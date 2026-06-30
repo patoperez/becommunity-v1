@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   AdaptOptions,
   AdaptResult,
@@ -96,7 +95,9 @@ function adapt(file: ParsedFile, opts: AdaptOptions = {}): AdaptResult {
     if (Object.keys(segments).length === 0 && quant.length === 0 && qual.length === 0) {
       return; // empty data row
     }
-    respondents.push({ id: randomUUID(), segments, quant, qual });
+    // Web Crypto global — works on Node 18+ and the Edge runtime (node:crypto
+    // is not available on Edge / Cloudflare).
+    respondents.push({ id: crypto.randomUUID(), segments, quant, qual });
   });
 
   if (errors.length > 0) return { ok: false, errors };

@@ -4,6 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import UploadForm from "./UploadForm";
 
+// Cloudflare Pages requires the Edge runtime for non-static routes.
+// NOTE: the upload action parses files with exceljs (Node APIs). See the
+// caveat in docs/DEPLOYMENT.md — Excel parsing may need the Node runtime
+// (OpenNext adapter) rather than Edge.
+export const runtime = "edge";
+
 export const metadata = { title: "Cargar datos · Be Community" };
 
 export default async function UploadPage() {

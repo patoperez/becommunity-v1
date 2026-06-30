@@ -8,6 +8,9 @@ import { parseJourneyDefinition, type JourneyStage } from "@/lib/calc/journey";
 import StudyCard from "./StudyCard";
 import { logout } from "./actions";
 
+// Cloudflare Pages requires the Edge runtime for non-static routes.
+export const runtime = "edge";
+
 export const metadata = {
   title: "Portal · Be Community",
 };
