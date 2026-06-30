@@ -1,8 +1,5 @@
 import { login } from "./actions";
 
-// Cloudflare Pages requires the Edge runtime for non-static routes.
-export const runtime = "edge";
-
 export const metadata = {
   title: "Iniciar sesión · Be Community",
 };

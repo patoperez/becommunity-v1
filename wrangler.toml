@@ -1,22 +1,22 @@
-# Cloudflare Pages configuration for Be Community (§1.1: Cloudflare Pages hosts
-# the frontend; Supabase is the backend).
-#
-# This app is dynamic (SSR + Server Actions + the session proxy + RLS-scoped
-# reads), so it is NOT a static export. It is deployed via the Next.js Cloudflare
-# adapter, which emits Pages Functions for the server routes. See docs/DEPLOYMENT.md.
+# Cloudflare deployment for Be Community via the OpenNext adapter
+# (@opennextjs/cloudflare). This builds a Cloudflare **Worker** that runs the
+# full Next.js server on the Node.js runtime — so Server Actions, the session
+# proxy, RLS-scoped reads, and Node libs (exceljs) all work. See docs/DEPLOYMENT.md.
 
 name = "be-community"
-compatibility_date = "2025-06-01"
+main = ".open-next/worker.js"
 
-# nodejs_compat lets Pages Functions use the Node.js APIs that supabase-js,
-# papaparse and exceljs rely on.
+# OpenNext requires a recent compatibility date + nodejs_compat.
+compatibility_date = "2025-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# Output produced by `npx @cloudflare/next-on-pages`.
-pages_build_output_dir = ".vercel/output/static"
+# Static assets emitted by the OpenNext build.
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
 
-# NOTE: secrets are NOT stored here. Set them in the Cloudflare Pages dashboard
-# (Settings -> Environment variables), or via `wrangler pages secret put`:
+# NOTE: secrets are NOT stored here. Set them on the Worker (dashboard ->
+# Settings -> Variables, or `wrangler secret put`):
 #   NEXT_PUBLIC_SUPABASE_URL        (plain)
 #   NEXT_PUBLIC_SUPABASE_ANON_KEY   (plain — public, RLS-protected)
 #   SUPABASE_SERVICE_ROLE_KEY       (ENCRYPTED secret — server only, never public)

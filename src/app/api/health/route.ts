@@ -7,8 +7,6 @@ import { NextResponse } from "next/server";
 //
 // Uses only the public anon key — no secret here, safe to expose.
 export const dynamic = "force-dynamic";
-// Cloudflare Pages requires the Edge runtime for non-static routes.
-export const runtime = "edge";
 
 export async function GET() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

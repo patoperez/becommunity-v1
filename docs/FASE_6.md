@@ -30,19 +30,25 @@ grants remain — the system is empty and ready for real data.
 
 Run as a release gate after each build.
 
-## 3. Deployment — Cloudflare Pages ready (§1.1)
+## 3. Deployment — Cloudflare via OpenNext (§1.1)
 
-- [wrangler.toml](../wrangler.toml) — name, compatibility date, `nodejs_compat`,
-  Pages output dir.
+> Updated post-v1: migrated from the deprecated `@cloudflare/next-on-pages` to
+> the **OpenNext** adapter (`@opennextjs/cloudflare`), which runs Next on the
+> Node.js runtime in a Cloudflare **Worker** — so `exceljs` `.xlsx` parsing works
+> in production. Next 16's `proxy` convention forces Node middleware (rejected by
+> the adapter), so the session gate uses the Edge **`middleware.ts`** convention.
+
+- [wrangler.toml](../wrangler.toml) — `main = .open-next/worker.js`,
+  `nodejs_compat`, compatibility date, static-assets binding.
+- [open-next.config.ts](../open-next.config.ts) — OpenNext Cloudflare config.
 - [docs/DEPLOYMENT.md](DEPLOYMENT.md) — full guide: migrations + RLS coverage
-  gate, build command (`npm run pages:build`), dashboard settings, environment
-  variables (service_role as an **encrypted** secret), go-live checklist.
-- `package.json` scripts: `pages:build`, `pages:preview`, `pages:deploy`.
-- `npm run build` (plain `next build`) runs **flawlessly**, including the new
-  `/api/health` route.
+  gate, build command (`npx opennextjs-cloudflare build`), Workers dashboard
+  settings, environment variables (service_role as an **encrypted** secret).
+- `package.json` scripts: `cf:build`, `cf:preview`, `cf:deploy`.
+- `npm run build` (plain `next build`) runs **flawlessly**, including `/api/health`.
 
-The app is dynamic (SSR + Server Actions + session proxy), so it deploys via the
-Next.js Cloudflare adapter (Pages Functions) — not a static export.
+The app is dynamic (SSR + Server Actions + session middleware), so it deploys as a
+Cloudflare Worker via OpenNext — not a static export.
 
 ## 4. Anti-pause — health endpoint + Uptime Robot (§9.1)
 

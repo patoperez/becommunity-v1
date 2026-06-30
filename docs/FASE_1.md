@@ -12,16 +12,16 @@ Status: ✅ **Complete and behaviorally verified.**
 |-------|------|
 | Login screen (email + password, §7.2) | [src/app/login/page.tsx](../src/app/login/page.tsx), [src/app/login/actions.ts](../src/app/login/actions.ts) |
 | Protected portal (`/dashboard`) | [src/app/dashboard/page.tsx](../src/app/dashboard/page.tsx), [src/app/dashboard/actions.ts](../src/app/dashboard/actions.ts) |
-| Session refresh + route gate (Next 16 `proxy`) | [src/proxy.ts](../src/proxy.ts), [src/lib/supabase/middleware.ts](../src/lib/supabase/middleware.ts) |
+| Session refresh + route gate (Edge middleware) | [src/middleware.ts](../src/middleware.ts), [src/lib/supabase/middleware.ts](../src/lib/supabase/middleware.ts) |
 | Root redirect → portal | [src/app/page.tsx](../src/app/page.tsx) |
 
 ## Defense in depth (§6.4) — how it is enforced
 
-1. **`proxy.ts`** refreshes the session and redirects unauthenticated requests
-   away from protected routes. This is the *first* gate, not the only one.
+1. **`middleware.ts`** refreshes the session and redirects unauthenticated
+   requests away from protected routes. This is the *first* gate, not the only one.
 2. **The dashboard Server Component independently re-checks** `supabase.auth.getUser()`
    before rendering anything, and redirects to `/login` if absent. It never
-   trusts the proxy alone.
+   trusts the middleware alone.
 3. Both layers use **`getUser()`** (revalidates the JWT against the Auth server),
    never `getSession()` (which only decodes the cookie and is spoofable).
 4. All data (tenant name, studies) is read with the **user's own session**, so

@@ -1,8 +1,11 @@
 import { type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-// Next.js 16 renamed the "middleware" file convention to "proxy".
-export async function proxy(request: NextRequest) {
+// Edge-runtime middleware. In Next 16 the `proxy` convention forces the Node.js
+// runtime, which the Cloudflare / OpenNext adapter does NOT support
+// ("Node.js middleware is not currently supported"). The `middleware` convention
+// runs on the Edge runtime, which the adapter requires — so we use it here.
+export async function middleware(request: NextRequest) {
   return await updateSession(request);
 }
 
