@@ -1,4 +1,5 @@
 import { login } from "./actions";
+import { authErrorMessage } from "./errors";
 
 export const metadata = {
   title: "Iniciar sesión · Be Community",
@@ -10,6 +11,8 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
+  // Only known error CODES map to a message; anything else renders nothing.
+  const errorMessage = authErrorMessage(error);
 
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
@@ -23,12 +26,12 @@ export default async function LoginPage({
           </p>
         </div>
 
-        {error ? (
+        {errorMessage ? (
           <div
             role="alert"
             className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
           >
-            {error}
+            {errorMessage}
           </div>
         ) : null}
 

@@ -61,7 +61,17 @@ developer. Keep Uptime Robot running afterward as an uptime/health monitor.
 ## Environment separation (§6.4)
 
 Keep **separate Supabase projects** for development/staging and production. Real
-client data never goes in the test environment. The dev project used during build
-(ref `lyidmvmxqiwkakdcrytj`) should not hold production data; provision a fresh
-project for production and apply the migrations there (see
+client data never goes in the test environment. The current dev project is
+**`be-community-v2`** (ref `ontvqazsqiwisdddblif`) and holds **test data only**;
+provision a separate project for production and apply the migrations there (see
 [DEPLOYMENT.md](DEPLOYMENT.md)).
+
+> **Build-time env caveat.** `NEXT_PUBLIC_SUPABASE_URL` and
+> `NEXT_PUBLIC_SUPABASE_ANON_KEY` are inlined by `next build`, so they must be set
+> as Cloudflare **build** variables (not only runtime "Variables and Secrets") and
+> must point at the intended project. A stale build variable once made the branch
+> preview authenticate against a **retired** project (logins failed with
+> `invalid_credentials`). After any project switch or rebuild, confirm the deploy
+> targets the right project with the two non-invasive checks:
+> `curl -sI https://<preview-or-domain>/login` → the CSP `connect-src` must show
+> the correct project ref, and `GET /api/health` must return `200 {"supabase":true}`.

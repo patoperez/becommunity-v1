@@ -98,6 +98,64 @@ async function testCrossTenantWrite(clientA) {
   else fail("insert into Tenant B SUCCEEDED — WITH CHECK policy is missing!");
 }
 
+// --- Test 4: client A must not WRITE into its OWN tenant either (P0.1) --------
+// AUDIT_V1.md §3.5 / red flag #1: clients are "read-only", but before migration
+// 0002 a client held CRUD grants + tenant-only write policies, so it could
+// INSERT/UPDATE/DELETE its own tenant's data. After 0002 (SELECT-only grant,
+// write policies dropped) every write must be rejected (42501 permission denied).
+//
+// Design notes (safe to run in BOTH states, idempotent, non-destructive):
+//  - INSERT uses a REAL own-tenant study (looked up via RLS-scoped read) so that,
+//    pre-fix, it genuinely succeeds; on that regression path we self-clean the row.
+//  - UPDATE/DELETE target a non-existent id (all-zeros): a missing write GRANT
+//    yields 42501 regardless of row match, while if writes were still allowed the
+//    call returns success/0-rows — so nothing real is ever modified either way.
+const ZERO_ID = "00000000-0000-0000-0000-000000000000";
+// A write is only "correctly rejected" when it fails for lack of privilege
+// (42501 permission denied). Any other error — notably an undefined table
+// (42P01 / PGRST205) — must NOT be counted as a pass, or a missing table could
+// masquerade as least-privilege working.
+function isPermissionDenied(error) {
+  return !!error && (error.code === "42501" || /permission denied/i.test(error.message ?? ""));
+}
+function checkDenied(verb, table, error) {
+  if (isPermissionDenied(error)) pass(`${verb} "${table}" (own tenant) rejected (42501 permission denied)`);
+  else if (error) fail(`${verb} "${table}" rejected for the WRONG reason (${error.code ?? error.message}) — expected 42501`);
+  else fail(`${verb} "${table}" (own tenant) SUCCEEDED — client is not read-only`);
+}
+
+async function testOwnTenantWrite(clientA) {
+  console.log("\n[4] Own-tenant WRITE by a client user (must be REJECTED after 0002):");
+
+  // Client A can read only its own tenant's rows (RLS), so this study is in A's tenant.
+  const { data: study } = await clientA
+    .from("study").select("id, tenant_id").limit(1).maybeSingle();
+
+  // 4a) Representative real INSERT into the client's own tenant.
+  if (study) {
+    const { data: ins, error } = await clientA
+      .from("quant_response")
+      .insert({ tenant_id: study.tenant_id, study_id: study.id, metric_key: "p0_write_probe", value: 1 })
+      .select("id").maybeSingle();
+    if (isPermissionDenied(error)) pass("INSERT quant_response (own tenant) rejected (42501 permission denied)");
+    else if (error) fail(`INSERT quant_response rejected for the WRONG reason (${error.code ?? error.message}) — expected 42501`);
+    else {
+      fail("INSERT quant_response (own tenant) SUCCEEDED — client is not read-only");
+      if (ins?.id) await clientA.from("quant_response").delete().eq("id", ins.id); // clean the leak
+    }
+  } else {
+    console.log("  (client A has no readable study; skipping own-tenant INSERT probe)");
+  }
+
+  // 4b) UPDATE + DELETE must be denied on every data table (grant-level).
+  for (const t of TENANT_SCOPED) {
+    const { error: upd } = await clientA.from(t).update({ tenant_id: ZERO_ID }).eq("id", ZERO_ID);
+    checkDenied("UPDATE", t, upd);
+    const { error: del } = await clientA.from(t).delete().eq("id", ZERO_ID);
+    checkDenied("DELETE", t, del);
+  }
+}
+
 async function main() {
   console.log("Be Community — RLS isolation test");
   await testAnonymous();
@@ -106,6 +164,7 @@ async function main() {
   );
   await testCrossTenantRead(clientA);
   await testCrossTenantWrite(clientA);
+  await testOwnTenantWrite(clientA);
 
   console.log("\n" + "=".repeat(60));
   if (failures > 0) {

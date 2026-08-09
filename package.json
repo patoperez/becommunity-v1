@@ -7,6 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:calc && npm run test:validation",
+    "test:calc": "tsx scripts/calculation-test.mjs",
+    "test:validation": "tsx scripts/validation-test.mjs",
+    "test:isolation": "node --env-file=.env.local scripts/isolation-test.mjs",
+    "test:secrets": "node --env-file=.env.local scripts/secret-leak-test.mjs",
+    "gates": "npm run typecheck && npm run build && npm run test && npm run test:isolation && npm run test:secrets",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
