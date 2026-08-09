@@ -7,8 +7,7 @@ import { parseFile } from "@/lib/ingestion/parse";
 import { wideSurveyAdapter } from "@/lib/ingestion/adapters/wide-survey";
 import { persistRespondents } from "@/lib/ingestion/persist";
 import type { IngestError, IngestSummary } from "@/lib/ingestion/canonical";
-
-const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+import { uploadSchema, ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/validation/schemas";
 
 export type IngestState = {
   status: "idle" | "success" | "error";
@@ -52,23 +51,37 @@ export async function ingestStudyFile(
     };
   }
 
-  // 2) Inputs -----------------------------------------------------------------
-  const tenantId = String(formData.get("tenant_id") ?? "");
-  const studyName = String(formData.get("study_name") ?? "").trim();
-  const period = String(formData.get("period") ?? "").trim() || null;
-  const requiredRaw = String(formData.get("required_columns") ?? "").trim();
-  const requiredColumns = requiredRaw
-    ? requiredRaw.split(",").map((s) => s.trim()).filter(Boolean)
+  // 2) Inputs — validated at the boundary with Zod (§5.3) ---------------------
+  const rawRequired = String(formData.get("required_columns") ?? "").trim();
+  const requiredColumnsRaw = rawRequired
+    ? rawRequired.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
-  const file = formData.get("file");
 
-  if (!tenantId) return { status: "error", message: "Selecciona un cliente (tenant)." };
-  if (!studyName) return { status: "error", message: "Indica el nombre del estudio." };
+  const fields = uploadSchema.safeParse({
+    tenant_id: formData.get("tenant_id"),
+    study_name: formData.get("study_name"),
+    period: String(formData.get("period") ?? "").trim() || undefined,
+    required_columns: requiredColumnsRaw,
+  });
+  if (!fields.success) {
+    return { status: "error", message: fields.error.issues[0]?.message ?? "Datos del formulario inválidos." };
+  }
+  const tenantId = fields.data.tenant_id;
+  const studyName = fields.data.study_name;
+  const period = fields.data.period ?? null;
+  const requiredColumns = fields.data.required_columns;
+
+  // File — not a Zod type: validate instance, size, and extension explicitly.
+  const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
     return { status: "error", message: "Adjunta un archivo CSV o Excel." };
   }
-  if (file.size > MAX_BYTES) {
+  if (file.size > MAX_UPLOAD_BYTES) {
     return { status: "error", message: "El archivo supera el límite de 10 MB." };
+  }
+  const ext = file.name.toLowerCase().split(".").pop() ?? "";
+  if (!ALLOWED_UPLOAD_EXTENSIONS.includes(ext as (typeof ALLOWED_UPLOAD_EXTENSIONS)[number])) {
+    return { status: "error", message: "Formato no soportado. Usa CSV o Excel (.csv, .xlsx, .xlsm)." };
   }
 
   const admin = createAdminClient();
