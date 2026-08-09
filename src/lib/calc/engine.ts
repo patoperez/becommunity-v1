@@ -3,6 +3,8 @@ import {
   csatTopBox,
   mean,
   npsFromScores,
+  roundTo,
+  DECIMALS,
   type CsatResult,
   type NpsResult,
 } from "./metrics";
@@ -51,8 +53,20 @@ type ExprRow = { metric_key: string; value: number } & Record<string, unknown>;
 type ExprParams = { metricKey: string };
 type Row = Record<string, unknown>;
 
+/**
+ * An empty table has no columns, so any Arquero column reference on it throws
+ * ("Invalid column reference"). A study with zero quantitative rows is a normal
+ * state (e.g. a qualitative-only upload), so every entry point below returns the
+ * empty result instead. This guard is numerically inert: it changes nothing for
+ * a table that has rows.
+ */
+function isEmpty(dt: ColumnTable): boolean {
+  return dt.numRows() === 0;
+}
+
 /** Raw numeric values for a metric (Arquero filter, params-bound — §5.2). */
 function valuesFor(dt: ColumnTable, metricKey: string): number[] {
+  if (isEmpty(dt)) return [];
   return dt
     .params({ metricKey })
     .filter((d: ExprRow, $: ExprParams) => d.metric_key === $.metricKey)
@@ -61,13 +75,16 @@ function valuesFor(dt: ColumnTable, metricKey: string): number[] {
 
 /** Average + n per metric (§5.2 rollup pattern). One declarative pass. */
 export function metricAverages(dt: ColumnTable): AverageRow[] {
+  if (isEmpty(dt)) return [];
   return (dt
     .groupby("metric_key")
     .rollup({ average: (d: ExprRow) => op.average(d.value), n: () => op.count() })
     .objects() as Row[])
     .map((r) => ({
       metric_key: String(r.metric_key),
-      average: r.average == null ? null : Number(r.average),
+      // Rounded ONCE here, at the declared score precision. Display must format
+      // at this same precision and never re-round (docs/CALCULATION_POLICY.md §4).
+      average: r.average == null ? null : roundTo(Number(r.average), DECIMALS.score),
       n: Number(r.n),
     }));
 }
@@ -77,6 +94,7 @@ export function metricAverages(dt: ColumnTable): AverageRow[] {
  * example), declaratively in Arquero.
  */
 export function crossAverage(dt: ColumnTable, metricKey: string, segment: string): CrossRow[] {
+  if (isEmpty(dt)) return [];
   return (dt
     .params({ metricKey })
     .filter((d: ExprRow, $: ExprParams) => d.metric_key === $.metricKey)
@@ -85,7 +103,8 @@ export function crossAverage(dt: ColumnTable, metricKey: string, segment: string
     .objects() as Row[])
     .map((r) => ({
       segment: r[segment] == null ? "(sin dato)" : String(r[segment]),
-      average: r.average == null ? null : Number(r.average),
+      // Rounded ONCE, same policy as metricAverages.
+      average: r.average == null ? null : roundTo(Number(r.average), DECIMALS.score),
       n: Number(r.n),
     }));
 }
@@ -195,7 +214,10 @@ export function computeStageMetric(
   }
 
   if (metricKey.startsWith("sat") || metricKey.startsWith("csat")) {
-    const avg = mean(values);
+    // Rounded ONCE at the journey headline precision. Previously this rounded to
+    // 2 dp here and the JourneyMap re-rounded with toFixed(1) — double rounding,
+    // which shifts values (raw 3.445 -> 3.45 -> "3.5", instead of "3.4").
+    const avg = mean(values, DECIMALS.journeyHeadline);
     const c = csatTopBox(values, csatMin);
     return {
       metricKey,
@@ -210,5 +232,6 @@ export function computeStageMetric(
     };
   }
 
-  return { metricKey, kind: "average", value: mean(values), unit: "score", n, detail: [] };
+  // Rounded ONCE at the journey headline precision (see note above).
+  return { metricKey, kind: "average", value: mean(values, DECIMALS.journeyHeadline), unit: "score", n, detail: [] };
 }
