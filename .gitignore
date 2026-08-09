@@ -44,3 +44,7 @@ cloudflare-env.d.ts
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Consultant process documentation — contains REAL CLIENT DATA and a signed NDA.
+# Must never be committed (CLAUDE.md: real client data never enters the repo).
+documentos de procesos de be community/
