@@ -8,7 +8,7 @@
 // gate: nothing is built on top of the engine until it passes.
 // =============================================================================
 
-import { mean, npsFromScores, csatTopBox, percentage, roundTo, DECIMALS } from "../src/lib/calc/metrics.ts";
+import { mean, npsFromScores, csatTopBox, percentage, roundTo } from "../src/lib/calc/metrics.ts";
 import {
   computeStudyMetrics, metricAverages, crossAverage, buildTable,
   computeStageMetric, nps as engineNps, csat as engineCsat,
