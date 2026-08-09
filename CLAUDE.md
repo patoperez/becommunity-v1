@@ -43,7 +43,9 @@ data-connected journey maps for the firm's clients (schools).
 - Sanitize user-generated content (survey free-text, e.g. `qual_observation.quote`) before rendering to prevent stored XSS. *(V1 has no `dangerouslySetInnerHTML` and does not yet render qual text; keep it that way as qualitative views land.)*
 
 ### Calculation integrity
-- Composite metrics (NPS, CSAT, Top-2-Box, Kano) are **canonical functions defined once** (`src/lib/calc/metrics.ts`), unit-tested against known-good outputs (`scripts/calculation-test.mjs`). A wrong number does not throw — it misleads a client. This is a human-review zone.
+- Composite metrics (NPS, CSAT, Top-2-Box) are **canonical functions defined once** (`src/lib/calc/metrics.ts`), unit-tested against known-good outputs (`scripts/calculation-test.mjs`). A wrong number does not throw — it misleads a client. This is a human-review zone.
+- ⓘ **Kano is OUT OF SCOPE.** The consultant's process documentation states explicitly: *"No se va a utilizar este modelo"* (§4.4). Do not build it.
+- **Rounding/precision is governed by `docs/CALCULATION_POLICY.md`** — one canonical helper (`roundTo`, half away from zero, Excel `ROUND()` parity), precision declared per unit in `DECIMALS`, every value rounded exactly once. Never round with `toFixed`.
 - Aggregations use Arquero, not hand-rolled loops (`src/lib/calc/engine.ts`, `pivot.ts`).
 - **Do not invent formulas.** The exact calculation catalog comes from the consultant's documented workflow (V2.5). Until then, use only the generic metrics already validated in V1.
 
