@@ -3,12 +3,17 @@
 import { useMemo, useState } from "react";
 import { computeStageMetric, type LongRow, type StageMetric } from "@/lib/calc/engine";
 import type { JourneyStage } from "@/lib/calc/journey";
+import { formatNumber } from "@/lib/calc/format";
+import { DECIMALS } from "@/lib/calc/metrics";
 
 function headline(m: StageMetric): string {
   if (m.value == null) return "—";
-  if (m.unit === "nps") return String(m.value);
-  if (m.unit === "percent") return `${m.value}%`;
-  return m.value.toFixed(1);
+  if (m.unit === "nps") return formatNumber(m.value, DECIMALS.nps);
+  if (m.unit === "percent") return `${formatNumber(m.value, DECIMALS.percent)}%`;
+  // The value was already rounded ONCE at DECIMALS.journeyHeadline in
+  // computeStageMetric. Formatting at that same precision cannot re-round it —
+  // the previous `toFixed(1)` on a 2 dp value was double-rounding.
+  return formatNumber(m.value, DECIMALS.journeyHeadline);
 }
 
 function kindLabel(m: StageMetric): string {
