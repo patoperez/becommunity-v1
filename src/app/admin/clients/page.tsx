@@ -2,12 +2,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { createTenant, deleteClientUser, inviteClientUser, renameTenant, updateClientUser } from "./actions";
+import { createTenant, deleteClientUser, inviteClientUser, renameTenant, updateClientUser, updateTenantBrand } from "./actions";
+import { logoPublicUrl, parseBrandConfig } from "@/lib/branding/config";
 
 export const metadata = { title: "Clientes y usuarios · Be Community" };
 
 type Search = Promise<{ ok?: string; error?: string }>;
-type Tenant = { id: string; name: string };
+type Tenant = { id: string; name: string; brand_config: unknown };
 type Profile = { user_id: string; tenant_id: string | null; full_name: string | null; data_scope: unknown };
 
 const input = "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950";
@@ -33,7 +34,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
 
   const admin = createAdminClient();
   const [{ data: tenants }, { data: profiles }, accounts, query] = await Promise.all([
-    admin.from("tenant").select("id, name").order("name").returns<Tenant[]>(),
+    admin.from("tenant").select("id, name, brand_config").order("name").returns<Tenant[]>(),
     admin.from("profiles").select("user_id, tenant_id, full_name, data_scope")
       .eq("role", "client").order("created_at").returns<Profile[]>(),
     listAllUsers(admin),
@@ -73,7 +74,25 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
       <section><div className="flex items-end justify-between"><div><h2 className="text-xl font-semibold">Organizaciones</h2><p className="text-sm text-zinc-500">{tenantList.length} clientes · {profileList.length} usuarios cliente</p></div></div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">{tenantList.map(tenant => {
           const userCount = profileList.filter(profile => profile.tenant_id === tenant.id).length;
-          return <form action={renameTenant} key={tenant.id} className="rounded-xl border bg-white p-4 dark:bg-zinc-900"><input type="hidden" name="tenant_id" value={tenant.id} /><div className="flex items-center gap-3"><input className={input} name="name" defaultValue={tenant.name} required maxLength={160} /><button className="rounded-lg border px-3 py-2 text-sm">Guardar</button></div><p className="mt-2 text-xs text-zinc-500">{userCount} {userCount === 1 ? "usuario" : "usuarios"}</p></form>;
+          const brand = parseBrandConfig(tenant.brand_config);
+          const logoUrl = logoPublicUrl(brand.logoPath);
+          return <article key={tenant.id} className="rounded-xl border bg-white p-4 dark:bg-zinc-900">
+            <form action={renameTenant}><input type="hidden" name="tenant_id" value={tenant.id} /><div className="flex items-center gap-3"><input className={input} name="name" defaultValue={tenant.name} required maxLength={160} /><button className="rounded-lg border px-3 py-2 text-sm">Guardar</button></div><p className="mt-2 text-xs text-zinc-500">{userCount} {userCount === 1 ? "usuario" : "usuarios"}</p></form>
+            <details className="mt-4 border-t pt-3"><summary className="cursor-pointer text-sm font-medium text-zinc-700 dark:text-zinc-300">Identidad visual</summary>
+              <form action={updateTenantBrand} className="mt-4 space-y-3"><input type="hidden" name="tenant_id" value={tenant.id} />
+                <div className="flex items-center gap-3">{logoUrl ? <>
+                  {/* Dynamic tenant Storage URLs cannot use a static Next Image remote allowlist. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={logoUrl} alt={`Logotipo de ${tenant.name}`} width={72} height={48} className="h-12 w-18 rounded border bg-white object-contain p-1" />
+                </> : <div className="flex h-12 w-18 items-center justify-center rounded border bg-zinc-50 text-xs text-zinc-400">Sin logo</div>}<div className="flex-1"><label className="text-xs font-medium">Logotipo</label><input className={`${input} mt-1`} name="logo" type="file" accept="image/png,image/jpeg,image/webp" /><p className="mt-1 text-[11px] text-zinc-400">PNG, JPEG o WebP · máximo 1 MB</p></div></div>
+                {logoUrl ? <label className="flex items-center gap-2 text-xs text-red-700"><input type="checkbox" name="remove_logo" /> Quitar logotipo actual</label> : null}
+                <input className={input} name="display_name" maxLength={120} defaultValue={brand.displayName ?? ""} placeholder="Nombre visible (opcional)" />
+                <input className={input} name="tagline" maxLength={180} defaultValue={brand.tagline} placeholder="Leyenda de marca" />
+                <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium">Color principal<input className="mt-1 h-10 w-full rounded border" name="primary_color" type="color" defaultValue={brand.primaryColor} /></label><label className="text-xs font-medium">Color de acento<input className="mt-1 h-10 w-full rounded border" name="accent_color" type="color" defaultValue={brand.accentColor} /></label></div>
+                <button className="rounded-lg border px-3 py-2 text-sm">Guardar identidad</button>
+              </form>
+            </details>
+          </article>;
         })}</div>
       </section>
 

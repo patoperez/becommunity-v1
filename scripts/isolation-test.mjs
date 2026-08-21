@@ -122,6 +122,8 @@ async function testInternalControls(clientA, userAId) {
   else pass("safe study columns remain readable through tenant RLS");
   const { error: scopeUpdateError } = await clientA.from("profiles").update({ data_scope: {} }).eq("user_id", userAId);
   checkDenied("UPDATE", "profiles.data_scope", scopeUpdateError);
+  const { error: brandUpdateError } = await clientA.from("tenant").update({ brand_config: {} }).eq("id", ZERO_ID);
+  checkDenied("UPDATE", "tenant.brand_config", brandUpdateError);
   for (const [name, args] of [
     ["save_study_template", {
       p_template_id: null, p_created_by: ZERO_ID, p_name: "probe", p_description: "",
