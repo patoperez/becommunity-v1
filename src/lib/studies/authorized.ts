@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadStudyRows } from "@/lib/calc/load";
 import type { ConfirmedQualitative } from "@/lib/qualitative/published";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { applyDataScope, parseDataScope } from "@/lib/studies/scope";
 
 export type AuthorizedStudy = {
   id: string;
@@ -66,12 +67,18 @@ export async function loadAuthorizedStudyData(
   requestClient: SupabaseClient,
   studyId: string,
 ): Promise<AuthorizedStudyData | null> {
-  const { data: study, error: studyError } = await requestClient.from("study")
-    .select("id, tenant_id, name, period, status, journey_definition, created_at")
-    .eq("id", studyId)
-    .maybeSingle<AuthorizedStudy>();
+  const [{ data: study, error: studyError }, { data: profile, error: profileError }] = await Promise.all([
+    requestClient.from("study")
+      .select("id, tenant_id, name, period, status, journey_definition, created_at")
+      .eq("id", studyId)
+      .maybeSingle<AuthorizedStudy>(),
+    requestClient.from("profiles").select("role, data_scope")
+      .maybeSingle<{ role: string; data_scope: unknown }>(),
+  ]);
   if (studyError) throw new Error(`study authorization: ${studyError.message}`);
-  if (!study) return null;
+  if (profileError) throw new Error(`profile scope: ${profileError.message}`);
+  if (!study || !profile) return null;
+  const scope = profile.role === "internal" ? {} : parseDataScope(profile.data_scope);
 
   const admin = createAdminClient();
   const [{ data: tenant, error: tenantError }, rows, qualitative] = await Promise.all([
@@ -80,5 +87,10 @@ export async function loadAuthorizedStudyData(
     loadConfirmedQualitativeInternal(admin, study.id),
   ]);
   if (tenantError) throw new Error(`tenant: ${tenantError.message}`);
-  return { study, tenantName: tenant?.name ?? "Be Community", rows, qualitative };
+  return {
+    study,
+    tenantName: tenant?.name ?? "Be Community",
+    rows: applyDataScope(rows, scope),
+    qualitative: applyDataScope(qualitative, scope),
+  };
 }
