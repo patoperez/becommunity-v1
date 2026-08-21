@@ -9,6 +9,8 @@ import { buildStudyDashboard, type StudyDashboardPayload } from "@/lib/dashboard
 import { buildLongitudinalView } from "@/lib/dashboard/longitudinal";
 import { loadAuthorizedStudyData } from "@/lib/studies/authorized";
 import LongitudinalTrends from "./LongitudinalTrends";
+import { buildNarrativeHome } from "@/lib/dashboard/narrative";
+import NarrativeHome from "./NarrativeHome";
 
 export const metadata = {
   title: "Portal · Be Community",
@@ -108,6 +110,9 @@ export default async function DashboardPage() {
         rows,
       })));
   const studyData = loadedStudyData.map(({ study, dashboard }) => ({ study, dashboard }));
+  const narrative = profile?.role === "internal" || !studyData[0]
+    ? null
+    : buildNarrativeHome(studyData[0].study, studyData[0].dashboard, longitudinal);
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
@@ -156,6 +161,7 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
+        {narrative ? <NarrativeHome view={narrative} /> : null}
         <LongitudinalTrends view={longitudinal} />
 
         <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
