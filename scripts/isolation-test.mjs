@@ -47,7 +47,7 @@ const TENANT_SCOPED = [
   "segment_dimension",
   "journey_definition",
 ];
-const INTERNAL_ONLY = ["import_mapping", "recoding_table", "import_batch"];
+const INTERNAL_ONLY = ["import_mapping", "recoding_table", "import_batch", "study_template"];
 
 let failures = 0;
 const fail = (msg) => { console.error("  ✗ FAIL:", msg); failures++; };
@@ -105,6 +105,21 @@ async function testInternalControls(clientA) {
     fail(`save_import_mapping rejected for the WRONG reason (${mappingRpcError.code ?? mappingRpcError.message})`);
   } else {
     fail("save_import_mapping was executable by a client role");
+  }
+  for (const [name, args] of [
+    ["save_study_template", {
+      p_template_id: null, p_created_by: ZERO_ID, p_name: "probe", p_description: "",
+      p_preview: {}, p_payload: {}, p_created_from: null,
+    }],
+    ["instantiate_study_template", {
+      p_template_id: ZERO_ID, p_created_by: ZERO_ID, p_tenant_id: ZERO_ID,
+      p_name: "probe", p_period: null,
+    }],
+  ]) {
+    const { error } = await clientA.rpc(name, args);
+    if (isPermissionDenied(error) || error?.code === "PGRST202") pass(`${name} is unavailable to client role`);
+    else if (error) fail(`${name} rejected for the WRONG reason (${error.code ?? error.message})`);
+    else fail(`${name} was executable by a client role`);
   }
 }
 
