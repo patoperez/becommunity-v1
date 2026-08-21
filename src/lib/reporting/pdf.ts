@@ -13,6 +13,7 @@ import {
 import { sampleVisibility } from "@/lib/calc/disclosure";
 import { formatScore } from "@/lib/calc/format";
 import type { JourneyStage } from "@/lib/calc/journey";
+import { DEFAULT_DASHBOARD_SECTIONS, type DashboardSections } from "@/lib/dashboard/config";
 import {
   summarizeConfirmedQualitative,
   type ConfirmedQualitative,
@@ -44,6 +45,7 @@ export type StudyPdfInput = {
   journeyStages: JourneyStage[];
   qualitative: ConfirmedQualitative[];
   filters: SegmentFilters;
+  sections?: DashboardSections;
   generatedAt?: Date;
 };
 
@@ -274,6 +276,7 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
   const units = distinctUnits(input.rows, input.qualitative);
   const selectionVisibility = sampleVisibility(units);
   const selectionSuppressed = selectionVisibility === "suppressed";
+  const sections = input.sections ?? DEFAULT_DASHBOARD_SECTIONS;
 
   pdf.setTitle(safeText(`${input.study.name} - Informe Be Community`));
   pdf.setAuthor("Be Community");
@@ -299,6 +302,7 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
     writer.callout(`Filtros aplicados: ${activeFilters.map(([key, value]) => `${humanize(key)} = ${value}`).join("; ")}`);
   }
 
+  if (sections.metrics) {
   writer.section("1. Resumen ejecutivo");
   if (units === 0) {
     writer.callout("No hay respuestas para esta seleccion.", true);
@@ -337,6 +341,9 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
     }
   }
 
+  }
+
+  if (sections.journey) {
   writer.section("2. Journey");
   if (selectionSuppressed) {
     writer.text("Resultados suprimidos por privacidad.", { color: WARNING });
@@ -367,6 +374,9 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
     }
   }
 
+  }
+
+  if (sections.segments) {
   writer.section("3. Insights por segmento");
   if (selectionSuppressed) {
     writer.text("Resultados suprimidos por privacidad.", { color: WARNING });
@@ -387,6 +397,9 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
     }
   }
 
+  }
+
+  if (sections.qualitative) {
   writer.section("4. Hallazgos cualitativos confirmados");
   if (selectionSuppressed) {
     writer.text("Resultados suprimidos por privacidad.", { color: WARNING });
@@ -412,7 +425,9 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
     }
   }
 
-  writer.section("5. Metodologia y lectura");
+  }
+
+  writer.section("Metodologia y lectura");
   writer.text("Este informe fue generado en el servidor desde el modelo canonico del estudio y con la sesion autenticada del usuario. La seguridad por filas limita la consulta al cliente correspondiente.", { size: 9.5 });
   writer.text("Los indicadores usan las mismas funciones canonicas del dashboard. Los valores se redondean una sola vez en la frontera de presentacion; el PDF no recalcula con formulas alternativas.", { size: 9.5 });
   writer.text("Control de divulgacion: n=0 se presenta como sin datos; n=1-4 se suprime; n=5-29 se muestra con advertencia de base pequena; n>=30 se muestra de forma estandar. La regla se vuelve a aplicar despues de los filtros.", { size: 9.5 });
