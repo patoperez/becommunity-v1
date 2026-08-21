@@ -23,7 +23,8 @@ const AGG_LABEL: Record<AggKind, string> = {
 
 const NONE = "__none__";
 
-// Single shared policy: pivot cells arrive pre-rounded from computePivot.
+// Pivot cells stay raw until this presentation boundary applies the shared
+// formatting and rounding policy once.
 const fmt = formatScore;
 
 function labelize(s: string): string {

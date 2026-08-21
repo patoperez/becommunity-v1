@@ -47,7 +47,7 @@ data-connected journey maps for the firm's clients (schools).
 - ⓘ **Kano is OUT OF SCOPE.** The consultant's process documentation states explicitly: *"No se va a utilizar este modelo"* (§4.4). Do not build it.
 - **Rounding/precision is governed by `docs/CALCULATION_POLICY.md`** — one canonical helper (`roundTo`, half away from zero, Excel `ROUND()` parity), precision declared per unit in `DECIMALS`, every value rounded exactly once. Never round with `toFixed`.
 - Aggregations use Arquero, not hand-rolled loops (`src/lib/calc/engine.ts`, `pivot.ts`).
-- **Do not invent formulas.** The exact calculation catalog comes from the consultant's documented workflow (V2.5). Until then, use only the generic metrics already validated in V1.
+- **Do not invent formulas.** Confirmed business rules live in `docs/CALCULATION_CATALOG.md`; implement only formulas marked authoritative there. Keep template-varying mappings and crosses in configuration.
 
 ### Data & config
 - **Configuration over code:** anything varying per client/study (journey stages, dashboard sections, segmentation, branding) lives in data (JSON/columns), never hardcoded. *(Realized: journey renders from `study.journey_definition` jsonb.)*
