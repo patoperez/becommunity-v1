@@ -11,6 +11,7 @@ import { loadAuthorizedStudyData } from "@/lib/studies/authorized";
 import LongitudinalTrends from "./LongitudinalTrends";
 import { buildNarrativeHome } from "@/lib/dashboard/narrative";
 import NarrativeHome from "./NarrativeHome";
+import { parseDashboardConfig } from "@/lib/dashboard/config";
 
 export const metadata = {
   title: "Portal · Be Community",
@@ -28,6 +29,7 @@ type Study = {
   name: string;
   period: string | null;
   status: string;
+  dashboard_config: unknown;
   journey_definition: unknown;
   created_at: string;
 };
@@ -65,7 +67,7 @@ export default async function DashboardPage() {
       .maybeSingle<{ name: string }>(),
     supabase
       .from("study")
-      .select("id, name, period, status, journey_definition, created_at")
+      .select("id, name, period, status, dashboard_config, journey_definition, created_at")
       .order("created_at", { ascending: false })
       .returns<Study[]>(),
   ]);
@@ -94,6 +96,7 @@ export default async function DashboardPage() {
               qualitative,
               parseJourneyDefinition(study.journey_definition),
               {},
+              study.dashboard_config,
             ),
           };
         }),
@@ -102,7 +105,10 @@ export default async function DashboardPage() {
   // Internal users may see studies from more than one tenant. Never aggregate
   // those into a fake cross-client history: P5A belongs to a client portal and
   // the backoffice will require an explicit tenant selection in P6.
-  const longitudinal = profile?.role === "internal"
+  const currentSections = loadedStudyData[0]
+    ? parseDashboardConfig(loadedStudyData[0].study.dashboard_config).sections
+    : null;
+  const longitudinal = profile?.role === "internal" || currentSections?.trends === false
     ? { periods: 0, series: [] }
     : buildLongitudinalView(loadedStudyData.map(({ study, rows }) => ({
         name: study.name,
@@ -111,7 +117,7 @@ export default async function DashboardPage() {
         rows,
       })));
   const studyData = loadedStudyData.map(({ study, dashboard }) => ({ study, dashboard }));
-  const narrative = profile?.role === "internal" || !studyData[0]
+  const narrative = profile?.role === "internal" || !studyData[0] || currentSections?.narrative === false
     ? null
     : buildNarrativeHome(studyData[0].study, studyData[0].dashboard, longitudinal);
 

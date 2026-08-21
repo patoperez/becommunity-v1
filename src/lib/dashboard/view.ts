@@ -14,6 +14,7 @@ import { formatNumber, formatScore } from "@/lib/calc/format";
 import { DECIMALS } from "@/lib/calc/metrics";
 import { buildAllowlist, type PivotAllowlist, type PivotResult } from "@/lib/calc/pivot";
 import type { JourneyStage } from "@/lib/calc/journey";
+import { parseDashboardConfig, type DashboardSections } from "@/lib/dashboard/config";
 import {
   summarizeConfirmedQualitative,
   type ConfirmedQualitative,
@@ -73,6 +74,7 @@ export type SafeStudyView = {
 };
 
 export type StudyDashboardPayload = {
+  sections: DashboardSections;
   filterOptions: SegmentFilterOption[];
   pivotAllowlist: PivotAllowlist;
   view: SafeStudyView;
@@ -140,7 +142,9 @@ export function buildStudyDashboard(
   qualitative: ConfirmedQualitative[],
   stages: JourneyStage[],
   filters: SegmentFilters,
+  rawConfig: unknown = {},
 ): StudyDashboardPayload {
+  const { sections } = parseDashboardConfig(rawConfig);
   const filterOptions = buildSegmentFilterOptions([...rows, ...qualitative]);
   const pivotAllowlist = buildAllowlist(rows);
   const filteredRows = filterRowsBySegments(rows, filters, filterOptions);
@@ -216,7 +220,8 @@ export function buildStudyDashboard(
   });
 
   return {
-    filterOptions,
+    sections,
+    filterOptions: sections.filters ? filterOptions : [],
     pivotAllowlist,
     view: {
       emptyStudy: sourceCount === 0,
@@ -224,15 +229,15 @@ export function buildStudyDashboard(
       selectionVisibility,
       selectedUnits: visibleCount(selectedCount, selectionVisibility),
       sourceUnits: visibleCount(sourceCount, sampleVisibility(sourceCount)),
-      tiles,
-      averages,
-      crossSegment: selectionSuppressed ? null : metrics.crossSegment,
-      crosses,
-      journey,
-      qualitative: selectionSuppressed
+      tiles: sections.metrics ? tiles : [],
+      averages: sections.metrics ? averages : [],
+      crossSegment: sections.segments && !selectionSuppressed ? metrics.crossSegment : null,
+      crosses: sections.segments ? crosses : [],
+      journey: sections.journey ? journey : [],
+      qualitative: !sections.qualitative || selectionSuppressed
         ? { themes: [], quotes: [], hasSuppressedThemes: false }
         : sanitizeQualitativeSummary(summarizeConfirmedQualitative(filteredQualitative)),
-      canPivot: !selectionSuppressed && filteredRows.length > 0
+      canPivot: sections.pivot && !selectionSuppressed && filteredRows.length > 0
         && pivotAllowlist.dimensions.length > 0 && pivotAllowlist.metrics.length > 0,
     },
   };

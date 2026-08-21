@@ -12,6 +12,7 @@ export type AuthorizedStudy = {
   name: string;
   period: string | null;
   status: string;
+  dashboard_config: unknown;
   journey_definition: unknown;
   created_at: string;
 };
@@ -69,7 +70,7 @@ export async function loadAuthorizedStudyData(
 ): Promise<AuthorizedStudyData | null> {
   const [{ data: study, error: studyError }, { data: profile, error: profileError }] = await Promise.all([
     requestClient.from("study")
-      .select("id, tenant_id, name, period, status, journey_definition, created_at")
+      .select("id, tenant_id, name, period, status, dashboard_config, journey_definition, created_at")
       .eq("id", studyId)
       .maybeSingle<AuthorizedStudy>(),
     requestClient.from("profiles").select("role, data_scope")

@@ -62,7 +62,7 @@ export function buildNarrativeHome(
       id: study.id,
       name: study.name,
       period: study.period,
-      reportAvailable: !dashboard.view.emptyStudy,
+      reportAvailable: dashboard.sections.report && !dashboard.view.emptyStudy,
     },
     metrics: metricSources.map((metric) => ({
       key: metric.key,
