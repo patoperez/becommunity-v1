@@ -76,6 +76,14 @@ export default function StudyCard({
   const selectionSuppressed = selectionVisibility === "suppressed";
   const canPivot = filteredRows.length > 0 && allowlist.dimensions.length > 0 && allowlist.metrics.length > 0;
   const hasJourney = journeyStages.length > 0 && (filteredRows.length > 0 || filteredQualitative.length > 0);
+  const reportHref = useMemo(() => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) params.set(`f.${key}`, value);
+    }
+    const query = params.toString();
+    return `/api/studies/${encodeURIComponent(study.id)}/report${query ? `?${query}` : ""}`;
+  }, [filters, study.id]);
 
   function setFilter(key: string, value: string) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -87,16 +95,23 @@ export default function StudyCard({
 
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">{study.name}</h3>
           {study.period ? (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{study.period}</p>
           ) : null}
         </div>
-        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-          {study.status}
-        </span>
+        <div className="flex items-center gap-2">
+          {!emptyStudy ? (
+            <a href={reportHref} className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200">
+              Descargar informe PDF
+            </a>
+          ) : null}
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+            {study.status}
+          </span>
+        </div>
       </div>
 
       {emptyStudy ? (
