@@ -9,12 +9,15 @@ import {
   saveStudyAsTemplate,
   updateTemplateMetadata,
 } from "./actions";
+import StudyConfigurator from "./StudyConfigurator";
+import { parseDashboardConfig } from "@/lib/dashboard/config";
+import { parseJourneyDefinition } from "@/lib/calc/journey";
 
 export const metadata = { title: "Estudios y plantillas · Be Community" };
 
 type Search = Promise<{ ok?: string; error?: string }>;
 type Tenant = { id: string; name: string };
-type Study = { id: string; tenant_id: string; name: string; period: string | null };
+type Study = { id: string; tenant_id: string; name: string; period: string | null; status: string; dashboard_config: unknown; journey_definition: unknown };
 type Template = {
   id: string; name: string; description: string; version: number; preview: Record<string, number>;
   updated_at: string;
@@ -33,7 +36,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
   const admin = createAdminClient();
   const [{ data: tenants }, { data: studies }, { data: templates }, query] = await Promise.all([
     admin.from("tenant").select("id, name").order("name").returns<Tenant[]>(),
-    admin.from("study").select("id, tenant_id, name, period").order("created_at", { ascending: false }).returns<Study[]>(),
+    admin.from("study").select("id, tenant_id, name, period, status, dashboard_config, journey_definition").order("created_at", { ascending: false }).returns<Study[]>(),
     admin.from("study_template").select("id, name, description, version, preview, updated_at")
       .eq("created_by", user.id).order("updated_at", { ascending: false }).returns<Template[]>(),
     searchParams,
@@ -94,6 +97,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
       </section>
 
       <section><h2 className="text-xl font-semibold">Estudios existentes</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{studyList.map(study => <div key={study.id} className="flex items-center justify-between rounded-lg border bg-white p-4 dark:bg-zinc-900"><div><p className="font-medium">{study.name}</p><p className="text-xs text-zinc-500">{study.period ?? "Sin periodo"}</p></div><Link className="text-sm underline" href={`/admin/upload?tenant=${study.tenant_id}&study=${study.id}`}>Cargar datos</Link></div>)}</div></section>
+      <section><div><h2 className="text-xl font-semibold">Configurar y publicar</h2><p className="mt-1 text-sm text-zinc-500">La configuración se aplica también al recálculo filtrado y al informe PDF.</p></div><div className="mt-4 space-y-3">{studyList.map(study => <StudyConfigurator key={study.id} study={study} sections={parseDashboardConfig(study.dashboard_config).sections} initialStages={parseJourneyDefinition(study.journey_definition)} />)}</div></section>
     </main>
   </div>;
 }
