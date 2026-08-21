@@ -22,7 +22,7 @@ function buildCsp(nonce: string): string {
     "object-src 'none'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    `img-src 'self' data: ${supabaseOrigin}`.trim(),
     "font-src 'self'",
     `connect-src ${connectSrc}`,
     "frame-ancestors 'none'",
