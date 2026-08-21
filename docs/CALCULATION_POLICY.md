@@ -4,10 +4,10 @@
 > `engine.ts`). Every statement here was **verified empirically** against the code
 > (P1, 2026-08-09), not assumed.
 >
-> This document does **not** define client-specific formulas. The consultant's
-> Calculation Catalog (Kano, named indices, recoding tables, documented crosses)
-> is **V2.5** and is not yet written — until it exists, **no new formula may be
-> invented** (CLAUDE.md standing rule).
+> This document does **not** define business-specific formulas. Confirmed named
+> indicators, recoding tables and documented crosses live in
+> `docs/CALCULATION_CATALOG.md`. A formula absent from that catalog must not be
+> invented (CLAUDE.md standing rule).
 >
 > Calculation code is a **human-review zone**. A wrong number does not throw — it
 > misleads a client.
