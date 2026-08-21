@@ -3,7 +3,7 @@
 # full Next.js server on the Node.js runtime — so Server Actions, the session
 # proxy, RLS-scoped reads, and Node libs (exceljs) all work. See docs/DEPLOYMENT.md.
 
-name = "be-community"
+name = "becommunity-v1"
 main = ".open-next/worker.js"
 
 # OpenNext requires a recent compatibility date + nodejs_compat.
