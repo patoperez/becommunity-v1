@@ -2,11 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadStudyRows } from "@/lib/calc/load";
-import type { LongRow } from "@/lib/calc/engine";
-import { parseJourneyDefinition, type JourneyStage } from "@/lib/calc/journey";
+import { parseJourneyDefinition } from "@/lib/calc/journey";
 import StudyCard from "./StudyCard";
 import { logout } from "./actions";
-import { loadConfirmedQualitative, type ConfirmedQualitative } from "@/lib/qualitative/published";
+import { loadConfirmedQualitative } from "@/lib/qualitative/published";
+import { buildStudyDashboard, type StudyDashboardPayload } from "@/lib/dashboard/view";
 
 export const metadata = {
   title: "Portal · Be Community",
@@ -70,9 +70,7 @@ export default async function DashboardPage() {
   // in their own data.
   const studyData: {
     study: Study;
-    rows: LongRow[];
-    journeyStages: JourneyStage[];
-    qualitative: ConfirmedQualitative[];
+    dashboard: StudyDashboardPayload;
   }[] = studies
     ? await Promise.all(
         studies.map(async (study) => {
@@ -82,9 +80,14 @@ export default async function DashboardPage() {
           ]);
           return {
             study,
-            rows,
-            journeyStages: parseJourneyDefinition(study.journey_definition),
-            qualitative,
+            // This is the serialization boundary: raw rows stay in this Server
+            // Component. The browser receives only sanitized aggregate DTOs.
+            dashboard: buildStudyDashboard(
+              rows,
+              qualitative,
+              parseJourneyDefinition(study.journey_definition),
+              {},
+            ),
           };
         }),
       )
@@ -155,13 +158,11 @@ export default async function DashboardPage() {
           </div>
         ) : (
           <div className="mt-6 grid gap-4">
-            {studyData.map(({ study, rows, journeyStages, qualitative }) => (
+            {studyData.map(({ study, dashboard }) => (
               <StudyCard
                 key={study.id}
                 study={study}
-                rows={rows}
-                journeyStages={journeyStages}
-                qualitative={qualitative}
+                initialDashboard={dashboard}
               />
             ))}
           </div>
