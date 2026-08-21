@@ -2,7 +2,9 @@
 
 ## Alcance
 
-P4A incorpora filtros de segmento compartidos por estudio. Las opciones se derivan exclusivamente de las filas que Supabase ya entregó bajo RLS y todas las visualizaciones visibles se recalculan en el navegador, sin una consulta nueva al servidor:
+P4A incorpora filtros de segmento compartidos por estudio. Las opciones se derivan exclusivamente de filas consultadas bajo RLS y todas las visualizaciones visibles se recalculan en conjunto.
+
+> **Actualizacion P4E:** la primera version recalculaba con filas serializadas al navegador. La frontera fue endurecida para cumplir la prohibicion de entregar respuestas crudas: ahora una Server Action autenticada recalcula bajo RLS y devuelve exclusivamente agregados ya suprimidos. Consulte `P4E_SERVER_AGGREGATION_BOUNDARY.md`.
 
 - indicadores principales (NPS, CSAT y promedios);
 - cruces por segmento;
