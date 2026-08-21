@@ -7,6 +7,8 @@ import StudyCard from "./StudyCard";
 import { logout } from "./actions";
 import { loadConfirmedQualitative } from "@/lib/qualitative/published";
 import { buildStudyDashboard, type StudyDashboardPayload } from "@/lib/dashboard/view";
+import { buildLongitudinalView } from "@/lib/dashboard/longitudinal";
+import LongitudinalTrends from "./LongitudinalTrends";
 
 export const metadata = {
   title: "Portal · Be Community",
@@ -24,6 +26,7 @@ type Study = {
   period: string | null;
   status: string;
   journey_definition: unknown;
+  created_at: string;
 };
 
 export default async function DashboardPage() {
@@ -59,7 +62,7 @@ export default async function DashboardPage() {
       .maybeSingle<{ name: string }>(),
     supabase
       .from("study")
-      .select("id, name, period, status, journey_definition")
+      .select("id, name, period, status, journey_definition, created_at")
       .order("created_at", { ascending: false })
       .returns<Study[]>(),
   ]);
@@ -68,9 +71,10 @@ export default async function DashboardPage() {
   // data is ever read). From the same rows we derive the static metrics (§5.2)
   // and the pivot allowlist (§5.3) — a user can only ever cross fields that exist
   // in their own data.
-  const studyData: {
+  const loadedStudyData: {
     study: Study;
     dashboard: StudyDashboardPayload;
+    rows: Awaited<ReturnType<typeof loadStudyRows>>;
   }[] = studies
     ? await Promise.all(
         studies.map(async (study) => {
@@ -80,6 +84,7 @@ export default async function DashboardPage() {
           ]);
           return {
             study,
+            rows,
             // This is the serialization boundary: raw rows stay in this Server
             // Component. The browser receives only sanitized aggregate DTOs.
             dashboard: buildStudyDashboard(
@@ -92,6 +97,18 @@ export default async function DashboardPage() {
         }),
       )
     : [];
+  // Internal users may see studies from more than one tenant. Never aggregate
+  // those into a fake cross-client history: P5A belongs to a client portal and
+  // the backoffice will require an explicit tenant selection in P6.
+  const longitudinal = profile?.role === "internal"
+    ? { periods: 0, series: [] }
+    : buildLongitudinalView(loadedStudyData.map(({ study, rows }) => ({
+        name: study.name,
+        period: study.period,
+        createdAt: study.created_at,
+        rows,
+      })));
+  const studyData = loadedStudyData.map(({ study, dashboard }) => ({ study, dashboard }));
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
@@ -139,6 +156,8 @@ export default async function DashboardPage() {
             </div>
           </div>
         ) : null}
+
+        <LongitudinalTrends view={longitudinal} />
 
         <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           Tus estudios
