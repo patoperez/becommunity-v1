@@ -20,6 +20,7 @@ type Profile = {
   tenant_id: string | null;
   role: string;
   full_name: string | null;
+  data_scope: unknown;
 };
 
 type Study = {
@@ -49,7 +50,7 @@ export default async function DashboardPage() {
   // profile row. If there is no profile, the account is not provisioned.
   const { data: profile } = await supabase
     .from("profiles")
-    .select("tenant_id, role, full_name")
+    .select("tenant_id, role, full_name, data_scope")
     .eq("user_id", user.id)
     .single<Profile>();
 
