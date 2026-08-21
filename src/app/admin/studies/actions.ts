@@ -7,10 +7,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { collectStudyTemplatePayload } from "@/lib/templates/collect";
 import { EMPTY_TEMPLATE_PAYLOAD, templatePayloadSchema, templatePreview } from "@/lib/templates/schema";
+import { dashboardConfigFromSections, dashboardSectionKeys, type DashboardSections } from "@/lib/dashboard/config";
+import { journeyDefinitionSchema } from "@/lib/calc/journey";
 
 const uuid = z.string().uuid();
 const nameSchema = z.string().trim().min(1).max(200);
 const templateNameSchema = z.string().trim().min(1).max(120);
+const statusSchema = z.enum(["draft", "published", "archived"]);
 
 async function internalContext() {
   const supabase = await createClient();
@@ -126,4 +129,57 @@ export async function deleteTemplate(formData: FormData) {
   if (error) finish("error", `No se pudo eliminar: ${error.message}`);
   revalidatePath("/admin/studies");
   finish("ok", "Plantilla eliminada. Los estudios existentes conservan su copia.");
+}
+
+export async function updateStudyConfiguration(formData: FormData) {
+  const { admin } = await internalContext();
+  const studyId = uuid.safeParse(formData.get("study_id"));
+  const name = nameSchema.safeParse(formData.get("name"));
+  const status = statusSchema.safeParse(formData.get("status"));
+  if (!studyId.success || !name.success || !status.success) finish("error", "Revisa el estudio, nombre y estado.");
+
+  const ids = formData.getAll("stage_id").map(String);
+  const labels = formData.getAll("stage_label").map(String);
+  const metrics = formData.getAll("stage_metric").map(String);
+  const descriptions = formData.getAll("stage_description").map(String);
+  if (![labels.length, metrics.length, descriptions.length].every((length) => length === ids.length)) {
+    finish("error", "Las etapas del journey están incompletas.");
+  }
+  const journey = journeyDefinitionSchema.safeParse({
+    stages: ids.map((id, index) => ({
+      id,
+      label: labels[index],
+      metric: metrics[index],
+      description: descriptions[index] || undefined,
+    })),
+  });
+  if (!journey.success) finish("error", "Revisa identificadores, métricas y textos del journey; no puede haber etapas duplicadas.");
+
+  const sections = Object.fromEntries(dashboardSectionKeys.map((key) => [
+    key,
+    formData.get(`section_${key}`) === "on",
+  ])) as DashboardSections;
+
+  if (status.data === "published") {
+    const [{ count: responses, error: responseError }, { count: observations, error: observationError }] = await Promise.all([
+      admin.from("quant_response").select("id", { count: "exact", head: true }).eq("study_id", studyId.data),
+      admin.from("qual_observation").select("id", { count: "exact", head: true })
+        .eq("study_id", studyId.data).eq("review_status", "confirmed"),
+    ]);
+    if (responseError || observationError) finish("error", "No se pudo validar el contenido antes de publicar.");
+    if ((responses ?? 0) + (observations ?? 0) === 0) finish("error", "Carga respuestas o confirma hallazgos antes de publicar el estudio.");
+  }
+
+  const period = String(formData.get("period") ?? "").trim().slice(0, 100) || null;
+  const { data, error } = await admin.from("study").update({
+    name: name.data,
+    period,
+    status: status.data,
+    dashboard_config: dashboardConfigFromSections(sections),
+    journey_definition: journey.data,
+  }).eq("id", studyId.data).select("id").maybeSingle();
+  if (error || !data) finish("error", `No se pudo guardar la configuración: ${error?.message ?? "estudio inexistente"}`);
+  revalidatePath("/admin/studies");
+  revalidatePath("/dashboard");
+  finish("ok", status.data === "published" ? "Configuración guardada y estudio publicado." : "Configuración del estudio guardada.");
 }
