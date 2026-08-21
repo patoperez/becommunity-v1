@@ -77,7 +77,12 @@ export type PivotResult = {
   measures: PivotMeasure[];
   colCombos: { key: string; labels: string[] }[];
   /** body cell key = `${colKey}|${measureId}` */
-  body: { rowLabels: string[]; cells: Record<string, number | null> }[];
+  body: {
+    rowLabels: string[];
+    cells: Record<string, number | null>;
+    /** Valid source-row count for the matching cell/measure. */
+    cellNs: Record<string, number>;
+  }[];
 };
 
 const aggLabel: Record<AggKind, string> = {
@@ -127,14 +132,15 @@ export function computePivot(rows: LongRow[], intent: PivotIntent, allow: PivotA
   const rowKeyMap = new Map<string, string[]>();
   const colKeyMap = new Map<string, string[]>();
   const cellMap = new Map<string, number | null>();
+  const cellNMap = new Map<string, number>();
 
   for (const m of measures) {
     const filtered = from(rows)
       .params({ field: m.field })
       .filter((d: ExprRow, $: { field: string }) => d.metric_key === $.field);
     const grouped = groupFields.length
-      ? filtered.groupby(groupFields).rollup({ val: rollupExpr(m.agg) })
-      : filtered.rollup({ val: rollupExpr(m.agg) });
+      ? filtered.groupby(groupFields).rollup({ val: rollupExpr(m.agg), n: () => op.count() })
+      : filtered.rollup({ val: rollupExpr(m.agg), n: () => op.count() });
 
     for (const obj of grouped.objects() as Row[]) {
       const rk = intent.rows.map((f) => String(obj[f] ?? ""));
@@ -149,6 +155,7 @@ export function computePivot(rows: LongRow[], intent: PivotIntent, allow: PivotA
       // error into that derived calculation, so the canonical rounding is
       // applied once at the presentation boundary (`formatNumber`) instead.
       cellMap.set(`${rks}|${cks}|${m.id}`, obj.val == null ? null : Number(obj.val));
+      cellNMap.set(`${rks}|${cks}|${m.id}`, Number(obj.n));
     }
   }
 
@@ -158,12 +165,14 @@ export function computePivot(rows: LongRow[], intent: PivotIntent, allow: PivotA
   const colCombos = sortedCols.map(([key, labels]) => ({ key, labels }));
   const body = sortedRows.map(([rks, rowLabels]) => {
     const cells: Record<string, number | null> = {};
+    const cellNs: Record<string, number> = {};
     for (const [cks] of sortedCols) {
       for (const m of measures) {
         cells[`${cks}|${m.id}`] = cellMap.get(`${rks}|${cks}|${m.id}`) ?? null;
+        cellNs[`${cks}|${m.id}`] = cellNMap.get(`${rks}|${cks}|${m.id}`) ?? 0;
       }
     }
-    return { rowLabels, cells };
+    return { rowLabels, cells, cellNs };
   });
 
   return { rowFields: intent.rows, colFields: intent.columns, measures, colCombos, body };

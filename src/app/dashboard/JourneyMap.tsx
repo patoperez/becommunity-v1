@@ -5,6 +5,7 @@ import { computeStageMetric, type LongRow, type StageMetric } from "@/lib/calc/e
 import type { JourneyStage } from "@/lib/calc/journey";
 import { formatNumber } from "@/lib/calc/format";
 import { DECIMALS } from "@/lib/calc/metrics";
+import { sampleVisibility } from "@/lib/calc/disclosure";
 
 function headline(m: StageMetric): string {
   if (m.value == null) return "—";
@@ -57,7 +58,8 @@ export default function JourneyMap({
       <div className="mt-4 flex items-start gap-1 overflow-x-auto pb-2">
         {stageMetrics.map(({ stage, metric }, i) => {
           const isActive = i === active;
-          const hasData = metric.value != null;
+          const visibility = sampleVisibility(metric.n);
+          const hasData = metric.value != null && visibility !== "suppressed";
           return (
             <button
               key={stage.id}
@@ -95,7 +97,7 @@ export default function JourneyMap({
                   hasData ? "text-zinc-900 dark:text-zinc-50" : "text-zinc-400 dark:text-zinc-600"
                 }`}
               >
-                {headline(metric)}
+                {visibility === "suppressed" ? "—" : headline(metric)}
               </span>
               <span className="text-[10px] uppercase tracking-wide text-zinc-400">{kindLabel(metric)}</span>
             </button>
@@ -112,7 +114,7 @@ export default function JourneyMap({
               <p className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{current.stage.metric}</p>
             </div>
             <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-              {headline(current.metric)}
+              {sampleVisibility(current.metric.n) === "suppressed" ? "—" : headline(current.metric)}
               <span className="ml-1 text-xs font-normal text-zinc-500">{kindLabel(current.metric)}</span>
             </p>
           </div>
@@ -121,7 +123,11 @@ export default function JourneyMap({
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{current.stage.description}</p>
           ) : null}
 
-          {current.metric.value == null ? (
+          {sampleVisibility(current.metric.n) === "suppressed" ? (
+            <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+              Muestra insuficiente para mostrar esta etapa.
+            </p>
+          ) : current.metric.value == null ? (
             <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
               Esta etapa todavía no tiene datos en este estudio.
             </p>

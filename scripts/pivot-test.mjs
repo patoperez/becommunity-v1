@@ -92,6 +92,10 @@ function testComputeCorrect() {
   const fCount = c.body.find((b) => b.rowLabels[0] === "F")?.cells["|m0"];
   const mCount = c.body.find((b) => b.rowLabels[0] === "M")?.cells["|m0"];
   fCount === 3 && mCount === 2 ? ok("count nps by genero: F=3, M=2") : bad(`counts F=${fCount} M=${mCount}`);
+  const fN = c.body.find((b) => b.rowLabels[0] === "F")?.cellNs["|m0"];
+  const mN = c.body.find((b) => b.rowLabels[0] === "M")?.cellNs["|m0"];
+  if (fN === 3 && mN === 2) ok("privacy cell n is carried: F=3, M=2");
+  else bad(`cell n F=${fN} M=${mN}`);
 
   // sum + min + max sanity on sat by genero
   const s = computePivot(rows, { rows: ["genero"], columns: [], values: [{ field: "sat", agg: "sum" }] }, allow);

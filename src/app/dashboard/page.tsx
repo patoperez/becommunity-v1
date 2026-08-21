@@ -2,8 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loadStudyRows } from "@/lib/calc/load";
-import { computeStudyMetrics, type LongRow, type StudyMetrics } from "@/lib/calc/engine";
-import { buildAllowlist, type PivotAllowlist } from "@/lib/calc/pivot";
+import type { LongRow } from "@/lib/calc/engine";
 import { parseJourneyDefinition, type JourneyStage } from "@/lib/calc/journey";
 import StudyCard from "./StudyCard";
 import { logout } from "./actions";
@@ -71,8 +70,6 @@ export default async function DashboardPage() {
   const studyData: {
     study: Study;
     rows: LongRow[];
-    metrics: StudyMetrics;
-    allowlist: PivotAllowlist;
     journeyStages: JourneyStage[];
   }[] = studies
     ? await Promise.all(
@@ -81,8 +78,6 @@ export default async function DashboardPage() {
           return {
             study,
             rows,
-            metrics: computeStudyMetrics(rows),
-            allowlist: buildAllowlist(rows),
             journeyStages: parseJourneyDefinition(study.journey_definition),
           };
         }),
@@ -151,13 +146,11 @@ export default async function DashboardPage() {
           </div>
         ) : (
           <div className="mt-6 grid gap-4">
-            {studyData.map(({ study, metrics, rows, allowlist, journeyStages }) => (
+            {studyData.map(({ study, rows, journeyStages }) => (
               <StudyCard
                 key={study.id}
                 study={study}
-                metrics={metrics}
                 rows={rows}
-                allowlist={allowlist}
                 journeyStages={journeyStages}
               />
             ))}
