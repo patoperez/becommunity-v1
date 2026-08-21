@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { JourneyStage } from "@/lib/calc/journey";
 import type { DashboardSectionKey, DashboardSections } from "@/lib/dashboard/config";
 import { updateStudyConfiguration } from "./actions";
@@ -39,7 +40,7 @@ export default function StudyConfigurator({ study, sections, initialStages }: {
     </summary>
     <form action={updateStudyConfiguration} className="mt-5 space-y-7 border-t pt-5">
       <input type="hidden" name="study_id" value={study.id} />
-      <section><h3 className="text-sm font-semibold">Identidad y publicación</h3><div className="mt-3 grid gap-3 sm:grid-cols-3"><input className={input} name="name" required maxLength={200} defaultValue={study.name} /><input className={input} name="period" maxLength={100} defaultValue={study.period ?? ""} placeholder="Periodo" /><select className={input} name="status" defaultValue={study.status}><option value="draft">Borrador · solo equipo interno</option><option value="published">Publicado · visible al cliente</option><option value="archived">Archivado · oculto al cliente</option></select></div><p className="mt-2 text-xs text-zinc-500">No se permite publicar un estudio vacío. Los clientes solo ven estudios con estado publicado.</p></section>
+      <section><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Identidad y publicación</h3><Link href={`/admin/preview/${study.id}`} target="_blank" className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100">Vista previa como cliente ↗</Link></div><div className="mt-3 grid gap-3 sm:grid-cols-3"><input className={input} name="name" required maxLength={200} defaultValue={study.name} /><input className={input} name="period" maxLength={100} defaultValue={study.period ?? ""} placeholder="Periodo" /><select className={input} name="status" defaultValue={study.status}><option value="draft">Borrador · solo equipo interno</option><option value="published">Publicado · visible al cliente</option><option value="archived">Archivado · oculto al cliente</option></select></div><p className="mt-2 text-xs text-zinc-500">No se permite publicar un estudio vacío. Los clientes solo ven estudios con estado publicado.</p></section>
 
       <section><h3 className="text-sm font-semibold">Secciones visibles</h3><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(sectionLabels).map(([key, label]) => <label key={key} className="flex items-center gap-2 rounded-lg border bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-950"><input type="checkbox" name={`section_${key}`} defaultChecked={sections[key as DashboardSectionKey]} />{label}</label>)}</div></section>
 
