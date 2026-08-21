@@ -41,9 +41,12 @@ assert.equal(safePivot.body[0].suppressed["|m0"], true);
 const pageSource = await readFile(new URL("../src/app/dashboard/page.tsx", import.meta.url), "utf8");
 const cardSource = await readFile(new URL("../src/app/dashboard/StudyCard.tsx", import.meta.url), "utf8");
 const actionSource = await readFile(new URL("../src/app/dashboard/data-actions.ts", import.meta.url), "utf8");
+const authorizedSource = await readFile(new URL("../src/lib/studies/authorized.ts", import.meta.url), "utf8");
 assert.doesNotMatch(pageSource, /rows=\{|qualitative=\{/, "page must not pass raw rows to Client Components");
 assert.doesNotMatch(cardSource, /LongRow|ConfirmedQualitative/, "StudyCard must accept aggregate DTOs only");
 assert.match(actionSource, /auth\.getUser\(\)/, "every recalculation must verify the user");
 assert.doesNotMatch(actionSource, /createAdminClient|service_role/i, "interactive calculations must never bypass RLS");
+assert.match(actionSource, /loadAuthorizedStudyData/, "interactive calculations must use the centralized authorized loader");
+assert.ok(authorizedSource.indexOf('requestClient.from("study")') < authorizedSource.indexOf("createAdminClient()"), "RLS authorization must precede privileged loading");
 
 console.log("P4E client-data boundary passed: no raw rows/IDs, server auth, RLS, and pre-serialization suppression.");

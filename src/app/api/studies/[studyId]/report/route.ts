@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { loadStudyRows } from "@/lib/calc/load";
 import { parseJourneyDefinition } from "@/lib/calc/journey";
-import { loadConfirmedQualitative } from "@/lib/qualitative/published";
 import {
   buildSegmentFilterOptions,
   filterRowsBySegments,
@@ -10,17 +9,9 @@ import {
 } from "@/lib/calc/filters";
 import { buildStudyPdf } from "@/lib/reporting/pdf";
 import { parseReportFilters } from "@/lib/reporting/filters";
+import { loadAuthorizedStudyData } from "@/lib/studies/authorized";
 
 export const dynamic = "force-dynamic";
-
-type Study = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  period: string | null;
-  status: string;
-  journey_definition: unknown;
-};
 
 function filename(value: string): string {
   const slug = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -37,17 +28,10 @@ export async function GET(
   if (!user) return new Response("No autorizado", { status: 401 });
 
   const { studyId } = await params;
-  const { data: study, error: studyError } = await supabase.from("study")
-    .select("id, tenant_id, name, period, status, journey_definition")
-    .eq("id", studyId).maybeSingle<Study>();
-  if (studyError) return new Response("No fue posible cargar el estudio", { status: 500 });
-  if (!study) return new Response("Estudio no encontrado", { status: 404 });
-
-  const [{ data: tenant }, rows, qualitative] = await Promise.all([
-    supabase.from("tenant").select("name").eq("id", study.tenant_id).maybeSingle<{ name: string }>(),
-    loadStudyRows(supabase, study.id),
-    loadConfirmedQualitative(supabase, study.id),
-  ]);
+  if (!z.string().uuid().safeParse(studyId).success) return new Response("Estudio no encontrado", { status: 404 });
+  const authorized = await loadAuthorizedStudyData(supabase, studyId);
+  if (!authorized) return new Response("Estudio no encontrado", { status: 404 });
+  const { study, rows, qualitative, tenantName } = authorized;
   const parsedFilters = parseReportFilters(request.nextUrl.searchParams);
   if (!parsedFilters.ok) return Response.json({ error: parsedFilters.error }, { status: 400 });
   const filters = parsedFilters.filters;
@@ -58,7 +42,7 @@ export async function GET(
   const filteredRows = filterRowsBySegments(rows, filters, options);
   const filteredQualitative = filterRowsBySegments(qualitative, filters, options);
   const bytes = await buildStudyPdf({
-    tenantName: tenant?.name ?? "Be Community",
+    tenantName,
     study,
     rows: filteredRows,
     journeyStages: parseJourneyDefinition(study.journey_definition),

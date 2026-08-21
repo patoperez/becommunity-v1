@@ -39,16 +39,16 @@ if (missing.length) {
 }
 
 const TENANT_B = process.env.TEST_TENANT_B_ID;
-const TENANT_SCOPED = [
-  "study",
+const RAW_RESPONSE_TABLES = [
   "respondent",
   "quant_response",
   "qual_observation",
   "segment_dimension",
   "journey_definition",
 ];
+const TENANT_SCOPED = ["study", ...RAW_RESPONSE_TABLES];
 const INTERNAL_ONLY = ["import_mapping", "recoding_table", "import_batch", "study_template"];
-const CLIENT_SAFE_VIEWS = ["confirmed_qual_observation"];
+const CLIENT_SAFE_VIEWS = [];
 
 let failures = 0;
 const fail = (msg) => { console.error("  ✗ FAIL:", msg); failures++; };
@@ -65,7 +65,7 @@ async function signIn(email, password) {
 async function testAnonymous() {
   console.log("\n[1] Anonymous access (Section 6.5):");
   const c = createClient(url, anon);
-  for (const t of [...TENANT_SCOPED, ...INTERNAL_ONLY, ...CLIENT_SAFE_VIEWS, "tenant", "profiles"]) {
+  for (const t of [...TENANT_SCOPED, ...INTERNAL_ONLY, ...CLIENT_SAFE_VIEWS, "confirmed_qual_observation", "tenant", "profiles"]) {
     const { data, error } = await c.from(t).select("*").limit(1);
     if (!error && data && data.length > 0) {
       fail(`anon read returned ${data.length} row(s) from "${t}"`);
@@ -84,6 +84,10 @@ async function testInternalControls(clientA) {
   }
   const { error: rawQualError } = await clientA.from("qual_observation").select("quote, suggested_theme").limit(1);
   checkDenied("SELECT RAW", "qual_observation", rawQualError);
+  for (const table of ["respondent", "quant_response", "segment_dimension", "journey_definition", "confirmed_qual_observation"]) {
+    const { error } = await clientA.from(table).select("*").limit(1);
+    checkDenied("SELECT RAW", table, error);
+  }
   const { error: rpcError } = await clientA.rpc("commit_import_batch", {
     p_import_batch_id: ZERO_ID,
     p_respondents: [],
@@ -140,18 +144,16 @@ async function testInternalControls(clientA) {
 // --- Test 2: client A must not READ tenant B's rows --------------------------
 async function testCrossTenantRead(clientA) {
   console.log("\n[2] Cross-tenant READ (Client A querying Tenant B):");
-  for (const t of TENANT_SCOPED) {
-    const { data, error } = await clientA
-      .from(t).select("*").eq("tenant_id", TENANT_B);
-    if (error) { pass(`"${t}" rejected (${error.code ?? error.message})`); continue; }
-    if (data && data.length > 0) fail(`read ${data.length} of Tenant B's rows from "${t}"`);
-    else pass(`"${t}" returned zero of Tenant B's rows`);
-  }
-  for (const view of CLIENT_SAFE_VIEWS) {
-    const { data, error } = await clientA.from(view).select("id").eq("tenant_id", TENANT_B);
-    if (error) fail(`safe view "${view}" failed (${error.code ?? error.message})`);
-    else if (data.length > 0) fail(`safe view "${view}" leaked ${data.length} Tenant B row(s)`);
-    else pass(`safe view "${view}" returned zero of Tenant B's rows`);
+  const { data: studies, error: studyError } = await clientA.from("study")
+    .select("id, tenant_id, name, status").eq("tenant_id", TENANT_B);
+  if (studyError) fail(`safe study metadata query failed (${studyError.code ?? studyError.message})`);
+  else if (studies.length > 0) fail(`read ${studies.length} Tenant B study row(s)`);
+  else pass('"study" returned zero of Tenant B\'s rows');
+  for (const table of [...RAW_RESPONSE_TABLES, "confirmed_qual_observation"]) {
+    const { error } = await clientA.from(table).select("*").limit(1);
+    if (isPermissionDenied(error)) pass(`raw surface "${table}" rejected (42501)`);
+    else if (error) fail(`raw surface "${table}" rejected for the WRONG reason (${error.code ?? error.message})`);
+    else fail(`raw surface "${table}" was directly readable`);
   }
 }
 
@@ -197,25 +199,13 @@ function checkDenied(verb, table, error) {
 async function testOwnTenantWrite(clientA) {
   console.log("\n[4] Own-tenant WRITE by a client user (must be REJECTED after 0002):");
 
-  // Client A can read only its own tenant's rows (RLS), so this study is in A's tenant.
-  const { data: study } = await clientA
-    .from("study").select("id, tenant_id").limit(1).maybeSingle();
-
-  // 4a) Representative real INSERT into the client's own tenant.
-  if (study) {
-    const { data: ins, error } = await clientA
-      .from("quant_response")
-      .insert({ tenant_id: study.tenant_id, study_id: study.id, metric_key: "p0_write_probe", value: 1 })
-      .select("id").maybeSingle();
-    if (isPermissionDenied(error)) pass("INSERT quant_response (own tenant) rejected (42501 permission denied)");
-    else if (error) fail(`INSERT quant_response rejected for the WRONG reason (${error.code ?? error.message}) — expected 42501`);
-    else {
-      fail("INSERT quant_response (own tenant) SUCCEEDED — client is not read-only");
-      if (ins?.id) await clientA.from("quant_response").delete().eq("id", ins.id); // clean the leak
-    }
-  } else {
-    console.log("  (client A has no readable study; skipping own-tenant INSERT probe)");
-  }
+  // Representative INSERT. Privilege denial must happen before row/FK checks.
+  const { error: insertError } = await clientA.from("quant_response").insert({
+    tenant_id: ZERO_ID, study_id: ZERO_ID, metric_key: "p0_write_probe", value: 1,
+  });
+  if (isPermissionDenied(insertError)) pass("INSERT quant_response rejected (42501 permission denied)");
+  else if (insertError) fail(`INSERT quant_response rejected for the WRONG reason (${insertError.code ?? insertError.message}) — expected 42501`);
+  else fail("INSERT quant_response SUCCEEDED — client is not read-only");
 
   // 4b) UPDATE + DELETE must be denied on every data table (grant-level).
   for (const t of TENANT_SCOPED) {
