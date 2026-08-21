@@ -76,7 +76,7 @@ async function testAnonymous() {
 }
 
 // --- Test 2b: internal import controls are not a client-facing read surface --
-async function testInternalControls(clientA) {
+async function testInternalControls(clientA, userAId) {
   console.log("\n[2b] Internal import controls (clients must have no access):");
   for (const table of INTERNAL_ONLY) {
     const { error } = await clientA.from(table).select("*").limit(1);
@@ -120,6 +120,8 @@ async function testInternalControls(clientA) {
   const { error: safeStudyError } = await clientA.from("study").select("id, name, period, status, dashboard_config, journey_definition").limit(1);
   if (safeStudyError) fail(`safe study columns were rejected (${safeStudyError.code ?? safeStudyError.message})`);
   else pass("safe study columns remain readable through tenant RLS");
+  const { error: scopeUpdateError } = await clientA.from("profiles").update({ data_scope: {} }).eq("user_id", userAId);
+  checkDenied("UPDATE", "profiles.data_scope", scopeUpdateError);
   for (const [name, args] of [
     ["save_study_template", {
       p_template_id: null, p_created_by: ZERO_ID, p_name: "probe", p_description: "",
@@ -223,7 +225,9 @@ async function main() {
     process.env.TEST_USER_A_EMAIL, process.env.TEST_USER_A_PASSWORD,
   );
   await testCrossTenantRead(clientA);
-  await testInternalControls(clientA);
+  const { data: { user: userA } } = await clientA.auth.getUser();
+  if (!userA) throw new Error("client A session disappeared");
+  await testInternalControls(clientA, userA.id);
   await testCrossTenantWrite(clientA);
   await testOwnTenantWrite(clientA);
 
