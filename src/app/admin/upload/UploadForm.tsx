@@ -84,14 +84,24 @@ export default function UploadForm({
   tenants,
   studies,
   history,
+  initialTenantId,
+  initialStudyId,
 }: {
   tenants: TenantOption[];
   studies: StudyOption[];
   history: ImportHistoryItem[];
+  initialTenantId?: string;
+  initialStudyId?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [tenantId, setTenantId] = useState(tenants[0]?.id ?? "");
+  const validInitialTenant = tenants.some((tenant) => tenant.id === initialTenantId)
+    ? initialTenantId ?? ""
+    : tenants[0]?.id ?? "";
+  const validInitialStudy = studies.some(
+    (study) => study.id === initialStudyId && study.tenantId === validInitialTenant,
+  ) ? initialStudyId ?? "" : "";
+  const [tenantId, setTenantId] = useState(validInitialTenant);
   const [file, setFile] = useState<File | null>(null);
   const [analysis, setAnalysis] = useState<AnalyzeResult | null>(null);
   const [mapping, setMapping] = useState<ImportMapping | null>(null);
@@ -99,7 +109,7 @@ export default function UploadForm({
   const [confirmation, setConfirmation] = useState<ConfirmResult | null>(null);
   const [rollbackState, setRollbackState] = useState<RollbackResult | null>(null);
   const [studyMode, setStudyMode] = useState<"existing" | "new">("existing");
-  const [studyId, setStudyId] = useState("");
+  const [studyId, setStudyId] = useState(validInitialStudy);
   const [studyName, setStudyName] = useState("");
   const [period, setPeriod] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -121,6 +131,7 @@ export default function UploadForm({
   function actionData(includeMapping = false) {
     const data = new FormData();
     data.set("tenant_id", tenantId);
+    if (studyMode === "existing" && studyId) data.set("study_id", studyId);
     if (file) data.set("file", file);
     if (includeMapping && mapping) data.set("mapping_json", JSON.stringify(mapping));
     return data;
@@ -264,7 +275,9 @@ export default function UploadForm({
             <span className="font-medium">
               {analysis.mappingSource === "saved"
                 ? `Mapeo guardado v${analysis.mappingVersion} reutilizado automáticamente.`
-                : "Instrumento nuevo: revisa el mapeo propuesto."}
+                : analysis.mappingSource === "template"
+                  ? "Mapeo de la plantilla aplicado automáticamente."
+                  : "Instrumento nuevo: revisa el mapeo propuesto."}
             </span>
             {analysis.notice ? <p className="mt-1">{analysis.notice}</p> : null}
           </div>

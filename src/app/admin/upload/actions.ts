@@ -14,6 +14,7 @@ import {
 import { persistRespondents, rollbackImportBatch } from "@/lib/ingestion/persist";
 import type { ImportPreviewRow, IngestError, IngestSummary, ParsedFile } from "@/lib/ingestion/canonical";
 import { ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/validation/schemas";
+import { templatePayloadSchema } from "@/lib/templates/schema";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -33,7 +34,7 @@ export type AnalyzeResult =
       mapping: ImportMapping;
       mappingId: string | null;
       mappingVersion: number | null;
-      mappingSource: "saved" | "suggested";
+      mappingSource: "saved" | "template" | "suggested";
       notice?: string;
     };
 
@@ -218,9 +219,22 @@ export async function analyzeImportFile(formData: FormData): Promise<AnalyzeResu
   if (error) return { status: "error", message: `No se pudo buscar un mapeo previo: ${error.message}` };
 
   const parsedSaved = saved ? importMappingSchema.safeParse(saved.configuration) : null;
+  let templateMapping: ImportMapping | null = null;
+  const studyId = z.string().uuid().safeParse(formData.get("study_id"));
+  if (!parsedSaved?.success && studyId.success) {
+    const { data: study } = await auth.admin.from("study")
+      .select("template_snapshot")
+      .eq("id", studyId.data)
+      .eq("tenant_id", tenant.tenant.id)
+      .maybeSingle<{ template_snapshot: unknown }>();
+    const snapshot = templatePayloadSchema.safeParse(study?.template_snapshot);
+    templateMapping = snapshot.success
+      ? snapshot.data.columnMappings.find((candidate) => candidate.sourceSignature === signature)?.mapping ?? null
+      : null;
+  }
   const mapping = parsedSaved?.success
     ? parsedSaved.data
-    : suggestedMapping(upload.parsed, upload.file.name);
+    : templateMapping ?? suggestedMapping(upload.parsed, upload.file.name);
 
   return {
     status: "ready",
@@ -231,10 +245,10 @@ export async function analyzeImportFile(formData: FormData): Promise<AnalyzeResu
     mapping,
     mappingId: parsedSaved?.success ? saved?.id ?? null : null,
     mappingVersion: parsedSaved?.success ? saved?.version ?? null : null,
-    mappingSource: parsedSaved?.success ? "saved" : "suggested",
+    mappingSource: parsedSaved?.success ? "saved" : templateMapping ? "template" : "suggested",
     notice: saved && !parsedSaved?.success
       ? "El mapeo guardado no pasó la validación actual; se generó una propuesta nueva."
-      : undefined,
+      : templateMapping ? "Se reconoció la estructura guardada en la plantilla del estudio." : undefined,
   };
 }
 

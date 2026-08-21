@@ -10,7 +10,11 @@ import UploadForm, {
 
 export const metadata = { title: "Cargar datos · Be Community" };
 
-export default async function UploadPage() {
+export default async function UploadPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tenant?: string; study?: string }>;
+}) {
   // Server-side authorization (§6.4) — not just hiding the link in the UI.
   const supabase = await createClient();
   const {
@@ -73,6 +77,7 @@ export default async function UploadPage() {
       }[]>(),
   ]);
 
+  const query = await searchParams;
   const tenantNames = new Map((tenants ?? []).map((tenant) => [tenant.id, tenant.name]));
   const studyNames = new Map((studies ?? []).map((study) => [study.id, study.name]));
   const studyOptions: StudyOption[] = (studies ?? []).map((study) => ({
@@ -110,7 +115,13 @@ export default async function UploadPage() {
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
-        <UploadForm tenants={tenants ?? []} studies={studyOptions} history={history} />
+        <UploadForm
+          tenants={tenants ?? []}
+          studies={studyOptions}
+          history={history}
+          initialTenantId={query.tenant}
+          initialStudyId={query.study}
+        />
       </main>
     </div>
   );
