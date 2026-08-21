@@ -52,6 +52,7 @@ export async function refreshStudyDashboard(
         context.qualitative,
         parseJourneyDefinition(context.study.journey_definition),
         parsedFilters.data,
+        context.study.dashboard_config,
       ),
     };
   } catch {
