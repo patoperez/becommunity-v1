@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { loadStudyRows } from "@/lib/calc/load";
+import type { LongRow } from "@/lib/calc/engine";
 import { parseJourneyDefinition } from "@/lib/calc/journey";
 import StudyCard from "./StudyCard";
 import { logout } from "./actions";
-import { loadConfirmedQualitative } from "@/lib/qualitative/published";
 import { buildStudyDashboard, type StudyDashboardPayload } from "@/lib/dashboard/view";
 import { buildLongitudinalView } from "@/lib/dashboard/longitudinal";
+import { loadAuthorizedStudyData } from "@/lib/studies/authorized";
 import LongitudinalTrends from "./LongitudinalTrends";
 
 export const metadata = {
@@ -74,14 +74,13 @@ export default async function DashboardPage() {
   const loadedStudyData: {
     study: Study;
     dashboard: StudyDashboardPayload;
-    rows: Awaited<ReturnType<typeof loadStudyRows>>;
+    rows: LongRow[];
   }[] = studies
     ? await Promise.all(
         studies.map(async (study) => {
-          const [rows, qualitative] = await Promise.all([
-            loadStudyRows(supabase, study.id),
-            loadConfirmedQualitative(supabase, study.id),
-          ]);
+          const authorized = await loadAuthorizedStudyData(supabase, study.id);
+          if (!authorized) throw new Error("Study authorization changed during dashboard load");
+          const { rows, qualitative } = authorized;
           return {
             study,
             rows,

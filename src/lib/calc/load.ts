@@ -5,9 +5,9 @@ import type { LongRow } from "./engine";
  * Load one study's quantitative answers as engine-ready long rows, with each
  * respondent's segments flattened onto the row.
  *
- * The caller passes the RLS-scoped client (the user's server session), so a
- * client user can only ever load their own tenant's study (§6.2). This function
- * never uses service_role.
+ * This low-level loader requires a privileged server client. User-facing code
+ * must call loadAuthorizedStudyData, which checks the request session and study
+ * through RLS before invoking this function for one exact study ID.
  *
  * All rows are given the SAME segment columns (union across respondents, missing
  * filled with "") so Arquero sees a rectangular table.

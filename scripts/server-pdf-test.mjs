@@ -9,8 +9,9 @@ const routeSource = await readFile(new URL("../src/app/api/studies/[studyId]/rep
 assert.match(routeSource, /createClient\(\)/, "report route must use the request-scoped Supabase client");
 assert.match(routeSource, /auth\.getUser\(\)/, "report route must verify the user with Supabase Auth");
 assert.doesNotMatch(routeSource, /createAdminClient|service_role/i, "report route must never bypass RLS");
+assert.match(routeSource, /loadAuthorizedStudyData/, "report must authorize through the centralized publication boundary");
 assert.match(routeSource, /private, no-store/, "report response must not be cached");
-assert.match(routeSource, /confirmedQualitative|loadConfirmedQualitative/, "report must use the confirmed qualitative surface");
+assert.doesNotMatch(routeSource, /loadStudyRows|loadConfirmedQualitative/, "report must not query raw tables directly");
 
 assert.deepEqual(
   parseReportFilters(new URLSearchParams("f.segmento=Familias&ignored=value")),

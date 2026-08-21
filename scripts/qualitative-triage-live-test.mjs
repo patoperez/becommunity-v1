@@ -44,11 +44,13 @@ try {
   }).select("id").single();
   if (observationError || !observation) throw new Error(`observation insert failed: ${observationError?.message ?? "empty observation"}`);
 
+  const draftStudy = await clientA.from("study").select("id").eq("id", studyId);
+  assert.ifError(draftStudy.error);
+  assert.equal(draftStudy.data.length, 0, "client must not see a draft study");
   const raw = await clientA.from("qual_observation").select("quote").eq("id", observation.id);
   assert.equal(raw.error?.code, "42501", "client must be denied access to raw qualitative text");
   const before = await clientA.from("confirmed_qual_observation").select("*").eq("id", observation.id);
-  assert.ifError(before.error);
-  assert.equal(before.data.length, 0, "pending suggestion must not be client-visible");
+  assert.equal(before.error?.code, "42501", "client must not query the confirmed row-level view directly");
 
   const deniedRpc = await clientA.rpc("review_qual_observations", {
     p_ids: [observation.id], p_study_id: studyId, p_mode: "accept", p_theme: "",
@@ -62,23 +64,33 @@ try {
   });
   assert.ifError(accepted.error);
   assert.equal(accepted.data, 1);
-  const confirmed = await clientA.from("confirmed_qual_observation").select("theme, stage_key, quote").eq("id", observation.id).single();
+  const confirmed = await admin.from("qual_observation").select("confirmed_theme, confirmed_stage_key, quote_approved").eq("id", observation.id).single();
   assert.ifError(confirmed.error);
-  assert.deepEqual(confirmed.data, { theme: "atencion_y_servicio", stage_key: "admision", quote: null });
+  assert.deepEqual(confirmed.data, { confirmed_theme: "atencion_y_servicio", confirmed_stage_key: "admision", quote_approved: false });
 
   const published = await admin.rpc("review_qual_observations", {
     p_ids: [observation.id], p_study_id: studyId, p_mode: "retag", p_theme: "servicio_confirmado",
     p_stage_key: "admision", p_quote_ids: [observation.id], p_reviewer: reviewer.user_id,
   });
   assert.ifError(published.error);
-  const withQuote = await clientA.from("confirmed_qual_observation").select("theme, quote").eq("id", observation.id).single();
+  const withQuote = await admin.from("qual_observation").select("confirmed_theme, quote, quote_approved").eq("id", observation.id).single();
   assert.ifError(withQuote.error);
-  assert.deepEqual(withQuote.data, { theme: "servicio_confirmado", quote: "CITA P4B PRIVADA" });
-  const crossTenant = await clientB.from("confirmed_qual_observation").select("id").eq("id", observation.id);
+  assert.deepEqual(withQuote.data, { confirmed_theme: "servicio_confirmado", quote: "CITA P4B PRIVADA", quote_approved: true });
+
+  const { error: publishError } = await admin.from("study").update({ status: "published" }).eq("id", studyId);
+  assert.ifError(publishError);
+  const publishedStudy = await clientA.from("study").select("id, status").eq("id", studyId).single();
+  assert.ifError(publishedStudy.error);
+  assert.equal(publishedStudy.data.status, "published");
+  const directConfirmed = await clientA.from("confirmed_qual_observation").select("theme, quote").eq("id", observation.id);
+  assert.equal(directConfirmed.error?.code, "42501", "published row-level qualitative data must remain server-only");
+  const directQuant = await clientA.from("quant_response").select("value").eq("study_id", studyId);
+  assert.equal(directQuant.error?.code, "42501", "published quantitative rows must remain server-only");
+  const crossTenant = await clientB.from("study").select("id").eq("id", studyId);
   assert.ifError(crossTenant.error);
   assert.equal(crossTenant.data.length, 0, "another tenant must not see the publication");
 
-  console.log("P4B live gate passed: raw denial, human gate, quote gate, RPC denial, and cross-tenant isolation.");
+  console.log("Publication live gate passed: draft denial, publish transition, raw denial, human gate, and cross-tenant isolation.");
 } finally {
   if (studyId) await admin.from("study").delete().eq("id", studyId);
 }

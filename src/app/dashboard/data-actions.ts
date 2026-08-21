@@ -2,7 +2,6 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { loadStudyRows } from "@/lib/calc/load";
 import { parseJourneyDefinition } from "@/lib/calc/journey";
 import {
   buildSegmentFilterOptions,
@@ -11,8 +10,8 @@ import {
   type SegmentFilters,
 } from "@/lib/calc/filters";
 import { buildAllowlist, computePivot, validatePivotIntent, type PivotIntent } from "@/lib/calc/pivot";
-import { loadConfirmedQualitative } from "@/lib/qualitative/published";
 import { buildStudyDashboard, sanitizePivotResult, type SafePivotResult, type StudyDashboardPayload } from "@/lib/dashboard/view";
+import { loadAuthorizedStudyData } from "@/lib/studies/authorized";
 
 const studyIdSchema = z.string().uuid();
 const filtersSchema = z.record(z.string().min(1).max(80), z.string().max(200))
@@ -32,10 +31,8 @@ async function authenticatedStudy(studyId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data: study } = await supabase.from("study")
-    .select("id, journey_definition").eq("id", studyId)
-    .maybeSingle<{ id: string; journey_definition: unknown }>();
-  return study ? { supabase, study } : null;
+  const data = await loadAuthorizedStudyData(supabase, studyId);
+  return data ? { supabase, ...data } : null;
 }
 
 export async function refreshStudyDashboard(
@@ -48,15 +45,11 @@ export async function refreshStudyDashboard(
   const context = await authenticatedStudy(id.data);
   if (!context) return { ok: false, error: "Estudio no disponible" };
   try {
-    const [rows, qualitative] = await Promise.all([
-      loadStudyRows(context.supabase, id.data),
-      loadConfirmedQualitative(context.supabase, id.data),
-    ]);
     return {
       ok: true,
       data: buildStudyDashboard(
-        rows,
-        qualitative,
+        context.rows,
+        context.qualitative,
         parseJourneyDefinition(context.study.journey_definition),
         parsedFilters.data,
       ),
@@ -78,7 +71,7 @@ export async function computeStudyPivot(
   const context = await authenticatedStudy(id.data);
   if (!context) return { ok: false, error: "Estudio no disponible" };
   try {
-    const rows = await loadStudyRows(context.supabase, id.data);
+    const rows = context.rows;
     const filterOptions = buildSegmentFilterOptions(rows);
     const filterValidation = validateSegmentFilters(parsedFilters.data, filterOptions);
     if (!filterValidation.ok) return { ok: false, error: "Filtros no permitidos" };
