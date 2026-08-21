@@ -13,7 +13,7 @@ Status: ✅ **Complete and behaviorally verified.**
 | Canonical types + Zod guards | [src/lib/ingestion/canonical.ts](../src/lib/ingestion/canonical.ts) |
 | File parsing (CSV via papaparse, XLSX via exceljs) | [src/lib/ingestion/parse.ts](../src/lib/ingestion/parse.ts) |
 | Wide-survey adapter (mapping + validation) | [src/lib/ingestion/adapters/wide-survey.ts](../src/lib/ingestion/adapters/wide-survey.ts) |
-| Persistence (chunked, injected client) | [src/lib/ingestion/persist.ts](../src/lib/ingestion/persist.ts) |
+| Persistence (atomic RPC, injected server client) | [src/lib/ingestion/persist.ts](../src/lib/ingestion/persist.ts) |
 | Upload UI (internal-only) | [src/app/admin/upload/page.tsx](../src/app/admin/upload/page.tsx), [UploadForm.tsx](../src/app/admin/upload/UploadForm.tsx) |
 | Server action (authZ + validate + persist) | [src/app/admin/upload/actions.ts](../src/app/admin/upload/actions.ts) |
 | Dashboard internal entry point | [src/app/dashboard/page.tsx](../src/app/dashboard/page.tsx) |
@@ -26,7 +26,7 @@ DB or the dashboard:
 ```
 file bytes ──▶ parse.ts ──▶ { headers, rows }     (format-agnostic)
             ──▶ SourceAdapter.adapt() ──▶ canonical respondents + Zod-validated
-            ──▶ persist.ts ──▶ respondent / quant_response / qual_observation
+            ──▶ persist.ts ──▶ transactional RPC ──▶ canonical response tables
 ```
 
 `SourceAdapter` is an interface; `wideSurveyAdapter` is the first implementation.
@@ -53,6 +53,11 @@ implementing `SourceAdapter`. Nothing downstream changes.
 - Errors are **collected, not fail-fast** — the user sees everything wrong at once.
 - A final **Zod** guard (`quantSchema`/`qualSchema`/`segmentsSchema`) re-validates
   the built records as the last gate before persistence.
+- Since P2B, persistence stages an `import_batch` and calls
+  `commit_import_batch` once. PostgreSQL validates counts and canonical shapes,
+  then writes respondents, quantitative rows and qualitative rows in one
+  transaction. An error rolls back the whole response bundle; there is no
+  direct-table fallback.
 
 ## Authorization (§6.4 defense in depth, §7.1 role-based)
 

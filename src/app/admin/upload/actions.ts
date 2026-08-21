@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { parseFile } from "@/lib/ingestion/parse";
 import { wideSurveyAdapter } from "@/lib/ingestion/adapters/wide-survey";
 import { persistRespondents } from "@/lib/ingestion/persist";
+import { sourceSignature } from "@/lib/ingestion/mapping";
 import type { IngestError, IngestSummary } from "@/lib/ingestion/canonical";
 import { uploadSchema, ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/validation/schemas";
 
@@ -144,6 +145,10 @@ export async function ingestStudyFile(
     const summary = await persistRespondents(admin, {
       tenantId,
       studyId,
+      sourceSignature: await sourceSignature(parsed.headers),
+      fileName: file.name,
+      sourceRows: parsed.rows.length,
+      createdBy: user.id,
       respondents: result.respondents,
     });
     revalidatePath("/dashboard");

@@ -6,7 +6,13 @@ import type {
   ParsedFile,
   SourceAdapter,
 } from "../canonical";
-import { quantSchema, qualSchema, segmentsSchema } from "../canonical";
+import {
+  QUALITATIVE_SOURCES,
+  qualSchema,
+  quantSchema,
+  segmentsSchema,
+  type QualitativeSource,
+} from "../canonical";
 
 /**
  * Wide-survey adapter: one row per respondent. Column prefixes drive the mapping
@@ -84,7 +90,19 @@ function adapt(file: ParsedFile, opts: AdaptOptions = {}): AdaptResult {
       quant.push({ metric_key: c.slice(Q.length), value: Number(raw) });
     }
 
-    const source = (row[SOURCE_COL] ?? "").trim() || defaultSource;
+    const rawSource = (row[SOURCE_COL] ?? "").trim();
+    let source: QualitativeSource = defaultSource;
+    if (rawSource) {
+      if ((QUALITATIVE_SOURCES as readonly string[]).includes(rawSource)) {
+        source = rawSource as QualitativeSource;
+      } else {
+        errors.push({
+          row: lineNo,
+          column: SOURCE_COL,
+          message: `Fuente cualitativa desconocida '${rawSource}'.`,
+        });
+      }
+    }
     const qual: CanonicalRespondent["qual"] = [];
     for (const c of qualCols) {
       const v = (row[c] ?? "").trim();

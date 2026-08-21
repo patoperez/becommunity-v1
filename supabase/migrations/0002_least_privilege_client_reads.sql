@@ -20,7 +20,8 @@
 -- Cross-tenant isolation is unaffected (already enforced by SELECT policies +
 -- WITH CHECK on the surviving read path; writes are now denied outright).
 --
--- Reversible: see 0002_down.sql. Idempotent (DROP POLICY IF EXISTS + REVOKE).
+-- Reversible: see ../rollbacks/0002_restore_client_writes.sql. Idempotent
+-- (DROP POLICY IF EXISTS + REVOKE).
 -- HUMAN-REVIEW ZONE (authorization/grants). Verify with scripts/isolation-test.mjs
 -- (tests 1-4) after applying.
 -- =============================================================================
