@@ -45,6 +45,12 @@ por `service_role`; además, la aplicación revalida en el servidor que la sesi�
 pertenece a un perfil `internal`. Las funciones también verifican que el dueño
 registrado sea un perfil interno.
 
+La instantánea y la procedencia guardadas en `study` contienen configuración
+interna. La migración `0007` sustituye el permiso amplio de lectura por una
+lista explícita de columnas seguras para clientes. Las columnas visibles del
+portal siguen protegidas por RLS, pero `template_snapshot` y
+`template_origin_*` no se pueden solicitar con el rol `authenticated`.
+
 ## Verificación
 
 - `npm run test:templates`: esquema, exclusión de datos, resumen y copia profunda.

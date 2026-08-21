@@ -106,6 +106,13 @@ async function testInternalControls(clientA) {
   } else {
     fail("save_import_mapping was executable by a client role");
   }
+  const { error: snapshotError } = await clientA.from("study").select("template_snapshot").limit(1);
+  checkDenied("SELECT COLUMN", "study.template_snapshot", snapshotError);
+  const { error: originError } = await clientA.from("study").select("template_origin_id, template_origin_version").limit(1);
+  checkDenied("SELECT COLUMNS", "study.template_origin_*", originError);
+  const { error: safeStudyError } = await clientA.from("study").select("id, name, period, status, dashboard_config, journey_definition").limit(1);
+  if (safeStudyError) fail(`safe study columns were rejected (${safeStudyError.code ?? safeStudyError.message})`);
+  else pass("safe study columns remain readable through tenant RLS");
   for (const [name, args] of [
     ["save_study_template", {
       p_template_id: null, p_created_by: ZERO_ID, p_name: "probe", p_description: "",

@@ -35,9 +35,13 @@ assert.deepEqual(templatePreview(studySnapshot), {
 });
 
 const migration = readFileSync(new URL("../supabase/migrations/0006_study_template_framework.sql", import.meta.url), "utf8");
+const protectionMigration = readFileSync(new URL("../supabase/migrations/0007_protect_template_snapshot_columns.sql", import.meta.url), "utf8");
 assert.match(migration, /template_snapshot jsonb not null/, "study must persist a template snapshot");
 assert.match(migration, /source\.payload, source\.id, source\.version/, "instantiation must copy payload and origin version");
 assert.match(migration, /revoke all[^;]+authenticated/si, "browser roles must not execute template operations");
 assert.doesNotMatch(migration, /quant_response|qual_observation|respondent\s/i, "instantiation must not copy study data");
+assert.match(protectionMigration, /revoke select on table public\.study from authenticated/i);
+assert.doesNotMatch(protectionMigration.match(/grant select \([\s\S]*?\)/i)?.[0] ?? "", /template_snapshot|template_origin/i,
+  "client column allowlist must exclude internal template provenance");
 
 console.log("Template framework tests passed: schema, privacy, preview, and deep-copy semantics.");
