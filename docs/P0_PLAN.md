@@ -68,7 +68,8 @@ alter default privileges in schema public
 commit;
 ```
 
-**Rollback `0002_down.sql`** (kept alongside, never auto-applied): re-grant
+**Rollback `supabase/rollbacks/0002_restore_client_writes.sql`** (kept outside
+the migrations directory, never auto-applied): re-grant
 `insert, update, delete` to `authenticated` + recreate the 18 policies verbatim
 from `0000_init_schema_and_rls.sql:210-378`.
 

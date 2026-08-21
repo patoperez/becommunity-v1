@@ -3,6 +3,7 @@ import { sourceSignature } from "../src/lib/ingestion/mapping.ts";
 import { previewMappedImport } from "../src/lib/ingestion/preview.ts";
 import { parseXlsx } from "../src/lib/ingestion/parse.ts";
 import ExcelJS from "exceljs";
+import { wideSurveyAdapter } from "../src/lib/ingestion/adapters/wide-survey.ts";
 
 let failures = 0;
 const ok = (message) => console.log("  ✓", message);
@@ -23,7 +24,7 @@ const mapping = {
     { sourceColumn: "Nivel escolar", target: { kind: "segment", key: "nivel", required: true } },
     { sourceColumn: "Probabilidad de recomendar", target: { kind: "quantitative", metricKey: "nps", min: 1, max: 10, required: true } },
     { sourceColumn: "Satisfacción docentes", target: { kind: "quantitative", metricKey: "sat_docentes", recodingTableId: "satisfaccion_5" } },
-    { sourceColumn: "Comentario", target: { kind: "qualitative", theme: "comentario_general", source: "forms" } },
+    { sourceColumn: "Comentario", target: { kind: "qualitative", theme: "comentario_general", source: "encuesta" } },
   ],
   recodingTables: [{
     id: "satisfaccion_5",
@@ -103,6 +104,13 @@ const badRange = adaptMappedSurvey(goodFile, {
 if (badRange.ok) bad("invalid range was accepted");
 else includes("invalid min/max rejected", badRange.errors, /mínimo no puede ser mayor/);
 
+const unknownQualSource = adaptMappedSurvey(goodFile, {
+  ...mapping,
+  columns: [{ sourceColumn: "Comentario", target: { kind: "qualitative", theme: "comentario", source: "forms" } }],
+});
+if (unknownQualSource.ok) bad("unknown qualitative source was accepted");
+else includes("unknown qualitative source rejected", unknownQualSource.errors, /Configuración de mapeo inválida/);
+
 const missingRecoding = adaptMappedSurvey(goodFile, {
   ...mapping,
   columns: [{ sourceColumn: "Comentario", target: { kind: "quantitative", metricKey: "sat", recodingTableId: "inexistente" } }],
@@ -153,6 +161,13 @@ const blankHeaderResult = adaptMappedSurvey(parsedXlsx, {
 });
 if (blankHeaderResult.ok) bad("blank XLSX header was accepted");
 else includes("blank XLSX header rejected explicitly", blankHeaderResult.errors, /encabezados no vacíos/);
+
+const badLegacySource = wideSurveyAdapter.adapt({
+  headers: ["qual_comentario", "source"],
+  rows: [{ qual_comentario: "Texto", source: "forms" }],
+});
+if (badLegacySource.ok) bad("legacy adapter accepted an unknown qualitative source");
+else includes("legacy adapter shares controlled source vocabulary", badLegacySource.errors, /Fuente cualitativa desconocida/);
 
 console.log("\n" + "=".repeat(60));
 if (failures > 0) {

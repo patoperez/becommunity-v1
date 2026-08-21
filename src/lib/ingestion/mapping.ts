@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { QUALITATIVE_SOURCES } from "./canonical";
 
 const keySchema = z
   .string()
@@ -35,7 +36,7 @@ export const columnTargetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("qualitative"),
     theme: keySchema,
-    source: keySchema.optional(),
+    source: z.enum(QUALITATIVE_SOURCES).optional(),
     ...commonTarget,
   }),
 ]);

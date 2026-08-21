@@ -20,10 +20,11 @@ cp .env.example .env.local   # fill with values from the Supabase dashboard
 npm run dev                  # http://localhost:3000
 ```
 
-Apply the database migrations (in order) to your Supabase project before first
-run: `supabase/migrations/0000_init_schema_and_rls.sql`, then
-`0001_api_role_grants.sql`. Verify with `supabase/tests/rls_coverage.sql`
-(query #1 must return zero rows).
+Apply every versioned migration in order before first run. For a linked
+development/staging project use `npx supabase db push --dry-run`, review the
+exact list, then `npx supabase db push`. Emergency rollback scripts live outside
+`supabase/migrations/` and are never auto-applied. Verify with
+`supabase/tests/rls_coverage.sql` (query #1 must return zero rows).
 
 ## Commands
 

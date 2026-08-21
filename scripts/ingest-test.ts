@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { parseCsv } from "../src/lib/ingestion/parse";
 import { wideSurveyAdapter } from "../src/lib/ingestion/adapters/wide-survey";
 import { persistRespondents } from "../src/lib/ingestion/persist";
+import { sourceSignature } from "../src/lib/ingestion/mapping";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const svc = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -48,7 +49,14 @@ async function testGoodPath() {
   if (error) { bad("could not create test study: " + error.message); return; }
 
   try {
-    await persistRespondents(admin, { tenantId, studyId: study.id, respondents: result.respondents });
+    await persistRespondents(admin, {
+      tenantId,
+      studyId: study.id,
+      sourceSignature: await sourceSignature(parsed.headers),
+      fileName: "study_good.csv",
+      sourceRows: parsed.rows.length,
+      respondents: result.respondents,
+    });
     const counts = await Promise.all([
       admin.from("respondent").select("id", { count: "exact", head: true }).eq("study_id", study.id),
       admin.from("quant_response").select("id", { count: "exact", head: true }).eq("study_id", study.id),

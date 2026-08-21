@@ -47,6 +47,7 @@ const TENANT_SCOPED = [
   "segment_dimension",
   "journey_definition",
 ];
+const INTERNAL_ONLY = ["import_mapping", "recoding_table", "import_batch"];
 
 let failures = 0;
 const fail = (msg) => { console.error("  ✗ FAIL:", msg); failures++; };
@@ -63,13 +64,33 @@ async function signIn(email, password) {
 async function testAnonymous() {
   console.log("\n[1] Anonymous access (Section 6.5):");
   const c = createClient(url, anon);
-  for (const t of [...TENANT_SCOPED, "tenant", "profiles"]) {
+  for (const t of [...TENANT_SCOPED, ...INTERNAL_ONLY, "tenant", "profiles"]) {
     const { data, error } = await c.from(t).select("*").limit(1);
     if (!error && data && data.length > 0) {
       fail(`anon read returned ${data.length} row(s) from "${t}"`);
     } else {
       pass(`anon read on "${t}" returned no data`);
     }
+  }
+}
+
+// --- Test 2b: internal import controls are not a client-facing read surface --
+async function testInternalControls(clientA) {
+  console.log("\n[2b] Internal import controls (clients must have no access):");
+  for (const table of INTERNAL_ONLY) {
+    const { error } = await clientA.from(table).select("*").limit(1);
+    checkDenied("SELECT", table, error);
+  }
+  const { error: rpcError } = await clientA.rpc("commit_import_batch", {
+    p_import_batch_id: ZERO_ID,
+    p_respondents: [],
+  });
+  if (isPermissionDenied(rpcError) || rpcError?.code === "PGRST202") {
+    pass("commit_import_batch is unavailable to client role");
+  } else if (rpcError) {
+    fail(`commit_import_batch rejected for the WRONG reason (${rpcError.code ?? rpcError.message})`);
+  } else {
+    fail("commit_import_batch was executable by a client role");
   }
 }
 
@@ -163,6 +184,7 @@ async function main() {
     process.env.TEST_USER_A_EMAIL, process.env.TEST_USER_A_PASSWORD,
   );
   await testCrossTenantRead(clientA);
+  await testInternalControls(clientA);
   await testCrossTenantWrite(clientA);
   await testOwnTenantWrite(clientA);
 

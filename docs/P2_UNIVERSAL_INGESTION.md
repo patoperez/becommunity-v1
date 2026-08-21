@@ -1,7 +1,8 @@
 # P2 — Ingesta universal
 
-> **Estado:** P2A implementa el núcleo puro; persistencia versionada, confirmación
-> atómica e interfaz visual permanecen pendientes en incrementos separados.
+> **Estado:** P2A y P2B implementados. Migraciones `0003` y `0004` aplicadas y
+> verificadas en `be-community-dev` el 20 de agosto de 2026. La interfaz visual
+> P2C permanece pendiente.
 
 ## Objetivo de aceptación de P2
 
@@ -28,10 +29,20 @@ El formato V1 por prefijos sigue disponible durante la transición.
 
 ### P2B — almacenamiento y seguridad
 
-- migración para firmas, mapeos, recodificaciones e historial de importación;
-- RLS y privilegios least-privilege en cada tabla nueva;
-- RPC/transacción para que confirmación y rollback sean atómicos;
-- prueba adversarial contra Supabase: error deliberado = cero filas residuales.
+- `import_mapping`, `recoding_table` e `import_batch` conservan versiones e
+  historial sin exponerlos a cuentas de navegador;
+- RLS forzado, política de denegación explícita y privilegios revocados para
+  `anon` y `authenticated` en cada tabla interna;
+- `commit_import_batch` valida el paquete y escribe encuestados, cuantitativos y
+  cualitativos dentro de una sola transacción;
+- `rollback_import_batch` elimina únicamente las filas selladas con el lote;
+- la aplicación ya no tiene fallback de escrituras directas a tablas de
+  respuestas.
+
+La compuerta local revisa el contrato y el parche SQL. La compuerta remota
+confirmó que un error deliberado deja cero filas de respuesta; un lote válido se
+confirma y su rollback elimina solo sus propias filas. El test de aislamiento
+confirmó además que clientes y anónimos no acceden a tablas ni RPC internos.
 
 ### P2C — interfaz del centro de importación
 

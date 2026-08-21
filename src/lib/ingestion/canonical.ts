@@ -16,6 +16,9 @@ export type ParsedFile = {
   rows: RawRow[];
 };
 
+export const QUALITATIVE_SOURCES = ["encuesta", "mystery_shopper", "focus_group"] as const;
+export type QualitativeSource = (typeof QUALITATIVE_SOURCES)[number];
+
 /** One canonical respondent with its quantitative + qualitative records. */
 export type CanonicalRespondent = {
   /** Generated up-front so child rows (quant/qual) can reference it before insert. */
@@ -24,7 +27,7 @@ export type CanonicalRespondent = {
   sourceRow?: number;
   segments: Record<string, string>;
   quant: { metric_key: string; value: number }[];
-  qual: { source: string; category: string | null; theme: string; quote: string }[];
+  qual: { source: QualitativeSource; category: string | null; theme: string; quote: string }[];
 };
 
 /** A small, safe sample shown before an operator confirms an import. */
@@ -32,7 +35,7 @@ export type ImportPreviewRow = {
   sourceRow: number;
   segments: Record<string, string>;
   quant: { metric_key: string; value: number }[];
-  qual: { source: string; theme: string; quote: string }[];
+  qual: { source: QualitativeSource; theme: string; quote: string }[];
 };
 
 /** A single, human-readable validation problem (§6.4: clear messages). */
@@ -57,7 +60,7 @@ export type AdaptOptions = {
   /** Header names that MUST be present, e.g. ['seg_nivel'] -> "Falta la columna…". */
   requiredColumns?: string[];
   /** Default 'source' for qualitative rows when the file has no source column. */
-  defaultSource?: string;
+  defaultSource?: QualitativeSource;
 };
 
 /** An ingestion source adapter (§2). New formats implement this interface. */
@@ -80,7 +83,7 @@ export const quantSchema = z.object({
 });
 
 export const qualSchema = z.object({
-  source: z.string().min(1),
+  source: z.enum(QUALITATIVE_SOURCES),
   category: z.string().nullable(),
   theme: z.string().min(1),
   quote: z.string().min(1),
