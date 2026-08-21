@@ -6,6 +6,7 @@ import type { LongRow } from "@/lib/calc/engine";
 import { parseJourneyDefinition, type JourneyStage } from "@/lib/calc/journey";
 import StudyCard from "./StudyCard";
 import { logout } from "./actions";
+import { loadConfirmedQualitative, type ConfirmedQualitative } from "@/lib/qualitative/published";
 
 export const metadata = {
   title: "Portal · Be Community",
@@ -71,14 +72,19 @@ export default async function DashboardPage() {
     study: Study;
     rows: LongRow[];
     journeyStages: JourneyStage[];
+    qualitative: ConfirmedQualitative[];
   }[] = studies
     ? await Promise.all(
         studies.map(async (study) => {
-          const rows = await loadStudyRows(supabase, study.id);
+          const [rows, qualitative] = await Promise.all([
+            loadStudyRows(supabase, study.id),
+            loadConfirmedQualitative(supabase, study.id),
+          ]);
           return {
             study,
             rows,
             journeyStages: parseJourneyDefinition(study.journey_definition),
+            qualitative,
           };
         }),
       )
@@ -149,12 +155,13 @@ export default async function DashboardPage() {
           </div>
         ) : (
           <div className="mt-6 grid gap-4">
-            {studyData.map(({ study, rows, journeyStages }) => (
+            {studyData.map(({ study, rows, journeyStages, qualitative }) => (
               <StudyCard
                 key={study.id}
                 study={study}
                 rows={rows}
                 journeyStages={journeyStages}
+                qualitative={qualitative}
               />
             ))}
           </div>
