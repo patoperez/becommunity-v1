@@ -20,9 +20,19 @@ export type ParsedFile = {
 export type CanonicalRespondent = {
   /** Generated up-front so child rows (quant/qual) can reference it before insert. */
   id: string;
+  /** Original 1-based file line, used only for preview/audit; never persisted. */
+  sourceRow?: number;
   segments: Record<string, string>;
   quant: { metric_key: string; value: number }[];
   qual: { source: string; category: string | null; theme: string; quote: string }[];
+};
+
+/** A small, safe sample shown before an operator confirms an import. */
+export type ImportPreviewRow = {
+  sourceRow: number;
+  segments: Record<string, string>;
+  quant: { metric_key: string; value: number }[];
+  qual: { source: string; theme: string; quote: string }[];
 };
 
 /** A single, human-readable validation problem (§6.4: clear messages). */
