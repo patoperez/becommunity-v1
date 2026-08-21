@@ -13,6 +13,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: {
+      // Upload validation below still enforces the exact 10 MiB product limit.
+      // Leave a small multipart envelope margin so valid files reach the action.
+      bodySizeLimit: "11mb",
+    },
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

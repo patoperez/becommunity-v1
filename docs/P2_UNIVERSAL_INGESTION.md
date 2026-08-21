@@ -1,8 +1,7 @@
 # P2 — Ingesta universal
 
-> **Estado:** P2A y P2B implementados. Migraciones `0003` y `0004` aplicadas y
-> verificadas en `be-community-dev` el 20 de agosto de 2026. La interfaz visual
-> P2C permanece pendiente.
+> **Estado:** P2A–P2C implementados y verificados en `be-community-dev`.
+> Migraciones `0003`–`0005` aplicadas. P2 está cerrado funcionalmente.
 
 ## Objetivo de aceptación de P2
 
@@ -25,7 +24,7 @@ archivo corrupto debe producir errores claros por fila y dejar cero residuos.
 
 El formato V1 por prefijos sigue disponible durante la transición.
 
-## Incrementos restantes
+## Incrementos
 
 ### P2B — almacenamiento y seguridad
 
@@ -46,10 +45,19 @@ confirmó además que clientes y anónimos no acceden a tablas ni RPC internos.
 
 ### P2C — interfaz del centro de importación
 
-- subir y analizar sin escribir;
-- mapeador visual con muestras de valores;
-- reutilización automática por firma;
-- previsualización, errores y confirmación explícita;
-- historial y rollback del último import confirmado.
+- el paso de análisis lee y muestra encabezados/muestras sin escribir;
+- el mapeador permite ignorar, segmentar, crear métricas o texto cualitativo,
+  marcar campos obligatorios, imponer rangos y definir recodificaciones;
+- una firma reconoce automáticamente instrumentos ya configurados;
+- la migración `0005` guarda nuevas versiones del mapeo de forma atómica y
+  reutiliza la versión activa cuando la configuración no cambió;
+- la vista previa vuelve a validar el archivo y muestra conteos y cinco filas;
+- la confirmación exige aceptación explícita y vuelve a parsear/validar antes de
+  llamar al commit transaccional de P2B;
+- el historial muestra los últimos 30 lotes y solo permite revertir el último
+  lote todavía confirmado.
 
-P2 no se considerará cerrado hasta que P2A–P2C pasen la compuerta completa.
+La prueba en navegador recorrió análisis → mapeo → preview → confirmación real →
+historial → rollback. El estudio, lote y mapeo sintéticos se eliminaron después,
+con cero residuos. La compuerta remota probó además que `anon` no puede guardar
+mapeos y que una modificación crea la siguiente versión dejando una sola activa.

@@ -32,6 +32,8 @@ exact list, then `npx supabase db push`. Emergency rollback scripts live outside
 npm run dev          # local dev server
 npm run build        # production build (must pass before any deploy)
 npm run lint         # eslint
+npm run test         # deterministic calculation + ingestion + validation gates
+npm run test:import-center-live # mapping version/RPC gate against linked dev DB
 npm run cf:build     # opennextjs-cloudflare build -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + deploy to Cloudflare Workers
@@ -42,6 +44,7 @@ npm run cf:deploy    # build + deploy to Cloudflare Workers
 ```bash
 npx tsc --noEmit                                          # typecheck
 npx tsx scripts/calculation-test.mjs                      # metric engine vs. hand-computed values
+node --env-file=.env.local scripts/import-center-live-test.mjs # mapping reuse/version/denial
 node --env-file=.env.local scripts/isolation-test.mjs     # adversarial RLS / tenant-isolation test
 node --env-file=.env.local scripts/secret-leak-test.mjs   # no secrets in the bundle
 ```
