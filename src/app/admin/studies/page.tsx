@@ -46,7 +46,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
     <header className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="mx-auto flex max-w-7xl items-center justify-between">
         <div><h1 className="text-lg font-semibold">Estudios y plantillas</h1><p className="text-xs text-zinc-500">Inicio estilo Word · biblioteca personal</p></div>
-        <div className="flex gap-2"><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/admin/upload">Cargar datos</Link><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/dashboard">Portal</Link></div>
+        <div className="flex gap-2"><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/admin/qualitative">Revisión cualitativa</Link><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/admin/upload">Cargar datos</Link><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/dashboard">Portal</Link></div>
       </div>
     </header>
     <main className="mx-auto max-w-7xl space-y-10 px-6 py-10">

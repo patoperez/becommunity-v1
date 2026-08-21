@@ -48,6 +48,7 @@ const TENANT_SCOPED = [
   "journey_definition",
 ];
 const INTERNAL_ONLY = ["import_mapping", "recoding_table", "import_batch", "study_template"];
+const CLIENT_SAFE_VIEWS = ["confirmed_qual_observation"];
 
 let failures = 0;
 const fail = (msg) => { console.error("  ✗ FAIL:", msg); failures++; };
@@ -64,7 +65,7 @@ async function signIn(email, password) {
 async function testAnonymous() {
   console.log("\n[1] Anonymous access (Section 6.5):");
   const c = createClient(url, anon);
-  for (const t of [...TENANT_SCOPED, ...INTERNAL_ONLY, "tenant", "profiles"]) {
+  for (const t of [...TENANT_SCOPED, ...INTERNAL_ONLY, ...CLIENT_SAFE_VIEWS, "tenant", "profiles"]) {
     const { data, error } = await c.from(t).select("*").limit(1);
     if (!error && data && data.length > 0) {
       fail(`anon read returned ${data.length} row(s) from "${t}"`);
@@ -81,6 +82,8 @@ async function testInternalControls(clientA) {
     const { error } = await clientA.from(table).select("*").limit(1);
     checkDenied("SELECT", table, error);
   }
+  const { error: rawQualError } = await clientA.from("qual_observation").select("quote, suggested_theme").limit(1);
+  checkDenied("SELECT RAW", "qual_observation", rawQualError);
   const { error: rpcError } = await clientA.rpc("commit_import_batch", {
     p_import_batch_id: ZERO_ID,
     p_respondents: [],
@@ -122,6 +125,10 @@ async function testInternalControls(clientA) {
       p_template_id: ZERO_ID, p_created_by: ZERO_ID, p_tenant_id: ZERO_ID,
       p_name: "probe", p_period: null,
     }],
+    ["review_qual_observations", {
+      p_ids: [ZERO_ID], p_study_id: ZERO_ID, p_mode: "accept", p_theme: "",
+      p_stage_key: "", p_quote_ids: [], p_reviewer: ZERO_ID,
+    }],
   ]) {
     const { error } = await clientA.rpc(name, args);
     if (isPermissionDenied(error) || error?.code === "PGRST202") pass(`${name} is unavailable to client role`);
@@ -139,6 +146,12 @@ async function testCrossTenantRead(clientA) {
     if (error) { pass(`"${t}" rejected (${error.code ?? error.message})`); continue; }
     if (data && data.length > 0) fail(`read ${data.length} of Tenant B's rows from "${t}"`);
     else pass(`"${t}" returned zero of Tenant B's rows`);
+  }
+  for (const view of CLIENT_SAFE_VIEWS) {
+    const { data, error } = await clientA.from(view).select("id").eq("tenant_id", TENANT_B);
+    if (error) fail(`safe view "${view}" failed (${error.code ?? error.message})`);
+    else if (data.length > 0) fail(`safe view "${view}" leaked ${data.length} Tenant B row(s)`);
+    else pass(`safe view "${view}" returned zero of Tenant B's rows`);
   }
 }
 
