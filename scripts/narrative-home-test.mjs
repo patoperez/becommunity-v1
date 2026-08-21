@@ -4,6 +4,7 @@ import { buildNarrativeHome } from "../src/lib/dashboard/narrative.ts";
 
 const safeMetric = (key, title, value) => ({ key, title, value, detail: null, visibility: "standard" });
 const dashboard = {
+  sections: { narrative: true, trends: true, filters: true, journey: true, qualitative: true, metrics: true, segments: true, pivot: true, report: true },
   filterOptions: [], pivotAllowlist: { dimensions: [], metrics: [] },
   view: {
     emptyStudy: false, emptySelection: false, selectionVisibility: "standard", selectedUnits: 40, sourceUnits: 40,
