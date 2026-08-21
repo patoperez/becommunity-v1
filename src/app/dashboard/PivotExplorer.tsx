@@ -12,6 +12,7 @@ import {
   type PivotIntent,
 } from "@/lib/calc/pivot";
 import { formatScore } from "@/lib/calc/format";
+import { sampleVisibility } from "@/lib/calc/disclosure";
 
 const AGG_LABEL: Record<AggKind, string> = {
   avg: "Promedio",
@@ -76,8 +77,12 @@ export default function PivotExplorer({
   const barRows =
     result && !hasColumns && measure
       ? result.body
-          .map((b) => ({ label: b.rowLabels[0] || "(sin dato)", value: b.cells[`|${measure.id}`] ?? null }))
-          .filter((b) => b.value != null)
+          .map((b) => ({
+            label: b.rowLabels[0] || "(sin dato)",
+            value: b.cells[`|${measure.id}`] ?? null,
+            n: b.cellNs[`|${measure.id}`] ?? 0,
+          }))
+          .filter((b) => b.value != null && sampleVisibility(b.n) !== "suppressed")
       : [];
   const maxBar = barRows.reduce((mx, b) => Math.max(mx, b.value ?? 0), 0) || 1;
 
@@ -175,12 +180,16 @@ export default function PivotExplorer({
                   {hasColumns ? (
                     result.colCombos.map((c) => (
                       <td key={c.key} className="px-3 py-2 text-right font-medium text-zinc-900 dark:text-zinc-50">
-                        {fmt(b.cells[`${c.key}|${measure.id}`] ?? null)}
+                        {sampleVisibility(b.cellNs[`${c.key}|${measure.id}`] ?? 0) === "suppressed"
+                          ? "Muestra insuficiente"
+                          : fmt(b.cells[`${c.key}|${measure.id}`] ?? null)}
                       </td>
                     ))
                   ) : (
                     <td className="px-3 py-2 text-right font-medium text-zinc-900 dark:text-zinc-50">
-                      {fmt(b.cells[`|${measure.id}`] ?? null)}
+                      {sampleVisibility(b.cellNs[`|${measure.id}`] ?? 0) === "suppressed"
+                        ? "Muestra insuficiente"
+                        : fmt(b.cells[`|${measure.id}`] ?? null)}
                     </td>
                   )}
                 </tr>
