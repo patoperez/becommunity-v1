@@ -150,7 +150,8 @@ export default async function DashboardPage() {
                 Carga datos de un estudio hacia el modelo canónico.
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Link href="/admin/clients" className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium">Clientes y usuarios</Link>
               <Link href="/admin/qualitative" className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium">Revisión cualitativa</Link>
               <Link
                 href="/admin/studies"
