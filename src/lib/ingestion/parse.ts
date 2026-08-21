@@ -41,11 +41,13 @@ export async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedFile> {
   if (!sheet) throw new Error("El archivo Excel no tiene hojas.");
 
   const headerRow = sheet.getRow(1);
-  const headers: string[] = [];
-  headerRow.eachCell({ includeEmpty: false }, (cell, col) => {
-    headers[col - 1] = String(cell.text ?? "").trim();
-  });
-  const cleanHeaders = normalizeHeaders(headers.filter((h) => h !== undefined));
+  // Preserve physical column positions, including blank headers. Compressing a
+  // gap here would silently associate every later header with the wrong cell.
+  const cleanHeaders = normalizeHeaders(
+    Array.from({ length: headerRow.cellCount }, (_, index) =>
+      String(headerRow.getCell(index + 1).text ?? "").trim(),
+    ),
+  );
 
   const rows: RawRow[] = [];
   for (let r = 2; r <= sheet.rowCount; r++) {
