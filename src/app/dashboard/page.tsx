@@ -12,6 +12,7 @@ import LongitudinalTrends from "./LongitudinalTrends";
 import { buildNarrativeHome } from "@/lib/dashboard/narrative";
 import NarrativeHome from "./NarrativeHome";
 import { parseDashboardConfig } from "@/lib/dashboard/config";
+import { logoPublicUrl, parseBrandConfig } from "@/lib/branding/config";
 
 export const metadata = {
   title: "Portal · Be Community",
@@ -62,9 +63,9 @@ export default async function DashboardPage() {
   const [{ data: tenant }, { data: studies }] = await Promise.all([
     supabase
       .from("tenant")
-      .select("name")
+      .select("name, brand_config")
       .eq("id", profile?.tenant_id ?? "")
-      .maybeSingle<{ name: string }>(),
+      .maybeSingle<{ name: string; brand_config: unknown }>(),
     supabase
       .from("study")
       .select("id, name, period, status, dashboard_config, journey_definition, created_at")
@@ -120,26 +121,37 @@ export default async function DashboardPage() {
   const narrative = profile?.role === "internal" || !studyData[0] || currentSections?.narrative === false
     ? null
     : buildNarrativeHome(studyData[0].study, studyData[0].dashboard, longitudinal);
+  const brand = parseBrandConfig(tenant?.brand_config);
+  const brandName = brand.displayName ?? tenant?.name ?? "Be Community";
+  const brandLogo = logoPublicUrl(brand.logoPath);
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
-      <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div>
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-            Be Community
-          </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {tenant?.name ?? (profile?.role === "internal" ? "Equipo interno" : "Portal de cliente")}
-          </p>
+      <header
+        className="flex items-center justify-between border-b px-6 py-4 text-white"
+        style={{ backgroundColor: brand.primaryColor, borderColor: brand.accentColor }}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          {brandLogo ? <>
+            {/* Dynamic tenant Storage URLs cannot use a static Next Image remote allowlist. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={brandLogo} alt={`Logotipo de ${brandName}`} className="h-11 w-11 shrink-0 rounded-lg bg-white object-contain p-1" />
+          </> : null}
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-semibold">{profile?.role === "internal" ? "Be Community" : brandName}</h1>
+            <p className="truncate text-xs text-white/75">
+              {profile?.role === "internal" ? "Equipo interno" : brand.tagline}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-4">
-          <span className="hidden text-sm text-zinc-600 sm:inline dark:text-zinc-400">
+          <span className="hidden text-sm text-white/80 sm:inline">
             {user.email}
           </span>
           <form action={logout}>
             <button
               type="submit"
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-lg border border-white/40 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-white/10"
             >
               Cerrar sesión
             </button>
@@ -169,7 +181,7 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
-        {narrative ? <NarrativeHome view={narrative} /> : null}
+        {narrative ? <NarrativeHome view={narrative} brand={brand} /> : null}
         <LongitudinalTrends view={longitudinal} />
 
         <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">

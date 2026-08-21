@@ -48,5 +48,6 @@ assert.match(actionSource, /auth\.getUser\(\)/, "every recalculation must verify
 assert.doesNotMatch(actionSource, /createAdminClient|service_role/i, "interactive calculations must never bypass RLS");
 assert.match(actionSource, /loadAuthorizedStudyData/, "interactive calculations must use the centralized authorized loader");
 assert.ok(authorizedSource.indexOf('requestClient.from("study")') < authorizedSource.indexOf("createAdminClient()"), "RLS authorization must precede privileged loading");
+assert.match(authorizedSource, /brand_config/, "authorized publications must load the tenant brand with the study");
 
 console.log("P4E client-data boundary passed: no raw rows/IDs, server auth, RLS, and pre-serialization suppression.");

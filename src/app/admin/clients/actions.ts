@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { parseDataScope } from "@/lib/studies/scope";
+import { brandConfigSchema, parseBrandConfig } from "@/lib/branding/config";
 
 const uuid = z.string().uuid();
 const tenantName = z.string().trim().min(2).max(160);
@@ -39,6 +40,16 @@ async function tenantExists(admin: ReturnType<typeof createAdminClient>, tenantI
   if (error || !data) finish("error", "El cliente seleccionado no existe.");
 }
 
+function imageExtension(bytes: Uint8Array, mime: string): "png" | "jpg" | "webp" | null {
+  if (mime === "image/png" && bytes.length >= 8
+    && [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value)) return "png";
+  if (mime === "image/jpeg" && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpg";
+  if (mime === "image/webp" && bytes.length >= 12
+    && new TextDecoder().decode(bytes.slice(0, 4)) === "RIFF"
+    && new TextDecoder().decode(bytes.slice(8, 12)) === "WEBP") return "webp";
+  return null;
+}
+
 export async function createTenant(formData: FormData) {
   const { admin } = await internalContext();
   const name = tenantName.safeParse(formData.get("name"));
@@ -60,6 +71,60 @@ export async function renameTenant(formData: FormData) {
   revalidatePath("/admin/clients");
   revalidatePath("/dashboard");
   finish("ok", "Nombre del cliente actualizado.");
+}
+
+export async function updateTenantBrand(formData: FormData) {
+  const { admin } = await internalContext();
+  const tenantId = uuid.safeParse(formData.get("tenant_id"));
+  const values = brandConfigSchema().safeParse({
+    displayName: formData.get("display_name"),
+    tagline: formData.get("tagline"),
+    primaryColor: formData.get("primary_color"),
+    accentColor: formData.get("accent_color"),
+  });
+  if (!tenantId.success || !values.success) finish("error", "Revisa el nombre visible, leyenda y colores de marca.");
+  const { data: tenant, error: tenantError } = await admin.from("tenant")
+    .select("name, brand_config").eq("id", tenantId.data)
+    .maybeSingle<{ name: string; brand_config: unknown }>();
+  if (tenantError || !tenant) finish("error", "El cliente seleccionado no existe.");
+  const previous = parseBrandConfig(tenant.brand_config);
+  const rawLogo = formData.get("logo");
+  const file = rawLogo instanceof File && rawLogo.size > 0 ? rawLogo : null;
+  let nextLogoPath = formData.get("remove_logo") === "on" ? null : previous.logoPath;
+  let uploadedPath: string | null = null;
+
+  if (file) {
+    if (file.size > 1_048_576) finish("error", "El logotipo no puede superar 1 MB.");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const extension = imageExtension(bytes, file.type);
+    if (!extension) finish("error", "El logotipo debe ser un PNG, JPEG o WebP real.");
+    uploadedPath = `${tenantId.data}/logo-${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await admin.storage.from("tenant-branding")
+      .upload(uploadedPath, bytes, { contentType: file.type, upsert: false, cacheControl: "3600" });
+    if (uploadError) finish("error", `No se pudo subir el logotipo: ${uploadError.message}`);
+    nextLogoPath = uploadedPath;
+  }
+
+  const nextBrand = {
+    version: 1,
+    displayName: values.data.displayName || null,
+    tagline: values.data.tagline,
+    primaryColor: values.data.primaryColor,
+    accentColor: values.data.accentColor,
+    logoPath: nextLogoPath,
+  };
+  const { data, error } = await admin.from("tenant").update({ brand_config: nextBrand })
+    .eq("id", tenantId.data).select("id").maybeSingle();
+  if (error || !data) {
+    if (uploadedPath) await admin.storage.from("tenant-branding").remove([uploadedPath]);
+    finish("error", "No se pudo guardar la marca del cliente.");
+  }
+  if (previous.logoPath && previous.logoPath !== nextLogoPath) {
+    await admin.storage.from("tenant-branding").remove([previous.logoPath]);
+  }
+  revalidatePath("/admin/clients");
+  revalidatePath("/dashboard");
+  finish("ok", "Identidad visual del cliente actualizada.");
 }
 
 export async function inviteClientUser(formData: FormData) {

@@ -5,6 +5,7 @@ import { loadStudyRows } from "@/lib/calc/load";
 import type { ConfirmedQualitative } from "@/lib/qualitative/published";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyDataScope, parseDataScope } from "@/lib/studies/scope";
+import { parseBrandConfig, type BrandConfig } from "@/lib/branding/config";
 
 export type AuthorizedStudy = {
   id: string;
@@ -20,6 +21,7 @@ export type AuthorizedStudy = {
 export type AuthorizedStudyData = {
   study: AuthorizedStudy;
   tenantName: string;
+  brand: BrandConfig;
   rows: Awaited<ReturnType<typeof loadStudyRows>>;
   qualitative: ConfirmedQualitative[];
 };
@@ -83,7 +85,8 @@ export async function loadAuthorizedStudyData(
 
   const admin = createAdminClient();
   const [{ data: tenant, error: tenantError }, rows, qualitative] = await Promise.all([
-    admin.from("tenant").select("name").eq("id", study.tenant_id).maybeSingle<{ name: string }>(),
+    admin.from("tenant").select("name, brand_config").eq("id", study.tenant_id)
+      .maybeSingle<{ name: string; brand_config: unknown }>(),
     loadStudyRows(admin, study.id),
     loadConfirmedQualitativeInternal(admin, study.id),
   ]);
@@ -91,6 +94,7 @@ export async function loadAuthorizedStudyData(
   return {
     study,
     tenantName: tenant?.name ?? "Be Community",
+    brand: parseBrandConfig(tenant?.brand_config),
     rows: applyDataScope(rows, scope),
     qualitative: applyDataScope(qualitative, scope),
   };

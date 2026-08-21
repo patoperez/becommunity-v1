@@ -44,6 +44,14 @@ for (let i = 1; i <= 36; i += 1) {
 
 const bytes = await buildStudyPdf({
   tenantName: "Cliente demostracion",
+  brand: {
+    version: 1,
+    displayName: "Comunidad Demo",
+    tagline: "Escuchar para transformar",
+    primaryColor: "#123456",
+    accentColor: "#2f9e8f",
+    logoPath: null,
+  },
   study: { id: "study-demo", name: "Experiencia de comunidad", period: "2026", status: "published" },
   rows,
   qualitative,

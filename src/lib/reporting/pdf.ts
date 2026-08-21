@@ -19,6 +19,7 @@ import {
   type ConfirmedQualitative,
 } from "@/lib/qualitative/published";
 import type { SegmentFilters } from "@/lib/calc/filters";
+import { DEFAULT_BRAND, hexToRgb, type BrandConfig } from "@/lib/branding/config";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -27,14 +28,13 @@ const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
 const INK = rgb(0.11, 0.12, 0.15);
 const MUTED = rgb(0.38, 0.4, 0.45);
-const BRAND = rgb(0.27, 0.18, 0.55);
-const BRAND_LIGHT = rgb(0.95, 0.93, 1);
 const LINE = rgb(0.86, 0.87, 0.9);
 const WARNING = rgb(0.64, 0.38, 0.04);
 const WARNING_LIGHT = rgb(1, 0.97, 0.86);
 
 export type StudyPdfInput = {
   tenantName: string;
+  brand?: BrandConfig;
   study: {
     id: string;
     name: string;
@@ -91,6 +91,8 @@ class ReportWriter {
     private readonly regular: PDFFont,
     private readonly bold: PDFFont,
     private readonly studyName: string,
+    private readonly brandColor: ReturnType<typeof rgb>,
+    private readonly brandLight: ReturnType<typeof rgb>,
   ) {
     this.addPage();
   }
@@ -150,13 +152,13 @@ class ReportWriter {
   }
 
   title(value: string) {
-    this.text(value, { size: 24, bold: true, color: BRAND, lineHeight: 29 });
+    this.text(value, { size: 24, bold: true, color: this.brandColor, lineHeight: 29 });
   }
 
   section(value: string) {
     this.ensure(34);
     this.y -= 8;
-    this.text(value, { size: 15, bold: true, color: BRAND, lineHeight: 19 });
+    this.text(value, { size: 15, bold: true, color: this.brandColor, lineHeight: 19 });
     this.rule();
   }
 
@@ -176,7 +178,7 @@ class ReportWriter {
       y: this.y - height,
       width: CONTENT_WIDTH,
       height,
-      color: warning ? WARNING_LIGHT : BRAND_LIGHT,
+      color: warning ? WARNING_LIGHT : this.brandLight,
     });
     let lineY = this.y - 13;
     for (const line of lines) {
@@ -185,7 +187,7 @@ class ReportWriter {
         y: lineY,
         size: fontSize,
         font: this.regular,
-        color: warning ? WARNING : BRAND,
+        color: warning ? WARNING : this.brandColor,
       });
       lineY -= 13;
     }
@@ -271,7 +273,16 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const generatedAt = input.generatedAt ?? new Date();
-  const writer = new ReportWriter(pdf, regular, bold, input.study.name);
+  const brand = input.brand ?? DEFAULT_BRAND;
+  const [red, green, blue] = hexToRgb(brand.primaryColor);
+  const [accentRed, accentGreen, accentBlue] = hexToRgb(brand.accentColor);
+  const brandColor = rgb(red, green, blue);
+  const brandLight = rgb(
+    0.9 + accentRed * 0.1,
+    0.9 + accentGreen * 0.1,
+    0.9 + accentBlue * 0.1,
+  );
+  const writer = new ReportWriter(pdf, regular, bold, input.study.name, brandColor, brandLight);
   const metrics = computeStudyMetrics(input.rows);
   const units = distinctUnits(input.rows, input.qualitative);
   const selectionVisibility = sampleVisibility(units);
@@ -284,9 +295,10 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
   pdf.setCreator("Be Community server PDF export");
   pdf.setCreationDate(generatedAt);
 
-  writer.text("BE COMMUNITY", { size: 9, bold: true, color: BRAND });
+  writer.text(brand.displayName ?? "BE COMMUNITY", { size: 9, bold: true, color: brandColor });
   writer.title(input.study.name);
-  writer.text(input.tenantName, { size: 12, bold: true });
+  if (brand.displayName !== input.tenantName) writer.text(input.tenantName, { size: 12, bold: true });
+  if (brand.tagline) writer.text(brand.tagline, { size: 9, color: MUTED });
   writer.text(
     [input.study.period, `Estado: ${input.study.status}`].filter(Boolean).join(" - "),
     { size: 9, color: MUTED },

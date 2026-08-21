@@ -1,4 +1,5 @@
 import type { NarrativeHomeView } from "@/lib/dashboard/narrative";
+import type { BrandConfig } from "@/lib/branding/config";
 
 function Delta({ metric }: { metric: NarrativeHomeView["metrics"][number] }) {
   if (!metric.delta) return <span className="text-zinc-400">Sin comparativo inmediato</span>;
@@ -6,20 +7,20 @@ function Delta({ metric }: { metric: NarrativeHomeView["metrics"][number] }) {
   return <span className="text-sky-700 dark:text-sky-300">{arrow} {metric.delta} vs. periodo anterior</span>;
 }
 
-export default function NarrativeHome({ view }: { view: NarrativeHomeView }) {
+export default function NarrativeHome({ view, brand }: { view: NarrativeHomeView; brand: BrandConfig }) {
   const studyAnchor = `study-${view.currentStudy.id}`;
   const reportHref = `/api/studies/${encodeURIComponent(view.currentStudy.id)}/report`;
 
   return <section className="mb-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-    <div className="bg-gradient-to-br from-sky-950 via-sky-900 to-cyan-800 px-6 py-7 text-white">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Panorama actual</p>
+    <div className="px-6 py-7 text-white" style={{ background: `linear-gradient(135deg, ${brand.primaryColor}, ${brand.accentColor})` }}>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/75">Panorama actual</p>
       <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold">{view.currentStudy.name}</h2>
-          <p className="mt-1 text-sm text-sky-100">{view.currentStudy.period ?? "Periodo actual"} · Lo esencial antes de explorar</p>
+          <p className="mt-1 text-sm text-white/80">{view.currentStudy.period ?? "Periodo actual"} · Lo esencial antes de explorar</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <a href={`#${studyAnchor}`} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-sky-950 hover:bg-sky-50">Explorar estudio</a>
+          <a href={`#${studyAnchor}`} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold hover:bg-white/90" style={{ color: brand.primaryColor }}>Explorar estudio</a>
           {view.currentStudy.reportAvailable ? <a href={reportHref} className="rounded-lg border border-white/40 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10">Descargar informe PDF</a> : null}
         </div>
       </div>
