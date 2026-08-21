@@ -143,6 +143,11 @@ export function computePivot(rows: LongRow[], intent: PivotIntent, allow: PivotA
       const cks = ck.join("§");
       rowKeyMap.set(rks, rk);
       colKeyMap.set(cks, ck);
+      // RAW precision on purpose. Pivot cells are NOT display-terminal: the
+      // PivotExplorer derives `maxBar` and the bar-width ratio
+      // ((value / maxBar) * 100) from them. Rounding here would feed rounding
+      // error into that derived calculation, so the canonical rounding is
+      // applied once at the presentation boundary (`formatNumber`) instead.
       cellMap.set(`${rks}|${cks}|${m.id}`, obj.val == null ? null : Number(obj.val));
     }
   }

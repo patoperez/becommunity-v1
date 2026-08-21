@@ -1,15 +1,15 @@
 import type { LongRow, StudyMetrics } from "@/lib/calc/engine";
 import type { PivotAllowlist } from "@/lib/calc/pivot";
 import type { JourneyStage } from "@/lib/calc/journey";
+import { formatScore } from "@/lib/calc/format";
 import PivotExplorer from "./PivotExplorer";
 import JourneyMap from "./JourneyMap";
 
 type Study = { id: string; name: string; period: string | null; status: string };
 
-function fmt(n: number | null): string {
-  if (n == null) return "—";
-  return Number.isInteger(n) ? String(n) : n.toFixed(2);
-}
+// Single shared policy: values arrive pre-rounded from the calc layer; this
+// formats only (docs/CALCULATION_POLICY.md §4).
+const fmt = formatScore;
 
 function label(metricKey: string): string {
   return metricKey.replace(/_/g, " ");

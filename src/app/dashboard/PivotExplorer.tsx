@@ -11,6 +11,7 @@ import {
   type PivotAllowlist,
   type PivotIntent,
 } from "@/lib/calc/pivot";
+import { formatScore } from "@/lib/calc/format";
 
 const AGG_LABEL: Record<AggKind, string> = {
   avg: "Promedio",
@@ -22,10 +23,8 @@ const AGG_LABEL: Record<AggKind, string> = {
 
 const NONE = "__none__";
 
-function fmt(n: number | null): string {
-  if (n == null) return "—";
-  return Number.isInteger(n) ? String(n) : n.toFixed(2);
-}
+// Single shared policy: pivot cells arrive pre-rounded from computePivot.
+const fmt = formatScore;
 
 function labelize(s: string): string {
   return s.replace(/_/g, " ");
