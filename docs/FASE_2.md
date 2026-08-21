@@ -14,8 +14,8 @@ Status: ✅ **Complete and behaviorally verified.**
 | File parsing (CSV via papaparse, XLSX via exceljs) | [src/lib/ingestion/parse.ts](../src/lib/ingestion/parse.ts) |
 | Wide-survey adapter (mapping + validation) | [src/lib/ingestion/adapters/wide-survey.ts](../src/lib/ingestion/adapters/wide-survey.ts) |
 | Persistence (atomic RPC, injected server client) | [src/lib/ingestion/persist.ts](../src/lib/ingestion/persist.ts) |
-| Upload UI (internal-only) | [src/app/admin/upload/page.tsx](../src/app/admin/upload/page.tsx), [UploadForm.tsx](../src/app/admin/upload/UploadForm.tsx) |
-| Server action (authZ + validate + persist) | [src/app/admin/upload/actions.ts](../src/app/admin/upload/actions.ts) |
+| Import center (analyze, map, preview, confirm, history, rollback) | [src/app/admin/upload/page.tsx](../src/app/admin/upload/page.tsx), [UploadForm.tsx](../src/app/admin/upload/UploadForm.tsx) |
+| Server actions (authZ + preview + version + persist + rollback) | [src/app/admin/upload/actions.ts](../src/app/admin/upload/actions.ts) |
 | Dashboard internal entry point | [src/app/dashboard/page.tsx](../src/app/dashboard/page.tsx) |
 
 ## Adapter pattern (§2: separate capture from presentation)
@@ -29,8 +29,9 @@ file bytes ──▶ parse.ts ──▶ { headers, rows }     (format-agnostic)
             ──▶ persist.ts ──▶ transactional RPC ──▶ canonical response tables
 ```
 
-`SourceAdapter` is an interface; `wideSurveyAdapter` is the first implementation.
-Its column contract (one row per respondent):
+`SourceAdapter` is an interface. `wideSurveyAdapter` preserves the V1 prefix
+contract, while `mapped-survey.ts` accepts arbitrary Forms-style headers through
+the operator-approved mapping. The legacy contract (one row per respondent) is:
 
 | Prefix | Maps to | Example |
 |--------|---------|---------|
@@ -58,6 +59,12 @@ implementing `SourceAdapter`. Nothing downstream changes.
   then writes respondents, quantitative rows and qualitative rows in one
   transaction. An error rolls back the whole response bundle; there is no
   direct-table fallback.
+- Since P2C, analysis and preview are separate, non-persistent actions. A
+  confirmation reparses the original file and revalidates the exact submitted
+  mapping; it never trusts the earlier browser preview as authorization to write.
+- Reusable mappings are versioned by `save_import_mapping`. The function is
+  `SECURITY DEFINER`, has an empty `search_path`, is executable only by
+  `service_role`, and serializes concurrent versions per tenant/signature.
 
 ## Authorization (§6.4 defense in depth, §7.1 role-based)
 
@@ -85,6 +92,13 @@ In-browser (live app):
 - Client (non-internal) user → "Acceso denegado"; unauthenticated → redirect to
   `/login`.
 - `scripts/isolation-test.mjs` re-run → still all green (no RLS regression).
+
+P2C browser smoke (synthetic file):
+- arbitrary headers mapped visually to segment, quantitative and qualitative;
+- preview reported 2 respondents, 2 numeric responses and 2 observations;
+- explicit confirmation wrote one atomic batch and refreshed history;
+- UI rollback changed the batch from confirmed to rolled back and removed the
+  rollback control; all synthetic database records were then deleted.
 
 ## Dependency note (§6.4 supply chain)
 

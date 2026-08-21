@@ -2,7 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import UploadForm from "./UploadForm";
+import UploadForm, {
+  type ImportHistoryItem,
+  type StudyOption,
+  type TenantOption,
+} from "./UploadForm";
 
 export const metadata = { title: "Cargar datos · Be Community" };
 
@@ -39,11 +43,56 @@ export default async function UploadPage() {
   // Internal users have no tenant, so the tenant list is fetched with the admin
   // client (server-only, §6.3) after the role check above.
   const admin = createAdminClient();
-  const { data: tenants } = await admin
-    .from("tenant")
-    .select("id, name")
-    .order("name")
-    .returns<{ id: string; name: string }[]>();
+  const [{ data: tenants }, { data: studies }, { data: batches }] = await Promise.all([
+    admin
+      .from("tenant")
+      .select("id, name")
+      .order("name")
+      .returns<TenantOption[]>(),
+    admin
+      .from("study")
+      .select("id, tenant_id, name, period")
+      .order("created_at", { ascending: false })
+      .returns<{ id: string; tenant_id: string; name: string; period: string | null }[]>(),
+    admin
+      .from("import_batch")
+      .select("id, tenant_id, study_id, file_name, status, expected_respondents, expected_quant, expected_qual, created_at, committed_at")
+      .order("created_at", { ascending: false })
+      .limit(30)
+      .returns<{
+        id: string;
+        tenant_id: string;
+        study_id: string;
+        file_name: string;
+        status: ImportHistoryItem["status"];
+        expected_respondents: number;
+        expected_quant: number;
+        expected_qual: number;
+        created_at: string;
+        committed_at: string | null;
+      }[]>(),
+  ]);
+
+  const tenantNames = new Map((tenants ?? []).map((tenant) => [tenant.id, tenant.name]));
+  const studyNames = new Map((studies ?? []).map((study) => [study.id, study.name]));
+  const studyOptions: StudyOption[] = (studies ?? []).map((study) => ({
+    id: study.id,
+    tenantId: study.tenant_id,
+    name: study.name,
+    period: study.period,
+  }));
+  const history: ImportHistoryItem[] = (batches ?? []).map((batch) => ({
+    id: batch.id,
+    tenantName: tenantNames.get(batch.tenant_id) ?? "Cliente eliminado",
+    studyName: studyNames.get(batch.study_id) ?? "Estudio eliminado",
+    fileName: batch.file_name,
+    status: batch.status,
+    respondents: batch.expected_respondents,
+    quant: batch.expected_quant,
+    qual: batch.expected_qual,
+    createdAt: batch.created_at,
+    committedAt: batch.committed_at,
+  }));
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
@@ -60,8 +109,8 @@ export default async function UploadPage() {
         </Link>
       </header>
 
-      <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-10">
-        <UploadForm tenants={tenants ?? []} />
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
+        <UploadForm tenants={tenants ?? []} studies={studyOptions} history={history} />
       </main>
     </div>
   );

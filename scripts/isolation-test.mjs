@@ -92,6 +92,20 @@ async function testInternalControls(clientA) {
   } else {
     fail("commit_import_batch was executable by a client role");
   }
+  const { error: mappingRpcError } = await clientA.rpc("save_import_mapping", {
+    p_tenant_id: ZERO_ID,
+    p_source_signature: `sha256:${"0".repeat(64)}`,
+    p_name: "isolation probe",
+    p_configuration: { version: 1, name: "probe", columns: [], recodingTables: [] },
+    p_created_by: null,
+  });
+  if (isPermissionDenied(mappingRpcError) || mappingRpcError?.code === "PGRST202") {
+    pass("save_import_mapping is unavailable to client role");
+  } else if (mappingRpcError) {
+    fail(`save_import_mapping rejected for the WRONG reason (${mappingRpcError.code ?? mappingRpcError.message})`);
+  } else {
+    fail("save_import_mapping was executable by a client role");
+  }
 }
 
 // --- Test 2: client A must not READ tenant B's rows --------------------------
