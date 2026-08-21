@@ -13,6 +13,8 @@ import { formatScore } from "@/lib/calc/format";
 import { sampleVisibility } from "@/lib/calc/disclosure";
 import PivotExplorer from "./PivotExplorer";
 import JourneyMap from "./JourneyMap";
+import QualitativeInsights from "./QualitativeInsights";
+import type { ConfirmedQualitative } from "@/lib/qualitative/published";
 
 type Study = { id: string; name: string; period: string | null; status: string };
 
@@ -40,30 +42,40 @@ export default function StudyCard({
   study,
   rows,
   journeyStages,
+  qualitative,
 }: {
   study: Study;
   rows: LongRow[];
   journeyStages: JourneyStage[];
+  qualitative: ConfirmedQualitative[];
 }) {
-  const filterOptions = useMemo(() => buildSegmentFilterOptions(rows), [rows]);
+  const filterOptions = useMemo(() => buildSegmentFilterOptions([...rows, ...qualitative]), [rows, qualitative]);
   const [filters, setFilters] = useState<SegmentFilters>({});
   const filteredRows = useMemo(
     () => filterRowsBySegments(rows, filters, filterOptions),
     [rows, filters, filterOptions],
   );
+  const filteredQualitative = useMemo(
+    () => filterRowsBySegments(qualitative, filters, filterOptions),
+    [qualitative, filters, filterOptions],
+  );
   const metrics = useMemo(() => computeStudyMetrics(filteredRows), [filteredRows]);
   const allowlist = useMemo(() => buildAllowlist(rows), [rows]);
-  const sourceRespondents = useMemo(
-    () => new Set(rows.map((row) => row.respondent_id)).size,
-    [rows],
-  );
+  const sourceRespondents = useMemo(() => new Set([
+    ...rows.map((row) => `r:${row.respondent_id}`),
+    ...qualitative.map((row) => row.respondent_id ? `r:${row.respondent_id}` : `o:${row.id}`),
+  ]).size, [rows, qualitative]);
+  const selectedRespondents = useMemo(() => new Set([
+    ...filteredRows.map((row) => `r:${row.respondent_id}`),
+    ...filteredQualitative.map((row) => row.respondent_id ? `r:${row.respondent_id}` : `o:${row.id}`),
+  ]).size, [filteredRows, filteredQualitative]);
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
-  const emptyStudy = rows.length === 0;
-  const emptySelection = !emptyStudy && filteredRows.length === 0;
-  const selectionVisibility = sampleVisibility(metrics.respondents);
+  const emptyStudy = rows.length === 0 && qualitative.length === 0;
+  const emptySelection = !emptyStudy && filteredRows.length === 0 && filteredQualitative.length === 0;
+  const selectionVisibility = sampleVisibility(selectedRespondents);
   const selectionSuppressed = selectionVisibility === "suppressed";
   const canPivot = filteredRows.length > 0 && allowlist.dimensions.length > 0 && allowlist.metrics.length > 0;
-  const hasJourney = journeyStages.length > 0 && filteredRows.length > 0;
+  const hasJourney = journeyStages.length > 0 && (filteredRows.length > 0 || filteredQualitative.length > 0);
 
   function setFilter(key: string, value: string) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -101,7 +113,7 @@ export default function StudyCard({
                   <p aria-live="polite" className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
                     {selectionSuppressed
                       ? "Muestra insuficiente · se ocultaron los resultados de esta selección"
-                      : `${metrics.respondents} de ${sourceRespondents} encuestados · todas las visualizaciones se recalculan en vivo`}
+                      : `${selectedRespondents} de ${sourceRespondents} unidades de respuesta · todas las visualizaciones se recalculan en vivo`}
                   </p>
                 </div>
                 {activeFilterCount > 0 ? (
@@ -137,7 +149,7 @@ export default function StudyCard({
 
           {selectionVisibility === "caution" ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-              Base pequeña (n={metrics.respondents}). Interpreta los resultados con cautela.
+              Base pequeña (n={selectedRespondents}). Interpreta los resultados con cautela.
             </div>
           ) : null}
 
@@ -148,7 +160,9 @@ export default function StudyCard({
           ) : null}
 
           {/* Data-connected journey map (§8), rendered from journey_definition */}
-          {!selectionSuppressed && hasJourney ? <JourneyMap stages={journeyStages} rows={filteredRows} /> : null}
+          {!selectionSuppressed && hasJourney ? <JourneyMap stages={journeyStages} rows={filteredRows} qualitative={filteredQualitative} /> : null}
+
+          {!selectionSuppressed && !emptySelection ? <QualitativeInsights rows={filteredQualitative} /> : null}
 
           {/* Headline tiles */}
           {!selectionSuppressed && !emptySelection ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

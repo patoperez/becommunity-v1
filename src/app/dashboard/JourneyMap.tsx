@@ -6,6 +6,8 @@ import type { JourneyStage } from "@/lib/calc/journey";
 import { formatNumber } from "@/lib/calc/format";
 import { DECIMALS } from "@/lib/calc/metrics";
 import { sampleVisibility } from "@/lib/calc/disclosure";
+import type { ConfirmedQualitative } from "@/lib/qualitative/published";
+import QualitativeInsights from "./QualitativeInsights";
 
 function headline(m: StageMetric): string {
   if (m.value == null) return "—";
@@ -33,9 +35,11 @@ function kindLabel(m: StageMetric): string {
 export default function JourneyMap({
   stages,
   rows,
+  qualitative,
 }: {
   stages: JourneyStage[];
   rows: LongRow[];
+  qualitative: ConfirmedQualitative[];
 }) {
   const stageMetrics = useMemo(
     () => stages.map((s) => ({ stage: s, metric: computeStageMetric(rows, s.metric) })),
@@ -145,6 +149,7 @@ export default function JourneyMap({
               ))}
             </div>
           )}
+          <QualitativeInsights rows={qualitative.filter((row) => row.stage_key === current.stage.id)} compact />
         </div>
       ) : null}
     </div>

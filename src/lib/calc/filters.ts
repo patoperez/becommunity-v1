@@ -1,13 +1,16 @@
-import type { LongRow } from "./engine";
+const RESERVED = new Set([
+  "id", "respondent_id", "metric_key", "value",
+  "theme", "stage_key", "quote", "source", "category",
+]);
 
-const RESERVED = new Set(["respondent_id", "metric_key", "value"]);
+export type SegmentableRow = Record<string, unknown>;
 
 export type SegmentFilterOption = { key: string; values: string[] };
 export type SegmentFilters = Record<string, string>;
 export type SegmentFilterValidation = { ok: true } | { ok: false; errors: string[] };
 
 /** Stable filter catalogue derived exclusively from the RLS-scoped study rows. */
-export function buildSegmentFilterOptions(rows: LongRow[]): SegmentFilterOption[] {
+export function buildSegmentFilterOptions(rows: SegmentableRow[]): SegmentFilterOption[] {
   const dimensions = new Map<string, Set<string>>();
   for (const row of rows) {
     for (const [key, rawValue] of Object.entries(row)) {
@@ -46,11 +49,11 @@ export function validateSegmentFilters(
  * Applies a validated AND filter across dimensions. Computations that consume
  * the returned rows continue through the canonical Arquero calculation layer.
  */
-export function filterRowsBySegments(
-  rows: LongRow[],
+export function filterRowsBySegments<T extends SegmentableRow>(
+  rows: T[],
   filters: SegmentFilters,
   options = buildSegmentFilterOptions(rows),
-): LongRow[] {
+): T[] {
   const validation = validateSegmentFilters(filters, options);
   if (!validation.ok) throw new Error(`Filtros inválidos: ${validation.errors.join(" ")}`);
   const active = Object.entries(filters).filter(([, value]) => Boolean(value));
