@@ -15,28 +15,25 @@ export type JourneyStage = {
   description?: string;
 };
 
+const stageSchema = z.object({
+  id: z.string().trim().min(1).max(64).regex(/^[a-z][a-z0-9_-]*$/),
+  label: z.string().trim().min(1).max(120),
+  metric: z.string().trim().min(1).max(120).regex(/^[a-z][a-z0-9_:-]*$/),
+  description: z.string().trim().max(500).optional(),
+});
+
+export const journeyDefinitionSchema = z.object({
+  stages: z.array(stageSchema).max(30)
+    .refine((stages) => new Set(stages.map((stage) => stage.id)).size === stages.length, "stage ids must be unique"),
+});
+
 /**
  * Safely parse a study's journey_definition jsonb into stages. Defensive: the
  * blob is validated, never trusted blindly — malformed entries are dropped so a
  * bad config can never crash the UI.
  */
 export function parseJourneyDefinition(def: unknown): JourneyStage[] {
-  if (!def || typeof def !== "object") return [];
-  const stages = (def as { stages?: unknown }).stages;
-  if (!Array.isArray(stages)) return [];
-
-  const out: JourneyStage[] = [];
-  for (const s of stages) {
-    if (!s || typeof s !== "object") continue;
-    const o = s as Record<string, unknown>;
-    if (typeof o.id === "string" && typeof o.label === "string" && typeof o.metric === "string") {
-      out.push({
-        id: o.id,
-        label: o.label,
-        metric: o.metric,
-        description: typeof o.description === "string" ? o.description : undefined,
-      });
-    }
-  }
-  return out;
+  const parsed = journeyDefinitionSchema.safeParse(def);
+  return parsed.success ? parsed.data.stages : [];
 }
+import { z } from "zod";
