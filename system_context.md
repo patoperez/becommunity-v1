@@ -32,7 +32,7 @@ What IS complex: the *structure* (nested segmentation — level → grade → gr
 - **Ingestion via adapter pattern:** raw flat files mapped to a canonical schema. Column-prefix convention (to be confirmed in audit): `seg_<key>` = segments/dimensions, `q_<metric>` = quantitative metrics, `qual_<theme>` = qualitative text.
 - **On-the-fly calculation:** NPS, CSAT, Top-Box computed live from relational data via Arquero.
 - **Configuration over code:** the journey map (and similar UI) renders from a JSON definition stored on the `study` row, not from hardcoded React.
-- **Deployment:** Cloudflare via OpenNext adapter (Node compat mode was needed so `.xlsx` parsing works in production; the edge runtime conflicted with middleware + exceljs).
+- **Deployment:** Cloudflare via OpenNext adapter (Node compat mode was needed because the edge runtime conflicted with middleware + ingestion). Node compat is necessary but **not sufficient**: workerd's `unenv` shims throw on unimplemented APIs, so `.xlsx` parsing uses ExcelJS's browser build, loaded lazily.
 
 ### Hard lessons from V1 (do not repeat)
 - The new Supabase key system does **not** auto-grant table privileges. RLS being enabled is not enough; `authenticated` needs explicit GRANTs or every query silently returns nothing. (Cost us a full debugging cycle.)

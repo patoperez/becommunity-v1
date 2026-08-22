@@ -9,8 +9,14 @@ is **not** a static export.
 
 We deploy with **[`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare)**
 (the `@cloudflare/next-on-pages` adapter is deprecated). OpenNext runs the full
-Next.js server on the **Node.js runtime inside a Cloudflare Worker** — so Node
-libraries work in production, including **`exceljs`** for `.xlsx` uploads.
+Next.js server on the **Node.js runtime inside a Cloudflare Worker**.
+
+> **`nodejs_compat` is not a blanket guarantee.** workerd polyfills Node via
+> `unenv`, whose unimplemented APIs *throw*. ExcelJS's Node entry reaches
+> `process.umask()` at module load (through `unzipper` → `fstream`) and is fatal
+> on Workers, which once broke CSV uploads too. `.xlsx` now loads ExcelJS's
+> **browser** build lazily; see `src/lib/ingestion/parse.ts`. Verify any new Node
+> dependency under real workerd before assuming it runs.
 
 > **This is a Workers deployment, not a Pages project.** OpenNext produces a
 > Worker (`.open-next/worker.js`) + static assets, deployed via Wrangler. If you
@@ -25,7 +31,8 @@ libraries work in production, including **`exceljs`** for `.xlsx` uploads.
   supported"). We therefore use the **`middleware.ts`** convention
   ([src/middleware.ts](../src/middleware.ts)), which runs on the Edge runtime.
 - **No `runtime = "edge"` on routes.** Under OpenNext the routes run on Node, so
-  those exports were removed — that's what lets `exceljs` work for `.xlsx`.
+  those exports were removed. This is necessary for Node-style code but, as
+  above, is not sufficient for every Node library.
 
 ## Prerequisites
 
