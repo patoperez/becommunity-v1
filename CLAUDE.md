@@ -25,7 +25,7 @@ data-connected journey maps for the firm's clients (schools).
 - Framework: **Next.js 16.2.9** (App Router) + **React 19.2.4** + **TypeScript ^5, `strict: true`**.
 - Styling: **TailwindCSS v4** (`@tailwindcss/postcss`).
 - Backend/DB: **Supabase Cloud** (`@supabase/supabase-js 2.108.2`, `@supabase/ssr 0.12.0`) — Postgres + Auth + Storage + RLS.
-- Deployment: **Cloudflare Worker via `@opennextjs/cloudflare 1.20.1`**, `nodejs_compat`. The full Next server runs on the **Node.js runtime** (not Edge) so **exceljs** parses `.xlsx` in prod; middleware uses the **Edge `middleware.ts` convention** because OpenNext rejects Node middleware.
+- Deployment: **Cloudflare Worker via `@opennextjs/cloudflare 1.20.1`**, `nodejs_compat`. The full Next server runs on the **Node.js runtime** (not Edge); middleware uses the **Edge `middleware.ts` convention** because OpenNext rejects Node middleware. ⓘ **`nodejs_compat` is NOT a guarantee that a Node library works.** workerd's `unenv` shims throw on unimplemented APIs, and ExcelJS's Node entry dies on a module-level `process.umask()` (via `unzipper` → `fstream`). `.xlsx` therefore loads ExcelJS's **browser** build lazily — see `src/lib/ingestion/parse.ts` and the `test:workers-ingestion` gate.
 - Data engine: **Arquero 8.0.3** — in use (`src/lib/calc/engine.ts`, `pivot.ts`) for cross-tabs/aggregations.
 - Validation: **Zod 4.4.3** — in use at the **ingestion boundary** (`src/lib/ingestion/canonical.ts`). ⓘ **Not yet at every form/param boundary — extend it (P0), see rule below.**
 - Ingestion: **PapaParse 5.5.4** (CSV) + **ExcelJS 4.4.0** (.xlsx), both in use (`src/lib/ingestion/parse.ts`).

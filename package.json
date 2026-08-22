@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:calc && npm run test:cloudflare-calc && npm run test:workers-runtime && npm run test:business-calc && npm run test:ingestion-core && npm run test:atomic-ingestion && npm run test:import-center && npm run test:templates && npm run test:bi-filters && npm run test:qualitative && npm run test:confirmed-qualitative && npm run test:client-boundary && npm run test:publication-boundary && npm run test:data-scope && npm run test:client-admin && npm run test:study-config && npm run test:client-preview && npm run test:longitudinal && npm run test:narrative-home && npm run test:server-pdf && npm run test:tenant-branding && npm run test:validation",
+    "test": "npm run test:calc && npm run test:cloudflare-calc && npm run test:workers-runtime && npm run test:workers-ingestion && npm run test:business-calc && npm run test:ingestion-core && npm run test:atomic-ingestion && npm run test:import-center && npm run test:templates && npm run test:bi-filters && npm run test:qualitative && npm run test:confirmed-qualitative && npm run test:client-boundary && npm run test:publication-boundary && npm run test:data-scope && npm run test:client-admin && npm run test:study-config && npm run test:client-preview && npm run test:longitudinal && npm run test:narrative-home && npm run test:server-pdf && npm run test:tenant-branding && npm run test:validation",
     "test:calc": "tsx scripts/calculation-test.mjs",
     "test:business-calc": "tsx scripts/business-calculation-test.mjs",
     "test:ingestion-core": "tsx scripts/universal-ingestion-test.mjs",
@@ -42,7 +42,8 @@
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "test:cloudflare-calc": "tsx scripts/cloudflare-calc-compat-test.mjs",
-    "test:workers-runtime": "tsx scripts/workers-runtime-safety-test.mjs"
+    "test:workers-runtime": "tsx scripts/workers-runtime-safety-test.mjs",
+    "test:workers-ingestion": "tsx scripts/workers-ingestion-runtime-test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",

@@ -1,12 +1,30 @@
 import Papa from "papaparse";
-import ExcelJS from "exceljs";
 import type { ParsedFile, RawRow } from "./canonical";
 
 /**
  * File parsing — turns CSV/XLSX bytes into a neutral { headers, rows } shape.
  * This is deliberately format-agnostic and has no knowledge of the canonical
  * schema; the adapter (next layer) does the mapping (§2).
+ *
+ * RUNTIME CONSTRAINT — DO NOT import ExcelJS at module scope.
+ *
+ * ExcelJS's Node entry pulls in unzipper -> fstream, and fstream/lib/writer.js
+ * evaluates `process.umask()` at MODULE LOAD time. On Cloudflare Workers
+ * `process.platform` is not "win32", so that call runs and unenv throws
+ * `[unenv] process.umask is not implemented yet!`. A static import therefore
+ * made this whole module — and with it the ingestion Server Actions
+ * (analyze/preview/confirm/rollback) — impossible to evaluate in production,
+ * breaking CSV uploads even though CSV never needs ExcelJS.
+ *
+ * ExcelJS is consequently loaded lazily, inside the XLSX branch only. Keep it
+ * that way: scripts/workers-ingestion-runtime-test.mjs fails the build if it
+ * ever becomes reachable from the CSV path again.
  */
+
+/** Shown to the user when the XLSX reader cannot run in the current runtime. */
+export const XLSX_UNAVAILABLE_MESSAGE =
+  "El formato Excel (.xlsx/.xlsm) no está disponible en este entorno de ejecución. " +
+  "Exporta la hoja como CSV (UTF-8) y vuelve a intentarlo.";
 
 function normalizeHeaders(headers: string[]): string[] {
   return headers.map((h) => (h ?? "").trim());
@@ -34,7 +52,47 @@ export function parseCsv(text: string): ParsedFile {
   return { headers, rows };
 }
 
+type ExcelJsModule = typeof import("exceljs");
+
+/** Interop: the CJS/UMD builds resolve to { default: module.exports, ...named }. */
+function unwrapExcelJs(mod: unknown): ExcelJsModule | null {
+  const api = ((mod as { default?: unknown })?.default ?? mod) as ExcelJsModule | undefined;
+  return typeof api?.Workbook === "function" ? api : null;
+}
+
+/**
+ * Load ExcelJS on demand, preferring its prebuilt BROWSER bundle.
+ *
+ * Verified under workerd (wrangler dev, nodejs_compat, unenv `process.umask`
+ * throwing exactly as in production):
+ *   - `exceljs/excel.js`          (Node entry) -> throws
+ *                                    "[unenv] process.umask is not implemented yet!"
+ *   - `exceljs/dist/exceljs.min.js` (browser)  -> loads and parses a real .xlsx
+ *
+ * The browser bundle is the same library without the Node-only zip/stream stack,
+ * and it also works under plain Node, so it is used in both environments. The
+ * package entry is kept only as a fallback for a bundler that cannot resolve the
+ * dist path; a failure of BOTH is a runtime-capability problem, not a problem
+ * with the user's file, so it surfaces as an actionable message.
+ */
+async function loadExcelJs(): Promise<ExcelJsModule> {
+  try {
+    const browserBuild = unwrapExcelJs(await import("exceljs/dist/exceljs.min.js"));
+    if (browserBuild) return browserBuild;
+  } catch {
+    // fall through to the package entry
+  }
+  try {
+    const packageEntry = unwrapExcelJs(await import("exceljs"));
+    if (packageEntry) return packageEntry;
+  } catch {
+    // fall through to the controlled error
+  }
+  throw new Error(XLSX_UNAVAILABLE_MESSAGE);
+}
+
 export async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedFile> {
+  const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
   const sheet = workbook.worksheets[0];

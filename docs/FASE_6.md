@@ -34,8 +34,9 @@ Run as a release gate after each build.
 
 > Updated post-v1: migrated from the deprecated `@cloudflare/next-on-pages` to
 > the **OpenNext** adapter (`@opennextjs/cloudflare`), which runs Next on the
-> Node.js runtime in a Cloudflare **Worker** — so `exceljs` `.xlsx` parsing works
-> in production. Next 16's `proxy` convention forces Node middleware (rejected by
+> Node.js runtime in a Cloudflare **Worker**. (Corrected later: Node compat alone
+> does *not* make `exceljs` work — its Node entry is fatal on workerd, so `.xlsx`
+> uses the browser build loaded lazily.) Next 16's `proxy` convention forces Node middleware (rejected by
 > the adapter), so the session gate uses the Edge **`middleware.ts`** convention.
 
 - [wrangler.toml](../wrangler.toml) — `main = .open-next/worker.js`,
