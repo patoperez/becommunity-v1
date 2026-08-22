@@ -10,7 +10,9 @@ import type { LongRow } from "./engine";
  * through RLS before invoking this function for one exact study ID.
  *
  * All rows are given the SAME segment columns (union across respondents, missing
- * filled with "") so Arquero sees a rectangular table.
+ * filled with "") so the calculation layer sees a rectangular table. Its column
+ * schema is taken from the FIRST row, so a ragged shape would hide the segments
+ * that only appear on later rows.
  */
 export async function loadStudyRows(
   client: SupabaseClient,

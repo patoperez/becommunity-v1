@@ -1,12 +1,27 @@
-import { from, op } from "arquero";
+import {
+  aggregateAverage,
+  aggregateCount,
+  aggregateMax,
+  aggregateMin,
+  aggregateSum,
+  assertColumn,
+  fromRows,
+  groupRows,
+  type DataRow,
+} from "./table";
 import type { LongRow } from "./engine";
 
 /**
  * Dynamic cross-tabulation (§5.3). The user's interactive selection is modeled
  * as a validated PivotIntent — never imperative free control — and the requested
- * fields are checked against an allowlist BEFORE anything reaches Arquero. This
- * is the mandatory safety gate: a malformed or out-of-scope intent can never
+ * fields are checked against an allowlist BEFORE anything reaches the engine.
+ * This is the mandatory safety gate: a malformed or out-of-scope intent can never
  * drive the calculation engine.
+ *
+ * Field names selected by the user are used ONLY as string lookups against the
+ * table's declared columns (see table.ts). They are never compiled, evaluated, or
+ * used as object prototypes — which is also why this file no longer uses Arquero,
+ * whose expression compiler calls `Function` and is rejected by Cloudflare Workers.
  */
 
 export type AggKind = "avg" | "count" | "sum" | "min" | "max";
@@ -93,21 +108,35 @@ const aggLabel: Record<AggKind, string> = {
   max: "Máx",
 };
 
-type ExprRow = { metric_key: string; value: number } & Record<string, unknown>;
-type Row = Record<string, unknown>;
+/**
+ * Combo keys stay `§`-joined so the emitted shape is unchanged (an empty
+ * dimension list is still `""`, a single label is still the label itself), but
+ * the separator and the escape character are escaped inside each part first.
+ *
+ * Without that escaping the tuples ["a§b","c"] and ["a","b§c"] both collapse to
+ * "a§b§c" and silently share one cell — distinct respondent groups merging into
+ * one another. `|` is escaped too because the body cell key is `${colKey}|${id}`.
+ * For any label free of `\`, `§` and `|` — i.e. every ordinary segment value —
+ * the key is byte-identical to the previous implementation.
+ */
+function encodeComboKey(parts: readonly string[]): string {
+  return parts
+    .map((p) => p.replace(/\\/g, "\\\\").replace(/§/g, "\\§").replace(/\|/g, "\\|"))
+    .join("§");
+}
 
-function rollupExpr(agg: AggKind) {
+function aggregateCell(agg: AggKind, rows: readonly DataRow[]): number | undefined {
   switch (agg) {
     case "avg":
-      return (d: ExprRow) => op.average(d.value);
+      return aggregateAverage(rows, "value");
     case "sum":
-      return (d: ExprRow) => op.sum(d.value);
+      return aggregateSum(rows, "value");
     case "min":
-      return (d: ExprRow) => op.min(d.value);
+      return aggregateMin(rows, "value");
     case "max":
-      return (d: ExprRow) => op.max(d.value);
+      return aggregateMax(rows, "value");
     case "count":
-      return () => op.count();
+      return aggregateCount(rows);
   }
 }
 
@@ -129,33 +158,45 @@ export function computePivot(rows: LongRow[], intent: PivotIntent, allow: PivotA
   }));
 
   const groupFields = [...intent.rows, ...intent.columns];
+  // Every dynamic field must be a real column of this table before it is used.
+  // The allowlist is a union over all rows, while the table's schema comes from
+  // the first row, so an unknown or non-rectangular dimension still fails loudly
+  // here rather than grouping into nothing.
+  const table = fromRows(rows as readonly DataRow[]);
+  assertColumn(table, "metric_key");
+  for (const f of groupFields) assertColumn(table, f);
+  if (measures.some((m) => m.agg !== "count")) assertColumn(table, "value");
+
   const rowKeyMap = new Map<string, string[]>();
   const colKeyMap = new Map<string, string[]>();
   const cellMap = new Map<string, number | null>();
   const cellNMap = new Map<string, number>();
 
   for (const m of measures) {
-    const filtered = from(rows)
-      .params({ field: m.field })
-      .filter((d: ExprRow, $: { field: string }) => d.metric_key === $.field);
-    const grouped = groupFields.length
-      ? filtered.groupby(groupFields).rollup({ val: rollupExpr(m.agg), n: () => op.count() })
-      : filtered.rollup({ val: rollupExpr(m.agg), n: () => op.count() });
+    const filtered = table.rows.filter((r) => r["metric_key"] === m.field);
+    // With no dimensions at all a rollup still yields exactly one result row,
+    // even when nothing matched the metric — that empty row is what produces the
+    // null cell with n = 0.
+    const groups = groupFields.length
+      ? groupRows(filtered, groupFields)
+      : [{ values: [] as unknown[], rows: filtered }];
 
-    for (const obj of grouped.objects() as Row[]) {
-      const rk = intent.rows.map((f) => String(obj[f] ?? ""));
-      const ck = intent.columns.map((f) => String(obj[f] ?? ""));
-      const rks = rk.join("§");
-      const cks = ck.join("§");
+    for (const group of groups) {
+      const valueOf = (field: string) => group.values[groupFields.indexOf(field)];
+      const rk = intent.rows.map((f) => String(valueOf(f) ?? ""));
+      const ck = intent.columns.map((f) => String(valueOf(f) ?? ""));
+      const rks = encodeComboKey(rk);
+      const cks = encodeComboKey(ck);
       rowKeyMap.set(rks, rk);
       colKeyMap.set(cks, ck);
+      const cell = aggregateCell(m.agg, group.rows);
       // RAW precision on purpose. Pivot cells are NOT display-terminal: the
       // PivotExplorer derives `maxBar` and the bar-width ratio
       // ((value / maxBar) * 100) from them. Rounding here would feed rounding
       // error into that derived calculation, so the canonical rounding is
       // applied once at the presentation boundary (`formatNumber`) instead.
-      cellMap.set(`${rks}|${cks}|${m.id}`, obj.val == null ? null : Number(obj.val));
-      cellNMap.set(`${rks}|${cks}|${m.id}`, Number(obj.n));
+      cellMap.set(`${rks}|${cks}|${m.id}`, cell == null ? null : Number(cell));
+      cellNMap.set(`${rks}|${cks}|${m.id}`, aggregateCount(group.rows));
     }
   }
 
