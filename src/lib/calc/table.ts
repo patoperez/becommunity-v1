@@ -136,11 +136,11 @@ export function validValues(rows: readonly DataRow[], field: string): number[] {
   return out;
 }
 
-/**
- * The five supported aggregations, matching `op.*` exactly — including the
- * `undefined` (NOT zero) answer when a group holds no valid value, which the
- * callers turn into a null cell.
- */
+// ---- The five supported aggregations ---------------------------------------
+// These match Arquero's `op.*` exactly, including the `undefined` (NOT zero)
+// answer when a group holds no valid value, which the callers turn into a null
+// cell.
+
 /**
  * Arithmetic mean, computed with Welford's INCREMENTAL update rather than
  * sum/count.

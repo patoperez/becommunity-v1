@@ -8,17 +8,21 @@
 //   EvalError: Code generation from strings disallowed for this context
 //
 // A static grep is not sufficient — a transitive import or a lazily-compiled
-// expression would slip through. This gate therefore does BOTH:
+// expression would slip through. This gate therefore does all of:
 //
-//   [1] RUNTIME: installs guards that throw when `eval`, `Function(...)`,
-//       `new Function(...)` or `fn.constructor(...)` is invoked — the same
-//       prohibition workerd enforces — and then executes the real production
-//       engine and pivot paths on non-empty data, asserting the results are
-//       genuinely data-bearing.
-//   [2] POSITIVE CONTROL: runs the Arquero pipeline under the same guards and
+//   [1] IMPORT-TIME: dynamically imports the production calculation modules
+//       WHILE the codegen guards are active, with a cache-busting specifier so
+//       the modules are genuinely evaluated rather than served from the ESM
+//       cache. Module-scope codegen would be caught here.
+//   [2] RUN-TIME: executes the real engine and pivot with `eval`,
+//       `Function(...)`, `new Function(...)` and `fn.constructor(...)` all
+//       throwing, exactly as workerd would.
+//   [3] DATA-BEARING: asserts the results are real, so the gate cannot pass on
+//       empty output.
+//   [4] POSITIVE CONTROL: runs the Arquero pipeline under the same guards and
 //       asserts it DOES trip them, proving the gate is not vacuous.
-//   [3] STATIC: scans src/ and asserts no production-reachable file imports
-//       Arquero.
+//   [5] STATIC: asserts no production-reachable file imports Arquero and that
+//       Arquero stays a dev-only pinned dependency.
 //
 // Globals are restored in a finally block.
 // =============================================================================
@@ -27,29 +31,21 @@ import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 let failures = 0;
-const ok = (m) => console.log("  ✓", m);
-const bad = (m) => { console.error("  ✗ FAIL:", m); failures++; };
-
-console.log("Be Community — Workers runtime safety gate");
-
-// Modules are imported BEFORE the guards are installed: the loader/transpiler
-// itself may legitimately use codegen. What must be codegen-free is EXECUTION.
-const engine = await import("../src/lib/calc/engine.ts");
-const pivot = await import("../src/lib/calc/pivot.ts");
-const arquero = await import("arquero");
-
-// ---- fixtures (synthetic) ---------------------------------------------------
-const people = [
-  { id: "1", genero: "F", nivel: "preescolar", sat: 5, nps: 9 },
-  { id: "2", genero: "F", nivel: "primaria", sat: 3, nps: 6 },
-  { id: "3", genero: "M", nivel: "preescolar", sat: 4, nps: 10 },
-  { id: "4", genero: "M", nivel: "primaria", sat: 2, nps: 7 },
-  { id: "5", genero: "F", nivel: "preescolar", sat: 5, nps: 8 },
-];
-const rows = people.flatMap((p) => [
-  { respondent_id: p.id, metric_key: "sat_general", value: p.sat, genero: p.genero, nivel: p.nivel },
-  { respondent_id: p.id, metric_key: "nps", value: p.nps, genero: p.genero, nivel: p.nivel },
-]);
+function ok(message) {
+  console.log("  ✓", message);
+}
+function bad(message) {
+  console.error("  ✗ FAIL:", message);
+  failures += 1;
+}
+/** Assertion helper — a plain call, so no bare-expression lint warnings. */
+function check(condition, message) {
+  if (condition) {
+    ok(message);
+  } else {
+    bad(message);
+  }
+}
 
 // ---- guards -----------------------------------------------------------------
 const RealFunction = globalThis.Function;
@@ -83,27 +79,86 @@ function restoreGuards() {
   if (realCtorDesc) Object.defineProperty(RealFunction.prototype, "constructor", realCtorDesc);
 }
 
+// ---- fixtures (synthetic) ---------------------------------------------------
+const people = [
+  { id: "1", genero: "F", nivel: "preescolar", sat: 5, nps: 9 },
+  { id: "2", genero: "F", nivel: "primaria", sat: 3, nps: 6 },
+  { id: "3", genero: "M", nivel: "preescolar", sat: 4, nps: 10 },
+  { id: "4", genero: "M", nivel: "primaria", sat: 2, nps: 7 },
+  { id: "5", genero: "F", nivel: "preescolar", sat: 5, nps: 8 },
+];
+const rows = people.flatMap((p) => [
+  { respondent_id: p.id, metric_key: "sat_general", value: p.sat, genero: p.genero, nivel: p.nivel },
+  { respondent_id: p.id, metric_key: "nps", value: p.nps, genero: p.genero, nivel: p.nivel },
+]);
+
+console.log("Be Community — Workers runtime safety gate");
+
 // ---- [0] the guard itself must work ----------------------------------------
 console.log("\n[0] Guard self-test");
 try {
   installGuards();
-  let threw = false;
-  try { new globalThis.Function("return 1"); } catch { threw = true; }
-  threw ? ok("new Function(...) is blocked") : bad("guard did NOT block new Function");
-  threw = false;
-  try { globalThis.eval("1"); } catch { threw = true; }
-  threw ? ok("eval(...) is blocked") : bad("guard did NOT block eval");
-  threw = false;
-  try { (function () {}).constructor("return 1"); } catch { threw = true; }
-  threw ? ok("fn.constructor(...) is blocked") : bad("guard did NOT block fn.constructor");
-} finally { restoreGuards(); }
+  let blockedNew = false;
+  try {
+    const made = new globalThis.Function("return 1");
+    void made;
+  } catch {
+    blockedNew = true;
+  }
+  let blockedEval = false;
+  try {
+    globalThis.eval("1");
+  } catch {
+    blockedEval = true;
+  }
+  let blockedCtor = false;
+  try {
+    (function () {}).constructor("return 1");
+  } catch {
+    blockedCtor = true;
+  }
+  restoreGuards();
+  check(blockedNew, "new Function(...) is blocked");
+  check(blockedEval, "eval(...) is blocked");
+  check(blockedCtor, "fn.constructor(...) is blocked");
+} finally {
+  restoreGuards();
+}
 
-// ---- [1] production calculation paths under the guards ----------------------
-console.log("\n[1] Production engine + pivot execute with codegen disabled");
+// ---- [1] IMPORT the production modules while guards are active --------------
+// A cache-busting query forces a real module evaluation instead of an ESM cache
+// hit, so module-scope code generation would be caught here rather than missed.
+console.log("\n[1] Production modules IMPORT cleanly with codegen disabled");
+let engine = null;
+let pivot = null;
+let importTripped = null;
+let importError = null;
+const bust = Date.now();
+try {
+  installGuards();
+  engine = await import(`../src/lib/calc/engine.ts?workersGate=${bust}`);
+  pivot = await import(`../src/lib/calc/pivot.ts?workersGate=${bust}`);
+  importTripped = tripped;
+} catch (e) {
+  importError = e;
+} finally {
+  restoreGuards();
+}
+if (importError) {
+  bad(`importing the calculation modules under the guards threw: ${importError.message}`);
+} else {
+  check(importTripped === null, "engine.ts and pivot.ts evaluate with no eval / Function / new Function");
+  check(engine !== null && pivot !== null, "both modules loaded under the guards");
+}
+
+// ---- [2] production calculation paths under the guards ----------------------
+console.log("\n[2] Production engine + pivot EXECUTE with codegen disabled");
 let results = null;
+let execError = null;
 try {
   installGuards();
   const dt = engine.buildTable(rows);
+  const allow = pivot.buildAllowlist(rows);
   results = {
     metricKeys: engine.metricKeys(dt),
     segmentKeys: engine.segmentKeys(dt),
@@ -113,53 +168,62 @@ try {
     csat: engine.csat(dt, "sat_general", 4),
     study: engine.computeStudyMetrics(rows, { csatMin: 4, satMetricPrefix: "sat" }),
     stage: engine.computeStageMetric(rows, "nps"),
+    allowlist: allow,
+    pivot: pivot.computePivot(
+      rows,
+      { rows: ["genero"], columns: ["nivel"], values: [
+        { field: "sat_general", agg: "avg" }, { field: "sat_general", agg: "count" },
+        { field: "sat_general", agg: "sum" }, { field: "sat_general", agg: "min" },
+        { field: "sat_general", agg: "max" },
+      ] },
+      allow,
+    ),
   };
-  const allow = pivot.buildAllowlist(rows);
-  results.pivot = pivot.computePivot(
-    rows,
-    { rows: ["genero"], columns: ["nivel"], values: [
-      { field: "sat_general", agg: "avg" }, { field: "sat_general", agg: "count" },
-      { field: "sat_general", agg: "sum" }, { field: "sat_general", agg: "min" },
-      { field: "sat_general", agg: "max" },
-    ] },
-    allow,
-  );
-  results.allowlist = allow;
 } catch (e) {
-  bad(`production path tripped the codegen guard or threw: ${e?.message}`);
-} finally { restoreGuards(); }
+  execError = e;
+} finally {
+  restoreGuards();
+}
+if (execError) {
+  bad(`production path tripped the codegen guard or threw: ${execError.message}`);
+}
+check(tripped === null, `no eval / Function / new Function during execution${tripped ? ` (tripped: ${tripped})` : ""}`);
 
-if (tripped) bad(`production code performed runtime code generation: ${tripped}`);
-else ok("no eval / Function / new Function during engine + pivot execution");
-
-// ---- [2] results must be genuinely data-bearing -----------------------------
-console.log("\n[2] Results are data-bearing (the gate is not passing on empty output)");
-if (results) {
-  results.metricKeys.length === 2 ? ok("metricKeys = 2 metrics") : bad(`metricKeys = ${JSON.stringify(results.metricKeys)}`);
-  results.segmentKeys.join(",") === "genero,nivel" ? ok("segmentKeys = genero,nivel") : bad(`segmentKeys = ${results.segmentKeys}`);
+// ---- [3] results must be genuinely data-bearing -----------------------------
+console.log("\n[3] Results are data-bearing (the gate is not passing on empty output)");
+if (results === null) {
+  bad("no results captured");
+} else {
+  check(results.metricKeys.length === 2, `metricKeys = 2 metrics (got ${results.metricKeys.length})`);
+  check(results.segmentKeys.join(",") === "genero,nivel", `segmentKeys = genero,nivel (got ${results.segmentKeys.join(",")})`);
   const sat = results.averages.find((a) => a.metric_key === "sat_general");
-  sat && sat.n === 5 && sat.average === 3.8 ? ok("avg sat_general = 3.8 (n=5)") : bad(`sat avg = ${JSON.stringify(sat)}`);
+  check(Boolean(sat) && sat.n === 5 && sat.average === 3.8, `avg sat_general = 3.8 (n=5) (got ${JSON.stringify(sat)})`);
   const f = results.cross.find((c) => c.segment === "F");
-  f && f.n === 3 && Math.abs(f.average - 4.33) < 1e-9 ? ok("cross sat_general · F = 4.33 (n=3)") : bad(`cross F = ${JSON.stringify(f)}`);
-  results.nps && results.nps.total === 5 ? ok(`NPS computed (total=5, nps=${results.nps.nps})`) : bad(`nps = ${JSON.stringify(results.nps)}`);
-  results.csat && results.csat.total === 5 ? ok(`CSAT computed (${results.csat.csat}%)`) : bad(`csat = ${JSON.stringify(results.csat)}`);
-  results.study.respondents === 5 ? ok("computeStudyMetrics respondents = 5") : bad(`respondents = ${results.study.respondents}`);
-  results.stage.kind === "nps" && results.stage.n === 5 ? ok("computeStageMetric produced an NPS headline") : bad(`stage = ${JSON.stringify(results.stage)}`);
+  check(Boolean(f) && f.n === 3 && Math.abs(f.average - 4.33) < 1e-9, `cross sat_general · F = 4.33 (n=3) (got ${JSON.stringify(f)})`);
+  check(Boolean(results.nps) && results.nps.total === 5, `NPS computed (total=5, nps=${results.nps?.nps})`);
+  check(Boolean(results.csat) && results.csat.total === 5, `CSAT computed (${results.csat?.csat}%)`);
+  check(results.study.respondents === 5, `computeStudyMetrics respondents = 5 (got ${results.study.respondents})`);
+  check(results.stage.kind === "nps" && results.stage.n === 5, "computeStageMetric produced an NPS headline");
 
   const p = results.pivot;
-  p && p.body.length === 2 ? ok("pivot body has 2 row combos (F, M)") : bad(`pivot rows = ${p?.body.length}`);
-  p && p.colCombos.length === 2 ? ok("pivot has 2 column combos") : bad(`pivot cols = ${p?.colCombos.length}`);
-  p && p.measures.length === 5 ? ok("pivot carries all 5 aggregations") : bad(`measures = ${p?.measures.length}`);
-  const cell = p?.body.find((b) => b.rowLabels[0] === "F");
-  const preKey = p?.colCombos.find((c) => c.labels[0] === "preescolar")?.key;
-  cell && preKey !== undefined && cell.cells[`${preKey}|m0`] === 5 ? ok("F·preescolar avg sat = 5 (real value, not null)") : bad(`F·preescolar = ${cell?.cells[`${preKey}|m0`]}`);
-  cell && cell.cellNs[`${preKey}|m0`] === 2 ? ok("F·preescolar n = 2") : bad(`F·preescolar n = ${cell?.cellNs[`${preKey}|m0`]}`);
-  const nonNull = p ? p.body.flatMap((b) => Object.values(b.cells)).filter((v) => v !== null).length : 0;
-  nonNull >= 10 ? ok(`${nonNull} non-null pivot cells`) : bad(`only ${nonNull} non-null pivot cells`);
-} else bad("no results captured");
+  check(p.body.length === 2, `pivot body has 2 row combos (got ${p.body.length})`);
+  check(p.colCombos.length === 2, `pivot has 2 column combos (got ${p.colCombos.length})`);
+  check(p.measures.length === 5, `pivot carries all 5 aggregations (got ${p.measures.length})`);
+  const cell = p.body.find((b) => b.rowLabels[0] === "F");
+  const preKey = p.colCombos.find((c) => c.labels[0] === "preescolar")?.key;
+  check(Boolean(cell) && preKey !== undefined && cell.cells[`${preKey}|m0`] === 5,
+    `F·preescolar avg sat = 5, a real value (got ${cell?.cells[`${preKey}|m0`]})`);
+  check(cell?.cellNs[`${preKey}|m0`] === 2, `F·preescolar n = 2 (got ${cell?.cellNs[`${preKey}|m0`]})`);
+  const nonNull = p.body.flatMap((b) => Object.values(b.cells)).filter((v) => v !== null).length;
+  check(nonNull >= 10, `${nonNull} non-null pivot cells`);
+}
 
-// ---- [3] positive control: Arquero MUST trip the same guards ----------------
-console.log("\n[3] Positive control — the Arquero pipeline still trips the guard");
+// ---- [4] positive control: Arquero MUST trip the same guards ----------------
+// Arquero is imported OUTSIDE the guards on purpose: the failure mode being
+// reproduced is its CALL-TIME expression compilation, which is what broke
+// production.
+console.log("\n[4] Positive control — the Arquero pipeline still trips the guard");
+const arquero = await import("arquero");
 let arqueroThrew = false;
 try {
   installGuards();
@@ -168,13 +232,13 @@ try {
     .objects();
 } catch {
   arqueroThrew = true;
-} finally { restoreGuards(); }
-arqueroThrew
-  ? ok("Arquero throws under the guard — the gate genuinely detects codegen")
-  : bad("Arquero did NOT trip the guard; this gate would not catch a regression");
+} finally {
+  restoreGuards();
+}
+check(arqueroThrew, "Arquero throws under the guard — the gate genuinely detects codegen");
 
-// ---- [4] static import scan -------------------------------------------------
-console.log("\n[4] No production-reachable file imports Arquero");
+// ---- [5] static import scan -------------------------------------------------
+console.log("\n[5] No production-reachable file imports Arquero");
 function walk(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -184,17 +248,19 @@ function walk(dir) {
   }
   return out;
 }
-const offenders = walk("src").filter((f) =>
+const srcFiles = walk("src");
+const offenders = srcFiles.filter((f) =>
   /(^|[^\w])(from\s+['"]arquero['"]|require\(\s*['"]arquero['"]\s*\)|import\(\s*['"]arquero['"]\s*\))/.test(readFileSync(f, "utf8")),
 );
-offenders.length === 0
-  ? ok(`scanned ${walk("src").length} files under src/ — zero Arquero imports`)
-  : bad(`Arquero imported by production files: ${offenders.join(", ")}`);
+check(offenders.length === 0, `scanned ${srcFiles.length} files under src/ — zero Arquero imports${offenders.length ? `: ${offenders.join(", ")}` : ""}`);
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-!pkg.dependencies?.arquero ? ok("arquero is not a runtime dependency") : bad("arquero is still in dependencies");
-pkg.devDependencies?.arquero === "8.0.3" ? ok("arquero 8.0.3 retained as a dev-only parity oracle") : bad(`devDependencies.arquero = ${pkg.devDependencies?.arquero}`);
+check(!pkg.dependencies?.arquero, "arquero is not a runtime dependency");
+check(pkg.devDependencies?.arquero === "8.0.3", `arquero 8.0.3 retained as a dev-only parity oracle (got ${pkg.devDependencies?.arquero})`);
 
 console.log("\n" + "=".repeat(70));
-if (failures > 0) { console.error(`RESULT: ${failures} failure(s). GATE BLOCKED.`); process.exit(1); }
-console.log("RESULT: calculation layer runs without runtime code generation. GATE PASSED.");
+if (failures > 0) {
+  console.error(`RESULT: ${failures} failure(s). GATE BLOCKED.`);
+  process.exit(1);
+}
+console.log("RESULT: calculation layer imports and runs without runtime code generation. GATE PASSED.");
