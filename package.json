@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:calc && npm run test:business-calc && npm run test:ingestion-core && npm run test:atomic-ingestion && npm run test:import-center && npm run test:templates && npm run test:bi-filters && npm run test:qualitative && npm run test:confirmed-qualitative && npm run test:client-boundary && npm run test:publication-boundary && npm run test:data-scope && npm run test:client-admin && npm run test:study-config && npm run test:client-preview && npm run test:longitudinal && npm run test:narrative-home && npm run test:server-pdf && npm run test:tenant-branding && npm run test:validation",
+    "test": "npm run test:calc && npm run test:cloudflare-calc && npm run test:workers-runtime && npm run test:business-calc && npm run test:ingestion-core && npm run test:atomic-ingestion && npm run test:import-center && npm run test:templates && npm run test:bi-filters && npm run test:qualitative && npm run test:confirmed-qualitative && npm run test:client-boundary && npm run test:publication-boundary && npm run test:data-scope && npm run test:client-admin && npm run test:study-config && npm run test:client-preview && npm run test:longitudinal && npm run test:narrative-home && npm run test:server-pdf && npm run test:tenant-branding && npm run test:validation",
     "test:calc": "tsx scripts/calculation-test.mjs",
     "test:business-calc": "tsx scripts/business-calculation-test.mjs",
     "test:ingestion-core": "tsx scripts/universal-ingestion-test.mjs",
@@ -40,12 +40,13 @@
     "gates": "npm run typecheck && npm run build && npm run test && npm run test:qualitative-live && npm run test:isolation && npm run test:secrets",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "test:cloudflare-calc": "tsx scripts/cloudflare-calc-compat-test.mjs",
+    "test:workers-runtime": "tsx scripts/workers-runtime-safety-test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",
     "@supabase/supabase-js": "2.108.2",
-    "arquero": "8.0.3",
     "exceljs": "4.4.0",
     "next": "16.2.9",
     "papaparse": "5.5.4",
@@ -62,6 +63,7 @@
     "@types/papaparse": "5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "arquero": "8.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",

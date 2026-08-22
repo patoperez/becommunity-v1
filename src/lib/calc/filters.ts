@@ -47,7 +47,7 @@ export function validateSegmentFilters(
 
 /**
  * Applies a validated AND filter across dimensions. Computations that consume
- * the returned rows continue through the canonical Arquero calculation layer.
+ * the returned rows continue through the canonical calculation layer.
  */
 export function filterRowsBySegments<T extends SegmentableRow>(
   rows: T[],

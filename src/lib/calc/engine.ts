@@ -1,4 +1,15 @@
-import { from, op, type ColumnTable } from "arquero";
+import {
+  aggregateAverage,
+  aggregateCount,
+  assertColumn,
+  columnValues,
+  filterByColumn,
+  fromRows,
+  groupRows,
+  numRows,
+  type CalcTable,
+  type DataRow,
+} from "./table";
 import {
   csatTopBox,
   mean,
@@ -10,9 +21,17 @@ import {
 } from "./metrics";
 
 /**
- * Calculation engine (§5.2). Arquero handles the relational work — filter,
- * group, average, count, cross — declaratively. Composite indicators delegate to
- * the canonical definitions in metrics.ts (NPS/CSAT live there, once).
+ * Calculation engine (§5.2). The relational work — filter, group, average, count,
+ * cross — runs on the Workers-safe primitives in table.ts. Composite indicators
+ * delegate to the canonical definitions in metrics.ts (NPS/CSAT live there, once).
+ *
+ * This layer used to be built on Arquero. Arquero compiles its expressions with
+ * the `Function` constructor, which Cloudflare Workers prohibit, so every
+ * data-bearing dashboard render failed in production with
+ * `EvalError: Code generation from strings disallowed for this context`.
+ * table.ts reproduces the exact Arquero semantics this engine depended on; the
+ * numbers, ordering and null behaviour are unchanged (see
+ * scripts/cloudflare-calc-compat-test.mjs, which diffs both implementations).
  *
  * Input rows are "long/tidy": one row per quantitative answer, with the
  * respondent's segments flattened onto the row:
@@ -32,92 +51,82 @@ export const DEFAULT_CSAT_MIN = 9;
 export type AverageRow = { metric_key: string; average: number | null; n: number };
 export type CrossRow = { segment: string; average: number | null; n: number };
 
-export function buildTable(rows: LongRow[]): ColumnTable {
-  return from(rows);
+export function buildTable(rows: LongRow[]): CalcTable {
+  return fromRows(rows as readonly DataRow[]);
 }
 
-/** Distinct metric keys present in the data. */
-export function metricKeys(dt: ColumnTable): string[] {
-  return [...new Set(dt.array("metric_key") as string[])];
+/** Distinct metric keys present in the data, in first-appearance order. */
+export function metricKeys(dt: CalcTable): string[] {
+  return [...new Set(columnValues(dt, "metric_key") as string[])];
 }
 
 /** Segment columns = any column that is not one of the reserved ones. */
-export function segmentKeys(dt: ColumnTable): string[] {
+export function segmentKeys(dt: CalcTable): string[] {
   const reserved = new Set(["respondent_id", "metric_key", "value"]);
-  return dt.columnNames().filter((c) => !reserved.has(c));
+  return dt.columns.filter((c) => !reserved.has(c));
 }
-
-// Arquero parses these expression functions from source; the param annotations
-// are only for TypeScript. `Row` types the plain objects coming out of .objects().
-type ExprRow = { metric_key: string; value: number } & Record<string, unknown>;
-type ExprParams = { metricKey: string };
-type Row = Record<string, unknown>;
 
 /**
- * An empty table has no columns, so any Arquero column reference on it throws
- * ("Invalid column reference"). A study with zero quantitative rows is a normal
- * state (e.g. a qualitative-only upload), so every entry point below returns the
- * empty result instead. This guard is numerically inert: it changes nothing for
- * a table that has rows.
+ * An empty table has no columns, so any column reference on it is meaningless.
+ * A study with zero quantitative rows is a normal state (e.g. a qualitative-only
+ * upload), so every entry point below returns the empty result instead. This
+ * guard is numerically inert: it changes nothing for a table that has rows.
  */
-function isEmpty(dt: ColumnTable): boolean {
-  return dt.numRows() === 0;
+function isEmpty(dt: CalcTable): boolean {
+  return numRows(dt) === 0;
 }
 
-/** Raw numeric values for a metric (Arquero filter, params-bound — §5.2). */
-function valuesFor(dt: ColumnTable, metricKey: string): number[] {
+/** Raw numeric values for a metric. Nulls are preserved, as the column holds them. */
+function valuesFor(dt: CalcTable, metricKey: string): number[] {
   if (isEmpty(dt)) return [];
-  return dt
-    .params({ metricKey })
-    .filter((d: ExprRow, $: ExprParams) => d.metric_key === $.metricKey)
-    .array("value") as number[];
+  return columnValues(filterByColumn(dt, "metric_key", metricKey), "value") as number[];
 }
 
-/** Average + n per metric (§5.2 rollup pattern). One declarative pass. */
-export function metricAverages(dt: ColumnTable): AverageRow[] {
+/** Average + n per metric (§5.2 rollup pattern). One pass over the grouped rows. */
+export function metricAverages(dt: CalcTable): AverageRow[] {
   if (isEmpty(dt)) return [];
-  return (dt
-    .groupby("metric_key")
-    .rollup({ average: (d: ExprRow) => op.average(d.value), n: () => op.count() })
-    .objects() as Row[])
-    .map((r) => ({
-      metric_key: String(r.metric_key),
+  return groupRows(dt.rows, ["metric_key"]).map((group) => {
+    const average = aggregateAverage(group.rows, "value");
+    return {
+      metric_key: String(group.values[0]),
       // Rounded ONCE here, at the declared score precision. Display must format
       // at this same precision and never re-round (docs/CALCULATION_POLICY.md §4).
-      average: r.average == null ? null : roundTo(Number(r.average), DECIMALS.score),
-      n: Number(r.n),
-    }));
+      average: average == null ? null : roundTo(Number(average), DECIMALS.score),
+      n: aggregateCount(group.rows),
+    };
+  });
 }
 
 /**
  * Cross: average of one metric by one segment (the §5.2 género × sat_maestros
- * example), declaratively in Arquero.
+ * example). The segment name is validated as a real column before it is used, so
+ * an unknown dimension fails loudly instead of silently grouping into nothing.
  */
-export function crossAverage(dt: ColumnTable, metricKey: string, segment: string): CrossRow[] {
+export function crossAverage(dt: CalcTable, metricKey: string, segment: string): CrossRow[] {
   if (isEmpty(dt)) return [];
-  return (dt
-    .params({ metricKey })
-    .filter((d: ExprRow, $: ExprParams) => d.metric_key === $.metricKey)
-    .groupby(segment)
-    .rollup({ average: (d: ExprRow) => op.average(d.value), n: () => op.count() })
-    .objects() as Row[])
-    .map((r) => ({
-      segment: r[segment] == null ? "(sin dato)" : String(r[segment]),
+  assertColumn(dt, segment);
+  const filtered = filterByColumn(dt, "metric_key", metricKey);
+  return groupRows(filtered.rows, [segment]).map((group) => {
+    const average = aggregateAverage(group.rows, "value");
+    const value = group.values[0];
+    return {
+      segment: value == null ? "(sin dato)" : String(value),
       // Rounded ONCE, same policy as metricAverages.
-      average: r.average == null ? null : roundTo(Number(r.average), DECIMALS.score),
-      n: Number(r.n),
-    }));
+      average: average == null ? null : roundTo(Number(average), DECIMALS.score),
+      n: aggregateCount(group.rows),
+    };
+  });
 }
 
 /** NPS for a study, via the canonical definition. */
-export function nps(dt: ColumnTable, metricKey = NPS_METRIC): NpsResult | null {
+export function nps(dt: CalcTable, metricKey = NPS_METRIC): NpsResult | null {
   const values = valuesFor(dt, metricKey);
   if (values.length === 0) return null;
   return npsFromScores(values);
 }
 
 /** CSAT (Top-N-Box) for a metric, via the canonical definition. */
-export function csat(dt: ColumnTable, metricKey: string, satisfiedMin = DEFAULT_CSAT_MIN): CsatResult | null {
+export function csat(dt: CalcTable, metricKey: string, satisfiedMin = DEFAULT_CSAT_MIN): CsatResult | null {
   const values = valuesFor(dt, metricKey);
   if (values.length === 0) return null;
   return csatTopBox(values, satisfiedMin);
