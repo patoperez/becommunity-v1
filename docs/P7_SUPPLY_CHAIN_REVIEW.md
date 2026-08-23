@@ -113,6 +113,27 @@ credentials, no network mutation, no writes to the repository.
 | **D-c** lockfile | `lockfileVersion ≥ 3`; every resolved package carries an `integrity` hash; every package resolves to `registry.npmjs.org`; `npm ci --dry-run` succeeds | a tampered, hand-edited, or out-of-sync lockfile, or a package pulled from an unexpected host |
 | **D-d** history | not a shallow clone; `.gitignore` excludes `.env*`; no `.env` file was ever tracked in any reachable commit; every reachable blob is scanned for secret classes | a secret was ever committed. **A short read is a failure**: the check compares blobs-scanned against blobs-found and goes red on any shortfall, so it can never pass vacuously |
 | **D-e** artifacts | delegates to `scripts/secret-leak-test.mjs` over `.next/static` **and** `.open-next` | either artifact is missing, or either contains secret material |
+| **D-f** toolchain | `package.json` declares `packageManager: "npm@10.9.2"`; CI pins Node `24.11.1`, installs that exact npm, reads `npm --version` back and exits non-zero on a mismatch, and does so **before** `npm ci`; no other `npm@<spec>` appears in the workflow | the declaration and the workflow drift apart, the npm version floats (`latest`, `^10`, a tag), the pin is installed but never verified, or `npm ci` runs before it |
+
+**Why D-f exists.** npm 10 and npm 11 resolve peer edges beneath a
+platform-excluded optional dependency differently. npm 11 prunes those nodes out
+of the lockfile; npm 10's `npm ci` still walks the edges and aborts with
+`EUSAGE … Missing: @emnapi/runtime@1.11.3 from lock file` before any build runs.
+Cloudflare's build image runs **npm 10.9.2**, so a lockfile regenerated under
+npm 11 passed every gate here and still broke the deploy build. D-c cannot catch
+that on its own: its `npm ci --dry-run` inherits whichever npm invoked it, so it
+was green on a developer machine and on CI while the deploy was red.
+
+The fix is one declared authoring version rather than a lockfile edit that any
+`npm install` could undo. **Regenerate the lockfile only under npm 10.9.2.** A
+regeneration under npm 11 silently drops the compatibility nodes again.
+
+Like the exception matcher, D-f carries its own positive and negative control: a
+pure `evaluateToolchain()` is run against a correct pin and against ten synthetic
+drift cases (declaration missing, drifted or naming another package manager;
+workflow missing; pin removed, floated, unverified or ordered after `npm ci`;
+lockfile install removed; Node pin drifted) on **every invocation**, so a
+detector that stops detecting shows up as a red gate rather than a silent pass.
 
 **Exception register.** `security/dependency-exceptions.json` requires all seven
 §6.3 fields per entry. An entry missing a field, naming a placeholder approver
@@ -264,6 +285,14 @@ read`, full-history checkout (Suite D needs it), the explicit runner image
 `ubuntu-24.04`, and Node pinned to the exact `24.11.1` this branch was verified
 against. `actions/checkout` and `actions/setup-node` are referenced by immutable
 commit SHA, with the reviewed v4 release named in a comment beside each.
+
+**npm is pinned as deliberately as Node.** `actions/setup-node` does not select
+an npm version, and the runner's default is npm 11 — the resolver that produced
+the broken lockfile. The job therefore installs exactly `npm@10.9.2`, asserts
+`npm --version` is exactly `10.9.2`, and only then runs `npm ci`, so the lockfile
+is always validated by the same npm Cloudflare will install it with. The version
+is never a range or a tag, and D-f fails if this step and `package.json` drift
+apart.
 
 After `npm ci` the job runs **`npm run gates:offline` and nothing else**. There is
 one canonical chain, defined in `package.json`; the workflow does not restate the

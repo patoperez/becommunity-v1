@@ -87,6 +87,13 @@ data-connected journey maps for the firm's clients (schools).
 - **Plan before code.** Propose a plan; wait for approval before writing, especially for security-adjacent work.
 - One task at a time on a given set of files.
 - Verify every npm package before install (it exists, correct name, no known CVE). Pin versions (runtime deps are exact-pinned; keep it so).
+- ⓘ **Regenerate `package-lock.json` only under npm 10.9.2** — the version
+  declared in `package.json` (`packageManager`) and enforced by CI and Suite D's
+  **D-f**. npm 11 prunes peer nodes beneath platform-excluded optional
+  dependencies; npm 10 (which Cloudflare's build image runs) still requires them,
+  so an npm 11 regeneration passes every local gate and then fails the deploy
+  build with `npm ci … Missing: @emnapi/…`. Never repair that by hand-editing the
+  lockfile or by adding an install bypass flag.
 - Migrations are versioned in git, applied to **staging first**, tested, then production. Never edit production schema/policies directly.
 - Separate Supabase projects for dev/staging vs production. Real client data never enters staging.
 - **Production repo stays clean:** no `CLAUDE.md`-style files, AI comments, or `§`/`Section` prompt-doc citations, or prompt files committed to production branches. *(Audit: `main` currently carries `CLAUDE.md`, `AGENTS.md`, `system_context.md`, `docs/FASE_*`, and §-citations in source — strip these on the production branch.)*

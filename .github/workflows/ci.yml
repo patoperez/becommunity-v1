@@ -20,8 +20,17 @@
 # must never appear here.
 #
 # Supply chain of the run itself is pinned: an explicit runner image, an exact
-# Node version, and actions referenced by immutable commit SHA rather than by a
-# mutable tag.
+# Node version, an exact npm version, and actions referenced by immutable commit
+# SHA rather than by a mutable tag.
+#
+# The npm pin is not cosmetic. npm 11 and npm 10 disagree about peer edges
+# beneath a platform-excluded optional dependency: npm 11 prunes those nodes
+# from the lockfile, npm 10's `npm ci` still demands them and aborts with
+# EUSAGE. Cloudflare's build image runs npm 10.9.2, so a lockfile authored by
+# npm 11 can pass every gate here and still fail the deploy build. package.json
+# declares `packageManager: npm@10.9.2`; this job installs exactly that and
+# asserts it, so the lockfile is always validated by the npm that will install
+# it. Suite D's D-f check fails if the two ever drift apart.
 
 name: CI
 
@@ -62,6 +71,21 @@ jobs:
           # Exact version, matching the one this branch was verified against.
           node-version: 24.11.1
           cache: npm
+
+      # Exact version, matching package.json's `packageManager` declaration and
+      # the npm that Cloudflare's build image runs. Never a range or a tag: a
+      # floating npm here would reintroduce the resolver drift this pin exists
+      # to stop. The assertion makes a silently ignored install a red job rather
+      # than a lockfile validated by the wrong npm.
+      - name: Pin npm to the lockfile-authoring version
+        run: |
+          npm install --global npm@10.9.2
+          actual="$(npm --version)"
+          if [ "$actual" != "10.9.2" ]; then
+            echo "npm is $actual — expected exactly 10.9.2"
+            exit 1
+          fi
+          echo "npm --version is exactly 10.9.2"
 
       - name: Install from the lockfile
         run: npm ci

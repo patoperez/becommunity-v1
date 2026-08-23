@@ -146,6 +146,13 @@ edge controls during the inventory task.
 
 ## Known constraints carried forward
 
+- **The lockfile has one authoring version: npm 10.9.2.** It is declared in
+  `package.json` (`packageManager`), installed and asserted by CI before
+  `npm ci`, and enforced by Suite D's D-f. npm 11 prunes peer nodes beneath
+  platform-excluded optional dependencies out of the lockfile; npm 10 — which
+  Cloudflare's build image runs — still requires them, so a regeneration under
+  npm 11 is green locally and in CI and then stops the deploy build before it
+  starts. Regenerate dependencies only under npm 10.9.2.
 - `npm run cf:build` can fail on Windows with OpenNext's documented symlink
   `EPERM`; Cloudflare's Linux branch build is the authoritative bundle check.
 - Local OpenNext output **does** contain inlined environment values:
