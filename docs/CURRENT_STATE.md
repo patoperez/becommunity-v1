@@ -144,6 +144,27 @@ human review of that plan before implementing P7. Do not create infrastructure,
 change credentials, rotate keys, alter production data or enable irreversible
 edge controls during the inventory task.
 
+### P7 progress (branch state, not merged)
+
+`docs/P7_PLAN.md` is approved and PRs 2-4 are merged (Worker identity,
+supply-chain gate, executable RLS coverage). PR 5 - the adversarial harness
+foundation - is implemented on `p7d-adversarial-harness` and **not merged**:
+
+- `docs/P7_HARNESS_DESIGN.md` is the approved contract for it.
+- `scripts/lib/{http-harness,harness-browser,harness-fixtures}.mjs` plus
+  `scripts/harness-selftest.mjs` (`npm run test:harness-selftest`) provide the
+  mechanism only. The harness is assertion-neutral: it reaches the app as a
+  named identity and returns sanitized observations.
+- Operation mechanisms are frozen in a checked-in catalog. `auth.login` and
+  `clients.createTenant` were verified to submit natively without client
+  JavaScript and are frozen as `form`; every other Server Action carries the
+  reviewed `browser` mechanism. There is no run-time fallback.
+- Coverage explicitly deferred: a genuinely expired access-token test (N4).
+  Sign-out revokes the refresh session; it does not invalidate an already-issued
+  access JWT before its `exp`, so the executable proof is revoked-refresh.
+- **No security suite has been run.** Suites A, B, C and E remain exactly as
+  recorded in `docs/P7_PLAN.md` §5, and PR 6 (Suite A) has not started.
+
 ## Known constraints carried forward
 
 - `npm run cf:build` can fail on Windows with OpenNext's documented symlink
