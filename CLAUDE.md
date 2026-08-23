@@ -115,9 +115,33 @@ npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + wrangler deploy (Cloudflare Workers)
 ```
 
-`npm run cf:build` has a documented Windows symlink limitation. A plain
-`npm run build` must still pass locally; validate the OpenNext bundle through
-Cloudflare's Linux branch build when Windows returns `EPERM`.
+### Where these commands may run ⓘ
+
+**Do not run repository npm lifecycle commands from Windows on this
+workstation.** That includes `npm install`, `npm ci`, `npm test`,
+`npm run build`, `npm run cf:build` and any gate chain
+(`gates`, `gates:offline`, `suite:d`, `suite:d:local`).
+
+Smart App Control is enabled here and blocks Cloudflare's unsigned
+`workerd.exe`. The boundary is **not** limited to `cf:build`: a plain `npm ci`
+runs package lifecycle/install validation that loads that binary, and Windows
+Code Integrity event 3077 has recorded exactly that. Do not disable Smart App
+Control and do not attempt a per-file bypass.
+
+- **Windows** is for editing, Git operations, and static/non-Node inspection
+  (`git diff --check`, reading files, reviewing a diff).
+- **Node/npm verification runs in WSL 2 Ubuntu or Linux CI.** Verifier:
+  `/root/becommunity-software`, Node 24.11.1, npm 10.9.2.
+- The Windows and WSL clones **do not auto-synchronize**. Push the exact commit
+  from the Windows editing tree, then `fetch` and check out that exact remote
+  commit in WSL before testing. Never assume the verifier already has your work.
+- Suite D's D-d scans every reachable blob, so the verifier clone must be a
+  full-history, full-blob clone — a `blob:none` partial clone cannot prove it.
+
+Never claim a Windows npm command was avoided unless the Code Integrity
+evidence supports it. The older note that "a plain `npm run build` must still
+pass locally" does not hold on this machine; Cloudflare's Linux branch build and
+the WSL verifier are the authoritative build checks.
 
 ## Build order (V2) — do not skip ahead
 P0 Security hardening (headers, WAF, rate limits, secret hygiene, staging/prod split, **least-privilege grants**, **Zod at all boundaries**, **prove RLS at runtime**)

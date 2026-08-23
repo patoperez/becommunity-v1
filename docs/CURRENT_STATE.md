@@ -153,7 +153,23 @@ edge controls during the inventory task.
   Cloudflare's build image runs — still requires them, so a regeneration under
   npm 11 is green locally and in CI and then stops the deploy build before it
   starts. Regenerate dependencies only under npm 10.9.2.
-- `npm run cf:build` can fail on Windows with OpenNext's documented symlink
+- **No repository npm lifecycle command runs on the Windows workstation.**
+  Smart App Control is enabled there and blocks Cloudflare's unsigned
+  `workerd.exe`. This is not confined to `cf:build`: a plain `npm ci` runs
+  package lifecycle/install validation that loads that binary, and Windows Code
+  Integrity event 3077 recorded three such blocked loads on 2026-08-23 —
+  two from disposable install directories and one from the main repository
+  `node_modules`. Treat `npm install`, `npm ci`, `npm test`, `npm run build`,
+  `npm run cf:build` and every gate chain as Linux-only. Windows is for editing,
+  Git and static inspection. Do not disable Smart App Control and do not attempt
+  a per-file bypass.
+- **The verifier does not auto-synchronize.** Node/npm verification runs in WSL 2
+  Ubuntu (`/root/becommunity-software`, Node 24.11.1, npm 10.9.2) or Linux CI.
+  Push the exact commit from the Windows editing tree first, then fetch and check
+  out that exact remote commit in WSL. The verifier clone must be full-history
+  and full-blob: Suite D's D-d proves every reachable blob, which a `blob:none`
+  partial clone cannot do.
+- `npm run cf:build` can also fail on Windows with OpenNext's documented symlink
   `EPERM`; Cloudflare's Linux branch build is the authoritative bundle check.
 - Local OpenNext output **does** contain inlined environment values:
   `cf:build` writes `.open-next/cloudflare/next-env.mjs` with every variable from
@@ -178,6 +194,9 @@ npm run lint
 npm test
 npm run build
 ```
+
+Run all of these in WSL or Linux CI, never on the Windows workstation — see
+"Known constraints carried forward" above.
 
 Security/release work also runs the applicable live isolation and secret gates.
 Never mark an unexecuted check as passed, never alter expected calculations to
