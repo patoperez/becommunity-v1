@@ -29,8 +29,10 @@ must use documented authoritative definitions rather than invented rules.
 
 ## Verified source and deployment baseline
 
-- Git `main`: `1a95cdf6081b07871153a5ce98f2db11cca2e7bb`
-- Commit: `P6E: restore CSV/XLSX ingestion on Cloudflare Workers (#24)`
+- Application-code baseline: `1a95cdf6081b07871153a5ce98f2db11cca2e7bb`
+  (`P6E: restore CSV/XLSX ingestion on Cloudflare Workers (#24)`). PR #25
+  updated documentation only; always start new work from the current
+  `origin/main` rather than treating this application baseline as the branch tip.
 - Production/test Worker version:
   `d43ff9ab-b837-49f2-8c34-03b0f236096e`
 - Production URL: `https://becommunity-v1.ollinagencyllc.workers.dev`
