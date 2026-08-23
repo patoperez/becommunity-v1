@@ -180,8 +180,18 @@ async function connect(port) {
     load: async (url) => {
       const loaded = new Promise((resolve) => waiters.push(resolve));
       await send("Page.navigate", { url });
-      await Promise.race([loaded, new Promise((resolve) => setTimeout(resolve, 20000))]);
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await Promise.race([loaded, new Promise((resolve) => setTimeout(resolve, 30000))]);
+      // A remote preview can still be streaming when the load event fires, so
+      // wait for the page shell itself rather than for a fixed delay.
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const ready = await send("Runtime.evaluate", {
+          expression: "document.readyState === 'complete' && !!document.querySelector('header')",
+          returnByValue: true,
+        });
+        if (ready.result.value) break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
     },
     evaluate: async (expression) => {
       const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
