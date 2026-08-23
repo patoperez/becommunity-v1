@@ -721,7 +721,8 @@ values · **any Server-Action / RSC response body or framework transport payload
 (§2.3) · raw server error text · Supabase error `details` / `hint` · **any hash,
 digest, fingerprint, prefix or other value derived from a credential** · the
 concrete uuids of any object other than the run's own fixture ids and the
-read-only P6E control id already published in `docs/CURRENT_STATE.md` (§6.7).**
+read-only P6E control id already published in `docs/CURRENT_STATE.md`
+(§6.2, §9.1.1).**
 
 Three mechanisms enforce this rather than relying on discipline:
 
@@ -810,8 +811,16 @@ P7H-<UTC yyyymmddThhmmssZ>-<6 random base36 chars>
 
 for example `P7H-20260822T191500Z-k3f9qa`. It appears in every created name
 (`P7H-… fixture study`), so a stray row is identifiable by inspection alone and
-can never be confused with a real or accepted object. The prefix is generated
-once per run and is the **only** deletion key (§6.7).
+can never be confused with a real or accepted object.
+
+The prefix is the run's **ownership and collision namespace — it is never a
+deletion key.** It answers "could this object be mine?" for the preflight check
+(§6.3) and for the residue assertion after cleanup (§6.7); it never selects what
+gets deleted. **Cleanup deletes only the exact ids recorded in the ledger**
+(§6.4), one `id = <ledger id>` predicate at a time. No delete is ever issued by
+prefix, by name, or by any other pattern match — a prefix delete would be a
+predicate broad enough to remove an object the run did not create, which is
+precisely the failure mode the ledger exists to prevent.
 
 ### 6.2 The out-of-bounds list — never touched, mutated or deleted
 
@@ -845,7 +854,7 @@ before the request is sent**. This is a precondition, not a post-hoc check.
 Before creating anything, the harness asserts that **zero** objects already carry
 the run prefix (`study.name`, `tenant.name`, `study_template.name`,
 `import_batch`, and the auth-user email space). A collision means a previous run
-leaked: the run **refuses to start** and prints the colliding prefix (§6.6)
+leaked: the run **refuses to start** and prints the colliding prefix (§6.7)
 rather than adopting or deleting objects it did not create. This read is one of
 the three places a narrowly scoped `service_role` query is permitted per
 `docs/P7_PLAN.md` §3 — reconciliation, never evidence.
@@ -873,7 +882,7 @@ never by a `service_role` insert. `service_role` may only:
 
 - read metadata for the preflight collision check (§6.3);
 - read residue counts (§6.4) — counts, never rows;
-- delete prefixed objects during cleanup (§6.6).
+- delete the ledger's exact ids during cleanup, never a prefix or name match (§6.7).
 
 It may never create an object that a suite then treats as evidence that the
 application created it, and it may never be the actor in any request whose
@@ -1309,7 +1318,7 @@ recorded unavailable (§9.1.1); and which surfaces are frozen as `form` versus
 | # | Decision | Resolution |
 |---|---|---|
 | **H1** | Scope of PR 5's merge gate | **Local-only.** `npm run test:harness-selftest` against a locally built app, plus the standard gate chain, is the entire merge gate. A run against the deployed synthetic beta is optional and **informational only**, and must never be represented as required PR 5 evidence, in this document or anywhere else (§9.3). Deployed-run coverage remains Suite B/C's obligation at PR 7 |
-| **H2** | Where mutation fixtures live | **A single current-run-prefixed throwaway tenant, created through the real application surface (M-B1), approved with constraints.** It must contain only current-run fixtures; it must **never create or invite an Auth user**; it must be recorded by exact id; cleanup must delete children before the exact tenant id inside `finally`; and any residue or cleanup failure makes the run red. An existing tenant is never reused or mutated for mutation fixtures. The full constraint table is §6.7 |
+| **H2** | Where mutation fixtures live | **A single current-run-prefixed throwaway tenant, created through the real application surface (M-B1), approved with constraints.** It must contain only current-run fixtures; it must **never create or invite an Auth user**; it must be recorded by exact id; cleanup must delete children before the exact tenant id inside `finally`; and any residue or cleanup failure makes the run red. An existing tenant is never reused or mutated for mutation fixtures. The full constraint table is §6.6 |
 
 ### 11.2 Corrections applied in this revision
 
