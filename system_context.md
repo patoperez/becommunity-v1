@@ -7,7 +7,7 @@
 
 ## 1. The business and the real goal
 
-Be Community is a consulting firm serving private schools. Its product is **voice-of-the-customer research**: satisfaction studies, NPS, CSAT, the Kano model, categorized open-ended feedback, mystery shopping, focus groups. The consultant collects data from many sources, processes it (historically in Excel), draws conclusions, and delivers dashboards and presentations to each school.
+Be Community is a consulting firm serving private schools. Its product is **voice-of-the-customer research**: satisfaction studies, NPS, CSAT, categorized open-ended feedback, mystery shopping, and focus groups. Kano was considered historically but is explicitly out of scope. The consultant collects data from many sources, processes it (historically in Excel), draws conclusions, and delivers dashboards and presentations to each school.
 
 The platform exists to solve four real pains, in priority order (all are Priority 1 for V2 — none is dropped):
 1. **Manual calculations/crosses redone every study** — the biggest time sink and error source.
@@ -66,9 +66,24 @@ The number-one adversary is our own AI-generated code, not an external hacker. H
 
 Supabase Cloud (not self-hosted — self-hosting was considered and deferred; it's more work and less secure unless a contractual data-residency requirement appears, which would migrate the same Postgres without an app rewrite). Free tier through build/testing; Pro (~$25/mo) only when the first real client has live access, for leaked-password protection, session controls, and daily backups. Cloudflare free tier hosts and provides the security perimeter. Cost is ~$0 until a live client exists.
 
-## 7. Current phase
+## 7. Current phase (verified 2026-08-22)
 
-A **documentation pause** runs in parallel: the consultant is documenting her full manual workflow on a live client (using a dedicated documentation guide) to produce the exact **Calculation Catalog** — every formula, tab, cross-reference, recoding table, and qualitative taxonomy. This specifies M1's engine content and the starter templates (V2.5). **Do not assume formulas; wait for the catalog.** Meanwhile, V2 builds everything that does not depend on it (P0–P7 framework), starting with security hardening (P0).
+P0-P6 of the V2 framework have been implemented. P6E synthetic acceptance was
+completed against the deployed Cloudflare Worker: CSV/XLSX ingestion, canonical
+calculations, filters, pivot, journey, server PDF, publication boundaries and
+Tenant A/Tenant B isolation passed 108 automated checks with no failures.
+
+Human acceptance then found two visual defects that remain part of P6 closure:
+the data-rich client dashboard creates document-level horizontal overflow on a
+narrow phone, and the generated PDF leaves an orphaned disclaimer paragraph on
+a mostly empty third page while pressuring the page-two footer. These must be
+fixed and visually re-tested before P7 begins. See `docs/CURRENT_STATE.md`.
+
+After P6 closes, continue with P7 full hardening and go-live preparedness in the
+original dependency order. Do not reprioritize the roadmap toward retention UI,
+new employee roles, or another feature because of an incidental business
+question. V2.5 content follows the framework roadmap and uses only documented,
+authoritative business definitions; never invent formulas.
 
 ## 8. How we work with AI
 

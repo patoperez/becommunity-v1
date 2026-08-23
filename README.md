@@ -9,7 +9,7 @@ journey maps for the firm's clients (schools).
 
 - **Next.js 16** (App Router) · React 19 · TypeScript (strict) · Tailwind v4
 - **Supabase Cloud** (Postgres + Auth + RLS) — tenant isolation via forced RLS on every table
-- **Arquero** (in-memory calculation engine) · Zod (validation) · PapaParse + ExcelJS (ingestion)
+- Workers-safe canonical calculation engine · Arquero (dev-only parity oracle) · Zod (validation) · PapaParse + lazy ExcelJS browser build (ingestion)
 - **Deployed on Cloudflare Workers** via the OpenNext adapter (`@opennextjs/cloudflare`), Node.js runtime with `nodejs_compat` — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). **Not Vercel, not Cloudflare Pages.**
 
 ## Getting started
@@ -30,9 +30,11 @@ exact list, then `npx supabase db push`. Emergency rollback scripts live outside
 
 ```bash
 npm run dev          # local dev server
+npm run typecheck    # TypeScript strict check
 npm run build        # production build (must pass before any deploy)
 npm run lint         # eslint
-npm run test         # deterministic calculation + ingestion + validation gates
+npm run test         # complete deterministic suite
+npm run gates        # build + deterministic/live security release gates
 npm run test:import-center-live # mapping version/RPC gate against linked dev DB
 npm run cf:build     # opennextjs-cloudflare build -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
@@ -55,3 +57,11 @@ Cloudflare **Workers** (not Pages), built with OpenNext and deployed via
 Wrangler. Full instructions, environment variables, and the go-live checklist:
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Operations (uptime monitoring,
 free-tier anti-pause): [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+## Current state
+
+P0-P6 are implemented and technically accepted with synthetic data. Two P6
+visual defects remain before P7: narrow-mobile dashboard overflow and PDF
+pagination polish. Read [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before
+starting or handing off work; historical audit/phase documents are not the
+authoritative current status.

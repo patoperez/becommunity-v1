@@ -1,9 +1,10 @@
 # CLAUDE.md — Be Community Platform
 
 > Operational rules for Claude Code on this repository. Read this every session.
-> Every fact below was verified against the code by the V1 audit
-> (`AUDIT_V1.md`, 2026-07-07). Rules marked ⓘ are audit-derived guardrails —
-> they are standing rules, not suggestions.
+> Standing rules originate in the V1 audit (`AUDIT_V1.md`, 2026-07-07) and
+> subsequent verified phases. Read `docs/CURRENT_STATE.md` for the authoritative
+> current handoff before planning any task. Rules marked ⓘ are audit-derived
+> guardrails — they are standing rules, not suggestions.
 
 ---
 
@@ -16,37 +17,56 @@ data-connected journey maps for the firm's clients (schools).
 
 **It is NOT a CRM.** No sales pipelines. The product is data → insight → client-facing story.
 
-- **V1** (the engine) is deployed in production. We are building **V2** (the full suite) on this same repository.
+- The P0-P6 V2 framework is deployed to a **synthetic-data test/beta Worker**.
+  It is not yet a real-client go-live environment; P7 and the go-live controls
+  remain outstanding.
 - Full V2 architecture lives in `BeCommunity_V2_Technical_Architecture.docx` (reference only — consult, don't inline).
 - Project background and decisions live in `system_context.md`.
 
-## Tech stack  *(verified against package.json + config, 2026-07-07)*
+## Tech stack  *(verified against package.json + config, 2026-08-22)*
 
 - Framework: **Next.js 16.2.9** (App Router) + **React 19.2.4** + **TypeScript ^5, `strict: true`**.
 - Styling: **TailwindCSS v4** (`@tailwindcss/postcss`).
 - Backend/DB: **Supabase Cloud** (`@supabase/supabase-js 2.108.2`, `@supabase/ssr 0.12.0`) — Postgres + Auth + Storage + RLS.
 - Deployment: **Cloudflare Worker via `@opennextjs/cloudflare 1.20.1`**, `nodejs_compat`. The full Next server runs on the **Node.js runtime** (not Edge); middleware uses the **Edge `middleware.ts` convention** because OpenNext rejects Node middleware. ⓘ **`nodejs_compat` is NOT a guarantee that a Node library works.** workerd's `unenv` shims throw on unimplemented APIs, and ExcelJS's Node entry dies on a module-level `process.umask()` (via `unzipper` → `fstream`). `.xlsx` therefore loads ExcelJS's **browser** build lazily — see `src/lib/ingestion/parse.ts` and the `test:workers-ingestion` gate.
-- Data engine: **Arquero 8.0.3** — in use (`src/lib/calc/engine.ts`, `pivot.ts`) for cross-tabs/aggregations.
-- Validation: **Zod 4.4.3** — in use at the **ingestion boundary** (`src/lib/ingestion/canonical.ts`). ⓘ **Not yet at every form/param boundary — extend it (P0), see rule below.**
+- Data engine: Workers-safe native table/aggregation code in
+  `src/lib/calc/table.ts`, `engine.ts`, and `pivot.ts`. **Arquero 8.0.3 is
+  dev-only**, retained as a parity oracle and positive control; production code
+  must not import it because its runtime code generation is forbidden by workerd.
+- Validation: **Zod 4.4.3** at ingestion, login, admin actions, dashboard data
+  actions, report/preview params, study scope, branding, templates, journey and
+  dashboard configuration boundaries. New untrusted boundaries must follow the
+  same reject-by-default pattern.
 - Ingestion: **PapaParse 5.5.4** (CSV) + **ExcelJS 4.4.0** (.xlsx), both in use (`src/lib/ingestion/parse.ts`).
 
 ## Non-negotiable rules
 
 ### Security (see system_context.md for the honest security goal)
 - The goal is **defense in depth, minimal attack surface, contained blast radius, and detection** — NOT "impenetrable" (no system is; claiming it breeds dangerous overconfidence).
-- **RLS on every public table, no exceptions.** A public table without RLS is a leak. Coverage is tested before every deploy. *(Verified: `enable` + `force` RLS on all 8 tables, policy-per-table, in `supabase/migrations/0000_init_schema_and_rls.sql`.)*
+- **RLS on every public table, no exceptions.** A public table without RLS is a
+  leak. Coverage is tested before every deploy across the base schema and every
+  later migration; `supabase/tests/rls_coverage.sql` must return zero uncovered
+  tables.
 - **Authorization is enforced server-side on every route and mutation**, never only in the frontend. Hiding a UI element is not access control. Session checks use `getUser()`, **never `getSession()`**, for any auth decision.
-- ⓘ **Least privilege at the database, not just the UI.** Client-role users must be **read-only on data tables at the RLS/grant level**, not merely in the interface. (Audit finding: V1 grants `authenticated` full CRUD and gates writes only by `tenant_id`, so a client could write within their own tenant via the API. Fix in P0: `SELECT`-only grant for clients + drop client write policies; internal writes go through service_role.)
+- ⓘ **Least privilege at the database, not just the UI.** Client-role users are
+  read-only at the RLS/grant level through migration
+  `0002_least_privilege_client_reads.sql`; internal mutations use explicitly
+  authorized server paths/service role. Preserve and adversarially verify this.
 - **Tenant isolation is sacred.** A user of tenant A must never read or write tenant B data. This is verified adversarially (authenticate as A, attempt B, assert failure — `scripts/isolation-test.mjs`), never assumed. **Run that test against the live DB before trusting isolation** — the SQL editor bypasses RLS and proves nothing.
 - Secrets live in `.env` only (gitignored), injected at runtime. The Supabase `service_role`/secret key is **server-only** (`import "server-only"` in `src/lib/supabase/admin.ts`) and must never reach the browser bundle or git. Only the publishable/anon key is client-side.
-- Validate every input boundary (uploads, forms, params) with Zod before use. Reject by default. ⓘ *Currently ingestion-only; bring login/upload form fields and route params under Zod in P0.*
-- Sanitize user-generated content (survey free-text, e.g. `qual_observation.quote`) before rendering to prevent stored XSS. *(V1 has no `dangerouslySetInnerHTML` and does not yet render qual text; keep it that way as qualitative views land.)*
+- Validate every new input boundary (uploads, forms, params) with Zod before use.
+  Reject by default and preserve the existing boundary schemas.
+- Render user-generated qualitative content only through React's escaped text
+  nodes; never introduce `dangerouslySetInnerHTML`. Only human-confirmed themes
+  and independently approved quotes may cross the client/publication boundary.
 
 ### Calculation integrity
 - Composite metrics (NPS, CSAT, Top-2-Box) are **canonical functions defined once** (`src/lib/calc/metrics.ts`), unit-tested against known-good outputs (`scripts/calculation-test.mjs`). A wrong number does not throw — it misleads a client. This is a human-review zone.
 - ⓘ **Kano is OUT OF SCOPE.** The consultant's process documentation states explicitly: *"No se va a utilizar este modelo"* (§4.4). Do not build it.
 - **Rounding/precision is governed by `docs/CALCULATION_POLICY.md`** — one canonical helper (`roundTo`, half away from zero, Excel `ROUND()` parity), precision declared per unit in `DECIMALS`, every value rounded exactly once. Never round with `toFixed`.
-- Aggregations use Arquero, not hand-rolled loops (`src/lib/calc/engine.ts`, `pivot.ts`).
+- Aggregations use the canonical Workers-safe engine and pivot implementation.
+  Arquero may be used only in tests as a parity oracle, never in
+  production-reachable code.
 - **Do not invent formulas.** Confirmed business rules live in `docs/CALCULATION_CATALOG.md`; implement only formulas marked authoritative there. Keep template-varying mappings and crosses in configuration.
 
 ### Data & config
@@ -70,19 +90,19 @@ data-connected journey maps for the firm's clients (schools).
 ## Commands  *(from package.json)*
 ```
 npm run dev          # next dev (local dev server)
+npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
+npm test             # complete deterministic suite (23 gates at the P6E baseline)
+npm run gates        # typecheck + build + offline/live isolation/secret gates
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + wrangler deploy (Cloudflare Workers)
-
-# No `typecheck` or `test` script yet. Until added:
-npx tsc --noEmit                          # typecheck
-npx tsx scripts/calculation-test.mjs      # canonical-metric known-good gate
-node --env-file=.env.local scripts/isolation-test.mjs   # adversarial RLS gate
-node --env-file=.env.local scripts/secret-leak-test.mjs # secret-leak release gate
 ```
-ⓘ *P0 should add first-class `typecheck` + `test` scripts (and ideally a runner/CI) wrapping the `scripts/` gates.*
+
+`npm run cf:build` has a documented Windows symlink limitation. A plain
+`npm run build` must still pass locally; validate the OpenNext bundle through
+Cloudflare's Linux branch build when Windows returns `EPERM`.
 
 ## Build order (V2) — do not skip ahead
 P0 Security hardening (headers, WAF, rate limits, secret hygiene, staging/prod split, **least-privilege grants**, **Zod at all boundaries**, **prove RLS at runtime**)
@@ -98,6 +118,21 @@ Each phase must pass its adversarial security suite before the next begins.
 The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
+
+## Current work — do not skip ahead
+
+The authoritative state is `docs/CURRENT_STATE.md`.
+
+- P0-P6 are implemented and technically accepted on synthetic data.
+- P6E production acceptance completed with 108 automated checks and 0 failures.
+- Human acceptance found two remaining P6 visual defects: document-level mobile
+  overflow on the data-rich dashboard and poor PDF pagination (orphaned final
+  methodology paragraph/footer pressure).
+- Fix those defects and repeat the narrow visual smoke test **before** declaring
+  P6 closed.
+- After P6 closes, proceed to P7 as originally planned. Do not redirect the
+  roadmap toward retention UI, new role tiers, or another feature because of an
+  incidental question.
 
 ## When unsure
 Ask. Do not guess on security, authorization, or calculations. A stopped task is
