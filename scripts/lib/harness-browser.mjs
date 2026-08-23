@@ -66,7 +66,8 @@ async function waitForDevTools(port, deadline) {
       const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
         signal: AbortSignal.timeout(1000),
       });
-      if (response.ok) return await response.json();
+      // DevTools /json/version handshake — browser control, never application data.
+      if (response.ok) return await response.json(); // /json/ endpoint, not an app body
     } catch (error) {
       lastError = error;
     }
@@ -362,6 +363,32 @@ export const PAGE = {
       return 'ok';
     })()`,
 
+  /** Reads a labelled control's surrounding panel text — a stable DOM signal. */
+  panelTextByLabel: (labelPrefix) => `
+    (() => {
+      const label = [...document.querySelectorAll('label')]
+        .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
+      if (!label) return null;
+      const panel = label.closest('div') && label.closest('div').parentElement;
+      return panel ? panel.innerText.trim().slice(0, 400) : null;
+    })()`,
+
+  /** Changes a labelled select the way a user would, so React sees it. */
+  changeSelectByLabel: (labelPrefix) => `
+    (() => {
+      const label = [...document.querySelectorAll('label')]
+        .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
+      const select = label && label.querySelector('select');
+      if (!select) return 'no-control';
+      const target = [...select.options].find((option) => option.value !== select.value);
+      if (!target) return 'no-alternative';
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, target.value);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    })()`,
+
   /** Selects an option by its visible text and returns the option's value. */
   optionValueByText: (selectName, text) => `
     (() => {
@@ -371,3 +398,71 @@ export const PAGE = {
       return option ? option.value : null;
     })()`,
 };
+
+// ---------------------------------------------------------------------------
+// Reviewed browser drivers for imperative Server Actions (design §1.7, §2.1)
+// ---------------------------------------------------------------------------
+//
+// Imperative actions have no form binding, so the framework must construct the
+// request from the application's own client runtime. Each driver therefore
+// drives REAL controls and reports a stable rendered-DOM outcome. No driver
+// builds, reads, parses or classifies a Server-Action / RSC transport payload.
+//
+// The dispatch is static and keyed by the frozen operation catalogue: a suite
+// cannot improvise a driver, and an operation without a reviewed driver fails
+// explicitly rather than being reported as anything.
+
+/** Thrown when a catalogue operation has no reviewed driver yet. */
+export class UnsupportedDriverError extends Error {
+  constructor(operationName) {
+    super(
+      `no reviewed browser driver for "${operationName}" — not implemented in PR 5; ` +
+        "a later suite must add and review one",
+    );
+    this.name = "UnsupportedDriverError";
+    this.code = "UNSUPPORTED_DRIVER";
+  }
+}
+
+const PIVOT_LABEL = "Agregación";
+
+/** The pivot result panel, as a plain in-page expression the driver reuses. */
+const PIVOT_PANEL_EXPR = `(() => {
+  const label = [...document.querySelectorAll('label')]
+    .find((item) => item.textContent.trim().startsWith(${JSON.stringify(PIVOT_LABEL)}));
+  if (!label) return null;
+  const panel = label.closest('div') && label.closest('div').parentElement;
+  return panel ? panel.innerText.trim().slice(0, 400) : null;
+})()`;
+
+export const BROWSER_DRIVERS = Object.freeze({
+  /**
+   * `computeStudyPivot` — fired by the dashboard's own pivot controls. The
+   * observable outcome is the rendered result panel changing; that is the
+   * application telling us the round-trip completed. The "before" snapshot is
+   * kept in the page rather than interpolated back into a predicate, so no
+   * rendered text is ever spliced into generated source.
+   */
+  "dashboard.pivot": async ({ context, origin, PAGE }) => {
+    await context.navigate(new URL("/dashboard", origin).toString());
+    if (!(await context.evaluate(PAGE.landmark))) return { status: 200, domSignal: "none" };
+    const before = await context.evaluate(
+      `(() => { const value = ${PIVOT_PANEL_EXPR}; window.__harnessPivotBefore = value; return value; })()`,
+    );
+    if (before === null) return { status: 200, domSignal: "none" };
+    const driven = await context.evaluate(PAGE.changeSelectByLabel(PIVOT_LABEL));
+    if (driven !== "ok") return { status: 200, domSignal: "none" };
+    const changed = await context
+      .waitForDom(
+        `() => { const value = ${PIVOT_PANEL_EXPR}; return value !== null && value !== window.__harnessPivotBefore; }`,
+      )
+      .catch(() => false);
+    return { status: 200, domSignal: changed ? "success" : "none" };
+  },
+});
+
+export function browserDriverFor(operationName) {
+  const driver = BROWSER_DRIVERS[operationName];
+  if (!driver) throw new UnsupportedDriverError(operationName);
+  return driver;
+}

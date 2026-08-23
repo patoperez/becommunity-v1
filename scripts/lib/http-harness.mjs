@@ -17,6 +17,7 @@
 
 import { randomBytes } from "node:crypto";
 import { createServerClient } from "@supabase/ssr";
+import { browserDriverFor } from "./harness-browser.mjs";
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -200,6 +201,15 @@ export const OPERATIONS = Object.freeze({
     submitLabel: "Iniciar sesión",
     fields: ["email", "password"],
     creates: [],
+    mutating: false,
+    // The login action redirects on success and re-renders /login with a fixed
+    // error CODE on failure (`login/actions.ts:24,32,36`). Both are public
+    // redirect targets; neither requires reading a response body.
+    outcome: {
+      success: { path: "/dashboard" },
+      validation: { path: "/login", query: "error" },
+      denied: { path: "/login" },
+    },
   }),
   "auth.logout": action("auth.logout", {
     urlClass: "/dashboard",
@@ -219,6 +229,15 @@ export const OPERATIONS = Object.freeze({
     submitLabel: "Crear cliente",
     fields: ["name"],
     creates: ["tenant"],
+    // `internalContext()` redirects an unauthenticated caller to /login and
+    // `finish()` returns to /admin/clients with either ?ok= or ?error=
+    // (`clients/actions.ts:19,27`). Validation is checked BEFORE success so a
+    // rejection on the same path can never be read as a success.
+    outcome: {
+      denied: { path: "/login" },
+      validation: { path: "/admin/clients", query: "error" },
+      success: { path: "/admin/clients", query: "ok" },
+    },
   }),
   "clients.renameTenant": action("clients.renameTenant", { urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients", submitLabel: "Guardar", fields: ["tenant_id", "name"], creates: [] }),
   "clients.updateTenantBrand": action("clients.updateTenantBrand", { urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients", submitLabel: "Guardar marca", fields: ["tenant_id"], creates: ["storage_object"] }),
@@ -234,6 +253,14 @@ export const OPERATIONS = Object.freeze({
     submitLabel: "Crear y cargar datos",
     fields: ["tenant_id", "name", "period"],
     creates: ["study"],
+    scopeParams: ["tenant_id"],
+    // Success redirects to the upload screen carrying the new study id
+    // (`studies/actions.ts:48`); a rejection returns to /admin/studies?error=.
+    outcome: {
+      denied: { path: "/login" },
+      validation: { path: "/admin/studies", query: "error" },
+      success: { path: "/admin/upload", query: "study" },
+    },
   }),
   "studies.createFromTemplate": action("studies.createFromTemplate", { urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies", submitLabel: "Usar plantilla", fields: ["template_id", "tenant_id", "name", "period"], creates: ["study"] }),
   "studies.saveAsTemplate": action("studies.saveAsTemplate", { urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies", submitLabel: "Guardar como plantilla", fields: ["study_id", "template_id", "name", "description"], creates: ["study_template"] }),
@@ -410,10 +437,44 @@ export async function createHarness(options) {
 
   // --- the form / browser mechanisms ---------------------------------------
 
+  /**
+   * Classifies a submitted form from its DECLARED, static outcome contract:
+   * the public path the framework navigated to plus a public query key. An
+   * outcome the operation did not declare is `none`, which classifies as
+   * `unclassified` and fails the run — success is never the default.
+   */
+  function evaluateOutcome(op, landedFull) {
+    const contract = op.outcome;
+    if (!contract) {
+      throw new Error(
+        `no outcome contract for "${op.name}" — not implemented in PR 5; a later suite ` +
+          "must declare and review one before this operation can be classified",
+      );
+    }
+    const [path, query = ""] = landedFull.split("?");
+    const params = new URLSearchParams(query);
+    const matches = (rule) =>
+      rule && path === rule.path && (!rule.query || params.has(rule.query));
+    if (matches(contract.denied)) return "denial";
+    if (matches(contract.validation)) return "validation";
+    if (matches(contract.success)) return "success";
+    return "none";
+  }
+
   async function browserRun(a, op, params, mechanism) {
     const javaScript = mechanism !== "form";
     const context = await contextFor(a.id, { javaScript });
     const started = now();
+
+    // Imperative Server Actions have no form; a reviewed, statically dispatched
+    // driver drives the app's own controls (design §1.7). An operation without
+    // one throws rather than being reported as any outcome.
+    if (op.imperative) {
+      const driver = browserDriverFor(op.name);
+      const observation = await driver({ context, origin, PAGE });
+      return finish(a, op, mechanism, observation, now() - started);
+    }
+
     const pagePath = fillPath(op.page ?? op.urlClass, params);
     await context.navigate(new URL(pagePath, origin).toString());
     const landed = await context.evaluate("location.pathname");
@@ -437,11 +498,10 @@ export async function createHarness(options) {
       if (result !== "ok") throw new Error(`could not fill field ${field}: ${result}`);
     }
     const finalPath = await context.submitAndWait(PAGE.clickSubmit(formIndex));
-    const settled = finalPath.split("?")[0];
     const observation = {
       status: 200,
       redirectTo: null,
-      domSignal: settled === "/login" && pagePath !== "/login" ? "denial" : "success",
+      domSignal: evaluateOutcome(op, finalPath),
       landedOn: finalPath,
     };
     const record = finish(a, op, mechanism, observation, now() - started);
@@ -476,10 +536,9 @@ export async function createHarness(options) {
 
   async function run(actorId, op, params = {}) {
     const a = actor(actorId);
-    if (op.mutating) {
-      for (const value of Object.values(params)) fixtures.assertMutable(value, "target");
-      if (params.tenant_id) fixtures.assertMutable(params.tenant_id, "tenant-scope");
-    }
+    // Ownership and scope are decided by the fixture ledger, before any request
+    // leaves the process (§6.2, §6.6).
+    fixtures.authorizeMutation(op, params);
     if (op.mechanism === "http") return httpRun(a, op, params);
     return browserRun(a, op, params, op.mechanism);
   }
@@ -591,12 +650,13 @@ export async function createHarness(options) {
       return a;
     },
 
-    /** N1: empty jar. */
+    /** N1: empty jar, in EVERY context this actor owns. */
     async clear(actorId) {
       const a = actor(actorId);
       a.jar.clear();
-      const context = a.contexts.js;
-      if (context) await context.clearCookies();
+      // Clearing only one context would leave the actor signed in elsewhere and
+      // make a later real sign-in redirect straight past the login form.
+      for (const context of Object.values(a.contexts)) await context.clearCookies();
       a.sessionKind = "none";
       a.sessionLabel = newSessionLabel();
       return a;
