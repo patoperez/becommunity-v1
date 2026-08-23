@@ -190,6 +190,14 @@ foundation - is implemented on `p7d-adversarial-harness` and **not merged**:
   out that exact remote commit in WSL. The verifier clone must be full-history
   and full-blob: Suite D's D-d proves every reachable blob, which a `blob:none`
   partial clone cannot do.
+- **Live browser evidence runs in WSL as a non-root user, with Linux Chrome.**
+  The harness self-test requires a real browser (design §3.2, S0), and it must be
+  the browser's Linux build inside the distribution, selected with `CHROME_PATH`.
+  Run it as an ordinary user rather than root, so the browser sandbox stays on
+  and `--no-sandbox` is never needed. **Never launch the Windows Chrome executable
+  from WSL:** its DevTools endpoint binds on the Windows side and is unreachable
+  from the distribution, and it cannot resolve a Linux profile path, so the run
+  fails at S0 with no browser coverage.
 - `npm run cf:build` can also fail on Windows with OpenNext's documented symlink
   `EPERM`; Cloudflare's Linux branch build is the authoritative bundle check.
 - Local OpenNext output **does** contain inlined environment values:
