@@ -46,8 +46,9 @@ data-connected journey maps for the firm's clients (schools).
 - **RLS on every public table, no exceptions.** A public table without RLS is a
   leak. `npm run test:rls-coverage` is the executable pre-merge/pre-deploy check:
   it reads the coverage inventory through migration `0014`'s metadata-only
-  reporting function and must report zero uncovered tables, and it proves in the
-  same run that `anon` and `authenticated` cannot execute that function.
+  reporting function and must report every public ordinary/partitioned table as
+  both **RLS-enabled and FORCE RLS** — zero exceptions on either — and it proves
+  in the same run that `anon` and `authenticated` cannot execute that function.
   `supabase/tests/rls_coverage.sql` remains the equivalent manual diagnostic for
   the SQL editor.
 - **Authorization is enforced server-side on every route and mutation**, never only in the frontend. Hiding a UI element is not access control. Session checks use `getUser()`, **never `getSession()`**, for any auth decision.

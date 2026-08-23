@@ -9,11 +9,17 @@
 // reporting function over the real PostgREST path, and — just as importantly —
 // proves that function's privilege model behaviorally:
 //
+//   [0] classifier the denial/absence rules themselves, before anything remote
 //   [1] contract   static assertions on migration 0014 and its rollback
 //   [2] project    the URL's project ref is the linked synthetic project
-//   [3] service    service_role CAN execute it; every public table has RLS on
+//   [3] service    service_role CAN execute it; every public table has RLS
+//                  ENABLED and FORCED
 //   [4] anon       anon CANNOT execute it (permission denied, not "not found")
 //   [5] authed     a really-signed-in client user CANNOT execute it either
+//
+// Denial and absence are classified strictly, by code AND status: a denial is
+// SQLSTATE 42501 with HTTP 401/403, and absence is PGRST202 or 42883. A bare 403
+// or 404 with any other or missing code fails as the wrong reason.
 //
 // Checks 4 and 5 run AS those roles. A service-role request with altered headers,
 // a fabricated JWT, or SET ROLE would prove nothing and is never used.
@@ -69,7 +75,14 @@ const fail = (m) => {
 const ok = (m) => console.log("  ✓", m);
 
 // Every control must record an outcome. An unexecuted control fails the gate.
-const CONTROLS = ["contract", "project", EXPECT_ABSENT ? "absence" : "service", "anon", "authenticated"];
+const CONTROLS = [
+  "contract",
+  "classifier",
+  "project",
+  EXPECT_ABSENT ? "absence" : "service",
+  "anon",
+  "authenticated",
+];
 const executed = new Set();
 const ran = (name) => executed.add(name);
 
@@ -211,9 +224,51 @@ async function callRpc({ url, apikey, bearer }) {
   };
 }
 
-const denied = (r) => r.status === 403 || r.code === "42501";
-const absent = (r) => r.code === "PGRST202" || r.code === "42883" || r.status === 404;
+// Classification is deliberately strict: a rejection counts only when the exact
+// expected code arrives with an expected status. A bare HTTP status proves
+// nothing — a gateway, a WAF, or an unrelated PostgREST error can produce 403 or
+// 404 without any privilege check having happened, and accepting those would let
+// an outage masquerade as a passing security control.
+const DENIAL_CODE = "42501"; // insufficient_privilege
+const DENIAL_STATUSES = new Set([401, 403]); // anon gets 401, authenticated 403
+const ABSENCE_CODES = new Set(["PGRST202", "42883"]); // not exposed / undefined function
+
+const denied = (r) => !r.rows && r.code === DENIAL_CODE && DENIAL_STATUSES.has(r.status);
+const absent = (r) => !r.rows && ABSENCE_CODES.has(r.code);
 const where = (r) => `status ${r.status}, code ${r.code ?? "none"}`;
+
+// --- [0] Classifier self-test ------------------------------------------------
+// Runs before any remote control, against the very functions the controls use —
+// no second implementation to drift from. A regression here fails the gate,
+// because every later verdict is only as trustworthy as this classification.
+const CLASSIFIER_CASES = [
+  ["401 + 42501", { status: 401, code: "42501", rows: null }, true, false],
+  ["403 + 42501", { status: 403, code: "42501", rows: null }, true, false],
+  ["403 + another code", { status: 403, code: "PGRST301", rows: null }, false, false],
+  ["403 + no code", { status: 403, code: null, rows: null }, false, false],
+  ["404 + PGRST202", { status: 404, code: "PGRST202", rows: null }, false, true],
+  ["400 + 42883", { status: 400, code: "42883", rows: null }, false, true],
+  ["404 + another code", { status: 404, code: "PGRST205", rows: null }, false, false],
+  ["404 + no code", { status: 404, code: null, rows: null }, false, false],
+  ["200 + rows", { status: 200, code: null, rows: [{ table_name: "x" }] }, false, false],
+];
+
+function checkClassifier() {
+  console.log("\n[0] Denial/absence classifier self-test:");
+  let broken = 0;
+  for (const [label, result, expectDenied, expectAbsent] of CLASSIFIER_CASES) {
+    const gotDenied = denied(result);
+    const gotAbsent = absent(result);
+    if (gotDenied === expectDenied && gotAbsent === expectAbsent) continue;
+    fail(
+      `${label}: classified denial=${gotDenied}/absence=${gotAbsent}, ` +
+        `expected denial=${expectDenied}/absence=${expectAbsent}`,
+    );
+    broken++;
+  }
+  if (broken === 0) ok(`${CLASSIFIER_CASES.length} classification cases hold (denial = 401/403 + 42501; absence = PGRST202/42883)`);
+  ran("classifier");
+}
 
 // Shared verdict for the two negative controls. In the gate, the only acceptable
 // rejection is an execute-permission denial — a missing endpoint would prove
@@ -253,13 +308,13 @@ async function checkServiceRole(url, serviceKey) {
   if (uncovered.length === 0) ok("every public ordinary/partitioned table has RLS enabled");
   else fail(`table(s) WITHOUT RLS: ${uncovered.join(", ")}`);
 
-  // Reported, not gated: FORCE RLS additionally binds the table owner. Coverage
-  // is the contract here; the flag is surfaced so a gap stays visible.
+  // FORCE RLS is a standing invariant, not a nice-to-have: without it the table
+  // owner bypasses every policy. The canonical schema force-enables it on every
+  // table, so a table that is merely `enable`d is a real gap. Kept as its own
+  // failure so it can never be confused with a missing-RLS table.
   const unforced = r.rows.filter((t) => t.rls_forced !== true).map((t) => t.table_name);
-  console.log(
-    `     forced RLS on ${r.rows.length - unforced.length}/${r.rows.length} table(s)` +
-      (unforced.length ? ` — not forced: ${unforced.join(", ")}` : ""),
-  );
+  if (unforced.length === 0) ok(`every public ordinary/partitioned table has FORCE RLS (${r.rows.length}/${r.rows.length})`);
+  else fail(`table(s) WITHOUT FORCE RLS: ${unforced.join(", ")}`);
 
   const zeroPolicy = r.rows
     .filter((t) => t.rls_enabled === true && Number(t.policy_count) === 0)
@@ -378,6 +433,7 @@ async function main() {
     process.exit(2);
   }
 
+  checkClassifier();
   checkContract();
   const ref = checkProject(url);
   if (!ref) {
