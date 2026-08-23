@@ -1,5 +1,10 @@
 # Fase 6 — Endurecimiento + despliegue producción
 
+> **Historical phase record.** This file describes the original numbered Fase 6
+> deliverable and contains point-in-time fixture/deployment statements. It is
+> not the current operational handoff and must not be used to infer the present
+> database or deployment state. Read [CURRENT_STATE.md](CURRENT_STATE.md).
+
 Deliverable (§3.1, Fase 6):
 > *Auditoría de seguridad, anti-pausa, respaldos, paso a plan Pro.*
 
