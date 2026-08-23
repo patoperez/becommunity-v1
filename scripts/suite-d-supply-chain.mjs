@@ -4,7 +4,7 @@
 //   npm run suite:d          complete gate (merge gate; requires both builds)
 //   npm run suite:d:local    Windows-local subset — NOT the complete Suite D
 // =============================================================================
-// Five deterministic checks, no credentials, no network mutation:
+// Six deterministic checks, no credentials, no network mutation:
 //
 //   D-a  npm audit           zero critical/high, unless a complete, explicitly
 //                            human-approved §6.3 exception record matches
@@ -16,6 +16,8 @@
 //   D-d  git history         no `.env` file ever tracked, and no secret-class
 //                            material in any reachable blob (D2)
 //   D-e  build artifacts     delegates to scripts/secret-leak-test.mjs (D1)
+//   D-f  toolchain pin       package.json and CI declare the same exact npm,
+//                            and CI proves it took effect before `npm ci`
 //
 // Reporting contract: this script prints commit / path / secret-class metadata
 // only. It never prints a matched value or any fragment of one.
@@ -35,6 +37,13 @@ import {
 
 const LOCAL_SUBSET = process.argv.includes("--local-subset");
 const EXCEPTIONS_FILE = "security/dependency-exceptions.json";
+const CI_WORKFLOW = ".github/workflows/ci.yml";
+// D-f contract. REQUIRED_NPM must equal the npm that Cloudflare's build image
+// runs; REQUIRED_NODE must equal the runtime this branch was verified against.
+// Changing either is a deliberate, reviewed edit, and D-f stays red until
+// package.json and the workflow are updated to agree with it.
+const REQUIRED_NPM = "10.9.2";
+const REQUIRED_NODE = "24.11.1";
 const ALLOWED_REGISTRY_HOSTS = new Set(["registry.npmjs.org"]);
 const BLOCKING_SEVERITIES = new Set(["critical", "high"]);
 // Paths that must never have been tracked, at any point in history.
@@ -363,6 +372,287 @@ function checkArtifacts() {
 }
 
 // ---------------------------------------------------------------------------
+// D-f — toolchain pin (npm resolver parity with the deploy build)
+//
+// npm 10 and npm 11 disagree about peer edges beneath a platform-excluded
+// optional dependency: npm 11 prunes those nodes out of the lockfile, npm 10's
+// `npm ci` still walks the edges and aborts with EUSAGE. Cloudflare's build
+// image runs npm 10.9.2, so a lockfile regenerated under npm 11 can pass every
+// gate in this repository and still break the deploy build before it starts —
+// which is exactly what happened. The lockfile must therefore be authored and
+// validated by one declared npm, and CI must prove it is running that npm and
+// not merely asking for it.
+//
+// This is a structural check over the tracked files, not a probe of whatever
+// npm happens to be on the current machine: a developer on npm 11 still gets a
+// truthful red when the declaration and the workflow drift apart.
+// ---------------------------------------------------------------------------
+
+/** Split a workflow into its `- name:` steps, preserving order. */
+export function workflowSteps(text) {
+  const steps = [];
+  let current = null;
+  for (const line of text.split(/\r?\n/)) {
+    const named = /^(\s{4,})- name:\s*(.+?)\s*$/.exec(line);
+    if (named) {
+      current = { name: named[2], lines: [] };
+      steps.push(current);
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  // Collapse whitespace so the assertions survive re-indentation.
+  return steps.map((s) => ({ name: s.name, body: s.lines.join(" ").replace(/\s+/g, " ") }));
+}
+
+/**
+ * Pure evaluator for D-f, so the detector itself can be exercised offline with
+ * synthetic drift rather than only against this branch's real files. Returns one
+ * entry per assertion, in report order.
+ */
+export function evaluateToolchain({
+  packageManager,
+  workflow,
+  npm = REQUIRED_NPM,
+  node = REQUIRED_NODE,
+}) {
+  const checks = [];
+  const add = (id, passed, message) => checks.push({ id, ok: passed, message });
+
+  add(
+    "declaration",
+    packageManager === `npm@${npm}`,
+    packageManager === `npm@${npm}`
+      ? `package.json declares packageManager "npm@${npm}"`
+      : `package.json declares packageManager ${JSON.stringify(packageManager ?? null)} — ` +
+          `expected exactly "npm@${npm}"`,
+  );
+
+  if (workflow == null) {
+    add("workflow", false, `${CI_WORKFLOW} is missing — the npm pin cannot be enforced`);
+    return checks;
+  }
+
+  const nodePinned = new RegExp(`(^|\\s)node-version:\\s*${node}(\\s|$)`).test(workflow);
+  add(
+    "node",
+    nodePinned,
+    nodePinned
+      ? `CI pins node-version to exactly ${node}`
+      : `CI does not pin node-version to exactly ${node}`,
+  );
+
+  // Any npm@<spec> other than the contract version — `latest`, `^10`, a tag —
+  // reintroduces the drift this pin exists to stop.
+  const floating = [
+    ...new Set(
+      [...workflow.matchAll(/npm@([^\s"'`;]+)/g)].map((m) => m[1]).filter((v) => v !== npm),
+    ),
+  ];
+  add(
+    "no-floating",
+    floating.length === 0,
+    floating.length === 0
+      ? `CI names no npm version other than ${npm}`
+      : `CI names a non-contract npm spec: ${floating.join(", ")}`,
+  );
+
+  const steps = workflowSteps(workflow);
+  const pinIndex = steps.findIndex((s) => s.body.includes(`npm install --global npm@${npm}`));
+  const installIndex = steps.findIndex((s) => /(^| )npm ci( |$)/.test(s.body));
+
+  add(
+    "pin-present",
+    pinIndex >= 0,
+    pinIndex >= 0
+      ? `CI installs npm@${npm} globally (step: "${steps[pinIndex].name}")`
+      : `no CI step installs npm@${npm} globally`,
+  );
+
+  // Installing is not proof. The step must read the version back and exit
+  // non-zero on a mismatch, so a silently ineffective install is a red job
+  // rather than a lockfile validated by the wrong npm.
+  const pinBody = pinIndex >= 0 ? steps[pinIndex].body : "";
+  const asserted =
+    pinBody.includes("npm --version") && pinBody.includes(npm) && /exit 1\b/.test(pinBody);
+  add(
+    "pin-asserted",
+    asserted,
+    asserted
+      ? `the pin step asserts npm --version is exactly ${npm} and fails otherwise`
+      : "the pin step does not read npm --version back and fail on a mismatch",
+  );
+
+  const ordered = installIndex >= 0 && pinIndex >= 0 && pinIndex < installIndex;
+  add(
+    "pin-ordered",
+    ordered,
+    installIndex < 0
+      ? "no CI step installs from the lockfile with `npm ci`"
+      : ordered
+        ? "the npm pin runs before the lockfile install"
+        : "`npm ci` runs before npm is pinned — the lockfile is validated by the wrong npm",
+  );
+
+  return checks;
+}
+
+/* <drift-vocabulary> — every way this pin can rot, as synthetic inputs. */
+const GOOD_WORKFLOW = [
+  "jobs:",
+  "  gates-offline:",
+  "    steps:",
+  "      - name: Set up Node",
+  "        with:",
+  `          node-version: ${REQUIRED_NODE}`,
+  "      - name: Pin npm to the lockfile-authoring version",
+  "        run: |",
+  `          npm install --global npm@${REQUIRED_NPM}`,
+  '          actual="$(npm --version)"',
+  `          if [ "$actual" != "${REQUIRED_NPM}" ]; then`,
+  "            exit 1",
+  "          fi",
+  "      - name: Install from the lockfile",
+  "        run: npm ci",
+].join("\n");
+
+const PIN_STEP_HEADER = "      - name: Pin npm to the lockfile-authoring version";
+const PIN_STEP_BODY = [
+  "        run: |",
+  `          npm install --global npm@${REQUIRED_NPM}`,
+  '          actual="$(npm --version)"',
+  `          if [ "$actual" != "${REQUIRED_NPM}" ]; then`,
+  "            exit 1",
+  "          fi",
+].join("\n");
+
+const DRIFT_CASES = [
+  {
+    why: "the declaration is missing",
+    input: { packageManager: undefined, workflow: GOOD_WORKFLOW },
+  },
+  {
+    why: "the declaration drifted to npm 11",
+    input: { packageManager: "npm@11.6.2", workflow: GOOD_WORKFLOW },
+  },
+  {
+    why: "the declaration names another package manager",
+    input: { packageManager: "pnpm@10.9.2", workflow: GOOD_WORKFLOW },
+  },
+  {
+    why: "the workflow is missing",
+    input: { packageManager: `npm@${REQUIRED_NPM}`, workflow: null },
+  },
+  {
+    why: "CI stopped pinning npm",
+    input: {
+      packageManager: `npm@${REQUIRED_NPM}`,
+      workflow: GOOD_WORKFLOW.replace(`          npm install --global npm@${REQUIRED_NPM}\n`, ""),
+    },
+  },
+  {
+    why: "CI floated the npm version",
+    input: {
+      packageManager: `npm@${REQUIRED_NPM}`,
+      workflow: GOOD_WORKFLOW.split(`npm@${REQUIRED_NPM}`).join("npm@latest"),
+    },
+  },
+  {
+    why: "CI installs npm but never proves it took effect",
+    input: {
+      packageManager: `npm@${REQUIRED_NPM}`,
+      workflow: [
+        "jobs:",
+        "  gates-offline:",
+        "    steps:",
+        "      - name: Set up Node",
+        "        with:",
+        `          node-version: ${REQUIRED_NODE}`,
+        PIN_STEP_HEADER,
+        "        run: |",
+        `          npm install --global npm@${REQUIRED_NPM}`,
+        "      - name: Install from the lockfile",
+        "        run: npm ci",
+      ].join("\n"),
+    },
+  },
+  {
+    why: "the pin runs after the lockfile install",
+    input: {
+      packageManager: `npm@${REQUIRED_NPM}`,
+      workflow: [
+        "jobs:",
+        "  gates-offline:",
+        "    steps:",
+        "      - name: Set up Node",
+        "        with:",
+        `          node-version: ${REQUIRED_NODE}`,
+        "      - name: Install from the lockfile",
+        "        run: npm ci",
+        PIN_STEP_HEADER,
+        PIN_STEP_BODY,
+      ].join("\n"),
+    },
+  },
+  {
+    why: "the lockfile install step disappeared",
+    input: {
+      packageManager: `npm@${REQUIRED_NPM}`,
+      workflow: GOOD_WORKFLOW.replace("        run: npm ci", "        run: true"),
+    },
+  },
+  {
+    why: "the Node pin drifted",
+    input: {
+      packageManager: `npm@${REQUIRED_NPM}`,
+      workflow: GOOD_WORKFLOW.replace(REQUIRED_NODE, "24.12.0"),
+    },
+  },
+];
+/* </drift-vocabulary> */
+
+/**
+ * Positive and negative control for the detector, run inside D-f on every
+ * invocation. A regression here surfaces as a red gate rather than as a pin
+ * that silently stopped detecting anything.
+ */
+function toolchainSelfTest() {
+  const good = evaluateToolchain({
+    packageManager: `npm@${REQUIRED_NPM}`,
+    workflow: GOOD_WORKFLOW,
+  });
+  const goodFailures = good.filter((c) => !c.ok);
+  if (goodFailures.length > 0) {
+    fail(
+      "toolchain",
+      `self-test positive control failed: ${goodFailures.map((c) => c.id).join(", ")}`,
+    );
+    return;
+  }
+  const undetected = DRIFT_CASES.filter(
+    (c) => !evaluateToolchain(c.input).some((check) => !check.ok),
+  );
+  undetected.length === 0
+    ? ok(
+        "toolchain",
+        `self-test: a correct pin passes and all ${DRIFT_CASES.length} drift cases are caught`,
+      )
+    : undetected.forEach((c) => fail("toolchain", `drift NOT caught by D-f: ${c.why}`));
+}
+
+function checkToolchain() {
+  heading("D-f  toolchain pin — npm resolver parity with the deploy build");
+
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+  const workflow = existsSync(CI_WORKFLOW) ? readFileSync(CI_WORKFLOW, "utf8") : null;
+
+  for (const check of evaluateToolchain({ packageManager: pkg.packageManager, workflow })) {
+    check.ok ? ok("toolchain", check.message) : fail("toolchain", check.message);
+  }
+  toolchainSelfTest();
+}
+
+// ---------------------------------------------------------------------------
 console.log("=".repeat(72));
 console.log("SUITE D — secrets and supply chain" + (LOCAL_SUBSET ? "   [LOCAL SUBSET]" : ""));
 if (LOCAL_SUBSET) {
@@ -376,6 +666,7 @@ checkPins();
 checkLockfile();
 checkHistory();
 checkArtifacts();
+checkToolchain();
 
 console.log("\n" + "=".repeat(72));
 const passed = results.filter((r) => r[1] === "PASS").length;
