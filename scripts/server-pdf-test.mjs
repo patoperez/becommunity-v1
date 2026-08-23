@@ -119,34 +119,93 @@ assert.ok(
   "the last page must not hold a single orphaned paragraph",
 );
 
+// 2b. Keeping the closing section together must not be paid for with a page
+//     that is mostly blank. When the closing block is the only thing on the
+//     final page, that break has to have been unavoidable: the block must be
+//     taller than the room still free on the page before it. This is a
+//     geometric rule, so it holds for any study rather than for one fixture.
+const CLOSING_BLOCKS = 6; // heading + five paragraphs
+function assertClosingPageWasUnavoidable(measured, label) {
+  if (measured.pages < 2) return;
+  const group = measured.groupPages[0];
+  if (group.startPage !== measured.pages) return;
+  if (measured.pageBlocks.at(-1) !== CLOSING_BLOCKS) return;
+  const closingHeight = measured.contentTop - measured.pageLowestY.at(-1);
+  const roomBefore = measured.pageLowestY.at(-2) - measured.contentBottom;
+  assert.ok(
+    closingHeight > roomBefore,
+    `${label}: the closing section opened page ${measured.pages} on its own while ` +
+      `${roomBefore.toFixed(1)}pt were still free on the previous page (block is ${closingHeight.toFixed(1)}pt)`,
+  );
+}
+assertClosingPageWasUnavoidable(layout, "narrative report");
+
 // 3. Every section heading lands with body content, never alone at a page foot.
 for (const { section, page } of layout.sectionPages) {
   assert.ok(layout.pageBlocks[page - 1] >= 2, `section "${section}" was stranded on page ${page}`);
 }
 
-// The shape that produced the reported defect: three journey stages plus a
-// four-metric / two-segment cross, whose closing section lands on a page edge.
-const wideRows = [];
-for (let i = 1; i <= 20; i += 1) {
-  const respondent_id = `p-${i}`;
-  const genero = i % 2 ? "F" : "M";
-  wideRows.push(
-    { respondent_id, metric_key: "nps", value: i % 4 === 0 ? 6 : 9, genero },
-    { respondent_id, metric_key: "sat_general", value: 8 + (i % 2) * 0.5, genero },
-    { respondent_id, metric_key: "sat_maestros", value: 7 + (i % 3), genero },
-    { respondent_id, metric_key: "confianza", value: 6 + (i % 3), genero },
-  );
+// 3b. No page may end on a heading. A section or subsection title as the last
+//     drawn block means its content was pushed to the next page - the journey
+//     stage whose title and description stayed behind while its result card
+//     moved on is exactly this shape.
+function assertNoOrphanHeading(measured, label) {
+  for (const [index, kind] of measured.pageLastBlock.entries()) {
+    assert.ok(
+      kind !== "section" && kind !== "subheading",
+      `${label}: page ${index + 1} ends on a ${kind} title, whose content fell to the next page`,
+    );
+  }
 }
+assertNoOrphanHeading(layout, "narrative report");
+
+// The shape that produced the reported defect: twenty respondents answering
+// four metrics, three journey stages and a two-value cross. That inventory -
+// a small-base callout, seven summary cards (two of them CSAT), three stage
+// cards and eight cross cards - is what a full report actually looks like, and
+// it is the shape whose closing section used to land on a page of its own.
+const wideAnswers = [
+  ["F", 10, 10, 8, 6], ["F", 9, 9, 8, 6], ["F", 8, 8, 7, 6], ["F", 6, 7, 7, 6], ["F", 5, 6, 5, 6],
+  ["F", 10, 10, 9, 7], ["F", 9, 10, 9, 7], ["F", 9, 9, 8, 7], ["F", 8, 8, 8, 7], ["F", 6, 8, 6, 7],
+  ["M", 10, 9, 10, 8], ["M", 9, 9, 9, 8], ["M", 8, 8, 8, 8], ["M", 6, 7, 7, 8], ["M", 5, 7, 6, 8],
+  ["M", 10, 10, 10, 9], ["M", 9, 9, 10, 9], ["M", 9, 9, 9, 9], ["M", 8, 8, 8, 9], ["M", 6, 7, 8, 9],
+];
+const wideRows = [];
+wideAnswers.forEach(([genero, nps, satGeneral, satMaestros, confianza], index) => {
+  const respondent_id = `p-${index + 1}`;
+  wideRows.push(
+    { respondent_id, metric_key: "nps", value: nps, genero },
+    { respondent_id, metric_key: "sat_general", value: satGeneral, genero },
+    { respondent_id, metric_key: "sat_maestros", value: satMaestros, genero },
+    { respondent_id, metric_key: "confianza", value: confianza, genero },
+  );
+});
 const { layout: wideLayout } = await buildStudyReport({
-  tenantName: "Colegio de prueba",
-  study: { id: "wide", name: "Estudio con cruce completo", period: "2026", status: "published" },
+  tenantName: "Colegio de prueba (TEST A)",
+  // Branded like a real client report: a display name that differs from the
+  // tenant, a tagline and a study title long enough to wrap. The header is
+  // part of the page-one budget, so a bare fixture would understate it.
+  brand: {
+    version: 1,
+    displayName: "BE COMMUNITY",
+    tagline: "Resultados para decidir con contexto",
+    primaryColor: "#1d4ed8",
+    accentColor: "#2f9e8f",
+    logoPath: null,
+  },
+  study: {
+    id: "wide",
+    name: "Estudio de cruce completo con datos sinteticos",
+    period: "2026 - Validacion controlada",
+    status: "published",
+  },
   rows: wideRows,
   qualitative: [],
   filters: {},
   journeyStages: [
-    { id: "recomendacion", label: "Recomendacion", metric: "nps", description: "Probabilidad de recomendacion." },
-    { id: "satisfaccion", label: "Satisfaccion general", metric: "sat_general", description: "Evaluacion general." },
-    { id: "confianza", label: "Confianza", metric: "confianza", description: "Indicador de confianza." },
+    { id: "recomendacion", label: "Recomendacion", metric: "nps", description: "Probabilidad de recomendacion del estudio sintetico." },
+    { id: "satisfaccion", label: "Satisfaccion general", metric: "sat_general", description: "Evaluacion general de satisfaccion." },
+    { id: "confianza", label: "Confianza", metric: "confianza", description: "Indicador sintetico de confianza." },
   ],
   generatedAt: new Date("2026-08-20T18:00:00-06:00"),
 });
@@ -166,6 +225,67 @@ assert.ok(
   wideLayout.pageBlocks.at(-1) >= 6,
   `the wide report's last page holds only ${wideLayout.pageBlocks.at(-1)} block(s) - the closing section was stranded`,
 );
+assertClosingPageWasUnavoidable(wideLayout, "wide report");
+assertNoOrphanHeading(wideLayout, "wide report");
+// This shape - four metrics, three journey stages and a two-value cross over
+// twenty respondents - is the shape of the accepted acceptance report. It has
+// to read as two full A4 pages, not two pages plus a trailing methodology page.
+assert.equal(
+  wideLayout.pages,
+  2,
+  `the wide report paginates to ${wideLayout.pages} pages; this shape must fit two`,
+);
+assert.ok(
+  wideLayout.pageLowestY.every((lowest) => lowest <= wideLayout.contentTop - 400),
+  `the wide report left a page nearly empty: page lows ${wideLayout.pageLowestY.map((y) => y.toFixed(1)).join(", ")}`,
+);
+
+// A journey stage is one visual unit: its title, its description and its
+// result card. A heading that reserves only a single body line strands itself
+// at the foot of a page while the block it introduces starts on the next one.
+// With this four-line stage description, ten summary metrics put the section
+// title on that boundary and seven put a stage title on it.
+const describedStage =
+  "Primer contacto y bienvenida de la familia. Recoge la claridad de la informacion recibida, " +
+  "el trato del personal de admisiones, los tiempos de respuesta a cada solicitud, la percepcion " +
+  "general sobre el acompanamiento del equipo y la facilidad para completar cada tramite durante " +
+  "todo el proceso de inscripcion al colegio, desde la primera visita al plantel hasta la firma " +
+  "del contrato y la entrega de los materiales del ciclo.";
+const describedLayouts = [];
+for (const metricCount of [7, 10]) {
+  const keys = Array.from({ length: metricCount }, (_, i) => `indicador_${i + 1}`);
+  const describedRows = [];
+  for (let i = 1; i <= 20; i += 1) {
+    const respondent_id = `d-${i}`;
+    const genero = i % 2 ? "F" : "M";
+    describedRows.push({ respondent_id, metric_key: "nps", value: i % 4 === 0 ? 6 : 9, genero });
+    for (const key of keys) describedRows.push({ respondent_id, metric_key: key, value: 7 + (i % 3), genero });
+  }
+  const { layout: describedLayout } = await buildStudyReport({
+    tenantName: "Colegio de prueba",
+    study: { id: `described-${metricCount}`, name: "Estudio con etapas descritas", period: "2026", status: "published" },
+    rows: describedRows,
+    qualitative: [],
+    filters: {},
+    sections: { metrics: true, journey: true, segments: false, qualitative: false, filters: true, pivot: true, report: true, trends: true, narrative: true },
+    journeyStages: [
+      { id: "a", label: "Recomendacion", metric: "nps", description: describedStage },
+      { id: "b", label: "Acompanamiento", metric: keys[0], description: describedStage },
+      { id: "c", label: "Comunicacion", metric: keys[1], description: describedStage },
+    ],
+    generatedAt: new Date("2026-08-20T18:00:00-06:00"),
+  });
+  const label = `described-journey report (${metricCount} metrics)`;
+  assertNoOrphanHeading(describedLayout, label);
+  assertClosingPageWasUnavoidable(describedLayout, label);
+  for (const [index, lowest] of describedLayout.pageLowestY.entries()) {
+    assert.ok(
+      lowest >= describedLayout.footerRuleY + 25,
+      `${label} page ${index + 1} body reaches y=${lowest}, too close to the footer`,
+    );
+  }
+  describedLayouts.push(describedLayout);
+}
 
 // Positive control: a report short enough to fit one page must not be split,
 // which proves the keep-together logic is not simply forcing a page break.
@@ -180,6 +300,8 @@ const { layout: shortLayout } = await buildStudyReport({
   generatedAt: new Date("2026-08-20T18:00:00-06:00"),
 });
 assert.equal(shortLayout.pages, 1, "a short report must stay on one page");
+assertClosingPageWasUnavoidable(shortLayout, "short report");
+assertNoOrphanHeading(shortLayout, "short report");
 assert.ok(shortLayout.pageLowestY[0] >= shortLayout.footerRuleY + 25);
 
 const output = process.env.P4D_SAMPLE_PDF;
@@ -191,5 +313,6 @@ if (output) {
 console.log(
   `server PDF gate: ${parsed.getPageCount()} pages, ${bytes.length} bytes, ` +
     `footer clearance ${layout.footerClearance}pt, blocks/page ${layout.pageBlocks.join("/")}; ` +
-    `wide fixture ${wideLayout.pages} pages, blocks/page ${wideLayout.pageBlocks.join("/")}`,
+    `wide fixture ${wideLayout.pages} pages, blocks/page ${wideLayout.pageBlocks.join("/")}; ` +
+    `described-journey fixtures ${describedLayouts.map((l) => l.pages).join("/")} pages`,
 );
