@@ -144,6 +144,27 @@ human review of that plan before implementing P7. Do not create infrastructure,
 change credentials, rotate keys, alter production data or enable irreversible
 edge controls during the inventory task.
 
+### P7 progress (branch state, not merged)
+
+`docs/P7_PLAN.md` is approved and PRs 2-4 are merged (Worker identity,
+supply-chain gate, executable RLS coverage). PR 5 - the adversarial harness
+foundation - is implemented on `p7d-adversarial-harness` and **not merged**:
+
+- `docs/P7_HARNESS_DESIGN.md` is the approved contract for it.
+- `scripts/lib/{http-harness,harness-browser,harness-fixtures}.mjs` plus
+  `scripts/harness-selftest.mjs` (`npm run test:harness-selftest`) provide the
+  mechanism only. The harness is assertion-neutral: it reaches the app as a
+  named identity and returns sanitized observations.
+- Operation mechanisms are frozen in a checked-in catalog. `auth.login` and
+  `clients.createTenant` were verified to submit natively without client
+  JavaScript and are frozen as `form`; every other Server Action carries the
+  reviewed `browser` mechanism. There is no run-time fallback.
+- Coverage explicitly deferred: a genuinely expired access-token test (N4).
+  Sign-out revokes the refresh session; it does not invalidate an already-issued
+  access JWT before its `exp`, so the executable proof is revoked-refresh.
+- **No security suite has been run.** Suites A, B, C and E remain exactly as
+  recorded in `docs/P7_PLAN.md` §5, and PR 6 (Suite A) has not started.
+
 ## Known constraints carried forward
 
 - **The lockfile has one authoring version: npm 10.9.2.** It is declared in
@@ -169,6 +190,14 @@ edge controls during the inventory task.
   out that exact remote commit in WSL. The verifier clone must be full-history
   and full-blob: Suite D's D-d proves every reachable blob, which a `blob:none`
   partial clone cannot do.
+- **Live browser evidence runs in WSL as a non-root user, with Linux Chrome.**
+  The harness self-test requires a real browser (design §3.2, S0), and it must be
+  the browser's Linux build inside the distribution, selected with `CHROME_PATH`.
+  Run it as an ordinary user rather than root, so the browser sandbox stays on
+  and `--no-sandbox` is never needed. **Never launch the Windows Chrome executable
+  from WSL:** its DevTools endpoint binds on the Windows side and is unreachable
+  from the distribution, and it cannot resolve a Linux profile path, so the run
+  fails at S0 with no browser coverage.
 - `npm run cf:build` can also fail on Windows with OpenNext's documented symlink
   `EPERM`; Cloudflare's Linux branch build is the authoritative bundle check.
 - Local OpenNext output **does** contain inlined environment values:
