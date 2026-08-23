@@ -29,8 +29,8 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
       })}
     </div>
     {current ? <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-baseline justify-between gap-4">
-        <div><p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{current.label}</p><p className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{current.metricKey}</p></div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div className="min-w-0"><p className="break-words text-sm font-semibold text-zinc-900 dark:text-zinc-50">{current.label}</p><p className="break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">{current.metricKey}</p></div>
         <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">{current.visibility === "suppressed" ? "—" : current.value ?? "—"}<span className="ml-1 text-xs font-normal text-zinc-500">{current.kindLabel}</span></p>
       </div>
       {current.description ? <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{current.description}</p> : null}

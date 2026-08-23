@@ -46,10 +46,10 @@ export default function StudyCard({ study, initialDashboard }: { study: Study; i
     });
   }
 
-  return <section id={`study-${study.id}`} className="scroll-mt-6 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+  return <section id={`study-${study.id}`} className="scroll-mt-6 min-w-0 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 className="font-semibold text-zinc-900 dark:text-zinc-50">{study.name}</h3>{study.period ? <p className="text-xs text-zinc-500 dark:text-zinc-400">{study.period}</p> : null}</div>
-      <div className="flex items-center gap-2">{dashboard.sections.report && !view.emptyStudy ? <a href={reportHref} className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200">Descargar informe PDF</a> : null}<span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{study.status}</span></div>
+      <div className="min-w-0"><h3 className="break-words font-semibold text-zinc-900 dark:text-zinc-50">{study.name}</h3>{study.period ? <p className="break-words text-xs text-zinc-500 dark:text-zinc-400">{study.period}</p> : null}</div>
+      <div className="flex flex-wrap items-center gap-2">{dashboard.sections.report && !view.emptyStudy ? <a href={reportHref} className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200">Descargar informe PDF</a> : null}<span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{study.status}</span></div>
     </div>
 
     {view.emptyStudy ? <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">Este estudio todavía no tiene datos cargados.</p> : <div className="mt-4 flex flex-col gap-5">
@@ -63,8 +63,8 @@ export default function StudyCard({ study, initialDashboard }: { study: Study; i
       {view.selectionVisibility === "suppressed" ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">Muestra insuficiente. Se requieren al menos cinco unidades para mostrar resultados segmentados.</div> : null}
       {view.journey.length ? <JourneyMap stages={view.journey} /> : null}
       {view.selectionVisibility !== "suppressed" && !view.emptySelection ? <QualitativeInsights summary={view.qualitative} /> : null}
-      {view.tiles.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{view.tiles.map((metric) => <Tile key={metric.key} metric={metric} />)}</div> : null}
-      {view.averages.length ? <div><h4 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Promedios</h4><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">{view.averages.map((metric) => <Tile key={metric.key} metric={metric} />)}</div></div> : null}
+      {view.tiles.length ? <div className="grid grid-cols-[repeat(auto-fit,minmax(min(7.5rem,100%),1fr))] gap-3 sm:grid-cols-4">{view.tiles.map((metric) => <Tile key={metric.key} metric={metric} />)}</div> : null}
+      {view.averages.length ? <div><h4 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Promedios</h4><div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(min(7.5rem,100%),1fr))] gap-3 sm:grid-cols-4">{view.averages.map((metric) => <Tile key={metric.key} metric={metric} />)}</div></div> : null}
       {view.crossSegment && view.crosses.length ? <div><h4 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Cruce por <span className="font-mono">{view.crossSegment}</span></h4><div className="mt-2 grid gap-4 sm:grid-cols-2">{view.crosses.map((cross) => <div key={cross.metricKey} className="overflow-hidden rounded-lg border border-zinc-200"><div className="bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-600">{label(cross.metricKey)} (promedio)</div><table className="w-full text-sm"><tbody>{cross.rows.map((row) => <tr key={row.segment} className="border-t border-zinc-100"><td className="px-3 py-1.5 text-zinc-700">{row.segment}</td>{row.visibility === "suppressed" ? <td colSpan={2} className="px-3 py-1.5 text-right text-xs font-medium text-amber-700">Muestra insuficiente</td> : <><td className="px-3 py-1.5 text-right font-medium text-zinc-900">{row.value}</td><td className="px-3 py-1.5 text-right text-xs text-zinc-400">n={row.n}</td></>}</tr>)}</tbody></table></div>)}</div></div> : null}
       {view.canPivot ? <PivotExplorer studyId={study.id} filters={filters} allowlist={dashboard.pivotAllowlist} /> : null}
     </div>}
