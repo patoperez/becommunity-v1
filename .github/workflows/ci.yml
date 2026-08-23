@@ -1,0 +1,80 @@
+# Deterministic, credentials-free PR gates (P7, RD3 / R26).
+#
+# One canonical chain: this workflow runs `npm run gates:offline` and nothing
+# else. The chain is defined once, in package.json, so CI and a developer's
+# machine cannot drift apart — there is no second list of steps here to fall out
+# of sync with it.
+#
+#   gates:offline = typecheck · lint · npm test · next build · cf:build · suite:d
+#
+# Live, credential-bearing checks are `npm run gates:live`
+# (test:qualitative-live, test:isolation) and are deliberately NOT run here; nor
+# are test:atomic-live, test:templates-live, test:client-admin-live,
+# test:tenant-branding-live, test:import-center-live or test:responsive-live.
+# `npm run gates` = gates:offline + gates:live, so a green CI run is NOT a green
+# `npm run gates`. It cannot be.
+#
+# The values below are obvious, non-functional canaries. They exist so the build
+# and the scanners have well-formed inputs, and so the secret scanner has a
+# needle to prove it is looking. No repository secret is consumed, and a real key
+# must never appear here.
+#
+# Supply chain of the run itself is pinned: an explicit runner image, an exact
+# Node version, and actions referenced by immutable commit SHA rather than by a
+# mutable tag.
+
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Public by design; inlining these into the client bundle is expected.
+  NEXT_PUBLIC_SUPABASE_URL: https://ci-canary-not-a-real-project.supabase.co
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-canary-anon-value-not-real-0000000000
+
+jobs:
+  gates-offline:
+    name: npm run gates:offline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      # Suite D scans the full git history, so a shallow clone is refused by the
+      # gate itself rather than silently passing.
+      - name: Checkout (full history — Suite D scans it)
+        # actions/checkout v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        # actions/setup-node v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          # Exact version, matching the one this branch was verified against.
+          node-version: 24.11.1
+          cache: npm
+
+      - name: Install from the lockfile
+        run: npm ci
+
+      # No .env file exists on the runner, so OpenNext has nothing to inline —
+      # which is exactly the property the Suite D artifact scan verifies.
+      - name: Credentials-free deterministic gates
+        env:
+          # Needle for the secret scanner, carried under a neutral name and bound
+          # to the real variable name only in the command itself: writing that
+          # name against a literal in a tracked file is exactly what Suite D's
+          # history scan is built to catch, including here. Deliberately NOT
+          # shaped like a real credential — no `sb_secret_` prefix, not a JWT, no
+          # `service_role` substring.
+          CI_CANARY_NEEDLE: ci-canary-value-not-real-00000000000000
+        run: SUPABASE_SERVICE_ROLE_KEY="$CI_CANARY_NEEDLE" npm run gates:offline

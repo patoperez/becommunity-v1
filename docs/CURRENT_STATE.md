@@ -148,8 +148,12 @@ edge controls during the inventory task.
 
 - `npm run cf:build` can fail on Windows with OpenNext's documented symlink
   `EPERM`; Cloudflare's Linux branch build is the authoritative bundle check.
-- Local OpenNext output can contain inlined environment values. `.open-next/`
-  is gitignored; purge partial output after checks and run `npm run test:secrets`.
+- Local OpenNext output **does** contain inlined environment values:
+  `cf:build` writes `.open-next/cloudflare/next-env.mjs` with every variable from
+  a local `.env*` file as a literal. `.open-next/` is gitignored; never deploy or
+  upload it from a machine with a populated `.env.local`, and purge it after
+  checks. `npm run test:secrets` now scans it and fails on exactly this;
+  `npm run suite:d` is the full supply-chain gate and runs on Linux CI.
 - The current synthetic environment is not the final staging/production split.
 - Some P7 controls require decisions or external prerequisites (custom domain,
   production Supabase project, billing/Pro activation). The P7 plan must expose

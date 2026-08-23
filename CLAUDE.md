@@ -94,7 +94,10 @@ npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
 npm test             # complete deterministic suite (23 gates at the P6E baseline)
-npm run gates        # typecheck + build + offline/live isolation/secret gates
+npm run gates        # gates:offline + gates:live (the complete release chain)
+npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
+npm run gates:live   # credential-bearing live checks (qualitative-live, isolation)
+npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + wrangler deploy (Cloudflare Workers)

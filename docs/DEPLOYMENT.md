@@ -166,7 +166,26 @@ How the connected Worker was created — Workers & Pages → **Create** → **Wo
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Plain | Public — safe only because RLS is on every table (§6.3) |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Encrypted secret** | Server only — bypasses RLS. NEVER `NEXT_PUBLIC_*` |
 
-Run `scripts/secret-leak-test.mjs` after a build as a release gate.
+### Secret-leak gate
+
+```bash
+npm run build && npm run cf:build && npm run test:secrets
+```
+
+`npm run test:secrets` scans **both** shipped artifacts: `.next/static` (what the
+browser downloads) and `.open-next` (the Worker bundle). A missing artifact is a
+**failure**, never a skip. On Windows, where `cf:build` hits the documented EPERM
+limitation, run `npm run test:secrets:client` — it scans the client bundle only
+and says so loudly; it is **not** the gate. `npm run suite:d` on Linux CI is.
+
+> **A local OpenNext build inlines your `.env.local`.** `cf:build` writes
+> `.open-next/cloudflare/next-env.mjs` containing every variable from a local
+> `.env*` file **as a literal**, service-role key included. Cloudflare's own build
+> checks out the repository, where no `.env*` file exists, so the deployed Worker
+> is unaffected — its values arrive as runtime bindings. But treat local OpenNext
+> output as secret-bearing: never `cf:deploy` from a machine with a populated
+> `.env.local`, never upload `.open-next` anywhere, and purge it after a check.
+> `npm run test:secrets` now fails on exactly this.
 
 ## Go-live checklist (§6.5 + §9.2)
 
