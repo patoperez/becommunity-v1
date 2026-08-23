@@ -27,7 +27,8 @@ this PR requires human exception approval.
 Two moderate advisories remain. They share one root cause (`uuid` reached
 through `exceljs`), the only offered fix is a **semver-major downgrade** of a
 runtime dependency, and the vulnerable code path is not reachable. They are
-documented in §3, not excepted — Suite D fails on critical/high only.
+**residual, documented and unexcepted** — recorded in §3, never approved away.
+Suite D blocks on critical/high only, so no exception was needed or created.
 
 ---
 
@@ -49,8 +50,8 @@ shipped) · **dev-only** (local tooling and tests).
 | 8 | `miniflare` 4.20260630.0 → **5.20260820.0-alpha** | via `sharp` + `undici` · **high** | `wrangler` → `miniflare` | **dev-only** | Local Worker emulator only; never deployed. The alpha-tagged version is `wrangler` 4.125.0's own exact pin, not a range resolution of ours | `wrangler` 4.125.0 | none |
 | 9 | `wrangler` 4.106.0 → **4.125.0** | via `miniflare` · **high** | direct `devDependencies.wrangler` | **dev-only** | Deploy/preview CLI. Not part of the Worker bundle | patched minor | none |
 | 10 | `@tailwindcss/postcss` 4.3.1 → **4.3.3** | via `postcss` · **moderate** | direct `devDependencies` | **build-time** | Same reasoning as #2 | patched patch release (with `tailwindcss` 4.3.3, which it pins exactly) | none |
-| 11 | `uuid` 8.3.2 | GHSA-w5hq-g745-h8pq missing buffer bounds check · **moderate** | `exceljs` → `uuid` | **Worker runtime (dependency), unreachable code path** | The advisory affects `v3`/`v5`/`v6` **when a `buf` argument is passed**. ExcelJS's only call site is `lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js`, which calls `v4()` with no arguments, on the conditional-formatting **write** path. We only read `.xlsx`, and we load ExcelJS's **prebuilt browser bundle** (`exceljs/dist/exceljs.min.js`, see `src/lib/ingestion/parse.ts`), which carries its own bundled copy — an `overrides` entry would not change the shipped code | **None applied.** npm's only fix is `exceljs@3.4.0`, a semver-major **downgrade** of a runtime dependency | **Moderate, accepted as documented** — see §3 |
-| 12 | `exceljs` 4.4.0 | inherits #11 · **moderate** | direct `dependencies` | same as #11 | same as #11 | same as #11 | **Moderate, accepted as documented** |
+| 11 | `uuid` 8.3.2 | GHSA-w5hq-g745-h8pq missing buffer bounds check · **moderate** | `exceljs` → `uuid` | **Worker runtime (dependency), unreachable code path** | The advisory affects `v3`/`v5`/`v6` **when a `buf` argument is passed**. ExcelJS's only call site is `lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js`, which calls `v4()` with no arguments, on the conditional-formatting **write** path. We only read `.xlsx`, and we load ExcelJS's **prebuilt browser bundle** (`exceljs/dist/exceljs.min.js`, see `src/lib/ingestion/parse.ts`), which carries its own bundled copy — an `overrides` entry would not change the shipped code | **None applied.** npm's only fix is `exceljs@3.4.0`, a semver-major **downgrade** of a runtime dependency | **Moderate — residual, documented, unexcepted** (see §3) |
+| 12 | `exceljs` 4.4.0 | inherits #11 · **moderate** | direct `dependencies` | same as #11 | same as #11 | same as #11 | **Moderate — residual, documented, unexcepted** |
 
 ---
 
@@ -58,10 +59,11 @@ shipped) · **dev-only** (local tooling and tests).
 
 `uuid` (#11) and `exceljs` (#12) — one root cause, two rows.
 
-- **Not excepted.** `security/dependency-exceptions.json` is empty. Suite D fails
-  on critical/high only, so these do not need, and have not received, a §6.3
-  human approval. Nothing in this PR should be described as an approved
-  exception.
+- **Residual, documented, unexcepted.** `security/dependency-exceptions.json` is
+  empty. Suite D blocks on critical/high only, so these two do not need — and
+  have not received — a §6.3 human approval. They are carried openly in this
+  document, not accepted through the register. Nothing in this PR may be
+  described as an approved or accepted exception.
 - **Not remediated**, because the only offered remediation is a major downgrade
   of a runtime dependency, which would be a larger risk than the advisory.
 - **Re-check trigger:** any `exceljs` release that moves off `uuid@8`, or a
@@ -114,9 +116,23 @@ credentials, no network mutation, no writes to the repository.
 
 **Exception register.** `security/dependency-exceptions.json` requires all seven
 §6.3 fields per entry. An entry missing a field, naming a placeholder approver
-(`TBD`, an agent name, …), or carrying a past `review_date` is **rejected and
-counted as a failure** — an incomplete exception makes the gate redder, not
-greener.
+(`TBD`, an agent name, …), carrying a past `review_date`, or using a
+`reachability` value outside `Worker runtime | build-time only | dev-only` is
+**rejected and counted as a failure** — an incomplete exception makes the gate
+redder, not greener.
+
+Identity is matched **exactly**, never by substring
+(`scripts/lib/dependency-exceptions.mjs`). An entry excuses one advisory, on one
+package, at one installed version, at one severity: `package_and_version` is
+parsed as `name@x.y.z` and the version must be one actually installed per the
+lockfile; `advisory_id_and_severity` is parsed as `<GHSA-…|CVE-…> <severity>` and
+both halves must match what npm reports. A free-text field that merely *contains*
+the package name and the advisory id excuses nothing — which is what the previous
+`includes()` matcher would have allowed. A self-test covering wrong version,
+wrong severity, wrong advisory id, wrong package, a name containing the
+vulnerable one, placeholder approver, expired review date, missing field and
+invalid reachability runs inside **D-a on every invocation**, so a regression in
+the matcher shows up as a red gate rather than as a silently widened exception.
 
 ### The two Suite D commands
 
@@ -214,30 +230,60 @@ is the check that this fix did not quietly neuter it.
 
 ## 7. CI (RD3 / R26) — and what it deliberately does not prove
 
-`.github/workflows/ci.yml`, one job on `pull_request`, `permissions: contents:
-read`, full-history checkout (Suite D needs it), Node 24 with npm cache:
+### The three gate commands
 
-```
-npm ci → typecheck → lint → npm test → build → cf:build → suite:d
-```
+One definition each, composed rather than duplicated:
 
-**Excluded, and still manual:** `test:isolation`, `test:qualitative-live`,
-`test:atomic-live`, `test:templates-live`, `test:client-admin-live`,
-`test:tenant-branding-live`, `test:import-center-live`, `test:responsive-live` —
-and therefore `npm run gates`, which chains several of them. Putting synthetic
-identity credentials into CI would create a new secret-handling surface for no
-gain (RD3).
+| Command | Chain | Needs credentials? |
+|---|---|---|
+| `npm run gates:offline` | `typecheck · lint · npm test · next build · cf:build · suite:d` | **No** |
+| `npm run gates:live` | `test:qualitative-live · test:isolation` | **Yes** |
+| `npm run gates` | `gates:offline` then `gates:live` | Yes (via `gates:live`) |
+
+`test:secrets` is **not** called separately after `suite:d`: Suite D's D-e already
+owns the complete artifact scan, and running it twice would imply two authorities
+over the same check. `test:secrets` and `test:secrets:client` remain available on
+their own for a focused run.
+
+`npm run gates` therefore requires a successful `cf:build`, so it is
+**Linux-capable and currently unavailable on the Windows development machine**,
+where `cf:build` hits the documented `EPERM: symlink` limitation. That is stated
+rather than worked around: Suite D is not weakened, and `suite:d:local` is never
+substituted into a chain that claims to be complete.
+
+**`gates:offline` is credentials-free — it is not network-independent.** It
+contacts neither the application, nor Supabase, nor Cloudflare, and it holds no
+credential. But `npm audit` inside Suite D queries the npm advisory service, and
+`npm ci --dry-run` consults the registry, so the chain needs outbound network
+access to npm and its result can change as advisories are published.
+
+### The workflow
+
+`.github/workflows/ci.yml`: one job on `pull_request`, `permissions: contents:
+read`, full-history checkout (Suite D needs it), the explicit runner image
+`ubuntu-24.04`, and Node pinned to the exact `24.11.1` this branch was verified
+against. `actions/checkout` and `actions/setup-node` are referenced by immutable
+commit SHA, with the reviewed v4 release named in a comment beside each.
+
+After `npm ci` the job runs **`npm run gates:offline` and nothing else**. There is
+one canonical chain, defined in `package.json`; the workflow does not restate the
+steps, so CI and a developer's machine cannot drift apart.
+
+**Excluded, and still manual:** `gates:live` (`test:qualitative-live`,
+`test:isolation`) plus `test:atomic-live`, `test:templates-live`,
+`test:client-admin-live`, `test:tenant-branding-live`, `test:import-center-live`
+and `test:responsive-live` — and therefore `npm run gates`, which composes
+`gates:live`. Putting synthetic identity credentials into CI would create a new
+secret-handling surface for no gain (RD3).
 
 Only obvious canary values are supplied, and only where a check needs a
 well-formed input. No repository secret is consumed. Nothing is deployed, no
 artifact is uploaded, and neither Supabase nor Cloudflare is contacted.
 
-**`npm run gates` was not weakened to make CI green.** It gained `lint` (it was
-missing) and otherwise still runs the live suites, so it can only be run by a
-human with credentials. The credentials-free chain is the separately named
-`npm run gates:offline` (`typecheck · lint · test · build · cf:build · suite:d`),
-which is what CI runs. A green CI run is **not** a green `npm run gates`, and no
-document may claim otherwise.
+**`npm run gates` was not weakened to make CI green.** It gained `lint`, and it
+still composes every live suite, so it can only be run by a human with
+credentials. A green CI run is **not** a green `npm run gates`, and no document
+may claim otherwise.
 
 ---
 

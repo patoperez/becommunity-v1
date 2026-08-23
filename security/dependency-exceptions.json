@@ -1,8 +1,12 @@
 {
-  "_purpose": "Dependency advisory exception register (docs/P7_PLAN.md §6.3). Suite D fails on every critical/high npm advisory unless a complete, human-approved entry here names it.",
+  "_purpose": "Dependency advisory exception register (docs/P7_PLAN.md §6.3). Suite D fails on every critical/high npm advisory unless a complete, human-approved entry here names it exactly.",
   "_rules": [
     "An entry needs ALL seven fields. An entry missing one is not an exception; the advisory keeps failing the gate.",
-    "approver must name a real human who approved it. Placeholders (TBD, pending, an agent name) are rejected.",
+    "An entry excuses ONE advisory, on ONE package, at ONE installed version, at ONE severity. Identity is compared exactly, never by substring: a wrong version, a wrong severity, a wrong advisory id, or a package name that merely contains the vulnerable one excuses nothing.",
+    "package_and_version must be exactly `name@x.y.z` (or `@scope/name@x.y.z`) naming the INSTALLED version, not a range or a tag.",
+    "advisory_id_and_severity must be exactly `<GHSA-xxxx-xxxx-xxxx|CVE-YYYY-NNNN> <critical|high|moderate|low>`, and the severity must be the one npm reports.",
+    "reachability must be exactly one of: `Worker runtime`, `build-time only`, `dev-only`.",
+    "approver must name a real human who approved it. Placeholders (TBD, pending, a team, an agent name) are rejected.",
     "review_date must be a future date. A passed review date re-reds the gate.",
     "Never add an entry to make a build green. Remediate first; except only what cannot be remediated compatibly.",
     "Moderate advisories do not need an entry — they are documented in docs/P7_SUPPLY_CHAIN_REVIEW.md."

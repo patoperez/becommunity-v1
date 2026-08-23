@@ -27,21 +27,16 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { scanText, looksBinary } from "./lib/secret-patterns.mjs";
+import {
+  loadRegister,
+  matchesAdvisory,
+  selfTest as exceptionSelfTest,
+} from "./lib/dependency-exceptions.mjs";
 
 const LOCAL_SUBSET = process.argv.includes("--local-subset");
 const EXCEPTIONS_FILE = "security/dependency-exceptions.json";
 const ALLOWED_REGISTRY_HOSTS = new Set(["registry.npmjs.org"]);
 const BLOCKING_SEVERITIES = new Set(["critical", "high"]);
-const REQUIRED_EXCEPTION_FIELDS = [
-  "package_and_version",
-  "advisory_id_and_severity",
-  "dependency_path",
-  "reachability",
-  "compensating_control",
-  "approver",
-  "review_date",
-];
-const PLACEHOLDER_APPROVERS = /^(tbd|todo|pending|n\/a|none|unknown|claude|agent|ai|automated)$/i;
 // Paths that must never have been tracked, at any point in history.
 const FORBIDDEN_HISTORY_PATHS = /(^|\/)\.env(\.|$)/;
 const ENV_EXAMPLE = /(^|\/)\.env\.(example|sample|template)$/;
@@ -78,7 +73,9 @@ function heading(title) {
 
 // ---------------------------------------------------------------------------
 // Exception register (§6.3). An entry missing any of the seven required fields
-// is NOT an exception: the advisory it names keeps failing the gate.
+// is NOT an exception: the advisory it names keeps failing the gate. Parsing and
+// matching live in scripts/lib/dependency-exceptions.mjs so they are directly
+// testable; that module's self-test runs as part of D-a.
 // ---------------------------------------------------------------------------
 function loadExceptions() {
   if (!existsSync(EXCEPTIONS_FILE)) return { valid: [], rejected: [] };
@@ -88,32 +85,27 @@ function loadExceptions() {
   } catch {
     return { valid: [], rejected: [{ reason: `${EXCEPTIONS_FILE} is not valid JSON`, entry: null }] };
   }
-  const valid = [];
-  const rejected = [];
-  for (const entry of parsed.exceptions ?? []) {
-    const missing = REQUIRED_EXCEPTION_FIELDS.filter(
-      (f) => typeof entry?.[f] !== "string" || entry[f].trim() === "",
-    );
-    if (missing.length > 0) {
-      rejected.push({ reason: `missing field(s): ${missing.join(", ")}`, entry });
-      continue;
-    }
-    if (PLACEHOLDER_APPROVERS.test(entry.approver.trim())) {
-      rejected.push({ reason: "approver is a placeholder, not a human approval", entry });
-      continue;
-    }
-    const review = Date.parse(entry.review_date);
-    if (Number.isNaN(review)) {
-      rejected.push({ reason: "review_date is not a parseable date", entry });
-      continue;
-    }
-    if (review < Date.now()) {
-      rejected.push({ reason: `review_date ${entry.review_date} has passed`, entry });
-      continue;
-    }
-    valid.push(entry);
+  return loadRegister(parsed);
+}
+
+/**
+ * The versions actually installed for a vulnerable package, read from the
+ * lockfile node paths npm audit names. An exception must match one of these —
+ * naming some other version excuses nothing.
+ */
+function installedVersionsFor(vuln) {
+  let lock;
+  try {
+    lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+  } catch {
+    return [];
   }
-  return { valid, rejected };
+  const versions = new Set();
+  for (const node of vuln.nodes ?? []) {
+    const entry = lock.packages?.[node];
+    if (entry?.version) versions.add(entry.version);
+  }
+  return [...versions];
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +127,13 @@ function checkAudit() {
       `moderate ${counts.moderate ?? 0}, low ${counts.low ?? 0}`,
   );
 
+  // The matcher decides which advisories can be excused, so a regression in it
+  // silently widens every exception. Prove it still works on every run.
+  const matcherFailures = exceptionSelfTest();
+  matcherFailures.length === 0
+    ? ok("audit", "exception matcher self-test: wrong version/severity/id/package, placeholder approver, expired and incomplete entries all rejected")
+    : matcherFailures.forEach((f) => fail("audit", `exception matcher self-test: ${f}`));
+
   const { valid, rejected } = loadExceptions();
   for (const r of rejected) {
     fail("audit", `incomplete §6.3 exception rejected — ${r.reason}`);
@@ -147,14 +146,16 @@ function checkAudit() {
   for (const [name, vuln] of Object.entries(report.vulnerabilities ?? {})) {
     if (!BLOCKING_SEVERITIES.has(vuln.severity)) continue;
     const advisoryIds = vuln.via
-      .filter((v) => typeof v === "object")
-      .map((v) => String(v.source ?? v.url ?? "").split("/").pop())
+      .filter((v) => typeof v === "object" && v.url)
+      .map((v) => String(v.url).split("/").pop())
       .filter(Boolean);
-    const excused = valid.some(
-      (e) =>
-        e.package_and_version.toLowerCase().includes(name.toLowerCase()) &&
-        advisoryIds.some((id) => e.advisory_id_and_severity.includes(id)),
-    );
+    const advisory = {
+      name,
+      severity: vuln.severity,
+      advisoryIds,
+      installedVersions: installedVersionsFor(vuln),
+    };
+    const excused = valid.some((v) => matchesAdvisory(v, advisory));
     if (excused) {
       info(`${name} (${vuln.severity}) carried by an approved §6.3 exception`);
       continue;

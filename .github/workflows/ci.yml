@@ -1,20 +1,27 @@
 # Deterministic, credentials-free PR gates (P7, RD3 / R26).
 #
-# Scope, deliberately: this workflow runs ONLY checks that need no real
-# credential and mutate nothing. It never touches Supabase or Cloudflare, never
-# deploys, and never uploads a build artifact — `.open-next` can contain
-# environment values inlined at build time, so it must not leave the runner.
+# One canonical chain: this workflow runs `npm run gates:offline` and nothing
+# else. The chain is defined once, in package.json, so CI and a developer's
+# machine cannot drift apart — there is no second list of steps here to fall out
+# of sync with it.
 #
-# Live, credential-bearing suites stay MANUAL and are NOT run here:
-#   test:isolation · test:qualitative-live · test:atomic-live · test:templates-live
-#   test:client-admin-live · test:tenant-branding-live · test:import-center-live
-#   test:responsive-live · and `npm run gates`, which chains several of them.
-# CI passing therefore does not mean `npm run gates` passed. It cannot.
+#   gates:offline = typecheck · lint · npm test · next build · cf:build · suite:d
+#
+# Live, credential-bearing checks are `npm run gates:live`
+# (test:qualitative-live, test:isolation) and are deliberately NOT run here; nor
+# are test:atomic-live, test:templates-live, test:client-admin-live,
+# test:tenant-branding-live, test:import-center-live or test:responsive-live.
+# `npm run gates` = gates:offline + gates:live, so a green CI run is NOT a green
+# `npm run gates`. It cannot be.
 #
 # The values below are obvious, non-functional canaries. They exist so the build
 # and the scanners have well-formed inputs, and so the secret scanner has a
-# needle to prove it is looking. A real key must never appear here or in
-# repository secrets consumed by this workflow.
+# needle to prove it is looking. No repository secret is consumed, and a real key
+# must never appear here.
+#
+# Supply chain of the run itself is pinned: an explicit runner image, an exact
+# Node version, and actions referenced by immutable commit SHA rather than by a
+# mutable tag.
 
 name: CI
 
@@ -34,53 +41,40 @@ env:
   NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-canary-anon-value-not-real-0000000000
 
 jobs:
-  deterministic-gates:
-    name: typecheck · lint · offline tests · build · OpenNext · Suite D
-    runs-on: ubuntu-latest
+  gates-offline:
+    name: npm run gates:offline
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
       # Suite D scans the full git history, so a shallow clone is refused by the
       # gate itself rather than silently passing.
       - name: Checkout (full history — Suite D scans it)
-        uses: actions/checkout@v4
+        # actions/checkout v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        # actions/setup-node v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
+          # Exact version, matching the one this branch was verified against.
+          node-version: 24.11.1
           cache: npm
 
       - name: Install from the lockfile
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Offline test suite
-        run: npm test
-
-      - name: Next build
-        run: npm run build
-
       # No .env file exists on the runner, so OpenNext has nothing to inline —
       # which is exactly the property the Suite D artifact scan verifies.
-      - name: OpenNext (Cloudflare) build
-        run: npm run cf:build
-
-      # The needle is carried in a neutrally named variable and bound to the
-      # real name only at the moment of the call. Writing
-      # `SUPABASE_SERVICE_ROLE_KEY: <literal>` in a tracked file is exactly the
-      # pattern Suite D's history scan exists to catch — including here.
-      - name: Suite D — secrets and supply chain
+      - name: Credentials-free deterministic gates
         env:
-          # Deliberately NOT shaped like a real credential: no `sb_secret_`
-          # prefix, not a JWT, no `service_role` substring — so it exercises the
-          # scanner without tripping the value-independent secret classes.
+          # Needle for the secret scanner, carried under a neutral name and bound
+          # to the real variable name only in the command itself: writing that
+          # name against a literal in a tracked file is exactly what Suite D's
+          # history scan is built to catch, including here. Deliberately NOT
+          # shaped like a real credential — no `sb_secret_` prefix, not a JWT, no
+          # `service_role` substring.
           CI_CANARY_NEEDLE: ci-canary-value-not-real-00000000000000
-        run: SUPABASE_SERVICE_ROLE_KEY="$CI_CANARY_NEEDLE" npm run suite:d
+        run: SUPABASE_SERVICE_ROLE_KEY="$CI_CANARY_NEEDLE" npm run gates:offline
