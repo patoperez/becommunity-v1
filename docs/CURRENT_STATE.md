@@ -29,14 +29,12 @@ must use documented authoritative definitions rather than invented rules.
 
 ## Verified source and deployment baseline
 
-- Application-code baseline: `1a95cdf6081b07871153a5ce98f2db11cca2e7bb`
-  (`P6E: restore CSV/XLSX ingestion on Cloudflare Workers (#24)`). PR #25
-  updated documentation only; always start new work from the current
-  `origin/main` rather than treating this application baseline as the branch tip.
-- Worker version verified during P6E acceptance:
-  `d43ff9ab-b837-49f2-8c34-03b0f236096e`. Later documentation-only merges may
-  produce a new Cloudflare version ID with the same application code; confirm
-  the current deployment rather than treating this ID as permanent.
+- Current `main`: `2fe76705cf2b98439b37cc6ff9a79c3f147f41d1`
+  (`fix(p6): keep the dashboard inside narrow viewports and fit the report into
+  two pages (#28)`). Always verify `origin/main` before beginning new work.
+- Worker version deployed after the P6 closure:
+  `0454021a-e307-430b-bb36-27612b5faa0c` (100% traffic). Version IDs are not
+  permanent identifiers; confirm the current deployment before release work.
 - Production URL: `https://becommunity-v1.ollinagencyllc.workers.dev`
 - The connected Supabase project contains **synthetic test data only**. This is
   not yet the separate real-client production environment required at go-live.
@@ -91,30 +89,42 @@ Technical production acceptance completed with **108 checks and 0 failures**:
 The two older `Satisfacción 2026 (TEST)` studies remain draft and must not be
 published, modified or deleted during this acceptance work.
 
-## Current task — finish P6 human visual acceptance
+## P6 closure record
 
-Human review passed desktop client behavior, Tenant B isolation, internal/CEO
-navigation, logged-out boundaries, calculations and PDF content. It found two
-genuine visual defects:
+PR #28 corrected the narrow-mobile min-content overflow and rebalanced the
+server PDF into two readable pages without changing calculations, ingestion,
+RLS, roles or data. The focused responsive matrix, PDF layout invariants, full
+23-gate suite, typecheck, lint and build passed. The accepted production-shaped
+PDF retained metric parity and the human reviewer confirmed the real-phone
+layout. The PR was squash-merged and the post-merge Worker health check returned
+200 with Supabase connected. **P6 is closed.**
 
-1. **Narrow-mobile document overflow.** On the data-rich Tenant A dashboard,
-   the blue header ends at the real viewport edge while the study card widens
-   the document to the right. Content beyond the viewport is clipped on the
-   phone. Find the actual min-content/flex/grid cause. Do not hide it with a
-   global `overflow-x: hidden`; any necessary horizontal scroll must remain
-   contained inside the relevant table/chart component.
-2. **PDF pagination.** The accepted report has correct content and calculations,
-   but page two pressures/clips its footer and the final methodology disclaimer
-   is orphaned on an otherwise mostly empty third page. Rebalance pagination
-   without shrinking text to an uncomfortable size or changing calculations.
+## Current task — plan and execute P7 hardening
 
-The next code change must be a narrow P6 visual-fix PR. It must preserve
-formulas, ingestion, RLS, roles and synthetic data, and it must stop for review
-before merge/deployment. After it merges, repeat only the targeted mobile/PDF
-human checks plus quick Tenant B/internal smoke tests.
+P7 is the final V2 hardening and go-live-preparedness phase, not a feature
+reprioritization. Its acceptance gate is: all adversarial suites A-E green and a
+backup restore tested. The complete intended scope is:
 
-P6 is closed only after those checks pass. **Then** begin P7 from a separate,
-explicitly planned task.
+- reconcile and run tenant-isolation, authorization, input/injection,
+  secrets/supply-chain and edge/auth-resilience suites;
+- audit logging for authentication, administrative mutations and imports, plus
+  actionable anomaly alerting;
+- a backup mechanism suitable for the current tier and a demonstrated restore;
+- an incident playbook covering key rotation, session revocation, containment,
+  recovery and verification;
+- production-branch hygiene and a deliberate deploy strategy;
+- monitoring and the remaining Cloudflare/Supabase go-live controls;
+- separate production Supabase provisioning and the Pro upgrade trigger before
+  any real client receives a link.
+
+Begin with a read-only evidence inventory against the architecture,
+`docs/GO_LIVE_SECURITY.md`, `docs/OPERATIONS.md`, current code, migrations,
+scripts and live test environment. Produce a phased `docs/P7_PLAN.md` that
+separates work executable now from controls blocked on a custom domain, a new
+production Supabase project, billing decisions or real-client go-live. Stop for
+human review of that plan before implementing P7. Do not create infrastructure,
+change credentials, rotate keys, alter production data or enable irreversible
+edge controls during the inventory task.
 
 ## Known constraints carried forward
 
@@ -123,11 +133,10 @@ explicitly planned task.
 - Local OpenNext output can contain inlined environment values. `.open-next/`
   is gitignored; purge partial output after checks and run `npm run test:secrets`.
 - The current synthetic environment is not the final staging/production split.
-- P7/go-live work still includes the full adversarial audit, audit logging and
-  alerts, backup/restore proof, incident playbook, edge controls, monitoring,
-  clean production branch, separate production Supabase project and the Pro
-  upgrade trigger documented in `docs/GO_LIVE_SECURITY.md` and
-  `docs/OPERATIONS.md`.
+- Some P7 controls require decisions or external prerequisites (custom domain,
+  production Supabase project, billing/Pro activation). The P7 plan must expose
+  these dependencies rather than silently skipping them or treating them as
+  already complete.
 
 ## Required verification discipline
 

@@ -60,8 +60,8 @@ free-tier anti-pause): [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Current state
 
-P0-P6 are implemented and technically accepted with synthetic data. Two P6
-visual defects remain before P7: narrow-mobile dashboard overflow and PDF
-pagination polish. Read [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before
-starting or handing off work; historical audit/phase documents are not the
-authoritative current status.
+P0-P6 are implemented, technically accepted and human-accepted with synthetic
+data. The remaining mobile and PDF defects were fixed and deployed in PR #28;
+P6 is closed. P7 full hardening and go-live preparedness is now the active
+phase. Read [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or
+handing off work; historical audit/phase documents are not authoritative.
