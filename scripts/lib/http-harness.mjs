@@ -23,7 +23,11 @@ import { browserDriverFor, hasBrowserDriver } from "./harness-browser.mjs";
 // Vocabulary
 // ---------------------------------------------------------------------------
 
-export const ACTOR_IDS = ["tenantA", "tenantB", "internal", "anonymous", "invalidToken"];
+// `scopedClient` is Suite A's temporary restricted-scope identity (PR 6): a real
+// `client` in an existing synthetic tenant whose profile carries a non-empty
+// `data_scope`. It is an ordinary actor here — the harness knows nothing about
+// what its scope means, exactly as it knows nothing about tenancy.
+export const ACTOR_IDS = ["tenantA", "tenantB", "internal", "scopedClient", "anonymous", "invalidToken"];
 export const MECHANISMS = ["http", "form", "browser"];
 /** No "expired" member: N4 is deferred and must never be simulated by N3 (§3.4). */
 export const SESSION_KINDS = ["live", "invalid", "revoked_refresh", "none"];
@@ -187,6 +191,11 @@ export const OPERATIONS = Object.freeze({
   "health.get": page("health.get", "/api/health"),
   "report.download": page("report.download", "/api/studies/:studyId/report", {
     successSignalHeader: { header: "content-type", contains: "application/pdf" },
+    // The route's own public contract is `f.<dimension>=<value>` query
+    // parameters (`src/lib/reporting/filters.ts`). Declaring it in the frozen
+    // catalogue is what lets `run()` append them: a caller cannot improvise a
+    // query on an operation that has not been reviewed for one.
+    acceptsQuery: true,
   }),
   "qualitative.selectStudy": page("qualitative.selectStudy", "/admin/qualitative", {
     urlClass: "/admin/qualitative?study=:studyId",
@@ -493,7 +502,7 @@ export async function createHarness(options) {
   // --- the http mechanism ---------------------------------------------------
 
   async function httpRun(a, op, params) {
-    const path = fillPath(op.path ?? op.urlClass, params);
+    const path = fillPath(op.path ?? op.urlClass, params) + queryFor(op, params);
     const started = now();
     let response = null;
     let transportError = false;
@@ -597,6 +606,26 @@ export async function createHarness(options) {
       errorCategory: classify(observation),
       durationMs,
     });
+  }
+
+  /**
+   * Query parameters, only for an operation the frozen catalogue declares as
+   * accepting them. `params.query` is an array of `[key, value]` pairs so a
+   * deliberately repeated key stays expressible — the duplicate-parameter case
+   * is itself part of what a suite may want to probe. The recorded `urlClass`
+   * is the unchanged template, so nothing here reaches the evidence ledger.
+   */
+  function queryFor(op, params = {}) {
+    const pairs = params.query;
+    if (pairs === undefined) return "";
+    if (!op.acceptsQuery) {
+      throw new Error(`operation "${op.name}" does not declare acceptsQuery — refusing to append a query`);
+    }
+    if (!Array.isArray(pairs)) throw new Error("params.query must be an array of [key, value] pairs");
+    const search = new URLSearchParams();
+    for (const [key, value] of pairs) search.append(String(key), String(value));
+    const encoded = search.toString();
+    return encoded ? `?${encoded}` : "";
   }
 
   function fillPath(template, params = {}) {
