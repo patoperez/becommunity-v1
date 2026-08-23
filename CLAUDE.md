@@ -87,6 +87,13 @@ data-connected journey maps for the firm's clients (schools).
 - **Plan before code.** Propose a plan; wait for approval before writing, especially for security-adjacent work.
 - One task at a time on a given set of files.
 - Verify every npm package before install (it exists, correct name, no known CVE). Pin versions (runtime deps are exact-pinned; keep it so).
+- ⓘ **Regenerate `package-lock.json` only under npm 10.9.2** — the version
+  declared in `package.json` (`packageManager`) and enforced by CI and Suite D's
+  **D-f**. npm 11 prunes peer nodes beneath platform-excluded optional
+  dependencies; npm 10 (which Cloudflare's build image runs) still requires them,
+  so an npm 11 regeneration passes every local gate and then fails the deploy
+  build with `npm ci … Missing: @emnapi/…`. Never repair that by hand-editing the
+  lockfile or by adding an install bypass flag.
 - Migrations are versioned in git, applied to **staging first**, tested, then production. Never edit production schema/policies directly.
 - Separate Supabase projects for dev/staging vs production. Real client data never enters staging.
 - **Production repo stays clean:** no `CLAUDE.md`-style files, AI comments, or `§`/`Section` prompt-doc citations, or prompt files committed to production branches. *(Audit: `main` currently carries `CLAUDE.md`, `AGENTS.md`, `system_context.md`, `docs/FASE_*`, and §-citations in source — strip these on the production branch.)*
@@ -108,9 +115,33 @@ npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + wrangler deploy (Cloudflare Workers)
 ```
 
-`npm run cf:build` has a documented Windows symlink limitation. A plain
-`npm run build` must still pass locally; validate the OpenNext bundle through
-Cloudflare's Linux branch build when Windows returns `EPERM`.
+### Where these commands may run ⓘ
+
+**Do not run repository npm lifecycle commands from Windows on this
+workstation.** That includes `npm install`, `npm ci`, `npm test`,
+`npm run build`, `npm run cf:build` and any gate chain
+(`gates`, `gates:offline`, `suite:d`, `suite:d:local`).
+
+Smart App Control is enabled here and blocks Cloudflare's unsigned
+`workerd.exe`. The boundary is **not** limited to `cf:build`: a plain `npm ci`
+runs package lifecycle/install validation that loads that binary, and Windows
+Code Integrity event 3077 has recorded exactly that. Do not disable Smart App
+Control and do not attempt a per-file bypass.
+
+- **Windows** is for editing, Git operations, and static/non-Node inspection
+  (`git diff --check`, reading files, reviewing a diff).
+- **Node/npm verification runs in WSL 2 Ubuntu or Linux CI.** Verifier:
+  `/root/becommunity-software`, Node 24.11.1, npm 10.9.2.
+- The Windows and WSL clones **do not auto-synchronize**. Push the exact commit
+  from the Windows editing tree, then `fetch` and check out that exact remote
+  commit in WSL before testing. Never assume the verifier already has your work.
+- Suite D's D-d scans every reachable blob, so the verifier clone must be a
+  full-history, full-blob clone — a `blob:none` partial clone cannot prove it.
+
+Never claim a Windows npm command was avoided unless the Code Integrity
+evidence supports it. The older note that "a plain `npm run build` must still
+pass locally" does not hold on this machine; Cloudflare's Linux branch build and
+the WSL verifier are the authoritative build checks.
 
 ## Build order (V2) — do not skip ahead
 P0 Security hardening (headers, WAF, rate limits, secret hygiene, staging/prod split, **least-privilege grants**, **Zod at all boundaries**, **prove RLS at runtime**)
