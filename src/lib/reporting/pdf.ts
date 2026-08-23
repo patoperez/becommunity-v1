@@ -25,12 +25,41 @@ const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 48;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+const CONTENT_TOP = PAGE_HEIGHT - MARGIN;
+// Footer geometry. CONTENT_BOTTOM is the lowest the body cursor may reach, so
+// every page keeps a real gap between its last line of text and the footer rule
+// instead of running the text down onto it.
+const FOOTER_RULE_Y = 42;
+const FOOTER_TEXT_Y = 27;
+const CONTENT_BOTTOM = 72;
+const FOOTER_CLEARANCE = CONTENT_BOTTOM - FOOTER_RULE_Y;
 
 const INK = rgb(0.11, 0.12, 0.15);
 const MUTED = rgb(0.38, 0.4, 0.45);
 const LINE = rgb(0.86, 0.87, 0.9);
 const WARNING = rgb(0.64, 0.38, 0.04);
 const WARNING_LIGHT = rgb(1, 0.97, 0.86);
+
+/**
+ * Pagination facts measured while the report is written. Exposed so layout
+ * invariants (footer clearance, an orphaned closing section) can be asserted
+ * deterministically instead of eyeballing the rendered file.
+ */
+export type ReportLayout = {
+  pages: number;
+  contentTop: number;
+  contentBottom: number;
+  footerRuleY: number;
+  footerClearance: number;
+  /** Lowest body cursor reached on each page. */
+  pageLowestY: number[];
+  /** Number of drawn body blocks on each page. */
+  pageBlocks: number[];
+  /** Page (1-based) each section heading was placed on. */
+  sectionPages: { section: string; page: number }[];
+  /** First and last page of each keep-together block; equal when unsplit. */
+  groupPages: { startPage: number; endPage: number }[];
+};
 
 export type StudyPdfInput = {
   tenantName: string;
@@ -85,6 +114,14 @@ function wrap(text: string, font: PDFFont, size: number, maxWidth: number): stri
 class ReportWriter {
   private page!: PDFPage;
   private y = 0;
+  private pageIndex = -1;
+  // Dry mode measures a block's height without drawing it or breaking a page,
+  // which is what makes keep-together (`group`) possible.
+  private dry = false;
+  private readonly lowest: number[] = [];
+  private readonly blocks: number[] = [];
+  private readonly sections: { section: string; page: number }[] = [];
+  private readonly groups: { startPage: number; endPage: number }[] = [];
 
   constructor(
     private readonly pdf: PDFDocument,
@@ -99,11 +136,41 @@ class ReportWriter {
 
   private addPage() {
     this.page = this.pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-    this.y = PAGE_HEIGHT - MARGIN;
+    this.y = CONTENT_TOP;
+    this.pageIndex += 1;
+    this.lowest[this.pageIndex] = CONTENT_TOP;
+    this.blocks[this.pageIndex] = 0;
+  }
+
+  private mark() {
+    if (this.dry) return;
+    this.lowest[this.pageIndex] = Math.min(this.lowest[this.pageIndex], this.y);
+    this.blocks[this.pageIndex] += 1;
   }
 
   private ensure(height: number) {
-    if (this.y - height < 58) this.addPage();
+    if (this.dry) return;
+    if (this.y - height < CONTENT_BOTTOM) this.addPage();
+  }
+
+  /**
+   * Keeps a whole block on one page. The block is measured first; if it does
+   * not fit in the room left on the current page it starts on the next one, so
+   * a closing section never strands a single paragraph on its own.
+   */
+  group(render: () => void) {
+    const startY = this.y;
+    this.dry = true;
+    render();
+    const height = startY - this.y;
+    this.dry = false;
+    this.y = startY;
+    // A block taller than a whole page has to flow anyway; forcing a break
+    // there would waste a page without keeping anything together.
+    if (height <= CONTENT_TOP - CONTENT_BOTTOM) this.ensure(height);
+    const startPage = this.pageIndex + 1;
+    render();
+    this.groups.push({ startPage, endPage: this.pageIndex + 1 });
   }
 
   gap(points: number) {
@@ -112,6 +179,10 @@ class ReportWriter {
 
   rule() {
     this.ensure(10);
+    if (this.dry) {
+      this.y -= 10;
+      return;
+    }
     this.page.drawLine({
       start: { x: MARGIN, y: this.y },
       end: { x: PAGE_WIDTH - MARGIN, y: this.y },
@@ -139,16 +210,19 @@ class ReportWriter {
     const lines = wrap(value, font, size, options.maxWidth ?? CONTENT_WIDTH - indent);
     this.ensure(lines.length * lineHeight + 2);
     for (const line of lines) {
-      this.page.drawText(line, {
-        x: MARGIN + indent,
-        y: this.y - size,
-        size,
-        font,
-        color: options.color ?? INK,
-      });
+      if (!this.dry) {
+        this.page.drawText(line, {
+          x: MARGIN + indent,
+          y: this.y - size,
+          size,
+          font,
+          color: options.color ?? INK,
+        });
+      }
       this.y -= lineHeight;
     }
     this.y -= 2;
+    this.mark();
   }
 
   title(value: string) {
@@ -156,8 +230,11 @@ class ReportWriter {
   }
 
   section(value: string) {
-    this.ensure(34);
+    // Reserve the lead-in gap, the heading, its rule and one body line so a
+    // section title can never be stranded at the foot of a page.
+    this.ensure(8 + 19 + 2 + 10 + 15);
     this.y -= 8;
+    if (!this.dry) this.sections.push({ section: value, page: this.pageIndex + 1 });
     this.text(value, { size: 15, bold: true, color: this.brandColor, lineHeight: 19 });
     this.rule();
   }
@@ -173,6 +250,10 @@ class ReportWriter {
     const lines = wrap(value, this.regular, fontSize, CONTENT_WIDTH - 24);
     const height = lines.length * 13 + 18;
     this.ensure(height + 4);
+    if (this.dry) {
+      this.y -= height + 6;
+      return;
+    }
     this.page.drawRectangle({
       x: MARGIN,
       y: this.y - height,
@@ -192,10 +273,15 @@ class ReportWriter {
       lineY -= 13;
     }
     this.y -= height + 6;
+    this.mark();
   }
 
   metric(label: string, value: string, detail: string, suppressed = false) {
     this.ensure(42);
+    if (this.dry) {
+      this.y -= 42;
+      return;
+    }
     this.page.drawRectangle({
       x: MARGIN,
       y: this.y - 35,
@@ -230,20 +316,35 @@ class ReportWriter {
       });
     }
     this.y -= 42;
+    this.mark();
+  }
+
+  layout(): ReportLayout {
+    return {
+      pages: this.pdf.getPageCount(),
+      contentTop: CONTENT_TOP,
+      contentBottom: CONTENT_BOTTOM,
+      footerRuleY: FOOTER_RULE_Y,
+      footerClearance: FOOTER_CLEARANCE,
+      pageLowestY: [...this.lowest],
+      pageBlocks: [...this.blocks],
+      sectionPages: [...this.sections],
+      groupPages: [...this.groups],
+    };
   }
 
   finalize() {
     const pages = this.pdf.getPages();
     pages.forEach((page, index) => {
       page.drawLine({
-        start: { x: MARGIN, y: 42 },
-        end: { x: PAGE_WIDTH - MARGIN, y: 42 },
+        start: { x: MARGIN, y: FOOTER_RULE_Y },
+        end: { x: PAGE_WIDTH - MARGIN, y: FOOTER_RULE_Y },
         thickness: 0.5,
         color: LINE,
       });
       page.drawText(safeText(`Be Community - ${this.studyName}`), {
         x: MARGIN,
-        y: 27,
+        y: FOOTER_TEXT_Y,
         size: 7.5,
         font: this.regular,
         color: MUTED,
@@ -252,7 +353,7 @@ class ReportWriter {
       const width = this.regular.widthOfTextAtSize(pageLabel, 7.5);
       page.drawText(pageLabel, {
         x: PAGE_WIDTH - MARGIN - width,
-        y: 27,
+        y: FOOTER_TEXT_Y,
         size: 7.5,
         font: this.regular,
         color: MUTED,
@@ -269,6 +370,12 @@ function distinctUnits(rows: LongRow[], qualitative: ConfirmedQualitative[]): nu
 }
 
 export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
+  return (await buildStudyReport(input)).bytes;
+}
+
+export async function buildStudyReport(
+  input: StudyPdfInput,
+): Promise<{ bytes: Uint8Array; layout: ReportLayout }> {
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -439,13 +546,17 @@ export async function buildStudyPdf(input: StudyPdfInput): Promise<Uint8Array> {
 
   }
 
-  writer.section("Metodologia y lectura");
-  writer.text("Este informe fue generado en el servidor desde el modelo canonico del estudio y con la sesion autenticada del usuario. La seguridad por filas limita la consulta al cliente correspondiente.", { size: 9.5 });
-  writer.text("Los indicadores usan las mismas funciones canonicas del dashboard. Los valores se redondean una sola vez en la frontera de presentacion; el PDF no recalcula con formulas alternativas.", { size: 9.5 });
-  writer.text("Control de divulgacion: n=0 se presenta como sin datos; n=1-4 se suprime; n=5-29 se muestra con advertencia de base pequena; n>=30 se muestra de forma estandar. La regla se vuelve a aplicar despues de los filtros.", { size: 9.5 });
-  writer.text("Los hallazgos cualitativos proceden exclusivamente de decisiones humanas confirmadas. Solo se incluyen citas aprobadas de manera independiente; el texto crudo y las sugerencias automaticas no forman parte del informe.", { size: 9.5 });
-  writer.text("Documento informativo. La interpretacion final y las recomendaciones de negocio requieren criterio profesional y el contexto del estudio.", { size: 9.5, color: MUTED });
+  // The closing section reads as one statement, so it is placed as one block:
+  // either it fits where it falls, or it starts on the next page complete.
+  writer.group(() => {
+    writer.section("Metodologia y lectura");
+    writer.text("Este informe fue generado en el servidor desde el modelo canonico del estudio y con la sesion autenticada del usuario. La seguridad por filas limita la consulta al cliente correspondiente.", { size: 9.5 });
+    writer.text("Los indicadores usan las mismas funciones canonicas del dashboard. Los valores se redondean una sola vez en la frontera de presentacion; el PDF no recalcula con formulas alternativas.", { size: 9.5 });
+    writer.text("Control de divulgacion: n=0 se presenta como sin datos; n=1-4 se suprime; n=5-29 se muestra con advertencia de base pequena; n>=30 se muestra de forma estandar. La regla se vuelve a aplicar despues de los filtros.", { size: 9.5 });
+    writer.text("Los hallazgos cualitativos proceden exclusivamente de decisiones humanas confirmadas. Solo se incluyen citas aprobadas de manera independiente; el texto crudo y las sugerencias automaticas no forman parte del informe.", { size: 9.5 });
+    writer.text("Documento informativo. La interpretacion final y las recomendaciones de negocio requieren criterio profesional y el contexto del estudio.", { size: 9.5, color: MUTED });
+  });
 
   writer.finalize();
-  return pdf.save();
+  return { bytes: await pdf.save(), layout: writer.layout() };
 }
