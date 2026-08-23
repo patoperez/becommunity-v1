@@ -3,6 +3,11 @@
 -- =============================================================================
 -- The single most common and most serious mistake is leaving a public table
 -- without RLS. These checks must pass before any real data is loaded.
+--
+-- This file is the MANUAL diagnostic and is kept as such. The executable gate is
+-- `npm run test:rls-coverage`, which asserts the same three checks through
+-- migration 0014's metadata-only reporting function. Run the gate before every
+-- merge/deploy; run these queries when you want to look at the catalog yourself.
 
 -- 1) Tables in the public schema WITHOUT RLS enabled. MUST return zero rows.
 select c.relname as table_without_rls

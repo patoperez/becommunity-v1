@@ -44,9 +44,12 @@ data-connected journey maps for the firm's clients (schools).
 ### Security (see system_context.md for the honest security goal)
 - The goal is **defense in depth, minimal attack surface, contained blast radius, and detection** — NOT "impenetrable" (no system is; claiming it breeds dangerous overconfidence).
 - **RLS on every public table, no exceptions.** A public table without RLS is a
-  leak. Coverage is tested before every deploy across the base schema and every
-  later migration; `supabase/tests/rls_coverage.sql` must return zero uncovered
-  tables.
+  leak. `npm run test:rls-coverage` is the executable pre-merge/pre-deploy check:
+  it reads the coverage inventory through migration `0014`'s metadata-only
+  reporting function and must report zero uncovered tables, and it proves in the
+  same run that `anon` and `authenticated` cannot execute that function.
+  `supabase/tests/rls_coverage.sql` remains the equivalent manual diagnostic for
+  the SQL editor.
 - **Authorization is enforced server-side on every route and mutation**, never only in the frontend. Hiding a UI element is not access control. Session checks use `getUser()`, **never `getSession()`**, for any auth decision.
 - ⓘ **Least privilege at the database, not just the UI.** Client-role users are
   read-only at the RLS/grant level through migration
@@ -96,7 +99,8 @@ npm run lint         # eslint
 npm test             # complete deterministic suite (23 gates at the P6E baseline)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
-npm run gates:live   # credential-bearing live checks (qualitative-live, isolation)
+npm run gates:live   # credential-bearing live checks (qualitative-live, isolation, rls-coverage)
+npm run test:rls-coverage # live RLS coverage + 0014 privilege model (service_role / anon / authenticated)
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
