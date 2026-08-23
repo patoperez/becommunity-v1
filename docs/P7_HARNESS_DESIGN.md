@@ -6,6 +6,10 @@
 > document. Per §6.1, PR 5 does not start until a human approves this note.
 > **Evidence date:** 2026-08-22 (local), against `origin/main`
 > `4d7974c7f1e2224dab1a95bee25f2e3145598cae`.
+> **Review status:** the design direction was approved on 2026-08-23, together
+> with both open decisions (H1 and H2, now recorded as resolved in §11). This
+> revision applies the reviewer's required corrections; it remains
+> documentation-only and PR 5 implementation has not begun.
 > Read `CLAUDE.md`, `docs/CURRENT_STATE.md` and `docs/P7_PLAN.md` first; this
 > document does not replace them and cannot relax them.
 
@@ -201,24 +205,39 @@ action-bound `<form>`, but the *content* is client-generated.
 M-D1–M-D6 have no form binding at all. M-D4 takes a bare string. These cannot be
 progressively enhanced by construction.
 
-**Behavioral proof (required before any suite relies on it).** The harness
-classifies a surface as progressive-enhancement-capable only after
-`assertDegrades()` (§8) has, in a browser context created with **JavaScript
-disabled**, loaded the page, submitted the form through the browser's own native
-HTML form machinery, and observed the application's expected server-side outcome.
-No harness code reads, parses or transmits the hidden fields the framework places
-in that form — the browser submits them as part of its own DOM, exactly as a
-no-JS user agent does. If `assertDegrades()` fails for a surface, that surface is
-**automatically demoted to the browser mechanism** (§2.2). Demotion is a
-pre-authorized, recorded outcome, not a design gap.
+**Behavioral proof, then a frozen catalog entry (required before any suite
+relies on it).** `assertDegrades()` (§8.3) is a **discovery tool used during PR 5
+implementation**, not a run-time selector. It loads the page in a browser context
+created with **JavaScript disabled**, submits the form through the browser's own
+native HTML form machinery, and observes the application's expected server-side
+outcome. No harness code reads, parses or transmits the hidden fields the
+framework places in that form — the browser submits them as part of its own DOM,
+exactly as a no-JS user agent does.
+
+The *result* of that discovery is then **written into the checked-in operation
+catalog** and reviewed as part of PR 5's diff. From that point the catalog is the
+only authority on which mechanism runs:
+
+- a surface whose catalog entry says `form` and which later fails to submit
+  natively is **red** — the harness never silently falls back to `browser`;
+- a surface that has not been behaviorally verified and frozen carries the
+  already-reviewed **`browser`** mechanism, which is always a valid way to reach
+  it;
+- moving a surface from `browser` to `form` requires a discovery run plus a
+  committed catalog change, i.e. a reviewable diff. See §2.2.
 
 ### 1.7 Which interactions require the application's own browser runtime
 
-M-C1 and M-D1–M-D6 (7 surfaces). For M-D there is no alternative: the request is
-constructed by React from JS values inside `startTransition`, and reproducing it
-outside the browser would mean hand-building the wire payload — prohibition 2.
-M-C1 requires the browser to *build the form's stage rows* even if its submit
-degrades.
+M-C1 and M-D1–M-D6 (7 surfaces) require it **intrinsically**. For M-D there is no
+alternative: the request is constructed by React from JS values inside
+`startTransition`, and reproducing it outside the browser would mean hand-building
+the wire payload — prohibition 2. M-C1 requires the browser to *build the form's
+stage rows* even if its submit degrades.
+
+Separately, every **PE-eligible** surface also runs on the browser mechanism
+until a discovery run freezes it to `form` (§2.2). At the time of this design
+that is all of them, so the browser is the working mechanism for all 22 Server
+Actions — which is why a browser is mandatory rather than optional (§3.2).
 
 ### 1.8 Named ambiguities — resolved by design, not by probing production
 
@@ -226,7 +245,7 @@ Per the efficiency rules, nothing below was resolved by invoking the deployed ap
 
 | # | Ambiguity | How the design resolves it |
 |---|---|---|
-| AM1 | Does M-C1 (`updateStudyConfiguration`, client-component form) degrade without JavaScript? | Not decidable from source: it depends on React DOM's SSR of a client-component action form. Resolved by `assertDegrades()` at run time, with **browser** as the pre-declared mechanism regardless (§2.1, row M-C1). No row is left TBD |
+| AM1 | Does M-C1 (`updateStudyConfiguration`, client-component form) degrade without JavaScript? | Not decidable from source: it depends on React DOM's SSR of a client-component action form. Not resolved at run time. M-C1's catalog mechanism is **`browser`** regardless (§2.1), because the browser runtime is needed to compose the stage rows even if the submit degrades. A discovery run may record whether it degrades; that record never changes the catalog entry. No row is left TBD |
 | AM2 | `inviteClientUser` (M-B4) sends an invitation email through Supabase Auth | Treated as an **external side effect**. Suite B exercises it only for its *denial* paths (unauthenticated, `client` role), which never reach the send. The positive-path invitation is out of the harness's fixture scope (§6.5) |
 | AM3 | `updateTenantBrand` (M-B3) writes to Storage, not only to Postgres | Residue accounting for Storage objects is deferred to the suite that exercises the positive path; PR 5's ledger records the object key it created and the same finally-block cleanup contract applies (§6) |
 | AM4 | Whether `/admin/upload` (P7) answers a `client` caller with a redirect or a rendered denial | `upload/page.tsx:31` branches on role, but the branch body was not pinned to a specific status in this pass. The harness records the observed outcome as evidence and Suite B asserts *"not a successful render of the upload UI"* rather than a specific status |
@@ -241,7 +260,8 @@ Four mechanisms exist. **Exactly one is assigned to every inventoried surface.**
   carrying an actor cookie jar. No browser.
 - **`form`** — native browser form submission in a **JavaScript-disabled**
   browser context. The browser's own HTML machinery constructs the POST; harness
-  code never inspects or reproduces any framework field.
+  code never inspects or reproduces any framework field. **Assigned only by a
+  frozen catalog entry backed by a completed discovery run** (§1.6, §2.2).
 - **`browser`** — real interaction through the application's own client runtime:
   a JavaScript-enabled browser context, controls located semantically (§4.1), the
   framework builds the request.
@@ -262,21 +282,21 @@ Four mechanisms exist. **Exactly one is assigned to every inventoried surface.**
 | H1 `GET /api/health` | route handler | `http` | Public, unauthenticated; also the readiness probe (§4.3) |
 | H2 `GET /api/studies/[studyId]/report` | route handler | `http` | Ordinary GET with a rich status vocabulary. `docs/P7_PLAN.md` §6.1 says explicitly that route handlers need no browser |
 | M-E1 qualitative study selector | GET form | `http` | Plain HTML GET with no Server Action; issuing the equivalent GET is the same request the browser would send |
-| M-A1 `login` | PE form | `form` | Verified by `assertDegrades()`; it is also how every actor's session is minted (§3.2). Fallback on failure: `browser` |
-| M-A2 `logout` | PE form | `form` | Same standard; needed for the session-invalidation cases (§3.4). Fallback: `browser` |
-| M-B1 `createTenant` | PE form | `form` | Server-Component form, plain named fields. Fallback: `browser` |
-| M-B2 `renameTenant` | PE form | `form` | same |
-| M-B3 `updateTenantBrand` | PE form | `form` | same (a file field submits natively; see AM3) |
-| M-B4 `inviteClientUser` | PE form | `form` | same; denial paths only (AM2) |
-| M-B5 `updateClientUser` | PE form | `form` | same — the `data_scope` write R2 depends on |
-| M-B6 `deleteClientUser` | PE form | `form` | same; destructive, fixture-only (§6) |
-| M-B7 `generateSuggestions` | PE form | `form` | same |
-| M-B8 `reviewObservations` | PE form | `form` | same; the three `name="mode"` submit buttons are ordinary named submitters that a no-JS browser sends correctly |
-| M-B9 `createBlankStudy` | PE form | `form` | same |
-| M-B10 `createStudyFromTemplate` | PE form | `form` | same |
-| M-B11 `saveStudyAsTemplate` | PE form | `form` | same |
-| M-B12 `updateTemplateMetadata` | PE form | `form` | same |
-| M-B13 `deleteTemplate` | PE form | `form` | same; destructive, fixture-only |
+| M-A1 `login` | PE-eligible form | `browser` | The catalog value today, because nothing has been behaviorally verified yet. This is the one surface PR 5 **must** run discovery on (S7), since it is also how every actor's session is minted (§3.2). If that discovery verifies native no-JS submission, PR 5's diff freezes this cell to `form` and a reviewer sees the change; if not, it stays `browser`. Either way the value is decided in review, never at run time |
+| M-A2 `logout` | PE-eligible form | `browser` | Needed for the revoked-refresh case (§3.4). Not verified in this pass, so it carries the reviewed `browser` mechanism until a discovery run freezes otherwise |
+| M-B1 `createTenant` | PE-eligible form | `browser` | Server-Component form with plain named fields, so PE is plausible — but unverified, and H2's throwaway tenant is created through this surface, so it runs on the reviewed `browser` mechanism until frozen otherwise |
+| M-B2 `renameTenant` | PE-eligible form | `browser` | same |
+| M-B3 `updateTenantBrand` | PE-eligible form | `browser` | same (a file field submits natively; see AM3) |
+| M-B4 `inviteClientUser` | PE-eligible form | `browser` | same; **denial paths only** (AM2). Per H2 the harness never creates or invites an Auth user, so the positive path is never driven |
+| M-B5 `updateClientUser` | PE-eligible form | `browser` | same — the `data_scope` write R2 depends on |
+| M-B6 `deleteClientUser` | PE-eligible form | `browser` | same; destructive, fixture-only (§6) |
+| M-B7 `generateSuggestions` | PE-eligible form | `browser` | same |
+| M-B8 `reviewObservations` | PE-eligible form | `browser` | same; the three `name="mode"` submit buttons are ordinary named submitters that a no-JS browser sends correctly |
+| M-B9 `createBlankStudy` | PE-eligible form | `browser` | same; this is the surface that creates the run's fixture study inside the throwaway tenant (§6) |
+| M-B10 `createStudyFromTemplate` | PE-eligible form | `browser` | same |
+| M-B11 `saveStudyAsTemplate` | PE-eligible form | `browser` | same |
+| M-B12 `updateTemplateMetadata` | PE-eligible form | `browser` | same |
+| M-B13 `deleteTemplate` | PE-eligible form | `browser` | same; destructive, fixture-only |
 | M-C1 `updateStudyConfiguration` | client-component form | **`browser`** | Stage rows are client state (`StudyConfigurator.tsx:30,47,52`), so the browser runtime is needed to compose the form even if the submit degrades. `assertDegrades()` may additionally record that it degrades; that record never downgrades the mechanism |
 | M-D1 `analyzeImportFile` | imperative | `browser` | Called from `startTransition` with JS-built `FormData`; no form binding exists |
 | M-D2 `previewImportFile` | imperative | `browser` | same |
@@ -287,13 +307,28 @@ Four mechanisms exist. **Exactly one is assigned to every inventoried surface.**
 
 **Rows: 31. `TBD`: 0. `seam`: 0.**
 
-### 2.2 The demotion rule (why no row is conditional)
+### 2.2 Frozen mechanism selection (no run-time fallback)
 
-Every `form` row has a **declared mechanism** (`form`) and a **declared fallback**
-(`browser`). `assertDegrades()` selects between them at run time and records
-which was used in the evidence record (§5.1). Both are approved mechanisms, so
-the fallback needs no second review. Demotion is one-directional: a surface may
-move `form → browser`, never `browser → form`, and never toward `seam`.
+Mechanism selection is a **checked-in fact**, not a run-time negotiation.
+
+1. **Default.** Every surface that has not been behaviorally verified carries
+   `browser`, which is already reviewed and can reach every one of them.
+2. **Discovery.** During PR 5 implementation, `assertDegrades()` may be run
+   against a PE-eligible surface to find out whether it truly submits natively
+   with JavaScript disabled.
+3. **Freeze.** The result is written into `OPERATIONS` (§8.3) and lands in PR 5's
+   reviewed diff. A surface becomes `form` only through that committed change.
+4. **Drift is red.** If a surface whose frozen mechanism is `form` later fails to
+   submit natively, the run **fails**. The harness does not retry it as
+   `browser`, does not record a "demotion", and does not continue. A progressive
+   enhancement that stopped working is a real product regression and must be
+   loud.
+5. **One-directional review.** `browser → form` requires a discovery run plus a
+   committed catalog change. `form → browser` is likewise a committed change,
+   never an automatic one. Nothing ever moves toward `seam`.
+
+There is therefore no `fallback` field on an operation descriptor and no
+`demoted` field on a result (§8.2).
 
 ### 2.3 What each mechanism may and may not touch
 
@@ -302,6 +337,15 @@ move `form → browser`, never `browser → form`, and never toward `seam`.
 | `http` | only for evidence classification (status, `Location`, `content-type`) — never to extract a form field | **never** | Node `fetch`, plain URL + method | from the actor jar |
 | `form` | only semantically, to *locate* the form (§4.1) | **never** — the browser submits its own DOM | the browser's native HTML form machinery | browser context |
 | `browser` | only semantically, to *locate* controls | **never** | the application's own React runtime | browser context |
+
+**Action-response rule (all mechanisms).** An imperative Server Action's outcome
+is classified **only** from (a) the stable rendered DOM the application produces
+in response, (b) a navigation or redirect, and (c) public HTTP status and
+response headers. The harness **never parses, inspects, snapshots, decodes or
+classifies a Server-Action / RSC response body or any framework transport
+payload** — reading that payload would make the harness depend on the same
+private serialization prohibition 2 forbids it from writing. This is asserted by
+G2 (§9.2).
 
 ### 2.4 Why not the tempting shortcut
 
@@ -343,7 +387,7 @@ Two further actors are **not** credentials:
 | Actor id | Definition |
 |---|---|
 | `anonymous` | an empty cookie jar; no sign-in is ever attempted |
-| `forged` | a jar whose Supabase auth cookie value is replaced with structurally malformed bytes (§3.4) |
+| `invalidToken` | a jar whose Supabase auth cookie value has been replaced with structurally malformed bytes (§3.4). Named for what it *is* — an invalid token — not for a signature the harness cannot and must not produce |
 
 `service_role` is **not an actor.** It never makes an application request, never
 proves access or denial, and appears only in §6's fixture ledger for metadata
@@ -370,15 +414,26 @@ HTTP client carries are *the very cookies the application's own login action
 issued*, so an `http` assertion and a `browser` assertion are provably the same
 session. No JWT is minted, decoded, re-signed or constructed anywhere.
 
-A **documented fallback** exists for environments with no browser binary: signing
-in with `@supabase/ssr`'s `createServerClient` and the **publishable/anon key**
-against Supabase Auth, populating the jar from its `setAll` callback — the
-identical pattern already used at `scripts/responsive-layout-test.mjs:105-122`.
-This is still a genuine Supabase Auth sign-in with a real password and a real
-issued token; it is *not* a forged session and *not* `service_role`. It is a
-fallback because it skips M-A1 itself, which lowers fidelity; the run records
-which path minted each session, and the `form` and `browser` mechanisms are
-unavailable in that mode.
+**A browser is mandatory for PR 5's self-test.** If no supported browser binary
+is found, `harness-selftest` **exits non-zero as unsupported/incomplete**. It
+never reports green, never reports "skipped", and never substitutes another
+sign-in path. Mechanism coverage that was not exercised cannot be claimed
+(§9.1 S0).
+
+A second, **strictly lower-fidelity HTTP-only utility** exists: signing in with
+`@supabase/ssr`'s `createServerClient` and the **publishable/anon key** against
+Supabase Auth, populating the jar from its `setAll` callback — the pattern
+already used at `scripts/responsive-layout-test.mjs:105-122`. It is a genuine
+Supabase Auth sign-in with a real password and a real issued token; it is not a
+fabricated session and not `service_role`. Its boundaries are absolute:
+
+- it exists only to give `http`-mechanism operations a session in contexts that
+  make no browser or form claim;
+- it **cannot make `harness-selftest` green**, and its presence never satisfies
+  S0–S9;
+- it is **not** a substitute for M-A1, and any evidence record minted through it
+  is marked as such and is inadmissible for a `form` or `browser` proof;
+- no suite may cite it where the assertion is about the login surface itself.
 
 ### 3.3 Cookie carriage and isolation
 
@@ -395,30 +450,66 @@ unavailable in that mode.
   refresh rotation is therefore preserved rather than pinned — unlike the
   read-only proxy at `responsive-layout-test.mjs:124-147`, which deliberately
   strips `set-cookie` because it only needs to render pages.
-- **Isolation is asserted, not assumed.** The PR 5 self-test (§9) requires that
-  after all three actors sign in, no cookie name/value pair present in one jar is
-  present in another, and that each actor's `/dashboard` identity signal is its
-  own (§3.5).
+- **Isolation is asserted, not assumed — and asserted without credential-derived
+  evidence.** The PR 5 self-test (§9.1 S2) proves three things, none of which
+  prints or derives a value from a cookie or token:
 
-### 3.4 The four negative session cases, and the distinction between two of them
+  1. **Storage separation is structural.** Each actor owns a distinct jar object
+     and a distinct browser context; the harness asserts object identity
+     distinctness (no jar or context is referenced by two actors). This is a
+     comparison of references, not of contents.
+  2. **No auth credential is reused across actors.** Restricted to the Supabase
+     auth-cookie namespace, the harness asserts in memory that no auth-cookie
+     value present in one actor's jar is present in another's. The assertion
+     yields a **boolean**; the values are compared, never printed, never hashed,
+     never summarized, and never stored beyond the jar itself. **Ordinary,
+     non-auth cookies are explicitly permitted to be identical across actors** —
+     framework, locale and layout cookies are shared by design and must never
+     fail this check.
+  3. **The application agrees.** Each actor's context reports that actor's own
+     identity through the app's own rendered signal (§3.5), and clearing one
+     actor's session denies that actor while leaving the others working — which
+     is the behavioral counterpart of (1) and (2).
 
-| Case | Construction | Never involves | Expected shape |
-|---|---|---|---|
-| **Logged out** | empty jar; no sign-in attempted | — | protected page → 302 `/login`; H2 → 401 |
-| **Malformed / forged token** | take a real signed-in jar and replace the Supabase auth cookie's **value** with structurally invalid bytes of the same length class (a base64-shaped string that is not a JWT, or a JWT-shaped string whose signature segment is random bytes) | **no valid signature is ever produced**; no signing key is read, derived or guessed; no `service_role` JWT is constructed | `getUser()` fails to validate → treated exactly as unauthenticated: 302 `/login` / 401 |
-| **Genuinely expired session** | sign in normally, then **revoke the session through Supabase Auth's own `signOut`** for that actor (or drive M-A2 `logout` in the browser), then replay the *previously captured* jar | no clock manipulation, no token mutation, no waiting on a real TTL | the token is well-formed and correctly signed but no longer valid server-side → the same rejection, reached by a **different mechanism** |
-| **Cross-tenant** | a fully valid `tenantA` session requesting a `tenantB` resource | no tampering of any kind | H2 → **404**, not 401 (`report/route.ts:34`); dashboard → zero `tenantB` content |
+### 3.4 Negative session cases — what is executable, and what is deferred
 
-**Why the middle two must be distinguished.** Both end in "rejected", but they
-prove different properties. The forged case proves the application does not trust
-the cookie's *contents* — that `getUser()` is verifying a signature rather than
-decoding like `getSession()`, which is precisely the rule stated at
-`src/lib/supabase/middleware.ts:76-78`. The expired case proves the application
-does not trust a *correctly signed* token indefinitely — that server-side
-revocation is honored. A harness that only forged bytes would leave the second
-property untested; one that only revoked would leave the first untested. The
-harness therefore exposes them as two distinct operations (`session.forge()` and
-`session.revoke()`, §8.3) and the evidence record carries which was used.
+Supabase's documented behavior constrains this section, and the design states it
+plainly rather than assuming a stricter model than the platform provides:
+**signing out revokes the refresh session; it does not retroactively invalidate an
+already-issued access-token JWT, which stays valid until its own `exp`.** A
+harness that asserted "after logout the captured JWT is immediately rejected"
+would be asserting something the platform does not promise, and would eventually
+fail — or, worse, pass for the wrong reason.
+
+| # | Case | Construction | Never involves | What is actually proven | Status |
+|---|---|---|---|---|---|
+| N1 | **Logged out** | empty jar; no sign-in attempted | — | protected page → 302 `/login`; H2 → 401 | **executable** |
+| N2 | **Invalid / malformed token** | take a real signed-in jar and replace the Supabase auth cookie's **value** with structurally invalid bytes of the same length class (a base64-shaped string that is not a JWT, or a JWT-shaped string whose signature segment is random bytes) | **no valid signature is ever produced**; no signing key is read, derived or guessed; no `service_role` JWT is constructed | the app does not trust the cookie's *contents*: `getUser()` verifies rather than decodes, so the request is rejected **immediately** on the next protected route — 302 `/login` / 401 | **executable** — this is the immediate protected-route negative case |
+| N3 | **Revoked refresh session** | sign in normally, then sign out through the application's own `logout` (M-A2) or Supabase Auth's `signOut`, then attempt to **mint or refresh a session from the prior refresh credential** | no clock manipulation, no token fabrication, no printing of any credential, no change to remote Auth configuration | the revoked refresh session **cannot produce a new session**: the refresh attempt is rejected, so the session cannot be resurrected once signed out | **executable** — recorded as `revoked_refresh`, never as "expired" |
+| N4 | **Genuinely expired access token** | — | — | that a *correctly signed but time-expired* access JWT is rejected on a protected route | **deferred — not executable** (see below) |
+| N5 | **Cross-tenant** | a fully valid `tenantA` session requesting a `tenantB` resource | no tampering of any kind | H2 → **404**, not 401 (`report/route.ts:34`); dashboard → zero `tenantB` content | **executable** |
+
+**What N3 does *not* claim.** N3 does not assert that replaying the captured,
+still-unexpired access token is rejected immediately after sign-out. If the
+harness observes that such a replay still succeeds before `exp`, that is
+**expected Supabase behavior, recorded as an observation and not as a finding**.
+No suite may treat it as a defect, and the harness must not convert it into one.
+
+**Why N4 is deferred rather than approximated.** Obtaining a genuinely expired,
+correctly signed access token would require one of: manipulating a clock,
+fabricating or re-signing a token, persisting a credential across runs until it
+ages out, changing the project's Auth token lifetime, or blocking for the full
+JWT TTL. Every one of those is forbidden by this design or by `CLAUDE.md`, and
+**this pass does not invent a mechanism to get around that**. N4 therefore stays
+explicitly unavailable: it is named in the coverage record as *deferred, not
+executed*, exactly as `docs/P7_PLAN.md` §5.1 requires E1 to be named. If the
+repository later gains a safe, real, bounded mechanism that satisfies all of those
+constraints, N4 becomes a separate reviewed change — not a silent relabelling.
+
+**Never relabel N3 as N4.** They prove different properties, and the vocabulary
+keeps them apart: `sessionKind` is `revoked_refresh`, never `expired`. R17's
+"expired/invalid/tampered session" requirement is therefore satisfied by N1, N2
+and N3 today, with the *expired* half of it explicitly outstanding.
 
 ### 3.5 Proving which actor actually performed a request
 
@@ -431,12 +522,19 @@ independent proofs are required, and both are recorded:
    for the signed-in user (`src/app/dashboard/page.tsx:148-150`) matches the
    actor's configured email. This is the application telling the harness who it
    thinks the caller is. It is never read from the cookie.
-2. **Jar provenance.** Every evidence record carries the actor id and a
-   **non-reversible short digest** of the jar's auth-cookie value (the first 8
-   hex characters of a SHA-256 over the value). Two records with the same digest
-   were made by the same session; a record whose digest differs from that actor's
-   registered digest is a harness bug and fails the run. The digest is a one-way
-   hash prefix and cannot reconstruct the token (§5.2).
+2. **Session provenance, via a credential-independent label.** Every evidence
+   record carries the actor id and a `sessionLabel`: a short **random opaque
+   token generated by the harness** (e.g. 8 random base36 characters) at the
+   moment a session is established. It is **not derived from — and carries no
+   information about — any cookie, access token, refresh token or other
+   credential**: it is generated before the credential is read, from the
+   runtime's random source, and bound internally to exactly one
+   (actor, session) pair. Two records carrying the same label were made by the
+   same session; a record whose label differs from the actor's currently
+   registered label is a harness bug and fails the run. Establishing a new
+   session (sign-in, `session.clear`, `session.invalidate`) mints a new label.
+   Because the label is credential-independent, printing it discloses nothing
+   (§5.2).
 
 For the `anonymous` actor, proof 1 is inverted: `/dashboard` must redirect, and
 the jar must be empty.
@@ -445,8 +543,12 @@ the jar must be empty.
 
 The harness has **no** ability to: mint a JWT, sign anything, read the Supabase
 JWT secret, elevate a `client` actor to `internal`, call a Server Action as one
-actor while carrying another's cookies, or use `service_role` to answer any
-authorization question. These are absences of code, not disabled features.
+actor while carrying another's cookies, use `service_role` to answer any
+authorization question, **derive any printable value from a credential** (there
+is no hash, digest or fingerprint of a cookie or token anywhere in the design —
+see §3.5), **manipulate a clock or token lifetime**, or **read a
+Server-Action / RSC response body** (§2.3). These are absences of code, not
+disabled features.
 
 ---
 
@@ -514,7 +616,7 @@ event or on a bounded, condition-terminated check:
 | page navigated | navigation settled **and** the page landmark (`header`) exists **and** `document.readyState === "complete"` |
 | PE form submitted (`form`) | the navigation the submission caused has completed and its URL/status is available. Every Server Action in this app ends in `redirect(...)` (`login/actions.ts:36`, `clients/actions.ts:27`, `studies/actions.ts:28`, `qualitative/actions.ts:23`), so the outcome *is* a navigation |
 | imperative action dispatched (`browser`) | the component's own rendered state changed — an `aria-live` region's text (`StudyCard.tsx:57` prints "Actualizando resultados agregados…" while `pending`), a rendered result, or a rendered error. `useTransition`'s pending flag is observable through the DOM the app itself renders |
-| session revoked | the next protected request returns its rejection |
+| refresh session revoked (N3) | the refresh attempt returns its rejection (§3.4) |
 
 The single tolerated exception is the browser-launch handshake — waiting for the
 DevTools endpoint to accept a connection — a bounded readiness check on a process
@@ -536,9 +638,32 @@ the harness itself started, terminating on first success, exactly as
 **Retry policy: at most one retry, and only for a transport-level failure**
 (connection refused / reset / DNS) during the **readiness probe or sign-in**.
 Zero retries for any request that produced an HTTP response — a 500 is evidence,
-not a flake. Zero retries for any mutating operation, ever. **No polling loops,
-no request bursts, no backoff ladders, no "try until green".** A suite that
-cannot decide from one answer is a suite with an ambiguous assertion.
+not a flake. Zero retries for any mutating operation, ever. **No request retry
+loops, no request bursts, no backoff ladders, no "try until green", no
+application-state polling, no load loops, no unbounded retries, and no arbitrary
+sleeps.** A suite that cannot decide from one answer is a suite with an ambiguous
+assertion.
+
+### 4.4.1 The one loop the design permits: bounded CDP event processing
+
+Driving a browser over raw CDP inherently requires **reading messages off a
+WebSocket until the awaited response or event arrives**. That is a message-pump,
+not a poller, and forbidding it would forbid the mechanism itself. It is
+permitted under all of the following, together:
+
+- it consumes **messages the browser pushes**; it never issues an application
+  request inside the loop, and never re-sends one;
+- it terminates on a **monotonic deadline** (`performance.now()` / `hrtime`, not
+  wall-clock), bounded by the per-operation timeouts above;
+- it terminates on an **explicit maximum message/event count**, so a chatty or
+  looping page cannot keep it alive indefinitely;
+- exhausting either bound is a **failure** that is recorded and propagated, never
+  a retry and never a silent continue;
+- it never sleeps between iterations and never waits on application state — that
+  belongs to the readiness conditions in §4.3.
+
+Any loop that issues, re-issues or probes an application endpoint is forbidden
+regardless of its bounds. G6 (§9.2) tests exactly that distinction.
 
 ### 4.5 Surviving a Next.js rebuild
 
@@ -571,10 +696,10 @@ printed as a line at the end of the run:
 | Field | Example | Notes |
 |---|---|---|
 | `actor` | `tenantA` | actor id, never an email |
-| `sessionDigest` | `9f3ac21b` | 8-hex SHA-256 prefix of the auth-cookie value (§3.5) |
-| `sessionKind` | `live` \| `forged` \| `revoked` \| `none` | distinguishes §3.4's cases |
+| `sessionLabel` | `k3f9qa7t` | harness-generated **random opaque** label, created independently of any credential and bound to one (actor, session) pair (§3.5). Carries no information about any cookie or token |
+| `sessionKind` | `live` \| `invalid` \| `revoked_refresh` \| `none` | distinguishes §3.4's cases N1–N3. There is deliberately **no `expired` value** — N4 is deferred (§3.4) |
 | `operation` | `report.download` | **stable operation name** from a fixed vocabulary, decoupled from the URL |
-| `mechanism` | `http` \| `form` \| `browser` | which mechanism ran; a demoted `form` row records `browser` with `demoted: true` |
+| `mechanism` | `http` \| `form` \| `browser` | the operation's **frozen catalog mechanism** (§2.2). There is no demotion field, because there is no run-time fallback |
 | `urlClass` | `/api/studies/:studyId/report` | **templated**, never the concrete uuid |
 | `httpStatus` | `404` | for `browser`, the status of the navigation or of the action's transport |
 | `redirectTo` | `/login` | path only; the query string is stripped except a fixed allow-list of non-sensitive keys (`error`) |
@@ -592,8 +717,11 @@ Never written to the ledger, stdout, stderr, a file, an exception message or a
 thrown stack: **passwords · cookie names or values · access or refresh tokens or
 any fragment of one · the service-role key or any fragment · any JWT segment ·
 any response body containing tenant rows, respondent data, quotes or metric
-values · raw server error text · Supabase error `details` / `hint` · the concrete
-uuids of any object other than the run's own fixture ids (§6.6).**
+values · **any Server-Action / RSC response body or framework transport payload**
+(§2.3) · raw server error text · Supabase error `details` / `hint` · **any hash,
+digest, fingerprint, prefix or other value derived from a credential** · the
+concrete uuids of any object other than the run's own fixture ids and the
+read-only P6E control id already published in `docs/CURRENT_STATE.md` (§6.7).**
 
 Three mechanisms enforce this rather than relying on discipline:
 
@@ -607,9 +735,13 @@ Three mechanisms enforce this rather than relying on discipline:
 3. **The self-test scans the harness's own output** through
    `scripts/lib/secret-patterns.mjs`'s `scanText` and fails on any hit (§9.3).
 
-The `sessionDigest` is a one-way SHA-256 prefix over a value the harness already
-holds; it cannot reconstruct the token and is not a "secret fragment". It is the
-minimum needed to prove two records share a session (§3.5).
+**No credential-derived value exists anywhere in the design.** The earlier
+revision of this note proposed a truncated SHA-256 of the auth cookie as a
+session marker; that has been **removed**. Even a one-way prefix is derived from
+a secret, invites "how many bits is safe" arguments that no reviewer should have
+to have, and would put credential-shaped material into a printed artifact. The
+`sessionLabel` (§3.5) replaces it: it is random, minted before the credential is
+read, and correlates records just as well while disclosing nothing.
 
 ### 5.3 The outcome classifier — denial vs. everything it is not
 
@@ -622,10 +754,10 @@ vocabulary is closed:
 |---|---|---|
 | `denied_unauthenticated` | 401, **or** 3xx whose `Location` path is `/login` | **yes** |
 | `denied_wrong_role` | 3xx whose `Location` path is `/dashboard` in response to an `/admin/*` request; **or** an action result carrying the app's fixed denial string | **yes** |
-| `denied_action_result` | class M-D: HTTP 200 whose parsed action result is `{ status: "error" }` / `{ ok: false }` **and** whose rendered surface shows a denial (`upload/actions.ts:78-93`, `data-actions.ts:33`) | **yes** — this is the class where a 200 means denied |
+| `denied_action_result` | class M-D: the **rendered DOM** the component produces in response shows the application's denial state — the error region `UploadForm` renders from `{ status: "error" }` (`upload/actions.ts:78-93`), or the error text `StudyCard` / `PivotExplorer` render from `{ ok: false }` (`data-actions.ts:33`). Classified from the DOM, the navigation and the public HTTP status only — **never by parsing the action's response body** (§2.3) | **yes** — this is the class where a 200 transport means denied |
 | `not_found` | 404 (`report/route.ts:32`, `:34`, `:37`; `notFound()` in P8) | **no** — absence, which may be *correct* isolation behavior but is a different claim |
-| `validation_rejected` | 400 with the app's structured error shape (`report/route.ts:39`, `:43`), or an action result that is a Zod-derived message | **no** — input was refused, authorization was never reached |
-| `success` | 2xx **and** the operation's own success signal (a PDF `content-type`, a redirect carrying `?ok=`, a rendered result) | **no** |
+| `validation_rejected` | 400 with the app's structured error shape (`report/route.ts:39`, `:43`), or a rendered validation message the component displays for a Zod-derived rejection | **no** — input was refused, authorization was never reached |
+| `success` | 2xx **and** the operation's own success signal, read only from public headers, the redirect target, or the rendered DOM (a PDF `content-type`, a redirect carrying `?ok=`, a rendered result region) | **no** |
 | `success_no_op` | 2xx + success signal **but** the fixture residue count is unchanged | **no** — flagged loudly; a mutation that "succeeded" and changed nothing is a false pass and fails the run |
 | `network_failure` | connection refused/reset/DNS/timeout, no HTTP response | **no** — harness/environment failure |
 | `page_crash` | 5xx, an uncaught page exception, or `render_incomplete` | **no** — **fails the run**; never reported as a denial |
@@ -637,9 +769,9 @@ Two rules make this safe:
   unknown answers as denials manufactures green suites.
 - **The classifier self-tests offline first.** Fixed synthetic cases (a 302 to
   `/login`, a 302 to `/dashboard`, a 404, a 400 in the report route's error
-  shape, a 200 with `{ ok: false }`, a 500, a socket error) run before any live
-  request. If the classifier is wrong, the run stops before it can mislabel
-  anything.
+  shape, a 200 whose *rendered DOM* carries the denial region, a 500, a socket
+  error) run before any live request. If the classifier is wrong, the run stops
+  before it can mislabel anything.
 
 ### 5.4 How Suites A/B/C/E consume this — and why the harness cannot claim their verdicts
 
@@ -679,7 +811,7 @@ P7H-<UTC yyyymmddThhmmssZ>-<6 random base36 chars>
 for example `P7H-20260822T191500Z-k3f9qa`. It appears in every created name
 (`P7H-… fixture study`), so a stray row is identifiable by inspection alone and
 can never be confused with a real or accepted object. The prefix is generated
-once per run and is the **only** deletion key (§6.6).
+once per run and is the **only** deletion key (§6.7).
 
 ### 6.2 The out-of-bounds list — never touched, mutated or deleted
 
@@ -690,9 +822,20 @@ Enforced as an explicit deny-list checked before every mutating operation:
 | P6E acceptance study | `ad275928-dbd1-4acf-9de9-fa1623b32a60` |
 | P6E import batch | `bd4f26db-093a-4e31-8fa9-de8281300c63` |
 | The two historical draft studies | `Satisfacción 2026 (TEST)` (both) |
-| Tenant A / Tenant B | `TEST_TENANT_A_ID` / `TEST_TENANT_B_ID` — **read as an actor, never mutated** |
+| Tenant A / Tenant B | `TEST_TENANT_A_ID` / `TEST_TENANT_B_ID` — **read as an actor, never mutated**, and never used to hold mutation fixtures (§6.6) |
 | The three fixture auth users | sign-in only; never modified or deleted |
+| **Every Auth user, without exception** | the harness never creates, invites, updates or deletes one (§6.6) |
 | Anything without the run prefix | — |
+
+The P6E acceptance study is on this list **and is additionally used as a
+read-only positive control** for the report route (§9.1 S6). That is not a
+contradiction: the deny-list governs *mutation*, and the control is
+`GET`-only. Concretely, for `ad275928-dbd1-4acf-9de9-fa1623b32a60` the harness
+may issue authenticated `GET` requests and may read its metadata; it may
+**never** publish, unpublish, reconfigure, rename, re-import, delete, add to the
+fixture ledger, or include it in any cleanup pass. It is not
+cleanup-owned data, and a run that ends with it altered in any way is a defect,
+not a fixture leak.
 
 A mutating operation whose target resolves to a deny-listed id **aborts the run
 before the request is sent**. This is a precondition, not a post-hoc check.
@@ -738,13 +881,30 @@ outcome is an authorization claim. `CLAUDE.md`'s standing rule — *never bypass
 the real application workflow by manually inserting acceptance rows* — is
 restated here as a harness invariant.
 
-### 6.6 Cleanup, and what happens when it fails
+### 6.6 The throwaway tenant (H2, approved with constraints)
+
+Mutation fixtures live in a **tenant the run creates and destroys**, never in an
+existing tenant. The approved constraints are binding:
+
+| Constraint | How the design meets it |
+|---|---|
+| Created through the real application surface | one tenant, created by the `internal` actor driving **M-B1 `createTenant`** through its frozen catalog mechanism — never a `service_role` insert (§6.5) |
+| Exactly one, current-run-prefixed | its name carries the run prefix `P7H-…` (§6.1); creating a second throwaway tenant in one run is a harness error |
+| Recorded by exact id | the id is captured from the application's own post-create response and written to the ledger as `{ kind: "tenant", id, … }`. Nothing is matched by name at deletion time |
+| Contains only current-run fixtures | every fixture object the run creates is created **inside this tenant**; an operation that would place a fixture in any other tenant aborts the run |
+| **Never creates or invites an Auth user** | M-B4 `inviteClientUser` is driven only for its denial paths (AM2, §2.1). No positive-path user creation exists anywhere in the harness, so the tenant is always user-less. Existing fixture actors are re-used for authentication and are never modified |
+| Children deleted before the tenant | cleanup deletes ledger entries **newest-first and child-kinds-before-tenant** (studies, templates, import batches, storage objects, then the tenant), each by exact id, so no delete relies on a cascade to reach an object the ledger did not name |
+| Residue or failure is red | any remaining prefixed object, any failed delete, or a tenant that could not be removed exits the run non-zero (§6.7) |
+| Never reuse or mutate an existing tenant | the deny-list (§6.2) rejects any mutating operation targeting `TEST_TENANT_A_ID`, `TEST_TENANT_B_ID`, or any tenant id not equal to the run's own throwaway tenant id — checked **before** the request is sent |
+
+### 6.7 Cleanup, and what happens when it fails
 
 Cleanup runs in a `finally` block entered on success, on assertion failure, on
 exception, and on the run timeout. It deletes **exactly the ledger's ids**,
-newest first, and never issues a delete predicate broader than
-`id = <ledger id>`. Afterwards it re-runs the preflight query and asserts zero
-remaining prefixed objects.
+newest first and **children before the throwaway tenant** (§6.6), and never
+issues a delete predicate broader than `id = <ledger id>`. Afterwards it re-runs
+the preflight query and asserts zero remaining prefixed objects. The read-only
+P6E control is never part of this pass.
 
 If cleanup fails or residue remains:
 
@@ -791,7 +951,7 @@ HTTPS).
 | B (authorization) | ✓ | ✓ | §9.1 PR 7: *"against a local build **and** once against the deployed Worker"* |
 | C (input / injection / upload / pivot) | ✓ | ✓ | same row |
 | E (headers, framing, session resilience) | — | ✓ | §5.1 / PR 8: Suite E runs *"against the deployed beta Worker"*; edge headers are only meaningful there |
-| PR 5 self-test (§9) | ✓ | optional | Local is the merge gate; a remote pass is recorded when run but is not required for PR 5 (see open decision H1) |
+| PR 5 self-test (§9) | ✓ **required** | informational only | **H1, approved:** local is the entire merge gate. A remote run may be performed and recorded, but is never required PR 5 evidence and never appears as such in a PR description, handoff note or status table (§9.3, §11.1) |
 
 ### 7.3 Browser ownership and debug-port isolation
 
@@ -839,7 +999,9 @@ No WSL, no Docker, no paid service, no plugin, no Playwright or Puppeteer
 dependency. The harness uses raw CDP over the WebSocket the runtime already
 provides — the approach `responsive-layout-test.mjs:150-202` proves works — plus
 `node:http`, `node:child_process` and the already-pinned `@supabase/supabase-js`
-and `@supabase/ssr`. **PR 5 adds zero dependencies.**
+and `@supabase/ssr`. **PR 5 adds zero dependencies**, and any future dependency
+would require its own justification and approval rather than arriving with the
+harness.
 
 ---
 
@@ -860,9 +1022,11 @@ and `@supabase/ssr`. **PR 5 adds zero dependencies.**
 ### 8.2 Types (TypeScript notation for review; the implementation is `.mjs`)
 
 ```ts
-type ActorId = "tenantA" | "tenantB" | "internal" | "anonymous" | "forged";
+type ActorId = "tenantA" | "tenantB" | "internal" | "anonymous" | "invalidToken";
 type Mechanism = "http" | "form" | "browser";
-type SessionKind = "live" | "forged" | "revoked" | "none";
+
+/** No "expired" member: N4 is deferred and must never be simulated by N3 (§3.4). */
+type SessionKind = "live" | "invalid" | "revoked_refresh" | "none";
 
 type Actor = {
   id: ActorId;
@@ -870,8 +1034,10 @@ type Actor = {
   sessionKind: SessionKind;
   /** opaque; never printed, never serialized, never shared across actors */
   jar: CookieJar;
-  /** 8-hex SHA-256 prefix of the auth cookie value; safe to print */
-  sessionDigest: string | null;
+  /** Random opaque label minted by the harness when the session is established.
+   *  NOT derived from any cookie, token or other credential — generated from the
+   *  runtime's random source before the credential is read (§3.5). Safe to print. */
+  sessionLabel: string | null;
 };
 
 type OperationDescriptor = {
@@ -879,9 +1045,12 @@ type OperationDescriptor = {
   name: string;
   /** templated path, e.g. "/api/studies/:studyId/report" */
   urlClass: string;
+  /** FROZEN in this checked-in catalog (§2.2). `form` appears only where a
+   *  committed discovery run verified native no-JS submission. There is no
+   *  `fallback` field: a frozen `form` that stops degrading is red, not demoted. */
   mechanism: Mechanism;
-  /** pre-approved fallback, for `form` rows only (§2.2) */
-  fallback?: "browser";
+  /** Provenance of a `form` entry, so a reviewer can see why it is not `browser`. */
+  degradationVerifiedAt?: string;
   mutating: boolean;
   /** ledger kinds this operation may create, for residue accounting */
   creates?: Array<"study" | "tenant" | "template" | "import_batch" | "profile" | "storage_object">;
@@ -896,11 +1065,13 @@ type ErrorCategory =
  *  a fixed safe subset, no cookie, no token, no tenant data. */
 type SanitizedResult = {
   actor: ActorId;
-  sessionDigest: string | null;
+  sessionLabel: string | null;
   sessionKind: SessionKind;
   operation: string;
-  mechanism: Mechanism;
-  demoted: boolean;
+  mechanism: Mechanism;          // the frozen catalog value; no `demoted` field exists
+  /** true only for a session minted by the lower-fidelity HTTP-only utility
+   *  (§3.2); such a record is inadmissible as `form` or `browser` evidence. */
+  httpOnlySession: boolean;
   urlClass: string;
   httpStatus: number | null;
   redirectTo: string | null;
@@ -921,21 +1092,33 @@ type FixtureRecord = {
 ```ts
 // ---- lifecycle -------------------------------------------------------------
 createHarness(options: {
-  origin: string;                          // the ONLY topology switch (§7.1)
+  origin: string;                    // the ONLY topology switch (§7.1)
   actors: ActorId[];
-  browser?: "auto" | "required" | "none";  // "none" => http-only fallback (§3.2)
-  runTimeoutMs?: number;                   // bounded; never raised without review
+  /** "required" is the only value the self-test accepts. "httpOnlyUtility" is the
+   *  lower-fidelity path of §3.2: it can never make harness-selftest green and
+   *  cannot serve a `form` or `browser` claim. Absence of a browser under
+   *  "required" exits non-zero as unsupported/incomplete. */
+  browser: "required" | "httpOnlyUtility";
+  runTimeoutMs?: number;             // bounded; never raised without review
 }): Promise<Harness>;
 
 harness.signIn(actor: ActorId): Promise<Actor>;         // through M-A1 (§3.2)
 harness.assertIdentity(actor: ActorId): Promise<void>;  // the app's own signal (§3.5)
-harness.assertJarIsolation(): Promise<void>;            // §3.3
+/** Structural + behavioral isolation (§3.3). Compares auth-cookie values in
+ *  memory and returns a boolean verdict; prints no name, value, hash or
+ *  token-derived metadata, and never fails on identical NON-auth cookies. */
+harness.assertSessionIsolation(): Promise<void>;
 harness.close(): Promise<void>;   // kills the browser it started; idempotent
 
-// ---- session manipulation (§3.4) — no signing, ever -------------------------
-harness.session.forge(actor: ActorId): Promise<Actor>;   // malformed bytes
-harness.session.revoke(actor: ActorId): Promise<Actor>;  // real server-side revocation
-harness.session.clear(actor: ActorId): Promise<Actor>;   // empty jar
+// ---- session manipulation (§3.4) — no signing, no clock control, ever -------
+/** N2: replace the auth cookie value with structurally malformed bytes. */
+harness.session.invalidate(actor: ActorId): Promise<Actor>;
+/** N3: sign out, then prove the prior REFRESH session cannot mint a new one.
+ *  Does NOT claim the already-issued access JWT is immediately rejected. */
+harness.session.revokeRefresh(actor: ActorId): Promise<SanitizedResult>;
+/** N1: empty jar. */
+harness.session.clear(actor: ActorId): Promise<Actor>;
+// N4 (genuinely expired access token) has NO function here — deferred by §3.4.
 
 // ---- the single execution entry point --------------------------------------
 harness.run(
@@ -944,16 +1127,20 @@ harness.run(
   params?: Record<string, string>,  // fills :placeholders and named form fields
 ): Promise<SanitizedResult>;
 
-// ---- progressive-enhancement verification (§1.6) ---------------------------
-harness.assertDegrades(op: OperationDescriptor): Promise<
-  { degrades: true } | { degrades: false; demotedTo: "browser" }
->;
+// ---- progressive-enhancement DISCOVERY (§1.6, §2.2) ------------------------
+/** Implementation-time tool only. Reports whether a surface submits natively
+ *  with JavaScript disabled. It does NOT change any mechanism: the result is
+ *  written into OPERATIONS by hand and reviewed in PR 5's diff. Calling it does
+ *  not make a `browser` surface run as `form`, and a frozen `form` surface that
+ *  fails here is red. */
+harness.assertDegrades(op: OperationDescriptor): Promise<{ degrades: boolean }>;
 
 // ---- fixtures (§6) ---------------------------------------------------------
 harness.fixtures.prefix: string;
 harness.fixtures.preflight(): Promise<void>;              // refuses on collision
 harness.fixtures.track(record: FixtureRecord): void;
 harness.fixtures.residue(kinds: string[]): Promise<Record<string, number>>;
+/** Deletes ledger ids newest-first, children before the throwaway tenant (§6.6). */
 harness.fixtures.cleanup(): Promise<{ removed: number; leaked: FixtureRecord[] }>;
 
 // ---- evidence (§5) ---------------------------------------------------------
@@ -970,7 +1157,9 @@ No `expectDenied()`, no `assertCannotAccess()`, no suite-named helper, no
 `assertTenantIsolation()`. PR 5 must contain no security expectation — that is
 how the harness stays a foundation and the suites stay honest (§5.4). Likewise
 absent: any retry-until-success helper, any sleep helper, any raw-response
-accessor, and any function accepting a `service_role` key as an actor credential.
+accessor, any Server-Action/RSC body reader, any credential-hashing helper, any
+run-time mechanism selector, and any function accepting a `service_role` key as
+an actor credential.
 
 ---
 
@@ -984,17 +1173,53 @@ non-zero if any of them fails.
 
 | # | Proof | Pass condition |
 |---:|---|---|
+| S0 | Browser availability | a supported browser binary is found and driven. If none is available the run **exits non-zero as unsupported/incomplete** — never green, never "skipped". The HTTP-only utility (§3.2) cannot satisfy this or any row below |
 | S1 | Sign-in for all three actors through M-A1 | `tenantA`, `tenantB` and `internal` each reach an authenticated `/dashboard`; each `assertIdentity()` matches the configured email via the app's own rendered signal |
-| S2 | Cookie isolation | no cookie name/value pair appears in more than one jar; the three `sessionDigest` values are distinct; a `tenantA` request never carries a `tenantB` cookie |
+| S2 | Session isolation, without credential-derived evidence | (a) each actor owns a distinct jar object and browser context (reference identity); (b) an in-memory comparison restricted to the **auth-cookie namespace** finds no value shared between actors, and **identical non-auth cookies do not fail it**; (c) the three `sessionLabel` values are distinct; (d) clearing one actor denies that actor while the others still succeed. No cookie name, value, hash or token-derived metadata is printed |
 | S3 | Logged-out handling | `anonymous` → `/admin/studies` classified `denied_unauthenticated` with `redirectTo === "/login"`; `anonymous` → H2 classified `denied_unauthenticated` with status 401 |
-| S4 | Forged-session handling | `session.forge(tenantA)` → protected page classified `denied_unauthenticated`; recorded `sessionKind: "forged"` |
-| S5 | Expired/revoked-session handling | `session.revoke(tenantB)`, then replay of the captured jar → `denied_unauthenticated`; recorded `sessionKind: "revoked"`; **S4 and S5 produce distinct records** |
-| S6 | One direct route request | `internal` → H2 for a fixture study returns `success` with `content-type: application/pdf`; the same request as `tenantB` returns `not_found` (recorded, **not** asserted as a suite verdict) |
-| S7 | One verified progressive-enhancement form | `assertDegrades(login)` returns `{ degrades: true }` **or** records `demotedTo: "browser"`; whichever occurs is recorded explicitly. At least one M-B form additionally runs through `assertDegrades()` |
+| S4 | Invalid-token handling (N2) | `session.invalidate(tenantA)` → the next protected page is classified `denied_unauthenticated` **immediately**; recorded `sessionKind: "invalid"` |
+| S5 | Revoked-refresh handling (N3) | after sign-out, an attempt to mint or refresh a session from the prior refresh credential is rejected; recorded `sessionKind: "revoked_refresh"`. The run **does not** require the still-unexpired access token to be rejected, and records any continued acceptance before `exp` as expected platform behavior rather than a finding. **S4 and S5 produce distinct records, and neither is ever labelled "expired"** |
+| S5b | Deferred case is named, not faked | the run's coverage output names **N4 (genuinely expired access token) as deferred and not executed**, with its blocking reason (§3.4). No code path simulates it |
+| S6 | Direct-route proof on H2, against a **read-only** control (see §9.1.1) | **S6a (always required):** using the P6E control id, `anonymous` → `denied_unauthenticated` (401); a malformed uuid → `not_found` (404); `tenantB` → `not_found` (404, non-disclosure). **S6b (positive control, precondition-gated):** if the read-only precondition in §9.1.1 holds, the actor that owns the study (`tenantA` if its tenant matches, otherwise `internal`) → `success` with `content-type: application/pdf`. Every request is a `GET`; nothing about the study is mutated, ledgered or cleaned up. Recorded, **not** asserted as a suite verdict |
+| S7 | Progressive enhancement is *discovered and frozen*, not negotiated | `assertDegrades()` is run against M-A1 `login` and at least one M-B form **during implementation**, and the outcome is written into `OPERATIONS` in PR 5's reviewed diff. At run time the self-test asserts that each surface behaves as its **frozen** catalog entry says: a frozen `form` that fails to submit natively is **red**, and no run-time demotion to `browser` occurs or is recorded. Surfaces whose catalog entry is `browser` are exercised as `browser` |
 | S8 | One browser-driven imperative Server Action | `internal` drives M-D6 (`computeStudyPivot`) through `PivotExplorer`'s real controls and receives a rendered result; the record shows `mechanism: "browser"` |
-| S9 | Fixture creation, cleanup and zero residue | one prefixed fixture study is created through M-B9 (the real workflow, §6.5), tracked in the ledger, then removed in `finally`; the post-run preflight returns zero prefixed objects; `leaked` is empty |
+| S9 | Throwaway tenant, fixture creation, ordered cleanup, zero residue | one prefixed tenant is created through M-B1 and one prefixed study inside it through M-B9 (the real workflows, §6.5); both are ledgered **by exact id**; `finally` deletes the study before the tenant, each by exact id; the post-run preflight returns zero prefixed objects and `leaked` is empty. **No Auth user is created or invited at any point.** Any residue or cleanup failure makes the run red |
 | S10 | Classifier self-test | the fixed offline cases in §5.3 all classify correctly **before** any live request; an unrecognized case yields `unclassified` and fails |
-| S11 | Deny-list precondition | a synthetic attempt to target `ad275928-dbd1-4acf-9de9-fa1623b32a60` in a mutating operation aborts **before** any request is sent |
+| S11 | Deny-list precondition | a synthetic attempt to target `ad275928-dbd1-4acf-9de9-fa1623b32a60`, `TEST_TENANT_A_ID` or `TEST_TENANT_B_ID` in a **mutating** operation aborts **before** any request is sent, while the S6 read-only `GET` requests against the same P6E id proceed — proving the deny-list gates mutation, not reads |
+
+#### 9.1.1 Why S6 uses the P6E study, read-only, and what happens if it cannot
+
+A **newly created blank study does not yield a 200 PDF.** It has no respondents
+and no rows, and `report/route.ts` additionally returns 404 when the study's
+`dashboard_config` disables the report section (`:37`). Asserting that a fixture
+PR 5 just created returns `application/pdf` would therefore be asserting
+something the application does not promise. This revision removes that claim.
+
+The report route's success path needs an already-populated, already-published
+study, and exactly one exists: the **P6E acceptance study**, whose id, tenant,
+status and row counts are recorded as non-secret test metadata in
+`docs/CURRENT_STATE.md` ("P6E acceptance record"). It is therefore
+**deterministically locatable without a secret and without a guess**.
+
+**Precondition, evaluated read-only before S6b runs.** Using the same narrowly
+scoped `service_role` metadata read permitted for preflight (§6.3) — metadata
+only, never rows — the harness confirms that the study still exists, is
+`published`, has its report section enabled, and identifies which tenant owns it.
+It then selects the actor accordingly: `tenantA` when `TEST_TENANT_A_ID` matches
+the study's tenant, otherwise `internal`, which reads every study through
+`loadAuthorizedStudyData` (`src/lib/studies/authorized.ts:84`).
+
+**If the precondition does not hold** — the study is missing, unpublished, or its
+report section is off — then **S6b is recorded as unavailable and not executed**,
+S6a still runs and still gates the merge, and the note states plainly that
+**positive report-route coverage belongs to Suite B/C (PR 7), not to PR 5.** The
+harness never manufactures a substitute fixture to force a 200, and never
+publishes or reconfigures anything to make the precondition true.
+
+**Read-only is enforced, not promised.** Every S6 request is a `GET`. The P6E
+study is never added to the fixture ledger, never appears in a cleanup pass, and
+remains on the mutation deny-list throughout (§6.2) — which S11 proves by showing
+a mutating attempt on the same id aborts while these reads proceed.
 
 ### 9.2 Structural guarantees (asserted over the harness's own source)
 
@@ -1004,12 +1229,15 @@ Each is a source assertion in `harness-selftest.mjs` over
 | # | Guarantee | Assertion |
 |---:|---|---|
 | G1 | No hashed action ID is constructed, scraped or stored | no occurrence of `$ACTION_ID`, `next-action`, `Next-Action`, `text/x-component`, `encodeReply`, or a locator matching a hex/hash-shaped selector |
-| G2 | No private RSC payload builder | no import from `react-server-dom-webpack`, from `react-dom/server` internals, or from any Next internal path; no hand-assembled multipart action body |
+| G2 | No private RSC payload builder **and no private RSC payload reader** | no import from `react-server-dom-webpack`, from `react-dom/server` internals, or from any Next internal path; no hand-assembled multipart action body; and **no code path that parses, decodes, snapshots or classifies a Server-Action / RSC response body or framework transport payload** — action outcomes are classified from rendered DOM, navigation and public status/headers only (§2.3) |
 | G3 | No bypass flag | no environment variable read by the harness alters an authorization decision, a mechanism, a locator or a classifier; the only recognized switches are `origin`, `browser`, `runTimeoutMs`, and the documented `TEST_*` / `NEXT_PUBLIC_*` / `CHROME_PATH` fixture variables |
 | G4 | No service-role authorization evidence | `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_SECRET_KEY` appear only inside `harness-fixtures.mjs`, and only in the preflight / residue / cleanup functions — never in a code path producing a `SanitizedResult` |
-| G5 | No secret logging | every printed field originates in `SanitizedResult` or `FixtureRecord`; there is no code path from a response body or a cookie to an output stream |
-| G6 | No sleeps or loops | no bare `setTimeout` used as a wait on application state; no `while` loop around a request; retry counters are ≤ 1 and apply only to transport failures during readiness or sign-in (§4.4) |
-| G7 | No production source is modified | PR 5's diff touches `docs/`, `scripts/`, and exactly one `package.json` script line — no file under `src/`, `supabase/`, and not `next.config.ts`, `src/middleware.ts` or `wrangler.toml` |
+| G5 | No secret logging **and no credential-derived value at all** | every printed field originates in `SanitizedResult` or `FixtureRecord`; there is no code path from a response body or a cookie to an output stream; and **no hashing, digest, fingerprint or truncation is ever applied to a cookie, access token, refresh token or other credential** — `sessionLabel` is asserted to come from the runtime's random source, not from any credential (§3.5) |
+| G6 | No arbitrary sleeps, no application polling, no unbounded loops — while permitting the CDP message pump | asserts the **real** risk rather than banning `while` syntax outright: (a) no bare `setTimeout` used as a wait on application state; (b) **no loop whose body issues, re-issues or probes an application request** — the property that distinguishes a poller from a message pump; (c) every loop that reads CDP messages carries **both** a monotonic deadline and an explicit maximum message/event count, and treats exhaustion as a recorded failure rather than a retry; (d) retry counters are ≤ 1 and apply only to transport failures during readiness or sign-in (§4.4, §4.4.1) |
+| G7 | No production source is modified, and no dependency is added | PR 5's diff touches `docs/`, `scripts/`, and exactly one `package.json` script line — no file under `src/` or `supabase/`, and not `next.config.ts`, `src/middleware.ts` or `wrangler.toml`. `package.json`'s `dependencies` and `devDependencies` and `package-lock.json` are unchanged; any future dependency requires separate justification and approval |
+
+| G8 | Mechanism selection is frozen, not run-time | `OPERATIONS` is a static, checked-in catalog; no code path assigns or rewrites an operation's `mechanism` at run time; there is no `fallback` field, no `demoted` field, and no branch that retries a `form` operation as `browser` |
+| G9 | No clock or token-lifetime manipulation | no code sets, offsets or fakes a system clock, and nothing alters an Auth token lifetime or remote Auth configuration; there is no `expired` session kind to produce (§3.4 N4) |
 
 ### 9.3 Gate results required for PR 5 to merge
 
@@ -1032,11 +1260,23 @@ own stdout through `scanText` and fails on any hit (§5.2). Per
 **before** implementation begins, and the "no hashed action ID or private wire
 payload" check (G1 / G2) is an explicit merge gate.
 
+**These commands run locally, and local is the whole merge gate (H1, approved).**
+A run against the deployed synthetic beta is **optional and informational only**.
+It may never be presented — in the PR description, a handoff note, a status table
+or this document — as required PR 5 evidence, and its absence never blocks the
+merge. Suites B and C carry the deployed-run requirement at PR 7
+(`docs/P7_PLAN.md` §9.1).
+
 ### 9.4 What PR 5 explicitly does **not** claim
 
 Its report must state, verbatim: *"The harness mechanism is proven. No security
 suite has been run. Suites A, B, C and E remain as recorded in
 `docs/P7_PLAN.md` §5."*
+
+It must additionally record, rather than quietly omit: **N4 (genuinely expired
+access token) as deferred and not executed** (§3.4); whether **S6b** ran or was
+recorded unavailable (§9.1.1); and which surfaces are frozen as `form` versus
+`browser` (§2.2). A remote run, if performed, is labelled informational.
 
 ---
 
@@ -1052,26 +1292,53 @@ suite has been run. Suites A, B, C and E remain as recorded in
 | R-5 | **A test-only authorization bypass or environment flag** (`HARNESS_MODE=1`, a header the middleware trusts, an alternate login path) | Creates a second authorization path that must itself be proven never enabled in production — a strictly worse security position than the one P7 is trying to reach. `CLAUDE.md` and prohibition 3 forbid it outright; G3 asserts its absence |
 | R-6 | **Relying solely on static regex tests over source** | This is the current state and is exactly what P7 corrects: R4 and R5 are "Missing" precisely because `publication-boundary-test.mjs` asserts that the *string* `auth.getUser()` appears. A regex cannot see a guard that is present but unreachable, ordered wrongly, or bypassed by a new route. The existing static tests stay as structural tripwires and stop being counted as suite coverage |
 | R-7 | **Arbitrary sleeps, request bursts, or indefinite retries** | Sleeps encode a guess about timing and rot into flakes; bursts against the deployed beta are indistinguishable from an attack and are forbidden by `docs/P7_PLAN.md` §9.2; indefinite retries convert a real failure into a slow pass. §4.3 and §4.4 replace all three with observable readiness conditions and hard bounds. Note that E1 (login flood) is *blocked*, not "implemented as a burst" — RD2 |
+| R-7b | **A truncated hash / digest / fingerprint of an auth cookie as a session marker** | Proposed in the first revision of this note and now **rejected**. It is still a value derived from a secret; it invites an unwinnable argument about how many bits are safe to print; and it puts credential-shaped material into an artifact whose whole purpose is to be safe to read. The random `sessionLabel` (§3.5) correlates records exactly as well and discloses nothing, so the derived value buys no capability |
+| R-7c | **Treating sign-out as immediate access-token invalidation** | Supabase revokes the *refresh* session on sign-out; an already-issued access JWT stays valid until its `exp`. Asserting immediate rejection would assert a guarantee the platform does not make — a test that is wrong today or passes for the wrong reason tomorrow. N3 proves the property that actually holds (the refresh session cannot mint a new session), and N4 stays honestly deferred (§3.4) |
+| R-7d | **Simulating an expired token** by clock manipulation, re-signing, persisting a credential until it ages out, changing the Auth token lifetime, or sleeping through the TTL | Each is forbidden by this design or by `CLAUDE.md` — the first two fabricate evidence, the third stores a credential, the fourth mutates remote configuration, the fifth is an arbitrary sleep. A deferred check named as deferred is worth more than a simulated check named as passing, which is the same reasoning `docs/P7_PLAN.md` RD2 applies to E1 |
+| R-7e | **Run-time demotion of a failing progressive-enhancement surface to `browser`** | It converts a real product regression into a silent pass: the suite stays green while the no-JS path it was supposed to protect is broken. Freezing the mechanism in a reviewed catalog (§2.2) keeps the failure loud and keeps mechanism choice inside code review, where it belongs |
+| R-7f | **Letting the HTTP-only sign-in utility make the self-test green when no browser exists** | It would let a run claim `form` and `browser` coverage it never exercised. PR 5's entire value is the browser mechanism; without a browser the honest outcome is a non-zero "unsupported/incomplete" exit (§3.2, §9.1 S0) |
+| R-7g | **Classifying an imperative action from its RSC / Server-Action response body** | Reading that payload couples the harness to the same private serialization prohibition 2 forbids it from writing, and the coupling would be invisible until a framework upgrade silently changed the shape. Rendered DOM, navigation and public status/headers are stable, product-level signals (§2.3) |
 | R-8 | **Playwright or Puppeteer as a dependency** | Would add a large dependency tree to a repository whose supply-chain gate (`npm run suite:d`) was only just brought green, and would need a browser-download step. Raw CDP over the built-in WebSocket already works here (`scripts/responsive-layout-test.mjs`). Rejected as "new infrastructure adopted for convenience" (`docs/P7_PLAN.md` §3 non-goals) |
 
 ---
 
-## 11. Open decisions
+## 11. Decisions
 
-Everything resolvable from the repository has been resolved above: the mechanism
-for all 31 surfaces (§2.1 — zero `TBD`, zero `seam`), the actor and session model
-(§3), the locator and readiness policy (§4), the evidence and classification
-vocabulary (§5), fixture safety (§6), topology and browser isolation (§7), the
-module API (§8), and the acceptance criteria (§9).
+### 11.1 Resolved — approved 2026-08-23, do not reopen
 
-Two choices remain genuinely human. Neither blocks review of the mechanism; both
-should be settled in the same approval.
+| # | Decision | Resolution |
+|---|---|---|
+| **H1** | Scope of PR 5's merge gate | **Local-only.** `npm run test:harness-selftest` against a locally built app, plus the standard gate chain, is the entire merge gate. A run against the deployed synthetic beta is optional and **informational only**, and must never be represented as required PR 5 evidence, in this document or anywhere else (§9.3). Deployed-run coverage remains Suite B/C's obligation at PR 7 |
+| **H2** | Where mutation fixtures live | **A single current-run-prefixed throwaway tenant, created through the real application surface (M-B1), approved with constraints.** It must contain only current-run fixtures; it must **never create or invite an Auth user**; it must be recorded by exact id; cleanup must delete children before the exact tenant id inside `finally`; and any residue or cleanup failure makes the run red. An existing tenant is never reused or mutated for mutation fixtures. The full constraint table is §6.7 |
 
-| # | Decision | Recommended (first) | Alternative | Security / maintenance tradeoff |
-|---|---|---|---|---|
-| **H1** | Should PR 5's self-test also run once against the deployed synthetic beta, or local-only? | **Local-only as the merge gate**, with a remote run recorded as informational if a reviewer asks for it | Require a remote self-test run before PR 5 merges | *Recommended:* PR 5 changes no runtime code, so a remote run adds little signal, and every remote request against the beta is real traffic against an environment `docs/P7_PLAN.md` §9.2 asks to touch only in bounded passes. *Alternative:* proves TLS and `Secure`-cookie handling one PR earlier — but Suites B and C already require a deployed run at PR 7, which covers it. Maintenance cost is symmetrical; the risk difference favors local-only |
-| **H2** | May the harness create a **throwaway tenant** through M-B1 for mutation fixtures, or must all fixtures live inside the existing Tenant A? | **Allow a prefixed throwaway tenant** (`P7H-…`), created through M-B1 by the `internal` actor and deleted in `finally` | Confine every fixture to Tenant A | *Recommended:* strongest blast-radius containment — a cleanup failure leaves an obviously-named empty tenant rather than stray rows inside the tenant Suite A uses as its isolation reference, and it keeps `data_scope` fixtures from perturbing Tenant A's dataset. Cost: one more object kind in the ledger, and tenant creation becomes a fixture dependency. *Alternative:* fewer moving parts, but mutation fixtures then share a tenant with isolation evidence, and a leaked fixture is harder to spot |
+### 11.2 Corrections applied in this revision
 
-If both are approved as recommended, **this design is ready for approval as
-written**, and PR 5 may proceed to implementation under a separate explicit
+Recorded so a reviewer can see what changed rather than re-deriving it:
+
+| Area | Correction |
+|---|---|
+| Credential-derived evidence | `sessionDigest` (a truncated SHA-256 of the auth cookie) is **removed everywhere**. Records now carry a random, credential-independent `sessionLabel` (§3.5, §5.1, §8.2). Rejected as R-7b |
+| Session isolation | proven structurally, by an in-memory auth-namespace comparison returning a boolean, and behaviorally — never by printing cookie names, values, hashes or token-derived metadata. **Identical non-auth cookies are explicitly allowed** (§3.3, S2) |
+| Revocation semantics | sign-out is described as revoking the **refresh** session, not as invalidating an already-issued access JWT. N3 is a revoked-refresh proof; continued acceptance of an unexpired access token before `exp` is recorded as expected platform behavior, not a finding. N4 (genuinely expired token) is **deferred and named**, never simulated (§3.4). Rejected as R-7c / R-7d |
+| Mechanism selection | frozen in a checked-in catalog after implementation-time discovery. Unverified surfaces default to the reviewed `browser` mechanism; a frozen `form` that stops degrading is **red**, never silently demoted. `fallback` and `demoted` are gone (§1.6, §2.1, §2.2, §8.2, G8). Rejected as R-7e |
+| Browser availability | mandatory for the self-test; no browser means a non-zero unsupported/incomplete exit. The direct Supabase Auth sign-in is a clearly lower-fidelity HTTP-only utility that can never make the self-test green or stand in for M-A1 (§3.2, S0). Rejected as R-7f |
+| S6 | no longer claims a blank fixture study yields a PDF. It uses the accepted P6E study as an explicitly **read-only** control, with a precondition gate and a stated fallback that hands positive report-route coverage to Suite B/C (§9.1.1) |
+| Action evidence | classified only from rendered DOM, navigation and public status/headers; never from a Server-Action / RSC response body (§2.3, §5.3, G2). Rejected as R-7g |
+| Loop prohibition | refined: arbitrary sleeps, application-state polling, load loops, unbounded retries and request retry loops stay forbidden; the bounded CDP message pump is permitted under a monotonic deadline and an explicit maximum message count, and G6 now tests that distinction instead of banning `while` (§4.4, §4.4.1, G6) |
+
+### 11.3 Standing constraints, unchanged by this revision
+
+No hashed `Next-Action` identifiers · no scraping or replay of rendered
+hidden fields · no hand-built React/RSC wire payloads · no authorization bypass,
+test mode or environment flag · no `service_role` authorization or isolation
+evidence (it remains limited to fixture metadata, counts and cleanup) · no secret
+output · no changes under `src/` · no new dependency without separate
+justification and approval · the harness reports sanitized observations and the
+suites own every assertion and verdict.
+
+### 11.4 Approval status
+
+Both open decisions are resolved and every reviewer correction is applied. **No
+design decision remains outstanding; this document is ready for approval as
+written**, and PR 5 may proceed to implementation only under a separate explicit
 approval.
