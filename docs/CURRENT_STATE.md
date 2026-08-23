@@ -33,8 +33,10 @@ must use documented authoritative definitions rather than invented rules.
   (`P6E: restore CSV/XLSX ingestion on Cloudflare Workers (#24)`). PR #25
   updated documentation only; always start new work from the current
   `origin/main` rather than treating this application baseline as the branch tip.
-- Production/test Worker version:
-  `d43ff9ab-b837-49f2-8c34-03b0f236096e`
+- Worker version verified during P6E acceptance:
+  `d43ff9ab-b837-49f2-8c34-03b0f236096e`. Later documentation-only merges may
+  produce a new Cloudflare version ID with the same application code; confirm
+  the current deployment rather than treating this ID as permanent.
 - Production URL: `https://becommunity-v1.ollinagencyllc.workers.dev`
 - The connected Supabase project contains **synthetic test data only**. This is
   not yet the separate real-client production environment required at go-live.
