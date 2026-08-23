@@ -123,6 +123,21 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
   const ledger = [];
   const denied = new Set([P6E_STUDY_ID, P6E_IMPORT_BATCH_ID, ...protectedTenantIds.filter(Boolean)]);
   let sequence = 0;
+  let halted = false;
+
+  /**
+   * Closes the ledger to new work. Called the moment a run is cancelled and
+   * again before cleanup, so no fixture can be authorized or tracked while — or
+   * after — cleanup runs. Idempotent.
+   */
+  function halt() {
+    halted = true;
+  }
+  function assertOpen(what) {
+    if (halted) {
+      throw new Error(`fixture ledger is closed: refusing to ${what} after the run was cancelled or cleaned up`);
+    }
+  }
 
   const tenantEntry = () => ledger.find((entry) => entry.kind === "tenant") ?? null;
   const ownershipContext = () => ({ prefix, tenantId: tenantEntry()?.id ?? null });
@@ -137,6 +152,7 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
    */
   function authorizeMutation(op, params = {}) {
     if (!op?.mutating) return;
+    assertOpen("authorize a mutation");
     for (const value of Object.values(params)) {
       if (typeof value === "string" && denied.has(value)) {
         throw new Error("deny-list: refusing to mutate a protected object (id withheld)");
@@ -180,6 +196,7 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
   }
 
   function track(record) {
+    assertOpen("track a fixture");
     if (!record?.kind || !record?.id) throw new Error("ledger: kind and id are required");
     if (!KINDS[record.kind]) {
       throw new Error(
@@ -217,6 +234,9 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
    * therefore cannot be deleted: ownership fails and the run goes red.
    */
   async function cleanup() {
+    // Cleanup always runs with the ledger closed, so nothing can be created or
+    // tracked while deletions are in flight.
+    halt();
     const context = ownershipContext();
     const refused = [];
     const failed = [];
@@ -278,6 +298,8 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
     reportControlMetadata,
     deletionOrder,
     cleanup,
+    halt,
+    isHalted: () => halted,
     isDenied: (id) => denied.has(id),
     ownsId,
   };

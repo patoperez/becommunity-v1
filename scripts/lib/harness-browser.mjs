@@ -81,6 +81,19 @@ function createCdp(socket) {
   let nextId = 0;
   const pending = new Map();
   const listeners = new Set();
+  let closed = null;
+
+  /**
+   * Terminating the browser must make in-flight browser work REJECT rather than
+   * hang, so a cancelled run can settle before cleanup begins.
+   */
+  function failAll(reason) {
+    closed = reason;
+    for (const [, entry] of pending) entry.reject(reason);
+    pending.clear();
+    for (const listener of [...listeners]) listener({ __cdpClosed: reason });
+  }
+  socket.addEventListener("close", () => failAll(new Error("CDP socket closed (browser terminated)")), { once: true });
 
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
@@ -95,6 +108,7 @@ function createCdp(socket) {
   });
 
   function send(method, params = {}, sessionId) {
+    if (closed) return Promise.reject(closed);
     const id = ++nextId;
     const payload = { id, method, params };
     if (sessionId) payload.sessionId = sessionId;
@@ -120,6 +134,7 @@ function createCdp(socket) {
         fn(value);
       };
       const listener = (message) => {
+        if (message.__cdpClosed) { finish(reject, message.__cdpClosed); return; }
         seen += 1;
         if (seen > maxEvents) {
           finish(reject, new Error(`CDP event cap (${maxEvents}) exhausted waiting for ${what}`));
@@ -460,6 +475,11 @@ export const BROWSER_DRIVERS = Object.freeze({
     return { status: 200, domSignal: changed ? "success" : "none" };
   },
 });
+
+/** Static: does this catalogue operation have a reviewed driver? */
+export function hasBrowserDriver(operationName) {
+  return Object.prototype.hasOwnProperty.call(BROWSER_DRIVERS, operationName);
+}
 
 export function browserDriverFor(operationName) {
   const driver = BROWSER_DRIVERS[operationName];
