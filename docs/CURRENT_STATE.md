@@ -32,12 +32,30 @@ must use documented authoritative definitions rather than invented rules.
 - Current `main`: `2fe76705cf2b98439b37cc6ff9a79c3f147f41d1`
   (`fix(p6): keep the dashboard inside narrow viewports and fit the report into
   two pages (#28)`). Always verify `origin/main` before beginning new work.
-- Worker version deployed after the P6 closure:
-  `0454021a-e307-430b-bb36-27612b5faa0c` (100% traffic). Version IDs are not
-  permanent identifiers; confirm the current deployment before release work.
-- Production URL: `https://becommunity-v1.ollinagencyllc.workers.dev`
+- **Milestone deployment baseline — P6 closure:** Worker version
+  `0454021a-e307-430b-bb36-27612b5faa0c` (100% traffic at the time of the P6
+  closure check). Version IDs are **not permanent identifiers**; confirm the
+  current deployment before release work.
+- **This file records milestone/baseline deployments only** — phase closures and
+  release baselines. Ordinary merges are **not** logged here: their commit-sha →
+  Worker-version mapping belongs in the merged pull request's conversation or
+  release record, using the post-merge record template in
+  [DEPLOYMENT.md](DEPLOYMENT.md). Because a merge to `main` deploys, a commit made
+  solely to record a version id would deploy again and immediately invalidate the
+  value it recorded. Never open a documentation PR for that purpose.
+- Beta URL (production alias of the synthetic beta Worker
+  `becommunity-v1`): `https://becommunity-v1.ollinagencyllc.workers.dev`
 - The connected Supabase project contains **synthetic test data only**. This is
   not yet the separate real-client production environment required at go-live.
+- **Observed behavior indicates that merges to `main` rebuild and deploy this
+  synthetic beta Worker automatically** (PR #29 was documentation-only, no manual
+  deployment was performed, and Cloudflare version
+  `2a508633-b985-474a-bc2d-e1ddf38a6c79` appeared afterward at 100%). The
+  Cloudflare Git-integration settings have not been read directly through
+  configured read-only tooling. Therefore **merge approval is deployment
+  approval**: every PR needs its full pre-merge gates and human approval before
+  merge, then one bounded post-merge health/smoke check — no retriggers, bursts,
+  or polling loops. See [DEPLOYMENT.md](DEPLOYMENT.md).
 - Supported roles today: `internal` and `client`. CEO and employee test accounts
   intentionally have the same `internal` permissions; do not claim otherwise.
 

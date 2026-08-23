@@ -109,7 +109,9 @@ Two baseline findings:
    step that precedes a separate one.
 4. **After each merge, perform one bounded check:** the production-alias health
    endpoint plus the focused smoke check relevant to that PR, then **record the
-   resulting Worker version id** in the handoff.
+   merged commit sha and the resulting Worker version id in that PR's
+   conversation/release record** — not in a repository file on the
+   deploy-triggering branch (§9.2).
 5. **Never** use repeated deployment retriggers, burst requests, or load loops to
    observe the result. One bounded pass, then stop.
 6. **Changing or disabling the current Git deployment integration is an external
@@ -448,14 +450,15 @@ reviewable.
 **Merge is deployment.** Per §2.1, merging any of these PRs to `main` currently
 rebuilds and deploys the synthetic beta Worker. Every row therefore requires
 branch/preview gates plus human approval **before** merge, and one bounded
-post-merge health-and-smoke pass with the resulting version id recorded. Test-only
-PRs still deploy — a merge that changes no runtime code still produces a new
-Worker version, exactly as PR #29 did.
+post-merge health-and-smoke pass with the resulting version id recorded in that
+PR's own conversation/release record (§9.2). Test-only PRs still deploy — a merge
+that changes no runtime code still produces a new Worker version, exactly as PR
+#29 did.
 
 | PR | Branch | Title | Contents | Human-review zone | Merges green? |
 |---:|---|---|---|---|---|
 | **1** | `docs/p7-evidence-plan` | docs: P7 evidence inventory and implementation plan | **This document only.** No code, tests, migrations, or config | — | n/a |
-| **2** | `p7a-worker-identity` | fix(deploy): correct the Worker identity and document deploy/rollback | `wrangler.toml` → `becommunity-v1`, superseding `origin/update_worker_name_to_becommunity-v1`; `docs/DEPLOYMENT.md` deploy/rollback procedure with commit-sha and version-id recording; the documented `production`-branch procedure and strip list (branch created only at go-live, RD4); `docs/DEPLOYMENT.md` corrected to describe the automatic `main` → beta deployment as it actually behaves. **Configuration-only in source, but merging it may automatically rebuild and deploy the beta Worker** — so it requires pre-merge review and post-merge version/health verification | **Yes — secrets/config** | Yes |
+| **2** | `p7a-worker-identity` | fix(deploy): correct the Worker identity and document beta deployment discipline | `wrangler.toml` → `becommunity-v1`, superseding `origin/update_worker_name_to_becommunity-v1`; `docs/DEPLOYMENT.md` deploy/rollback procedure, the post-merge record template, and the rule that the commit-sha → version-id mapping is recorded in the PR record rather than in a repository file (§9.2); the documented `production`-branch procedure and strip list (branch created only at go-live, RD4); `docs/DEPLOYMENT.md` corrected to describe the automatic `main` → beta deployment as it actually behaves. **Configuration-only in source, but merging it may automatically rebuild and deploy the beta Worker** — so it requires pre-merge review and post-merge version/health verification | **Yes — secrets/config** | Yes |
 | **3** | `p7b-supply-chain` | fix(deps): analyse and remediate dependency advisories, add the supply-chain gate | Per-advisory reachability analysis (runtime-in-Worker / build-only / dev-only) with the dependency path recorded; compatible remediation; any residual advisory carried as a §6.3 register entry; **then** `scripts/suite-d-supply-chain.mjs` wired in (audit threshold, git-history env scan, secret scan extended to `.open-next/`); offline CI workflow running the deterministic gates (RD3). Full regression suite on the branch. **Because merge deploys the beta, the pre-merge review is the deployment authorization**; the post-merge bounded health-and-smoke pass and version-id record are mandatory for this PR in particular, since it changes the dependency tree the Worker is built from | **Yes — secrets/config** | Yes — gate and remediation land together |
 | **4** | `p7c-rls-coverage-gate` | feat(security): make RLS coverage executable | migration `0014` — an internal-only reporting function over the catalog (`security definer`, `search_path = ''`) with the exact privilege model in §6.4, i.e. `revoke execute … from public, anon, authenticated;` followed by `grant execute … to service_role;` and no table grants; `scripts/rls-coverage-test.mjs` invoking it with the narrowly scoped service role (permitted per §3, metadata only); rollback `0014_*.sql`; correct the stale `CLAUDE.md` claim | **Yes — authorization** | Yes |
 | **5** | `p7d-adversarial-harness` | test(p7): add the reviewed adversarial HTTP harness | `docs/P7_HARNESS_DESIGN.md` (approved per §6.1) and `scripts/lib/http-harness.mjs`: attach to an app origin, sign in as the synthetic A / B / internal identities, carry cookies, forge and expire them. No hashed action IDs, no hand-built wire payloads. No assertions of its own | Authorization | Yes |
@@ -486,8 +489,8 @@ Additional, per PR:
 
 | PR | Additional required gates |
 |---:|---|
-| 2 | `wrangler deployments list --name becommunity-v1` (read-only) confirms the identity the config now names; the documented deploy/rollback procedure reviewed. **Merging deploys the beta**, so the pre-merge review is the deployment authorization; post-merge, one bounded `/api/health` + `/login` check and the new version id recorded |
-| 3 | Reachability analysis reviewed per advisory; `npm run suite:d` **green** at merge (or every residual advisory carried by a complete §6.3 register entry); `npm run gates`; suites re-run on the branch; CI workflow green on the PR itself. Post-merge, one bounded `/api/health` + `/login` smoke check and the new version id recorded — mandatory here because this PR changes the dependency tree the Worker is built from |
+| 2 | `wrangler deployments list --name becommunity-v1` (read-only) confirms the identity the config now names; the documented deploy/rollback procedure reviewed. **Merging deploys the beta**, so the pre-merge review is the deployment authorization; post-merge, one bounded `/api/health` + `/login` check and the new version id recorded in the PR record |
+| 3 | Reachability analysis reviewed per advisory; `npm run suite:d` **green** at merge (or every residual advisory carried by a complete §6.3 register entry); `npm run gates`; suites re-run on the branch; CI workflow green on the PR itself. Post-merge, one bounded `/api/health` + `/login` smoke check and the new version id recorded in the PR record — mandatory here because this PR changes the dependency tree the Worker is built from |
 | 4 | `npm run test:rls-coverage` returns zero uncovered tables; `npm run test:isolation` still green; the rollback script applied and re-applied once on the synthetic project; **the §6.4 privilege model verified behaviorally** — `anon` and `authenticated` attempting `execute` on the new function are rejected, asserted while authenticated as those roles, not as the service role |
 | 5 | Harness design note approved **before** implementation; harness self-test against a running app; explicit check that no hashed action ID or private wire payload is constructed; `npm run test:secrets` |
 | 6 | `npm run suite:a`; `npm run test:isolation`; `npm run test:client-boundary`, `test:publication-boundary`, `test:data-scope` |
@@ -498,7 +501,7 @@ Additional, per PR:
 | 11 | Export → re-import into a fresh synthetic tenant → recomputed metrics match the source study exactly → fixture teardown verified; the documentation's non-DR disclaimer reviewed |
 | 12 | Documentation review only; no command in the playbook is executed; no database credential requested |
 | 13 | `npm run suite:a` + `suite:b`; deletion path exercised on a throwaway synthetic tenant only; audit entries confirmed |
-| 14 | `npm run gates`; suites A–D green; `suite:e:available` green and `suite:e:full` red with E1 named; parity proof re-read for accuracy; the final beta version id recorded |
+| 14 | `npm run gates`; suites A–D green; `suite:e:available` green and `suite:e:full` red with E1 named; parity proof re-read for accuracy; the final beta version id recorded as the State-1 milestone baseline (§9.2) |
 
 Standing rules: never alter an expected calculation to make a test green; never
 mark an unexecuted check as passed; never insert acceptance rows by hand to
@@ -512,8 +515,27 @@ One bounded pass, then stop:
 2. The focused smoke check for that PR's surface (for most PRs, `/login` returning
    200 with the full header set; for PR 3, additionally that the app still boots
    under the changed dependency tree).
-3. Record the resulting Worker version id, alongside the merged commit sha, in
-   `docs/CURRENT_STATE.md`.
+3. Record the resulting Worker version id alongside the merged commit sha — **in
+   that pull request's conversation or release record, not in a repository file
+   on the deploy-triggering branch.**
+
+**Where the record lives, and why it is not `docs/CURRENT_STATE.md` per merge.**
+Because merging to `main` deploys (§2.1), committing every post-merge version id
+into a tracked file recurses: merge produces version A → a commit records A →
+that documentation merge deploys and produces version B → the recorded value is
+already stale. The rule is therefore:
+
+- **`docs/CURRENT_STATE.md` records milestone/baseline deployments only** — phase
+  closures and release baselines — and states explicitly that version ids are not
+  permanent identifiers. It is not a per-merge deployment log.
+- **Every ordinary merge's commit-sha → Worker-version mapping is recorded outside
+  the deploy-triggering branch**, in the merged PR's conversation/release record,
+  using the post-merge record template in `docs/DEPLOYMENT.md`.
+- **The State-1 closure PR (PR 14) may update the milestone baseline once**,
+  accepting that its own documentation merge can produce a later, code-identical
+  Worker version. That is the accepted, bounded cost of having a baseline at all.
+- **Never create a follow-up documentation merge whose only purpose is to record a
+  Worker version.** It deploys, so it invalidates the very value it records.
 
 **Forbidden:** repeated deployment retriggers, burst request loops, load tests, or
 polling the deployment API in a loop. If the bounded pass fails, roll back per
@@ -740,8 +762,10 @@ running version back to a commit.
    — dependency remediation included — is auto-merged.
 3. **After every merge**, one bounded post-merge pass per §9.2: production-alias
    health, the focused smoke check, and the resulting Worker version id recorded
-   alongside the commit sha in `docs/CURRENT_STATE.md`. That record is what makes
-   "redeploy version X" a real rollback rather than archaeology.
+   alongside the commit sha **in that PR's conversation/release record** — not in
+   a tracked file on the deploy-triggering branch, which would recurse (§9.2).
+   `docs/CURRENT_STATE.md` keeps milestone/baseline deployments only. That record
+   is what makes "redeploy version X" a real rollback rather than archaeology.
 4. **No retrigger loops.** One bounded verification pass per merge. If it fails,
    roll back per §9.3.
 5. **The Git integration itself is not modified.** Changing, disabling, or
@@ -838,7 +862,8 @@ must be reviewed before it, not after.
    carries a complete §6.3 register entry. Every merged commit is green.
 4. The Worker identity is correct; the deploy path is documented **as it actually
    behaves** (merge to `main` deploys the beta), and every merged commit has its
-   resulting Worker version id recorded per §9.2.
+   resulting Worker version id recorded per §9.2 — in that PR's record, with
+   `docs/CURRENT_STATE.md` holding milestone baselines only.
 5. `audit_log` meets every requirement in §11.1, captures the §11.2 events, and
    demonstrably did not widen the client read surface.
 6. Anomaly signals exist over that log and reach a human through a chosen channel.
@@ -849,8 +874,10 @@ must be reviewed before it, not after.
 9. Deletion readiness and the personal-data register structure exist for LFPDPPP.
 10. `npm run gates` is green (it includes `suite:e:available`, never
     `suite:e:full`); `docs/CURRENT_STATE.md` records **State 1 reached, State 2
-    blocked**, naming R18/E1 and R35 as the blockers, and carries the current beta
-    Worker version id with the commit that produced it.
+    blocked**, naming R18/E1 and R35 as the blockers, and carries the State-1
+    **milestone baseline** — the Worker version id and the commit that produced
+    it, marked as a non-permanent identifier, updated this once and never
+    maintained per merge (§9.2).
 
 ### 16.2 State 2 — P7 final acceptance (architecture gate, currently blocked)
 

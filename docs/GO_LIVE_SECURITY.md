@@ -71,10 +71,22 @@ page).
 
 ## B3 — Production deploy branch + repo hygiene (P0.6)
 
-- Create a **`production`** branch as the deploy branch; point Cloudflare's Git
-  build at it. (Today deploys are manual `cf:deploy`, all local — no auto-deploy
-  branch is set yet; document the intended strategy: `main` = working branch with
-  prompt docs, `production` = clean deploy branch.)
+- **Current reality (corrected):** the live Worker `becommunity-v1` is the
+  **synthetic-data beta**, and *observed behavior indicates* that merges to
+  `main` rebuild and deploy it automatically (PR #29 was documentation-only, no
+  manual deployment was performed, and Cloudflare version
+  `2a508633-b985-474a-bc2d-e1ddf38a6c79` appeared afterward at 100%). The Git
+  integration's settings have not been read directly through configured
+  read-only tooling. So `main` is in practice the beta's deploy branch, merge
+  approval is deployment approval, and the deploy discipline in
+  [DEPLOYMENT.md](DEPLOYMENT.md) applies to every merge today — not only at
+  go-live.
+- **At go-live**, create a **`production`** branch as the deploy branch and point
+  Cloudflare's Git build at it. Intended strategy: `main` = working branch with
+  prompt docs, `production` = clean deploy branch. The branch is created and
+  connected **only at the approved real-client go-live transition**; changing the
+  Cloudflare Git integration is a human-performed external mutation, never done
+  by an implementation PR.
 - On `production` **only**, strip the standalone prompt docs (decision: **option
   (b)** — strip docs, keep code comments as normal engineering references; no
   release-rewrite machinery):
