@@ -5,14 +5,20 @@
 // asserts is about the MECHANISM. It runs no security suite and returns no
 // security verdict: Suites A, B, C and E own those (§5.4).
 //
-//   node --env-file=.env.local scripts/harness-selftest.mjs        (npm run test:harness-selftest)
+//   node --env-file=.env.local scripts/harness-selftest.mjs   (npm run test:harness-selftest)
 //
 // Requires a running local app (default http://localhost:3000), the .env.local
 // fixture accounts, and a supported browser. Without a browser the run exits
 // non-zero as unsupported/incomplete — never green, never "skipped" (S0).
+//
+// Structure: an offline phase (classifier, fixture-safety negatives, forced
+// timeout cleanup, detector negatives) runs before anything touches the app; the
+// live phase runs inside a bounded promise whose outer `finally` ALWAYS enters
+// the same exact-id cleanup path, including on timeout.
 // =============================================================================
 
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { scanText } from "./lib/secret-patterns.mjs";
 import {
   OPERATIONS,
@@ -34,6 +40,23 @@ const HARNESS_FILES = [
   "scripts/harness-selftest.mjs",
 ];
 
+/** The complete PR 5 surface. Anything else changing makes G7 fail. */
+const ALLOWED_PATHS = new Set([
+  "docs/P7_HARNESS_DESIGN.md",
+  "docs/CURRENT_STATE.md",
+  "package.json",
+  ...HARNESS_FILES,
+]);
+
+const FORBIDDEN_PATH_RULES = [
+  { test: (p) => p.startsWith("src/"), why: "application source" },
+  { test: (p) => p.startsWith("supabase/"), why: "migrations or database policy" },
+  { test: (p) => p.startsWith(".github/"), why: "CI configuration" },
+  { test: (p) => p === "package-lock.json", why: "lockfile" },
+  { test: (p) => p.startsWith("next.config"), why: "framework configuration" },
+  { test: (p) => p.startsWith("wrangler"), why: "deployment configuration" },
+];
+
 // --- output capture, so the whole run can be scanned for secrets (§5.2) -----
 const transcript = [];
 const realLog = console.log.bind(console);
@@ -52,14 +75,18 @@ function requireEnv(names) {
   const missing = names.filter((name) => !process.env[name]);
   if (missing.length) {
     console.error(`Missing environment variables: ${missing.join(", ")}`);
+    // Safe: this runs at module load, before any fixture exists or any object
+    // could have been created, so there is no cleanup for it to bypass. Every
+    // exit from inside the live phase throws AbortRun instead.
     process.exit(2);
   }
 }
 
+// The fixture service credential is deliberately absent from this list: it is
+// owned, read and used exclusively by harness-fixtures.mjs (G4).
 requireEnv([
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-  "SUPABASE_SERVICE_ROLE_KEY",
   "TEST_USER_A_EMAIL", "TEST_USER_A_PASSWORD",
   "TEST_USER_B_EMAIL", "TEST_USER_B_PASSWORD",
   "TEST_INTERNAL_EMAIL", "TEST_INTERNAL_PASSWORD",
@@ -73,7 +100,7 @@ const CREDENTIALS = {
 };
 
 // ---------------------------------------------------------------------------
-// G1-G9: structural guarantees over the harness's own source (§9.2)
+// Detector vocabulary and the scope classifier
 // ---------------------------------------------------------------------------
 
 function sources() {
@@ -81,10 +108,10 @@ function sources() {
 }
 
 /**
- * A detector naturally has to NAME the things it forbids, so the literals below
- * would otherwise match themselves. Everything between the two markers in this
- * file is the detector's own vocabulary and is excluded from the content scans;
- * the rest of this file is scanned exactly like the harness modules.
+ * A detector must NAME what it forbids, so its own literal patterns would match
+ * themselves. ONLY the literal pattern table between the markers is excluded —
+ * never executable code and never a success message, both of which are scanned
+ * exactly like the harness modules.
  */
 function scannable(text) {
   // `lastIndexOf` deliberately: the marker strings also appear above as const
@@ -119,9 +146,18 @@ const DETECTOR_OPEN = "/* <detector-vocabulary> */";
 const DETECTOR_CLOSE = "/* </detector-vocabulary> */";
 
 /* <detector-vocabulary> */
-// Each pattern targets CODE, not prose: a comment that names a prohibition is
-// documentation and must not trip its own detector, while any actual use — a
-// quoted wire header, a call, a printed credential expression — still does.
+// Literal test data only. Every pattern targets CODE, not prose: a comment that
+// names a prohibition is documentation and must not trip its own detector,
+// while an actual use — a quoted wire header, a call, a printed credential
+// expression, a runtime assignment — still does.
+const ALLOWED_ENV = [
+  "HARNESS_ORIGIN", "CHROME_PATH",
+  "NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
+  "TEST_USER_A_EMAIL", "TEST_USER_A_PASSWORD", "TEST_USER_B_EMAIL", "TEST_USER_B_PASSWORD",
+  "TEST_INTERNAL_EMAIL", "TEST_INTERNAL_PASSWORD", "TEST_TENANT_A_ID", "TEST_TENANT_B_ID",
+];
+const CREDENTIAL_ENV = /SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SECRET_KEY|service_role/;
+const PRIVILEGED_CLIENT_IMPORT = /@supabase\/supabase-js/;
 const FORBIDDEN = {
   actionId: [
     /\$ACTION_ID/,
@@ -142,93 +178,395 @@ const FORBIDDEN = {
   demotedField: /\bdemoted\s*[:=]/,
   clock: /setSystemTime|useFakeTimers|Date\.now\s*=(?!=)|JWT_EXPIRY/,
 };
+
+// Negative fixtures: the literal violating snippets each detector must catch.
+// They live inside this block for the same reason the patterns do — a detector
+// cannot be allowed to flag its own test data. The loop that USES them is
+// executable code and stays outside, where it is scanned normally.
+const CORE_FILE = "scripts/lib/http-harness.mjs";
+const SELF_FILE = "scripts/harness-selftest.mjs";
+const NEGATIVE_CASES = [
+  { id: "G1", why: "a quoted private action header", file: CORE_FILE, inject: 'const h = { "next-action": id };' },
+  { id: "G2", why: "a private transport import", file: CORE_FILE, inject: 'import x from "react-server-dom-webpack/client";' },
+  { id: "G2", why: "a response-body read", file: CORE_FILE, inject: "const body = await response.text();" },
+  { id: "G3", why: "an undocumented environment switch", file: CORE_FILE, inject: "if (process.env.HARNESS_BYPASS) skipAuth();" },
+  { id: "G4", why: "the fixture credential outside the fixtures module", file: SELF_FILE, inject: "const k = process.env.SUPABASE_SERVICE_ROLE_KEY;" },
+  { id: "G4", why: "a privileged client import outside the fixtures module", file: CORE_FILE, inject: 'import { createClient } from "@supabase/supabase-js";' },
+  { id: "G5", why: "credential hashing", file: CORE_FILE, inject: 'const d = createHash("sha256").update(v);' },
+  { id: "G5", why: "a printed credential expression", file: CORE_FILE, inject: "console.log(actor.jar.header());" },
+  { id: "G6", why: "an application-request poll loop", file: CORE_FILE, inject: "while (waiting) { await fetch(new URL('/dashboard', origin)); }" },
+  { id: "G8", why: "a run-time mechanism assignment", file: CORE_FILE, inject: 'op.mechanism = "browser";' },
+  { id: "G9", why: "clock manipulation", file: CORE_FILE, inject: "Date.now = () => 0;" },
+];
+const SCOPE_CASES = [
+  { why: "application source changed", scope: { files: ["src/app/login/actions.ts"], depsChanged: false, baseResolved: true } },
+  { why: "a migration changed", scope: { files: ["supabase/migrations/0016_x.sql"], depsChanged: false, baseResolved: true } },
+  { why: "CI changed", scope: { files: [".github/workflows/ci.yml"], depsChanged: false, baseResolved: true } },
+  { why: "the lockfile changed", scope: { files: ["package-lock.json"], depsChanged: false, baseResolved: true } },
+  { why: "a dependency changed", scope: { files: ["package.json"], depsChanged: true, baseResolved: true } },
+  { why: "an unrelated path changed", scope: { files: ["scripts/isolation-test.mjs"], depsChanged: false, baseResolved: true } },
+  { why: "the baseline could not be resolved", scope: { files: [], depsChanged: false, baseResolved: false } },
+];
 /* </detector-vocabulary> */
 
-function structuralGuarantees() {
-  console.log("\n[G] Structural guarantees over the harness's own source:");
-  const src = sources();
+/**
+ * Pure scope classifier for G7, so the detector itself can be tested offline
+ * with synthetic inputs rather than only against this branch's real diff.
+ */
+export function evaluateScope({ files, depsChanged, baseResolved }) {
+  const reasons = [];
+  if (!baseResolved) reasons.push("the origin/main merge base could not be resolved");
+  for (const file of files ?? []) {
+    const rule = FORBIDDEN_PATH_RULES.find((entry) => entry.test(file));
+    if (rule) reasons.push(`${rule.why} changed: ${file}`);
+    else if (!ALLOWED_PATHS.has(file)) reasons.push(`path outside the approved PR 5 surface: ${file}`);
+  }
+  if (depsChanged) reasons.push("dependencies or devDependencies differ from origin/main");
+  return { ok: reasons.length === 0, reasons };
+}
+
+function readBranchScope() {
+  try {
+    const git = (args) => execFileSync("git", args, { encoding: "utf8" });
+    const base = git(["merge-base", "origin/main", "HEAD"]).trim();
+    if (!base) return { baseResolved: false, files: [], depsChanged: false };
+    const files = git(["diff", "--name-only", base]).split("\n").map((f) => f.trim()).filter(Boolean);
+    const basePkg = JSON.parse(git(["show", `${base}:package.json`]));
+    const currentPkg = JSON.parse(readFileSync("package.json", "utf8"));
+    const depsChanged =
+      JSON.stringify(basePkg.dependencies ?? {}) !== JSON.stringify(currentPkg.dependencies ?? {}) ||
+      JSON.stringify(basePkg.devDependencies ?? {}) !== JSON.stringify(currentPkg.devDependencies ?? {});
+    return { baseResolved: true, files, depsChanged };
+  } catch {
+    return { baseResolved: false, files: [], depsChanged: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The detector battery, as a pure function so negatives can be injected
+// ---------------------------------------------------------------------------
+
+function runDetectors(src, scope) {
+  const results = [];
+  const record = (id, passedCheck, message) => results.push({ id, passed: passedCheck, message });
   const all = Object.values(src).map(scannable).join("\n");
-  const core = scannable(src["scripts/lib/http-harness.mjs"]);
-  const browser = scannable(src["scripts/lib/harness-browser.mjs"]);
+  const browser = scannable(src["scripts/lib/harness-browser.mjs"] ?? "");
 
-  // G1 - no hashed action id is constructed, scraped or stored.
-  const g1Hits = FORBIDDEN.actionId.filter((pattern) => pattern.test(all));
-  if (g1Hits.length) bad("G1", `action-id pattern present: ${g1Hits.length} match(es)`);
-  // Worded without the literal header token: this message is scanned too, and
-  // a detector that names its quarry inside a quoted string matches itself.
-  else ok("G1", "no hashed action identifier is synthesized, scraped, stored or replayed");
-
-  // G2 - no private RSC payload builder AND no private RSC payload reader.
-  if (FORBIDDEN.privateImport.test(all)) bad("G2", "an import of private React/Next internals is present");
-  else if (FORBIDDEN.bodyRead.test(core) || FORBIDDEN.bodyRetained.test(core)) {
-    bad("G2", "a response body is parsed or retained in the core module");
-  } else ok("G2", "no RSC payload is built, parsed, snapshotted or classified; bodies are drained, never read");
-
-  // G3 - no bypass flag; only the documented switches are read.
-  const allowed = new Set([
-    "HARNESS_ORIGIN", "CHROME_PATH",
-    "NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
-    "TEST_USER_A_EMAIL", "TEST_USER_A_PASSWORD", "TEST_USER_B_EMAIL", "TEST_USER_B_PASSWORD",
-    "TEST_INTERNAL_EMAIL", "TEST_INTERNAL_PASSWORD", "TEST_TENANT_A_ID", "TEST_TENANT_B_ID",
-  ]);
-  const read = [...all.matchAll(/process\.env\.([A-Z_][A-Z_0-9]*)/g)].map((m) => m[1]);
-  const rogue = [...new Set(read)].filter((name) => !allowed.has(name));
-  if (rogue.length) bad("G3", `undocumented environment switch read: ${rogue.join(", ")}`);
-  else ok("G3", "no bypass flag; only documented origin/browser/fixture variables are read");
-
-  // G4 - service_role never reaches a code path that produces evidence.
-  const leaks = ["scripts/lib/http-harness.mjs", "scripts/lib/harness-browser.mjs"].filter(
-    (file) => /SERVICE_ROLE/.test(src[file]) || /@supabase\/supabase-js/.test(src[file]),
+  record(
+    "G1",
+    !FORBIDDEN.actionId.some((pattern) => pattern.test(all)),
+    "no hashed action identifier is synthesized, scraped, stored or replayed",
   );
-  if (leaks.length) bad("G4", `service-role reachable from an evidence-producing module: ${leaks.join(", ")}`);
-  else ok("G4", "service_role is confined to harness-fixtures.mjs (preflight, counts, exact-id cleanup)");
 
-  // G5 - no secret logging and no credential-derived value at all.
-  if (FORBIDDEN.hashing.test(all)) bad("G5", "a hashing/fingerprint primitive is present in the harness");
-  else if (FORBIDDEN.printsCredential.test(all)) bad("G5", "a cookie/token/password identifier reaches an output stream");
-  else ok("G5", "no credential-derived value exists; sessionLabel comes from the random source");
+  // The prohibition is on APPLICATION / Server-Action response bodies. The one
+  // narrow exemption is the browser's own DevTools handshake endpoint, which is
+  // browser control, not application data — so the exemption is line-scoped and
+  // must name /json/, never a blanket allowance.
+  const bodyReads = all
+    .split(/\r?\n/)
+    .filter((line) => FORBIDDEN.bodyRead.test(line) || FORBIDDEN.bodyRetained.test(line))
+    .filter((line) => !/\/json\//.test(line));
+  record(
+    "G2",
+    !FORBIDDEN.privateImport.test(all) && bodyReads.length === 0,
+    bodyReads.length
+      ? `${bodyReads.length} application response body read(s) present`
+      : "no private framework payload is built, imported, parsed or retained; app bodies are drained, never read",
+  );
 
-  // G6 - no arbitrary sleeps, no application polling, no unbounded loops.
+  const rogueEnv = [...new Set([...all.matchAll(/process\.env\.([A-Z_][A-Z_0-9]*)/g)].map((m) => m[1]))]
+    .filter((name) => !ALLOWED_ENV.includes(name));
+  record("G3", rogueEnv.length === 0, `no bypass switch; undocumented reads: ${rogueEnv.join(", ") || "none"}`);
+
+  // G4 scans EVERY harness source, including this self-test. The fixtures
+  // module is the single permitted holder of the privileged credential.
+  const credentialLeaks = Object.entries(src)
+    .filter(([file]) => file !== "scripts/lib/harness-fixtures.mjs")
+    .filter(([, text]) => CREDENTIAL_ENV.test(scannable(text)) || PRIVILEGED_CLIENT_IMPORT.test(scannable(text)))
+    .map(([file]) => file);
+  record(
+    "G4",
+    credentialLeaks.length === 0,
+    credentialLeaks.length
+      ? `the privileged fixture credential leaked into ${credentialLeaks.join(", ")}`
+      : "the privileged fixture credential is confined to the fixtures module",
+  );
+
+  record(
+    "G5",
+    !FORBIDDEN.hashing.test(all) && !FORBIDDEN.printsCredential.test(all),
+    "no credential-derived value exists; the session label comes from the random source",
+  );
+
   const appPollers = loopBodies(all).filter((body) => /fetch\(/.test(body) && !/\/json\//.test(body));
   const pumpBounded =
     /MAX_EVENTS_PER_WAIT/.test(browser) && /maxEvents/.test(browser) &&
     /deadline/.test(browser) && /hrtime/.test(browser);
-  if (appPollers.length) bad("G6", `${appPollers.length} loop(s) issue an application request`);
-  else if (!pumpBounded) bad("G6", "the CDP event pump lacks a monotonic deadline or an explicit event cap");
-  else ok("G6", "no application polling; the CDP pump is bounded by a deadline AND an event cap");
+  record(
+    "G6",
+    appPollers.length === 0 && pumpBounded,
+    appPollers.length
+      ? `${appPollers.length} loop(s) issue an application request`
+      : "no application polling; the CDP pump is bounded by a deadline AND an event cap",
+  );
 
-  // G7 - no production source, dependency or lockfile change.
-  ok("G7", "asserted out-of-band by the changed-file scope check (see the run report)");
+  const scopeVerdict = evaluateScope(scope);
+  record(
+    "G7",
+    scopeVerdict.ok,
+    scopeVerdict.ok
+      ? "the branch diff touches only the approved PR 5 surface; dependencies unchanged"
+      : scopeVerdict.reasons.join("; "),
+  );
 
-  // G8 - mechanism selection is frozen, not run-time.
-  const mutates =
-    FORBIDDEN.runtimeMechanism.test(all) ||
-    FORBIDDEN.fallbackField.test(core) ||
-    FORBIDDEN.demotedField.test(core);
-  if (!Object.isFrozen(OPERATIONS)) bad("G8", "OPERATIONS is not frozen");
-  else if (mutates) bad("G8", "a mechanism is assigned at run time, or a fallback/demoted field exists");
-  else ok("G8", "OPERATIONS is a frozen checked-in catalog; no run-time mechanism selection or fallback");
+  record(
+    "G8",
+    Object.isFrozen(OPERATIONS) &&
+      !FORBIDDEN.runtimeMechanism.test(all) &&
+      !FORBIDDEN.fallbackField.test(all) &&
+      !FORBIDDEN.demotedField.test(all),
+    "the catalogue is frozen; no run-time mechanism assignment and no fallback/demotion field",
+  );
 
-  // G9 - no clock or token-lifetime manipulation.
-  if (FORBIDDEN.clock.test(all)) bad("G9", "a clock manipulation primitive is present");
-  else if (SESSION_KINDS.includes("expired")) bad("G9", "an `expired` session kind exists; N4 must stay deferred");
-  else ok("G9", `no clock/token-lifetime manipulation; session kinds are ${SESSION_KINDS.join("/")}`);
+  record(
+    "G9",
+    !FORBIDDEN.clock.test(all) && !SESSION_KINDS.includes("expired"),
+    `no clock or token-lifetime manipulation; session kinds are ${SESSION_KINDS.join("/")}`,
+  );
+
+  return results;
 }
 
 // ---------------------------------------------------------------------------
-// The run
+// Bounded execution: a timeout REJECTS, it never exits the process
 // ---------------------------------------------------------------------------
 
-const runTimer = setTimeout(() => {
-  console.error("run timeout exhausted — aborting");
-  process.exit(1);
-}, RUN_TIMEOUT_MS);
-runTimer.unref?.();
+/**
+ * Raised instead of calling process.exit() from inside the live phase, so the
+ * outer `finally` always reaches cleanup before the process ends.
+ */
+class AbortRun extends Error {
+  constructor(message, exitCode) {
+    super(message);
+    this.name = "AbortRun";
+    this.exitCode = exitCode;
+  }
+}
+let abortRun = null;
+
+function withTimeout(work, ms, what) {
+  let timer = null;
+  const guard = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`run timeout after ${ms}ms during ${what}`)), ms);
+  });
+  return Promise.race([work, guard]).finally(() => clearTimeout(timer));
+}
+
+// ---------------------------------------------------------------------------
+// Offline phase — no application, no remote rows
+// ---------------------------------------------------------------------------
+
+/** A mock data gateway: records deletes, so ownership rules can be proven offline. */
+function mockGateway(objects) {
+  const deletes = [];
+  return {
+    deletes,
+    async countPrefixed(kind, prefix) {
+      return Object.values(objects).filter(
+        (o) => o.kind === kind && typeof o.name === "string" && o.name.startsWith(prefix) && !o.deleted,
+      ).length;
+    },
+    async readMeta(kind, id) {
+      const found = objects[id];
+      return found && found.kind === kind && !found.deleted ? { ...found } : null;
+    },
+    async deleteById(kind, id) {
+      deletes.push({ kind, id });
+      if (objects[id]) objects[id].deleted = true;
+      return { ok: true };
+    },
+    async reportControl() {
+      return null;
+    },
+  };
+}
+
+async function offlineFixtureSafety() {
+  console.log("\n[N] Fixture-safety negatives (offline, no remote rows):");
+  const prefix = "P7H-TEST-offline";
+  const tenantId = "11111111-1111-1111-1111-111111111111";
+  const studyId = "22222222-2222-2222-2222-222222222222";
+  const strangerId = "33333333-3333-3333-3333-333333333333";
+
+  // N1 — an unsupported kind is refused by track(), not silently undeletable.
+  {
+    const f = createFixtures({ prefix, gateway: mockGateway({}) });
+    try {
+      f.track({ kind: "storage_object", id: strangerId });
+      bad("N1", "track() accepted a kind with no ownership validator");
+    } catch {
+      ok("N1", "track() refuses a kind with no ownership validator or deletion strategy");
+    }
+  }
+
+  // N2 — a scoped mutation before any tenant is ledgered must abort.
+  {
+    const f = createFixtures({ prefix, gateway: mockGateway({}) });
+    try {
+      f.authorizeMutation(OPERATIONS["studies.createBlank"], { tenant_id: tenantId });
+      bad("N2", "a scoped mutation was allowed with no throwaway tenant ledgered");
+    } catch {
+      ok("N2", "a scoped mutation aborts while no throwaway tenant is ledgered");
+    }
+  }
+
+  // N3 — a scoped mutation into a DIFFERENT tenant must abort.
+  {
+    const objects = { [tenantId]: { kind: "tenant", id: tenantId, name: `${prefix} tenant` } };
+    const f = createFixtures({ prefix, gateway: mockGateway(objects) });
+    f.track({ kind: "tenant", id: tenantId });
+    try {
+      f.authorizeMutation(OPERATIONS["studies.createBlank"], { tenant_id: strangerId });
+      bad("N3", "a fixture was allowed outside the run's throwaway tenant");
+    } catch {
+      ok("N3", "a fixture targeting another tenant aborts before any request");
+    }
+  }
+
+  // N4 — an exact id the run does not own can never reach a delete call.
+  {
+    const objects = {
+      [tenantId]: { kind: "tenant", id: tenantId, name: `${prefix} tenant` },
+      [strangerId]: { kind: "study", id: strangerId, name: "Satisfacción 2026 (TEST)", tenant_id: tenantId },
+    };
+    const gateway = mockGateway(objects);
+    const f = createFixtures({ prefix, gateway });
+    f.track({ kind: "tenant", id: tenantId });
+    f.track({ kind: "study", id: strangerId }); // a wrongly captured id
+    const result = await f.cleanup();
+    if (gateway.deletes.some((d) => d.id === strangerId)) {
+      bad("N4", "an object without the run prefix was deleted");
+    } else if (result.clean) {
+      bad("N4", "cleanup reported clean while refusing an unowned object");
+    } else ok("N4", "a name without the run prefix is refused before deletion and the run goes red");
+  }
+
+  // N5 — a study whose tenant is not the throwaway tenant is refused.
+  {
+    const objects = {
+      [tenantId]: { kind: "tenant", id: tenantId, name: `${prefix} tenant` },
+      [studyId]: { kind: "study", id: studyId, name: `${prefix} study`, tenant_id: strangerId },
+    };
+    const gateway = mockGateway(objects);
+    const f = createFixtures({ prefix, gateway });
+    f.track({ kind: "tenant", id: tenantId });
+    f.track({ kind: "study", id: studyId });
+    await f.cleanup();
+    if (gateway.deletes.some((d) => d.id === studyId)) {
+      bad("N5", "a study outside the throwaway tenant was deleted");
+    } else ok("N5", "a study whose tenant is not the throwaway tenant is refused");
+  }
+
+  // N6 — a deny-listed id can never enter the ledger.
+  {
+    const f = createFixtures({ prefix, protectedTenantIds: [tenantId], gateway: mockGateway({}) });
+    let aborted = 0;
+    for (const id of [P6E_STUDY_ID, tenantId]) {
+      try { f.track({ kind: "study", id }); } catch { aborted += 1; }
+    }
+    if (aborted === 2) ok("N6", "deny-listed ids cannot enter the ledger at all");
+    else bad("N6", "a deny-listed id was accepted by the ledger");
+  }
+
+  // N7 — deletion order is child-kind first, newest-first within a kind.
+  {
+    const objects = {
+      [tenantId]: { kind: "tenant", id: tenantId, name: `${prefix} tenant` },
+      [studyId]: { kind: "study", id: studyId, name: `${prefix} study 1`, tenant_id: tenantId },
+      [strangerId]: { kind: "study", id: strangerId, name: `${prefix} study 2`, tenant_id: tenantId },
+    };
+    const gateway = mockGateway(objects);
+    const f = createFixtures({ prefix, gateway });
+    f.track({ kind: "tenant", id: tenantId });
+    f.track({ kind: "study", id: studyId });
+    f.track({ kind: "study", id: strangerId });
+    const result = await f.cleanup();
+    const order = gateway.deletes.map((d) => (d.kind === "tenant" ? "tenant" : d.id === strangerId ? "study:newer" : "study:older"));
+    const expected = ["study:newer", "study:older", "tenant"];
+    if (JSON.stringify(order) === JSON.stringify(expected) && result.clean) {
+      ok("N7", "cleanup order is child-kind before tenant, newest-first within a kind");
+    } else bad("N7", `unexpected deletion order: ${order.join(" -> ")}`);
+  }
+}
+
+/**
+ * Proves the run timeout enters the SAME exact-id cleanup path. Uses mock
+ * fixtures: no remote row is created merely to test the timeout.
+ */
+async function offlineTimeoutCleanup() {
+  console.log("\n[N] Forced-timeout cleanup (offline, mock fixtures):");
+  const prefix = "P7H-TEST-timeout";
+  const tenantId = "44444444-4444-4444-4444-444444444444";
+  const studyId = "55555555-5555-5555-5555-555555555555";
+  const objects = {
+    [tenantId]: { kind: "tenant", id: tenantId, name: `${prefix} tenant` },
+    [studyId]: { kind: "study", id: studyId, name: `${prefix} study`, tenant_id: tenantId },
+  };
+  const gateway = mockGateway(objects);
+  const f = createFixtures({ prefix, gateway });
+  f.track({ kind: "tenant", id: tenantId });
+  f.track({ kind: "study", id: studyId });
+
+  let timedOut = false;
+  let cleanup = null;
+  try {
+    // The same shape the live phase uses: a bounded race, never process.exit.
+    await withTimeout(new Promise(() => {}), 40, "offline timeout probe");
+  } catch (error) {
+    timedOut = /timeout/i.test(error.message);
+  } finally {
+    cleanup = await f.cleanup();
+  }
+  const order = gateway.deletes.map((d) => d.kind);
+  if (!timedOut) bad("N8", "the forced timeout did not reject as a timeout");
+  else if (JSON.stringify(order) !== JSON.stringify(["study", "tenant"])) {
+    bad("N8", `timeout cleanup ran in the wrong order: ${order.join(" -> ")}`);
+  } else if (!cleanup.clean) bad("N8", "timeout cleanup did not report clean");
+  else ok("N8", "a timeout enters the same exact-id cleanup path, child before tenant, with no process.exit");
+}
+
+function offlineDetectorNegatives() {
+  console.log("\n[N] Detector negatives (each injected violation must be caught):");
+  const real = sources();
+  const goodScope = { files: [...ALLOWED_PATHS], depsChanged: false, baseResolved: true };
+
+  let caught = 0;
+  for (const testCase of NEGATIVE_CASES) {
+    const mutated = { ...real, [testCase.file]: `${real[testCase.file]}\n${testCase.inject}\n` };
+    const verdict = runDetectors(mutated, goodScope).find((r) => r.id === testCase.id);
+    if (verdict && !verdict.passed) caught += 1;
+    else bad(`N9/${testCase.id}`, `${testCase.why} was NOT caught by ${testCase.id}`);
+  }
+  if (caught === NEGATIVE_CASES.length) {
+    ok("N9", `${caught}/${NEGATIVE_CASES.length} injected violations were caught by their own detector`);
+  }
+
+  let scopeCaught = 0;
+  for (const testCase of SCOPE_CASES) {
+    if (!evaluateScope(testCase.scope).ok) scopeCaught += 1;
+    else bad("N10/G7", `${testCase.why} was NOT caught by the scope classifier`);
+  }
+  if (scopeCaught === SCOPE_CASES.length) {
+    ok("N10", `${scopeCaught}/${SCOPE_CASES.length} out-of-scope diffs are rejected, including an unresolved baseline`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Live phase
+// ---------------------------------------------------------------------------
 
 const prefix = newRunPrefix();
 const fixtures = createFixtures({
-  url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   prefix,
   protectedTenantIds: [process.env.TEST_TENANT_A_ID, process.env.TEST_TENANT_B_ID],
 });
@@ -240,18 +578,10 @@ console.log(`  run prefix: ${prefix}  (ownership namespace, never a deletion key
 let harness = null;
 let s6bRan = false;
 
-try {
-  // --- S10 — the classifier self-tests offline, before any live request ----
-  console.log("\n[S10] Classifier self-test (offline, before any live request):");
-  const classifierFailures = selfTestClassifier();
-  if (classifierFailures.length) bad("S10", classifierFailures.join("; "));
-  else ok("S10", `${CLASSIFIER_CASES.length} fixed cases classify correctly; unknown answers are 'unclassified'`);
-
-  // --- readiness: the app's own health signal, not a delay -----------------
+async function livePhase() {
   const health = await fetch(new URL("/api/health", ORIGIN), { signal: AbortSignal.timeout(15000) }).catch(() => null);
   if (!health?.ok) {
-    console.error(`the app is not answering at ${ORIGIN} — start it first (npm run build && npm run start)`);
-    process.exit(2);
+    throw new AbortRun(`the app is not answering at ${ORIGIN} — start it first (npm run build && npm run start)`, 2);
   }
 
   console.log("\n[S0] Browser availability (mandatory — design §3.2):");
@@ -273,17 +603,15 @@ try {
     ok("S0", "a supported browser was found and driven over an OS-assigned ephemeral port");
   } catch (error) {
     if (error.code === "NO_BROWSER") {
-      console.error(`\nUNSUPPORTED/INCOMPLETE: ${error.message}`);
-      process.exit(1);
+      throw new AbortRun(`UNSUPPORTED/INCOMPLETE: ${error.message}`, 1);
     }
     throw error;
   }
 
-  // --- preflight: refuse to start if a previous run leaked -----------------
   await fixtures.preflight();
   note("preflight: zero pre-existing objects carry this run prefix");
 
-  // --- S1 — sign-in for all three actors through M-A1 ----------------------
+  // --- S1 -----------------------------------------------------------------
   console.log("\n[S1] Sign-in for all three actors through the real login surface:");
   for (const id of ["tenantA", "tenantB", "internal"]) {
     await harness.signIn(id);
@@ -291,12 +619,31 @@ try {
     ok("S1", `${id} reached an authenticated dashboard; the app reported this actor's own identity`);
   }
 
-  // --- S2 — session isolation, without credential-derived evidence ---------
+  // --- S2: structural AND behavioral, both against LIVE sessions -----------
   console.log("\n[S2] Session isolation (no cookie name, value or hash is printed):");
   const isolation = harness.assertSessionIsolation(["tenantA", "tenantB", "internal"]);
   ok("S2", `distinct jars, contexts and session labels for ${isolation.actors} actors; no auth credential reused`);
 
-  // --- S3 — logged-out handling -------------------------------------------
+  // tenantB is LIVE here — that is the point: clearing a valid session must
+  // affect exactly one actor.
+  await harness.session.clear("tenantB");
+  const clearedB = await harness.run("tenantB", OPERATIONS["page.dashboard"]);
+  const otherA = await harness.run("tenantA", OPERATIONS["page.dashboard"]);
+  const otherInternal = await harness.run("internal", OPERATIONS["page.adminStudies"]);
+  if (
+    clearedB.errorCategory === "denied_unauthenticated" &&
+    otherA.errorCategory === "success" &&
+    otherInternal.errorCategory === "success"
+  ) {
+    ok("S2", "clearing one LIVE actor denies exactly that actor; the other two stay authenticated");
+  } else {
+    bad("S2", `live-session isolation: tenantB=${clearedB.errorCategory}, tenantA=${otherA.errorCategory}, internal=${otherInternal.errorCategory}`);
+  }
+  await harness.signIn("tenantB");
+  await harness.assertIdentity("tenantB");
+  ok("S2", "tenantB signed back in through the real login flow after the isolation probe");
+
+  // --- S3 -----------------------------------------------------------------
   console.log("\n[S3] Logged-out handling:");
   const anonAdmin = await harness.run("anonymous", OPERATIONS["page.adminStudies"]);
   if (anonAdmin.errorCategory === "denied_unauthenticated" && anonAdmin.redirectTo === "/login") {
@@ -313,21 +660,21 @@ try {
     }
   } else bad("S3", `anonymous -> report route gave ${anonReport.errorCategory} / ${anonReport.httpStatus}`);
 
-  // --- S11 — deny-list precondition, before any request --------------------
-  console.log("\n[S11] Deny-list precondition (aborts before a request is sent):");
+  // --- S11 ----------------------------------------------------------------
+  console.log("\n[S11] Ownership and deny-list preconditions (abort before any request):");
   let aborted = 0;
   for (const protectedId of [P6E_STUDY_ID, process.env.TEST_TENANT_A_ID, process.env.TEST_TENANT_B_ID]) {
     try {
       await harness.run("internal", OPERATIONS["studies.createBlank"], { tenant_id: protectedId, name: `${prefix} must-not-run` });
       bad("S11", "a mutating operation against a protected id was NOT refused");
     } catch (error) {
-      if (/deny-list|fixture scope/.test(error.message)) aborted += 1;
+      if (/deny-list|fixture scope|ownership/.test(error.message)) aborted += 1;
       else bad("S11", `unexpected error: ${error.message}`);
     }
   }
   if (aborted === 3) ok("S11", "3/3 mutating attempts on protected ids aborted before any request");
 
-  // --- S6 — direct-route proof against a READ-ONLY control -----------------
+  // --- S6 -----------------------------------------------------------------
   console.log("\n[S6] Direct-route proof on the report route (GET-only, read-only control):");
   const control = await fixtures.reportControlMetadata(P6E_STUDY_ID);
   const bogus = await harness.run("internal", OPERATIONS["report.download"], { studyId: "not-a-uuid" });
@@ -351,66 +698,31 @@ try {
     } else bad("S6b", `${owner} -> the control study gave ${positive.errorCategory} / ${positive.httpStatus}`);
   }
 
-  // --- S8 — one browser-driven imperative Server Action --------------------
-  console.log("\n[S8] Browser-driven imperative Server Action (computeStudyPivot):");
-  const PIVOT_LABEL = "Agregación";
-  const findPivot = `
-    (() => {
-      const label = [...document.querySelectorAll('label')].find((l) => l.textContent.trim().startsWith(${JSON.stringify(PIVOT_LABEL)}));
-      if (!label) return null;
-      const select = label.querySelector('select');
-      const panel = label.closest('div')?.parentElement;
-      return panel ? panel.innerText.trim().slice(0, 400) : (select ? 'found' : null);
-    })()`;
-  const drivePivot = `
-    (() => {
-      const label = [...document.querySelectorAll('label')].find((l) => l.textContent.trim().startsWith(${JSON.stringify(PIVOT_LABEL)}));
-      const select = label && label.querySelector('select');
-      if (!select) return 'no-control';
-      const target = [...select.options].find((o) => o.value !== select.value);
-      if (!target) return 'no-alternative';
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(select, target.value);
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      return 'ok';
-    })()`;
-
-  let pivotActor = null;
-  for (const candidate of ["internal", "tenantA"]) {
-    const context = await harness.contextFor(candidate, { javaScript: true });
-    await context.navigate(new URL("/dashboard", ORIGIN).toString());
-    const found = await context.evaluate(findPivot);
-    if (found) { pivotActor = candidate; break; }
-  }
-  if (!pivotActor) {
-    bad("S8", "no pivot control rendered for any actor — the imperative action could not be driven");
+  // --- S8 — through harness.run only --------------------------------------
+  console.log("\n[S8] Imperative Server Action through the public entry point:");
+  let pivot = await harness.run("internal", OPERATIONS["dashboard.pivot"]);
+  if (pivot.errorCategory !== "success") pivot = await harness.run("tenantA", OPERATIONS["dashboard.pivot"]);
+  if (pivot.errorCategory === "success" && pivot.mechanism === "browser") {
+    ok("S8", `harness.run drove computeStudyPivot through the app's own controls (${pivot.actor}, mechanism: browser)`);
   } else {
-    const context = await harness.contextFor(pivotActor, { javaScript: true });
-    const before = await context.evaluate(findPivot);
-    const driven = await context.evaluate(drivePivot);
-    if (driven !== "ok") {
-      bad("S8", `could not drive the pivot control: ${driven}`);
-    } else {
-      const changed = await context
-        .waitForDom(
-          `() => { const l = [...document.querySelectorAll('label')].find((x) => x.textContent.trim().startsWith(${JSON.stringify(PIVOT_LABEL)}));
-             const p = l && l.closest('div') && l.closest('div').parentElement;
-             return p && p.innerText.trim().slice(0, 400) !== ${JSON.stringify(before)}; }`,
-        )
-        .catch(() => false);
-      if (changed) ok("S8", `${pivotActor} drove the real pivot control; the rendered result changed (mechanism: browser)`);
-      else bad("S8", "the pivot action did not produce an observable rendered change");
-    }
+    bad("S8", `dashboard.pivot gave ${pivot.errorCategory} / mechanism ${pivot.mechanism}`);
+  }
+  try {
+    await harness.run("internal", OPERATIONS["upload.rollback"]);
+    bad("S8", "an imperative operation with no reviewed driver was executed");
+  } catch (error) {
+    if (error.code === "UNSUPPORTED_DRIVER") {
+      ok("S8", "an imperative operation with no reviewed driver fails explicitly, never as success");
+    } else bad("S8", `unexpected error for an undriven operation: ${error.message}`);
   }
 
-  // --- S7 + S9 — frozen mechanisms, fixture creation, ordered cleanup ------
+  // --- S7 + S9 ------------------------------------------------------------
   console.log("\n[S7] Frozen mechanism catalogue (no run-time selection, no demotion):");
-  const frozenForms = Object.values(OPERATIONS).filter((op) => op.mechanism === "form");
-  for (const op of frozenForms) {
+  for (const op of Object.values(OPERATIONS).filter((entry) => entry.mechanism === "form")) {
     if (!op.degradationVerifiedAt) bad("S7", `${op.name} is frozen as 'form' without a recorded discovery run`);
   }
-  note(`frozen as 'form': ${frozenForms.map((op) => op.name).join(", ") || "(none)"}`);
+  const frozenForms = Object.values(OPERATIONS).filter((op) => op.mechanism === "form").map((op) => op.name);
+  note(`frozen as 'form': ${frozenForms.join(", ")}`);
   note(`auth.login ran as '${OPERATIONS["auth.login"].mechanism}' during S1 — the frozen value, not a negotiated one`);
 
   console.log("\n[S9] Throwaway tenant, fixture study, ordered cleanup:");
@@ -419,58 +731,58 @@ try {
   const tenantResult = await harness.run("internal", createTenant, { name: tenantName });
   if (tenantResult.errorCategory !== "success") {
     bad("S9", `tenant creation gave ${tenantResult.errorCategory}`);
-  } else {
-    ok("S7", `clients.createTenant ran as its frozen '${createTenant.mechanism}' mechanism and succeeded`);
-    const adminContext = await harness.contextFor("internal", { javaScript: true });
-    await adminContext.navigate(new URL("/admin/studies", ORIGIN).toString());
-    const tenantId = await adminContext.evaluate(PAGE.optionValueByText("tenant_id", tenantName));
-    if (!tenantId) {
-      bad("S9", "the created tenant did not appear in the application's own tenant list");
-    } else {
-      fixtures.track({ kind: "tenant", id: tenantId, createdBy: createTenant.name, viaMechanism: createTenant.mechanism });
-      ok("S9", "one prefixed throwaway tenant created through the real application surface and ledgered by exact id");
-
-      const studyName = `${prefix} study`;
-      const studyOp = OPERATIONS["studies.createBlank"];
-      const studyResult = await harness.run("internal", studyOp, { tenant_id: tenantId, name: studyName, period: "" });
-      const landed = studyResult.landedOn ?? "";
-      const studyId = new URLSearchParams(landed.split("?")[1] ?? "").get("study");
-      if (!studyId) {
-        bad("S9", `study creation did not return a study id (landed on ${landed.split("?")[0]})`);
-      } else {
-        fixtures.track({ kind: "study", id: studyId, createdBy: studyOp.name, viaMechanism: studyOp.mechanism });
-        ok("S9", "one prefixed study created inside the throwaway tenant through the real workflow and ledgered");
-      }
-    }
+    return;
   }
+  ok("S7", `clients.createTenant ran as its frozen '${createTenant.mechanism}' mechanism and matched its declared outcome contract`);
+
+  const adminContext = await harness.contextFor("internal", { javaScript: true });
+  await adminContext.navigate(new URL("/admin/studies", ORIGIN).toString());
+  const tenantId = await adminContext.evaluate(PAGE.optionValueByText("tenant_id", tenantName));
+  if (!tenantId) {
+    bad("S9", "the created tenant did not appear in the application's own tenant list");
+    return;
+  }
+  fixtures.track({ kind: "tenant", id: tenantId, createdBy: createTenant.name, viaMechanism: createTenant.mechanism });
+  ok("S9", "one prefixed throwaway tenant created through the real application surface and ledgered by exact id");
+
+  const studyOp = OPERATIONS["studies.createBlank"];
+  const studyResult = await harness.run("internal", studyOp, {
+    tenant_id: tenantId,
+    name: `${prefix} study`,
+    period: "",
+  });
+  const studyId = new URLSearchParams((studyResult.landedOn ?? "").split("?")[1] ?? "").get("study");
+  if (studyResult.errorCategory !== "success" || !studyId) {
+    bad("S9", `study creation gave ${studyResult.errorCategory}`);
+    return;
+  }
+  fixtures.track({ kind: "study", id: studyId, createdBy: studyOp.name, viaMechanism: studyOp.mechanism });
+  ok("S9", "one prefixed study created inside the throwaway tenant through the real workflow and ledgered");
   note("no Auth user was created or invited at any point in this run");
 
-  // --- S4 — invalid-token handling (N2), immediate rejection ---------------
-  console.log("\n[S4] Invalid-token handling (N2):");
-  await harness.session.invalidate("tenantA");
-  const invalidResult = await harness.run("tenantA", OPERATIONS["page.dashboard"]);
-  if (invalidResult.errorCategory === "denied_unauthenticated" && invalidResult.sessionKind === "invalid") {
-    ok("S4", "a structurally malformed auth cookie is rejected immediately on the next protected route");
-  } else bad("S4", `invalid token gave ${invalidResult.errorCategory} / kind ${invalidResult.sessionKind}`);
+  // --- S4 — an independent, currently VALID session -----------------------
+  console.log("\n[S4] Invalid-token handling (N2) against a currently valid session:");
+  const beforeInvalidation = await harness.run("tenantA", OPERATIONS["page.dashboard"]);
+  if (beforeInvalidation.errorCategory !== "success") {
+    bad("S4", `tenantA was not authenticated before invalidation (${beforeInvalidation.errorCategory})`);
+  } else {
+    await harness.session.invalidate("tenantA");
+    const afterInvalidation = await harness.run("tenantA", OPERATIONS["page.dashboard"]);
+    if (afterInvalidation.errorCategory === "denied_unauthenticated" && afterInvalidation.sessionKind === "invalid") {
+      ok("S4", "a valid session whose cookie is then structurally corrupted is rejected immediately");
+    } else bad("S4", `invalid token gave ${afterInvalidation.errorCategory} / kind ${afterInvalidation.sessionKind}`);
+  }
 
-  // --- S2 (behavioral half) — clearing one actor denies only that actor ----
-  await harness.session.clear("tenantA");
-  const clearedA = await harness.run("tenantA", OPERATIONS["page.dashboard"]);
-  const stillInternal = await harness.run("internal", OPERATIONS["page.adminStudies"]);
-  if (clearedA.errorCategory === "denied_unauthenticated" && stillInternal.errorCategory === "success") {
-    ok("S2", "clearing one actor's session denies that actor while the others keep working");
-  } else bad("S2", `isolation behavior: tenantA=${clearedA.errorCategory}, internal=${stillInternal.errorCategory}`);
-
-  // --- S5 — revoked-refresh handling (N3) ----------------------------------
+  // --- S5 -----------------------------------------------------------------
   console.log("\n[S5] Revoked-refresh handling (N3) — NOT an expired-token claim:");
   const revoked = await harness.session.revokeRefresh("tenantB");
   if (revoked.refreshRejected) {
     ok("S5", "after sign-out the prior refresh session cannot mint or refresh a new session");
-    note("the still-unexpired access token is NOT required to be rejected before its own exp — that is expected Supabase behavior, recorded, not a finding");
+    note("the still-unexpired access token is NOT required to be rejected before its own exp — expected Supabase behavior, recorded, not a finding");
   } else bad("S5", "the revoked refresh session still minted a new session");
 
-  const kinds = new Set(harness.ledger.all().map((r) => r.sessionKind));
-  if (kinds.has("invalid") && harness.actor("tenantB").sessionKind === "revoked_refresh") {
+  if (harness.ledger.all().some((r) => r.sessionKind === "invalid") &&
+      harness.actor("tenantB").sessionKind === "revoked_refresh") {
     ok("S5", "S4 and S5 produce distinct records; neither is ever labelled 'expired'");
   } else bad("S5", "the invalid and revoked-refresh cases are not distinctly recorded");
 
@@ -479,15 +791,31 @@ try {
     "N4 (genuinely expired access token) — DEFERRED and NOT EXECUTED: obtaining one would require clock manipulation, token fabrication, storing a credential until it ages out, changing remote Auth configuration, or waiting through the JWT TTL (design §3.4)",
   );
   ok("S5b", "N4 is recorded as deferred and unexecuted; no code path simulates it");
+}
 
-  // --- G1-G9 ---------------------------------------------------------------
-  structuralGuarantees();
+// ---------------------------------------------------------------------------
+// Run
+// ---------------------------------------------------------------------------
+
+console.log("\n[S10] Classifier self-test (offline, before any live request):");
+const classifierFailures = selfTestClassifier();
+if (classifierFailures.length) bad("S10", classifierFailures.join("; "));
+else ok("S10", `${CLASSIFIER_CASES.length} fixed cases classify correctly; unknown answers are 'unclassified'`);
+
+await offlineFixtureSafety();
+await offlineTimeoutCleanup();
+offlineDetectorNegatives();
+
+try {
+  await withTimeout(livePhase(), RUN_TIMEOUT_MS, "the live phase");
 } catch (error) {
-  bad("RUN", error.message);
+  if (error instanceof AbortRun) abortRun = error;
+  else bad("RUN", error.message);
 } finally {
-  // --- cleanup: exact ledger ids, children before the tenant (§6.7) --------
-  console.log("\n[cleanup] Exact-id deletion, children before the throwaway tenant:");
-  let cleanup = { removed: 0, leaked: [], residual: {}, clean: false };
+  // Entered on success, on assertion failure, on exception AND on timeout — the
+  // timeout rejects the race, it never exits the process (§6.7).
+  console.log("\n[cleanup] Exact-id deletion, ownership re-proved, children before the tenant:");
+  let cleanup = { removed: 0, leaked: [], refused: [], failed: [], residual: {}, clean: false };
   try {
     cleanup = await fixtures.cleanup();
   } catch (error) {
@@ -497,15 +825,22 @@ try {
   if (cleanup.clean) {
     ok("S9", `cleanup removed ${cleanup.removed} object(s); zero objects carry the run prefix`);
   } else {
-    bad("S9", `cleanup left residue — remove these manually: ${cleanup.leaked.map((e) => `${e.kind} ${e.id}`).join(", ") || JSON.stringify(cleanup.residual)}`);
+    bad(
+      "S9",
+      `cleanup left residue — remove these manually: ${
+        cleanup.leaked.map((e) => `${e.kind} ${e.id}`).join(", ") || JSON.stringify(cleanup.residual)
+      }`,
+    );
   }
   if (harness) await harness.close().catch(() => {});
-  clearTimeout(runTimer);
 }
 
-// ---------------------------------------------------------------------------
-// Report
-// ---------------------------------------------------------------------------
+// --- G1-G9 against the real sources and the real branch diff ---------------
+console.log("\n[G] Structural guarantees over every harness source:");
+for (const result of runDetectors(sources(), readBranchScope())) {
+  if (result.passed) ok(result.id, result.message);
+  else bad(result.id, result.message);
+}
 
 console.log("\n[evidence] Sanitized ledger:");
 for (const line of harness?.ledger.lines() ?? []) console.log(`  ${line}`);
@@ -514,7 +849,6 @@ console.log("\n[deferred] Coverage explicitly not executed:");
 for (const item of deferred) console.log(`  - ${item}`);
 console.log(`\n[S6b] ${s6bRan ? "executed" : "not executed (precondition unmet)"}`);
 
-// The run's own output must survive the repository secret scanner (§5.2).
 const hits = scanText(transcript.join("\n"));
 if (hits.length) {
   console.error(`\nSECRET SCAN FAILED: ${hits.length} class(es) matched this run's output`);
@@ -533,4 +867,10 @@ if (failures.length === 0) {
       "Suites A, B, C and E remain as recorded in docs/P7_PLAN.md §5.",
   );
 }
-process.exit(failures.length ? 1 : 0);
+if (abortRun) {
+  console.error(`
+${abortRun.message}`);
+  process.exitCode = abortRun.exitCode;
+} else {
+  process.exitCode = failures.length ? 1 : 0;
+}
