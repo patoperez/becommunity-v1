@@ -38,6 +38,7 @@
     "test:responsive-live": "node --env-file=.env.local scripts/responsive-layout-test.mjs",
     "test:isolation": "node --env-file=.env.local scripts/isolation-test.mjs",
     "test:rls-coverage": "node --env-file=.env.local scripts/rls-coverage-test.mjs",
+    "test:harness-selftest": "node --env-file=.env.local scripts/harness-selftest.mjs",
     "test:secrets": "node --env-file-if-exists=.env.local scripts/secret-leak-test.mjs",
     "test:secrets:client": "node --env-file-if-exists=.env.local scripts/secret-leak-test.mjs --client-only",
     "suite:d": "node scripts/suite-d-supply-chain.mjs",
