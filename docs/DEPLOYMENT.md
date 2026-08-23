@@ -51,18 +51,106 @@ npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + wrangler deploy (to Cloudflare Workers)
 ```
 
+`cf:deploy` is a manual, local deploy path kept for exceptional recovery (for
+example redeploying a known-good version). The normal path to the beta Worker is
+a reviewed merge to `main` — see "Deployment discipline" below.
+
 > **Windows note:** `npm run cf:build` may fail locally on Windows with
 > `EPERM: symlink` (OpenNext's file-tracing step needs symlink privileges).
 > This is a local-only limitation — Cloudflare's build runs on **Linux**, where
 > it succeeds. Enable Windows "Developer Mode" if you want it to run locally.
 
-`wrangler.toml` encodes `main = .open-next/worker.js`, `nodejs_compat`, the
-compatibility date, and the static-assets binding.
+`wrangler.toml` encodes the Worker name `becommunity-v1`, the entry point
+`main = .open-next/worker.js`, `nodejs_compat`, the compatibility date, and the
+static-assets binding. The name must match the live Worker: if it names a script
+that does not exist on the account, an ad-hoc `npm run cf:deploy` silently
+publishes a **second, separate** Worker instead of updating the running one.
+
+## Deployment discipline — the current synthetic beta
+
+The Worker this repository deploys to is **`becommunity-v1`**
+(`https://becommunity-v1.ollinagencyllc.workers.dev`), and `wrangler.toml` names
+it. It is a **synthetic-data beta environment**. It is *not* the future
+real-client production environment — that environment, with its own separate
+Supabase project, does not exist yet.
+
+**Observed behavior indicates that merging to `main` rebuilds and deploys that
+beta automatically.** PR #29 was documentation-only, no manual deployment was
+performed for it, and Cloudflare version `2a508633-b985-474a-bc2d-e1ddf38a6c79`
+appeared afterward serving 100% of traffic. The Cloudflare Git-integration
+settings themselves have **not** been read directly through configured read-only
+tooling, so this is inferred from deployment evidence rather than from an
+inspected dashboard configuration. Treat it as the operating assumption unless
+later evidence disproves it.
+
+The rules that follow from it:
+
+1. **Merge approval is deployment approval.** There is no separate deploy step to
+   review afterwards, and a merge that changes no runtime code still produces a
+   new Worker version — exactly as PR #29 did.
+2. **Every implementation PR passes its full pre-merge gates and receives explicit
+   human approval before merge:**
+
+   ```bash
+   npm run typecheck && npm run lint && npm test && npm run build
+   ```
+
+   plus the focused gates for the surface it touches. No PR is auto-merged.
+3. **After merge, perform exactly one bounded verification pass:** the
+   production-alias `/api/health` endpoint, plus the focused smoke check for what
+   changed (for most changes, `/login` returning 200 with the full
+   security-header set). Then stop.
+4. **Record the merged commit sha and the resulting Worker version id** — see
+   "Post-merge record" below.
+5. **No repeated deployment retriggers, burst request loops, load tests, or
+   polling loops** to observe a deployment. One bounded pass; if it fails, roll
+   back rather than re-running it.
+6. **The `production` branch is a go-live action, not a beta one.** The clean
+   `production` deploy branch is created and connected to Cloudflare **only at the
+   approved real-client go-live transition** (see
+   [GO_LIVE_SECURITY.md](GO_LIVE_SECURITY.md) B3). Until then `main` is in
+   practice the beta's deploy branch, whatever earlier documentation implied.
+7. **Changing the Cloudflare Git-integration settings is an external mutation.**
+   Modifying, disabling, or re-pointing the integration is done by a human in the
+   Cloudflare dashboard. It is never performed by an implementation PR and is not
+   authorized by one.
+
+### Post-merge record
+
+Record the merged-commit → Worker-version mapping **outside the deploy-triggering
+branch** — in the merged pull request's conversation or release record:
+
+```
+Merged commit:
+Worker version:
+Health:
+Focused smoke:
+Rollback version:
+Verified at:
+```
+
+Never open a follow-up documentation PR whose only purpose is to write a Worker
+version id into the repository. That merge itself deploys and produces a newer
+version, so the committed value is stale the moment it lands.
+
+`docs/CURRENT_STATE.md` therefore records **milestone/baseline deployments only**
+(phase closures and release baselines) and states there that version ids are not
+permanent identifiers. Ordinary merges are not recorded in it.
+
+### Rollback
+
+- Revert the merge commit on `main` and let the integration rebuild and deploy the
+  reverted tree; **or**
+- if the running Worker must be corrected faster than a rebuild allows, redeploy
+  the previously recorded Worker version id.
+
+Both depend on the post-merge record above having been written — which is why
+recording it is a gate, not a nicety.
 
 ## Cloudflare dashboard (Workers + Git)
 
-Workers & Pages → **Create** → **Workers** → **Connect to Git** → select
-`patoperez/becommunity-v1`, then:
+How the connected Worker was created — Workers & Pages → **Create** → **Workers**
+→ **Connect to Git** → select `patoperez/becommunity-v1`, then:
 
 | Setting | Value |
 |---------|-------|
