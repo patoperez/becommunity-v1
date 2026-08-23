@@ -72,7 +72,7 @@ export default function LongitudinalTrends({ view }: { view: LongitudinalView })
         <h2 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">Evolución entre periodos</h2>
         <p className="mt-1 max-w-2xl text-sm text-zinc-500 dark:text-zinc-400">Compara el mismo indicador por su clave estable, aunque cambie la redacción de la pregunta. Los periodos sin ese indicador permanecen como huecos.</p>
       </div>
-      <label className="flex min-w-52 flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">Indicador
+      <label className="flex w-full min-w-0 flex-col gap-1 text-xs font-medium text-zinc-600 sm:w-auto sm:min-w-52 dark:text-zinc-300">Indicador
         <select value={selected.key} onChange={(event) => setSelectedKey(event.target.value)} className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50">
           {view.series.map((series) => <option key={series.key} value={series.key}>{series.title}</option>)}
         </select>

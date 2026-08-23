@@ -201,7 +201,7 @@ export default async function DashboardPage() {
             </p>
           </div>
         ) : (
-          <div className="mt-6 grid gap-4">
+          <div className="mt-6 grid grid-cols-1 gap-4">
             {studyData.map(({ study, dashboard }) => (
               <StudyCard
                 key={study.id}
