@@ -26,6 +26,9 @@ import {
   createHarness,
   selfTestClassifier,
   CLASSIFIER_CASES,
+  evaluateOutcome,
+  supportedMutations,
+  unsupportedMutations,
 } from "./lib/http-harness.mjs";
 import { launchBrowser, PAGE } from "./lib/harness-browser.mjs";
 import { createFixtures, newRunPrefix, P6E_STUDY_ID } from "./lib/harness-fixtures.mjs";
@@ -354,12 +357,53 @@ class AbortRun extends Error {
 }
 let abortRun = null;
 
-function withTimeout(work, ms, what) {
+const SHUTDOWN_MS = 15_000;
+
+/**
+ * Bounded runner with COOPERATIVE CANCELLATION.
+ *
+ * `Promise.race` alone is not enough: rejecting a guard leaves the live worker
+ * running, so it could still issue browser/network work — or ledger a freshly
+ * created object — while fixture cleanup is already deleting. This runner
+ * instead aborts a shared signal, terminates the browser so pending CDP work
+ * rejects, closes the fixture ledger so nothing further can be tracked, and
+ * only THEN awaits the worker's settlement. Cleanup begins after that.
+ *
+ * Each operation keeps its own deadline and event cap; nothing here polls or
+ * sleeps, and the shutdown wait is itself explicitly bounded.
+ */
+async function runCancellable(work, { deadlineMs, shutdownMs, onEvent, onCancel }) {
+  const controller = new AbortController();
+  const worker = Promise.resolve()
+    .then(() => work(controller.signal))
+    .then((value) => ({ ok: true, value }), (error) => ({ ok: false, error }));
+
   let timer = null;
-  const guard = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`run timeout after ${ms}ms during ${what}`)), ms);
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), deadlineMs);
   });
-  return Promise.race([work, guard]).finally(() => clearTimeout(timer));
+  const first = await Promise.race([worker.then(() => "worker"), deadline]);
+  clearTimeout(timer);
+  if (first === "worker") return { timedOut: false, settled: await worker, shutdownFailed: false };
+
+  onEvent?.("timeout/abort");
+  controller.abort(new Error("run deadline exhausted"));
+  // Stop the world BEFORE waiting: terminating the browser makes in-flight CDP
+  // work reject, and closing the ledger blocks any late fixture activity.
+  await onCancel?.();
+
+  let shutdownTimer = null;
+  const shutdown = new Promise((resolve) => {
+    shutdownTimer = setTimeout(() => resolve("shutdown-deadline"), shutdownMs);
+  });
+  const outcome = await Promise.race([worker.then(() => "settled"), shutdown]);
+  clearTimeout(shutdownTimer);
+  if (outcome !== "settled") {
+    onEvent?.("shutdown deadline exhausted");
+    return { timedOut: true, settled: null, shutdownFailed: true };
+  }
+  onEvent?.("worker settled");
+  return { timedOut: true, settled: await worker, shutdownFailed: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -500,39 +544,198 @@ async function offlineFixtureSafety() {
 }
 
 /**
- * Proves the run timeout enters the SAME exact-id cleanup path. Uses mock
- * fixtures: no remote row is created merely to test the timeout.
+ * Deterministic negative concurrency proof for the run deadline.
+ *
+ * The live worker deliberately keeps going past the deadline and then tries to
+ * ledger a NEW fixture. Cancellation must prevent that attempt, the worker must
+ * settle, and only then may cleanup start — so the event trace is exactly
+ * timeout/abort -> worker settled -> child cleanup -> tenant cleanup, with
+ * nothing after cleanup. All offline: no remote row is created.
  */
 async function offlineTimeoutCleanup() {
-  console.log("\n[N] Forced-timeout cleanup (offline, mock fixtures):");
+  console.log("\n[N] Forced-timeout cancellation and cleanup ordering (offline, mock fixtures):");
   const prefix = "P7H-TEST-timeout";
   const tenantId = "44444444-4444-4444-4444-444444444444";
   const studyId = "55555555-5555-5555-5555-555555555555";
+  const lateId = "66666666-6666-6666-6666-666666666666";
+  const trace = [];
   const objects = {
     [tenantId]: { kind: "tenant", id: tenantId, name: `${prefix} tenant` },
     [studyId]: { kind: "study", id: studyId, name: `${prefix} study`, tenant_id: tenantId },
   };
   const gateway = mockGateway(objects);
+  const deleteById = gateway.deleteById.bind(gateway);
+  gateway.deleteById = async (kind, id) => {
+    trace.push(`cleanup:${kind}`);
+    return deleteById(kind, id);
+  };
   const f = createFixtures({ prefix, gateway });
   f.track({ kind: "tenant", id: tenantId });
   f.track({ kind: "study", id: studyId });
 
-  let timedOut = false;
-  let cleanup = null;
-  try {
-    // The same shape the live phase uses: a bounded race, never process.exit.
-    await withTimeout(new Promise(() => {}), 40, "offline timeout probe");
-  } catch (error) {
-    timedOut = /timeout/i.test(error.message);
-  } finally {
-    cleanup = await f.cleanup();
+  let lateMutation = "not attempted";
+  let browserTerminated = false;
+
+  // Work that ignores the signal and tries to mutate AFTER the deadline. A
+  // timer stands in for slow browser/network work; it is a mock, not a poll.
+  const work = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    try {
+      f.track({ kind: "study", id: lateId, createdBy: "post-timeout" });
+      lateMutation = "PERFORMED";
+      trace.push("late-track");
+    } catch {
+      lateMutation = "refused";
+    }
+  };
+
+  const result = await runCancellable(work, {
+    deadlineMs: 40,
+    shutdownMs: 5000,
+    onEvent: (event) => trace.push(event),
+    onCancel: async () => {
+      browserTerminated = true; // stands in for harness.close()
+      f.halt();
+    },
+  });
+
+  const cleanup = await f.cleanup();
+  const expected = ["timeout/abort", "worker settled", "cleanup:study", "cleanup:tenant"];
+
+  if (!result.timedOut) bad("N8", "the deadline did not fire");
+  else if (result.shutdownFailed) bad("N8", "the worker did not settle within the shutdown deadline");
+  else if (lateMutation !== "refused") bad("N8", `a post-timeout mutation was ${lateMutation}`);
+  else if (!browserTerminated) bad("N8", "the browser was not terminated before awaiting settlement");
+  else if (JSON.stringify(trace) !== JSON.stringify(expected)) {
+    bad("N8", `unexpected event order: ${trace.join(" -> ")}`);
+  } else if (f.ledger.length !== 2 || !cleanup.clean) {
+    bad("N8", "the ledger or cleanup result changed after cancellation");
+  } else {
+    ok("N8", `cancellation ordering is exact: ${trace.join(" -> ")}`);
+    ok("N8", "the post-timeout mutation was refused; live work settled before cleanup began");
   }
-  const order = gateway.deletes.map((d) => d.kind);
-  if (!timedOut) bad("N8", "the forced timeout did not reject as a timeout");
-  else if (JSON.stringify(order) !== JSON.stringify(["study", "tenant"])) {
-    bad("N8", `timeout cleanup ran in the wrong order: ${order.join(" -> ")}`);
-  } else if (!cleanup.clean) bad("N8", "timeout cleanup did not report clean");
-  else ok("N8", "a timeout enters the same exact-id cleanup path, child before tenant, with no process.exit");
+}
+
+/**
+ * Zero-side-effect proof: a catalogued-but-unsupported mutation must fail
+ * before any context, navigation, request, ownership check or ledger activity.
+ */
+async function offlineUnsupportedOperations() {
+  console.log("\n[N] Unsupported operations fail before any side effect (offline spies):");
+  const calls = { contexts: 0, navigations: 0, fetches: 0, authorize: 0, track: 0 };
+
+  const spyFixtures = {
+    prefix: "P7H-TEST-spy",
+    ledger: [],
+    authorizeMutation: () => { calls.authorize += 1; },
+    track: () => { calls.track += 1; },
+    preflight: async () => ({}),
+    cleanup: async () => ({ clean: true, removed: 0, leaked: [], residual: {} }),
+    halt: () => {},
+  };
+  const spyBrowser = {
+    port: 0,
+    binary: "spy",
+    createContext: async () => {
+      calls.contexts += 1;
+      return {
+        navigate: async () => { calls.navigations += 1; return "/"; },
+        evaluate: async () => null,
+        location: async () => "/",
+        waitForDom: async () => true,
+        submitAndWait: async () => "/",
+        cookies: async () => [],
+        clearCookies: async () => {},
+        setCookies: async () => {},
+        dispose: async () => {},
+        browserContextId: "spy",
+      };
+    },
+    close: async () => {},
+  };
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (...args) => { calls.fetches += 1; return realFetch(...args); };
+
+  let refused = 0;
+  const probes = ["clients.renameTenant", "clients.deleteClientUser", "upload.confirm", "studies.deleteTemplate"];
+  try {
+    const spyHarness = await createHarness({
+      origin: "http://127.0.0.1:1",
+      actors: ["internal"],
+      browser: "required",
+      fixtures: spyFixtures,
+      credentials: { internal: { email: "spy@example.invalid", password: "unused", role: "internal" } },
+      supabase: { url: "http://127.0.0.1:1", anonKey: "unused" },
+      launchBrowser: async () => spyBrowser,
+      PAGE,
+    });
+    for (const name of probes) {
+      try {
+        await spyHarness.run("internal", OPERATIONS[name], { tenant_id: "x", user_id: "x", template_id: "x" });
+        bad("N11", `${name} executed despite having no PR 5 support`);
+      } catch (error) {
+        if (error.code === "UNSUPPORTED_OPERATION") refused += 1;
+        else bad("N11", `${name} threw an unexpected error: ${error.message}`);
+      }
+    }
+    await spyHarness.close();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  const noEffects =
+    calls.contexts === 0 && calls.navigations === 0 && calls.fetches === 0 &&
+    calls.authorize === 0 && calls.track === 0;
+  if (refused !== probes.length) bad("N11", `${refused}/${probes.length} unsupported operations were refused`);
+  else if (!noEffects) bad("N11", `side effects occurred: ${JSON.stringify(calls)}`);
+  else {
+    ok("N11", `${refused}/${probes.length} unsupported form/imperative mutations refused before dispatch`);
+    ok("N11", "zero contexts, navigations, requests, ownership checks and ledger calls");
+  }
+}
+
+/** The declared login contract, including the query-specificity ordering. */
+function offlineOutcomeCases() {
+  console.log("\n[N] Declared outcome contracts (public path/query only):");
+  const login = OPERATIONS["auth.login"];
+  const cases = [
+    { landed: "/dashboard", expect: "success" },
+    { landed: "/login?error=invalid_credentials", expect: "validation" },
+    { landed: "/login", expect: "denial" },
+    { landed: "/admin/studies", expect: "none" },
+  ];
+  const wrong = cases.filter((c) => evaluateOutcome(login, c.landed) !== c.expect);
+  if (wrong.length) {
+    bad("N12", `login outcome mismatch: ${wrong.map((c) => `${c.landed} != ${c.expect}`).join(", ")}`);
+  } else {
+    ok("N12", "auth.login: /dashboard=success, /login?error=validation, /login=denial, other=unclassified");
+  }
+  try {
+    evaluateOutcome(OPERATIONS["clients.renameTenant"], "/admin/clients?ok=1");
+    bad("N12", "an operation with no declared contract was classified");
+  } catch {
+    ok("N12", "an operation with no declared contract throws instead of being classified");
+  }
+}
+
+/** The catalogue itself: nothing unsupported can reach dispatch. */
+function offlineCatalogSupport() {
+  console.log("\n[N] Catalogue capability model:");
+  const supported = supportedMutations();
+  const missingOwnership = supported.filter((name) => {
+    const op = OPERATIONS[name];
+    return !((op.creates?.length ?? 0) > 0 || (op.scopeParams?.length ?? 0) > 0 || (op.targetParams?.length ?? 0) > 0);
+  });
+  const expected = ["clients.createTenant", "studies.createBlank"];
+  if (JSON.stringify(supported) !== JSON.stringify(expected)) {
+    bad("N13", `supported mutation surface drifted: ${supported.join(", ")}`);
+  } else if (missingOwnership.length) {
+    bad("N13", `supported mutations without ownership metadata: ${missingOwnership.join(", ")}`);
+  } else {
+    ok("N13", `supported mutations are exactly ${supported.join(", ")}; each declares ownership metadata`);
+    note(`${unsupportedMutations().length} catalogued mutations remain unsupported and cannot reach dispatch`);
+  }
 }
 
 function offlineDetectorNegatives() {
@@ -578,8 +781,11 @@ console.log(`  run prefix: ${prefix}  (ownership namespace, never a deletion key
 let harness = null;
 let s6bRan = false;
 
-async function livePhase() {
-  const health = await fetch(new URL("/api/health", ORIGIN), { signal: AbortSignal.timeout(15000) }).catch(() => null);
+async function livePhase(signal) {
+  const readiness = signal
+    ? AbortSignal.any([AbortSignal.timeout(15000), signal])
+    : AbortSignal.timeout(15000);
+  const health = await fetch(new URL("/api/health", ORIGIN), { signal: readiness }).catch(() => null);
   if (!health?.ok) {
     throw new AbortRun(`the app is not answering at ${ORIGIN} — start it first (npm run build && npm run start)`, 2);
   }
@@ -590,6 +796,7 @@ async function livePhase() {
       origin: ORIGIN,
       actors: ["tenantA", "tenantB", "internal", "anonymous"],
       browser: "required",
+      signal,
       fixtures,
       credentials: CREDENTIALS,
       supabase: {
@@ -707,12 +914,16 @@ async function livePhase() {
   } else {
     bad("S8", `dashboard.pivot gave ${pivot.errorCategory} / mechanism ${pivot.mechanism}`);
   }
+  // An imperative operation with no reviewed driver must fail at the earliest
+  // possible point — the pre-dispatch capability guard — so it can never reach
+  // a context, a navigation or a real control. UnsupportedDriverError remains
+  // in the dispatcher as defense in depth behind this guard.
   try {
     await harness.run("internal", OPERATIONS["upload.rollback"]);
     bad("S8", "an imperative operation with no reviewed driver was executed");
   } catch (error) {
-    if (error.code === "UNSUPPORTED_DRIVER") {
-      ok("S8", "an imperative operation with no reviewed driver fails explicitly, never as success");
+    if (error.code === "UNSUPPORTED_OPERATION") {
+      ok("S8", "an undriven imperative operation is refused before dispatch, never as success");
     } else bad("S8", `unexpected error for an undriven operation: ${error.message}`);
   }
 
@@ -804,10 +1015,33 @@ else ok("S10", `${CLASSIFIER_CASES.length} fixed cases classify correctly; unkno
 
 await offlineFixtureSafety();
 await offlineTimeoutCleanup();
+await offlineUnsupportedOperations();
+offlineOutcomeCases();
+offlineCatalogSupport();
 offlineDetectorNegatives();
 
+const bounded = await runCancellable((signal) => livePhase(signal), {
+  deadlineMs: RUN_TIMEOUT_MS,
+  shutdownMs: SHUTDOWN_MS,
+  onEvent: (event) => note(`run lifecycle: ${event}`),
+  // Stop the world before awaiting settlement: terminate the browser so pending
+  // CDP work rejects, and close the ledger so nothing further can be tracked.
+  onCancel: async () => {
+    fixtures.halt();
+    if (harness) await harness.close().catch(() => {});
+  },
+});
+
 try {
-  await withTimeout(livePhase(), RUN_TIMEOUT_MS, "the live phase");
+  if (bounded.timedOut) {
+    if (bounded.shutdownFailed) {
+      bad("RUN", "the live phase did not settle within the shutdown deadline — cleanup safety is NOT claimed");
+    } else {
+      bad("RUN", `the live phase exceeded its ${RUN_TIMEOUT_MS}ms deadline and was cancelled`);
+    }
+  } else if (bounded.settled && !bounded.settled.ok) {
+    throw bounded.settled.error;
+  }
 } catch (error) {
   if (error instanceof AbortRun) abortRun = error;
   else bad("RUN", error.message);
