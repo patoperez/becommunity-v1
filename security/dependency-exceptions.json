@@ -1,0 +1,20 @@
+{
+  "_purpose": "Dependency advisory exception register (docs/P7_PLAN.md §6.3). Suite D fails on every critical/high npm advisory unless a complete, human-approved entry here names it.",
+  "_rules": [
+    "An entry needs ALL seven fields. An entry missing one is not an exception; the advisory keeps failing the gate.",
+    "approver must name a real human who approved it. Placeholders (TBD, pending, an agent name) are rejected.",
+    "review_date must be a future date. A passed review date re-reds the gate.",
+    "Never add an entry to make a build green. Remediate first; except only what cannot be remediated compatibly.",
+    "Moderate advisories do not need an entry — they are documented in docs/P7_SUPPLY_CHAIN_REVIEW.md."
+  ],
+  "_required_fields": [
+    "package_and_version",
+    "advisory_id_and_severity",
+    "dependency_path",
+    "reachability",
+    "compensating_control",
+    "approver",
+    "review_date"
+  ],
+  "exceptions": []
+}

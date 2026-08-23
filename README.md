@@ -34,7 +34,9 @@ npm run typecheck    # TypeScript strict check
 npm run build        # production build (must pass before any deploy)
 npm run lint         # eslint
 npm run test         # complete deterministic suite
-npm run gates        # build + deterministic/live security release gates
+npm run gates        # build + deterministic/live security release gates (needs credentials)
+npm run gates:offline # credentials-free deterministic chain — what CI runs
+npm run suite:d      # Suite D: dependency advisories, pins, lockfile, history, artifacts
 npm run test:import-center-live # mapping version/RPC gate against linked dev DB
 npm run cf:build     # opennextjs-cloudflare build -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
