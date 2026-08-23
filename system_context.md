@@ -73,16 +73,17 @@ completed against the deployed Cloudflare Worker: CSV/XLSX ingestion, canonical
 calculations, filters, pivot, journey, server PDF, publication boundaries and
 Tenant A/Tenant B isolation passed 108 automated checks with no failures.
 
-Human acceptance then found two visual defects that remain part of P6 closure:
-the data-rich client dashboard creates document-level horizontal overflow on a
-narrow phone, and the generated PDF leaves an orphaned disclaimer paragraph on
-a mostly empty third page while pressuring the page-two footer. These must be
-fixed and visually re-tested before P7 begins. See `docs/CURRENT_STATE.md`.
+Human acceptance then found two visual defects in mobile layout and PDF
+pagination. PR #28 fixed both without changing calculations or security
+boundaries; the real-phone and final two-page PDF checks passed, the change was
+merged and deployed, and P6 is now closed.
 
-After P6 closes, continue with P7 full hardening and go-live preparedness in the
-original dependency order. Do not reprioritize the roadmap toward retention UI,
+P7 full hardening and go-live preparedness is the active phase. It begins with
+an evidence inventory and reviewed plan, then completes suites A-E,
+backup/restore proof, audit detection, incident response and the documented
+go-live controls in dependency order. Do not reprioritize toward retention UI,
 new employee roles, or another feature because of an incidental business
-question. V2.5 content follows the framework roadmap and uses only documented,
+question. V2.5 content follows afterward and uses only documented,
 authoritative business definitions; never invent formulas.
 
 ## 8. How we work with AI

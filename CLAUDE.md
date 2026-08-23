@@ -123,14 +123,16 @@ Do not block V2 waiting for that documentation.
 
 The authoritative state is `docs/CURRENT_STATE.md`.
 
-- P0-P6 are implemented and technically accepted on synthetic data.
-- P6E production acceptance completed with 108 automated checks and 0 failures.
-- Human acceptance found two remaining P6 visual defects: document-level mobile
-  overflow on the data-rich dashboard and poor PDF pagination (orphaned final
-  methodology paragraph/footer pressure).
-- Fix those defects and repeat the narrow visual smoke test **before** declaring
-  P6 closed.
-- After P6 closes, proceed to P7 as originally planned. Do not redirect the
+- P0-P6 are implemented, technically accepted and human-accepted on synthetic
+  data. P6E completed with 108 automated checks and 0 failures.
+- The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
+  #28, human-accepted, squash-merged and deployed. P6 is closed.
+- Proceed to P7 as originally planned: full hardening, adversarial suites A-E,
+  backups with restore proof, detection/alerting and the incident playbook.
+- Begin P7 with an evidence-based inventory and an explicit reviewed plan. Do
+  not mutate production infrastructure, rotate credentials, create a real-data
+  environment or enable irreversible controls during the inventory task.
+- Do not redirect the
   roadmap toward retention UI, new role tiers, or another feature because of an
   incidental question.
 
