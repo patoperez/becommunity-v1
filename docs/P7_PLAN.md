@@ -26,10 +26,12 @@ control becomes a claimed one.
 ### State 1 — P7 code-complete (implementation-ready)
 
 Everything achievable against synthetic infrastructure is built, merged green,
-and proven behaviorally: Suites A, B, C and D green; the executable subset of
-Suite E green; audit logging live; application-data export/import parity proven;
-incident playbook written; release discipline corrected; compliance structure in
-place.
+and proven behaviorally: Suites A, B, C and D green; `suite:e:available` green
+while `suite:e:full` stays red with E1 named (§5.1); audit logging live;
+application-data export/import parity proven; incident playbook written; release
+discipline corrected; compliance structure in place. Every merge reaches the
+synthetic beta Worker automatically (§2.1), so "merged green" here means each PR
+was reviewed and gated *before* the merge that deployed it.
 
 **This state is reachable now.** It is what the P7 workstreams below deliver.
 
@@ -74,7 +76,7 @@ Collected read-only on 2026-08-22.
 | Production URL | `https://becommunity-v1.ollinagencyllc.workers.dev` |
 | Health probe (once) | `200` · `{"status":"ok","supabase":true,"ts":"2026-08-23T04:03:32.874Z"}` |
 | Response headers on `/login` (once) | `strict-transport-security`, `x-frame-options: DENY`, `x-content-type-options: nosniff`, `referrer-policy: strict-origin-when-cross-origin`, `permissions-policy`, and a per-request nonce `content-security-policy` — the full expected set is live |
-| Worker (Cloudflare API, read-only list) | script name **`becommunity-v1`**; current 100% version `2a508633-b985-474a-bc2d-e1ddf38a6c79` |
+| Worker (Cloudflare API, read-only list) | script name **`becommunity-v1`**; current 100% version `2a508633-b985-474a-bc2d-e1ddf38a6c79`. **Synthetic-data beta environment**, not the future real-client production environment |
 | Migrations | `0000`–`0013` (14 files), 2 rollbacks, 1 coverage SQL |
 | Scripts | 40 files in `scripts/` |
 | Deterministic suite | `npm test` chains 23 gates |
@@ -82,17 +84,40 @@ Collected read-only on 2026-08-22.
 | `npm audit` (once) | **0 critical, 9 high, 3 moderate** |
 | `gh` CLI | not installed on this machine |
 
-Two baseline deltas, neither of which blocks P7:
+Two baseline findings:
 
-- `docs/CURRENT_STATE.md` records Worker version `0454021a-e307-430b-bb36-27612b5faa0c`
-  as the post-P6 deployment. The Cloudflare API now reports
-  `2a508633-b985-474a-bc2d-e1ddf38a6c79` at 100%, with `0454021a` immediately
-  preceding it. Version IDs are not permanent identifiers; the running code is
-  expected to be the same P6-closure bundle, but **that is an assumption, not a
-  verified fact** — see R25.
+- **`main` currently deploys the synthetic beta Worker automatically.** PR #29
+  was a documentation-only merge at `b529411`; no manual deployment was performed
+  for it; shortly afterward Cloudflare created Worker version
+  `2a508633-b985-474a-bc2d-e1ddf38a6c79`, which now serves 100% of traffic
+  (`0454021a-e307-430b-bb36-27612b5faa0c`, the version `docs/CURRENT_STATE.md`
+  records for the P6 closure, immediately precedes it). Treat the current `main`
+  integration as **automatically rebuilding and deploying the beta Worker after
+  every merge** unless later evidence proves otherwise. See §2.1 and R25.
 - `wrangler.toml` on `main` declares `name = "be-community"`. **No Worker by that
   name exists on the account**; the live Worker is `becommunity-v1`. An unmerged
   branch `origin/update_worker_name_to_becommunity-v1` carries the one-line fix.
+
+### 2.1 Deployment reality and the rules it imposes
+
+1. The live Worker is a **synthetic-data beta environment**. It is not the future
+   real-client production environment, which does not exist yet (R28).
+2. **Merging to `main` currently appears to trigger an automatic Cloudflare
+   rebuild and deployment.** Every plan section below assumes this.
+3. Therefore **every implementation PR must pass its branch/preview gates and
+   receive human approval before merge** — merge is the deploy decision, not a
+   step that precedes a separate one.
+4. **After each merge, perform one bounded check:** the production-alias health
+   endpoint plus the focused smoke check relevant to that PR, then **record the
+   resulting Worker version id** in the handoff.
+5. **Never** use repeated deployment retriggers, burst requests, or load loops to
+   observe the result. One bounded pass, then stop.
+6. **Changing or disabling the current Git deployment integration is an external
+   Cloudflare mutation and is not authorized by this planning task.** It may be
+   proposed to the human, never performed by an implementation PR.
+7. The `production`-branch cutover (§13, RD4) remains a go-live action. Until it
+   happens, `main` is the deploy branch for the beta in practice, whatever the
+   documentation previously implied.
 
 ---
 
@@ -185,7 +210,7 @@ real Supabase project) · **manual** · **absent**.
 | R22 | **Application-data export/import parity proof** | Missing | none | absent | Proves logical portability of application rows and metric parity after re-import. Does **not** satisfy the architecture's "backup restore tested" gate | R21 | — | Yes (synthetic) |
 | R23 | Incident playbook (rotation, revocation, containment, recovery, verification) | Missing | `docs/GO_LIVE_SECURITY.md` covers perimeter setup, not incident response | absent | Must be written before launch. Writing it is safe; **executing** rotation/revocation is not part of P7 | R19, R21, R35 design | Secrets/config | Yes (write only) |
 | R24 | `production` branch clean of prompt docs | Missing | `docs/GO_LIVE_SECURITY.md` B3 specifies the intended strategy; no `production` branch exists (31 remote branches, none named `production`) | absent | Per RD4 the branch is created only at the approved go-live transition; P7 delivers the documented procedure and strip list | go-live | — | Procedure yes; branch creation at go-live |
-| R25 | Deployment strategy is correct and attributable | Partial | `wrangler.toml` names `be-community`; the live Worker is `becommunity-v1`; `origin/update_worker_name_to_becommunity-v1` carries the fix, unmerged. The deployment list shows `Source: Unknown (deployment)` and `Secret Change` entries | live, read-only | **A local `npm run cf:deploy` from `main` would publish a second, separate Worker instead of updating production.** Deploys are manual, unattributed, and not tied to a commit. **Urgent — PR 2** | — | Secrets/config | Yes |
+| R25 | Deployment strategy is correct and attributable | Partial | `wrangler.toml` names `be-community`; the live Worker is `becommunity-v1`; `origin/update_worker_name_to_becommunity-v1` carries the fix, unmerged. PR #29 (docs-only) was followed by Worker version `2a508633…` with no manual deploy — **`main` merges deploy the beta automatically** | live, read-only | Two problems. (a) The config names a Worker that does not exist, so an ad-hoc `npm run cf:deploy` from `main` would publish a **second, separate** Worker. (b) Because merge deploys, **merge approval is the deployment decision** and nothing currently ties a running version id back to a commit. **Urgent — PR 2** | — | Secrets/config | Yes |
 | R26 | Deterministic gates enforced automatically | Missing | none — no `.github/` | absent | Every gate depends on a human remembering to run it. Per RD3, offline CI is recommended; live credential-bearing suites stay manual | — | — | Yes |
 | R27 | Cloudflare perimeter: managed WAF, bot mode, TLS Full (Strict), edge header mirror, geo rules | Blocked | `docs/GO_LIVE_SECURITY.md` B1/B2 | absent | All of it needs a **zone**. `*.workers.dev` has no zone-level WAF, rate limiting, or Transform Rules | custom domain | Secrets/config | No |
 | R28 | Separate staging and production Supabase projects | Blocked | `docs/GO_LIVE_SECURITY.md` B4; `docs/OPERATIONS.md` names the single dev project | absent | The production project does not exist. Creating it is explicitly forbidden until approved | D4 | Authorization | No |
@@ -235,14 +260,33 @@ Suite definitions follow the architecture §6.
 | **D1** | Production bundle grep for secret patterns | `scripts/secret-leak-test.mjs` on `.next/static` | **Partial** | Extend to `.open-next/` | Yes |
 | **D2** | `.env` gitignored, no secret in git history | manual verification | **Partial** | Automate as a gate | Yes |
 | **D3** | `npm audit` clean of high/critical; packages verified | — | **Red, currently failing (9 high)** | Reachability analysis → compatible remediation → gate, all in one PR that merges green | Yes |
-| **E1** | Login flood → challenged/blocked at the edge | — | **Red — unexecutable without a zone** | **Cannot be made green in State 1.** No substitute control will be built (RD2); the check is recorded as red and blocks Suite E | **No** |
+| **E1** | Login flood → challenged/blocked at the edge (`suite:e:full` only) | — | **Red — unexecutable without a zone** | **Cannot be made green in State 1.** No substitute control will be built (RD2); the check is recorded as red and keeps `suite:e:full` failing | **No** |
 | **E2** | Security headers present | observed once, manually | **Partial** | Committed assertion against the deployed Worker | Yes |
 | **E3** | Iframe load blocked | observed once, manually | **Partial** | Committed assertion | Yes |
 | **E4** | Expired/invalid session token → rejected, redirected | — | **Red** | New session-resilience case | Yes |
 
+### 5.1 Suite E exit contract — two commands, no ambiguity
+
+"The executable subset passes" and "every merged PR is green" only coexist if the
+merge gate and the release-status check are **different commands**. They are:
+
+| Command | Contains | Exit behavior | Role |
+|---|---|---|---|
+| `npm run suite:e:available` | E2, E3, E4 only | **Must exit 0** for the PR to merge. Prints a prominent banner on every run stating that **this is not the complete Suite E** and naming E1 as blocked | **Merge gate** |
+| `npm run suite:e:full` | E1, E2, E3, E4 | **Must exit non-zero** while E1 is blocked, and does so by design, not by accident. It reports E1 as blocked-and-unexecuted, never as skipped or passed | **Release-status command** — not a merge gate until the Cloudflare zone exists |
+| `npm run suite:e` | alias of `suite:e:full` | inherits the non-zero exit | Prevents anyone from typing the obvious command and calling the partial suite "Suite E green" |
+
+Rules that follow:
+
+- No document, PR description, handoff entry, or status table may write
+  "Suite E green" on the strength of `suite:e:available`.
+- `suite:e:full` becomes a merge gate only after the zone exists and E1 executes.
+- `npm run gates` includes `suite:e:available`, never `suite:e:full`, so the
+  standard gate chain stays green while release status stays honest.
+
 **Suite verdicts at State 1:** A green · B green · C green · D green ·
-**E red (E1 unexecutable).** Suite E turns green only when a zone exists and E1
-actually runs — at which point State 2 also requires R35.
+**E: `suite:e:available` green, `suite:e:full` red with E1 named.** Suite E is
+green only when `suite:e:full` exits 0 — at which point State 2 also requires R35.
 
 ### Gate reconciliation — current scripts mapped to suites
 
@@ -331,13 +375,51 @@ dev tooling only · the compensating control · the approver · and a **review
 date**. An exception without all seven fields is not an exception; the gate stays
 red and the PR does not merge.
 
+### 6.4 Privilege model for every security-definer helper
+
+PostgreSQL grants `EXECUTE` on a new function to `PUBLIC` by default. A
+`security definer` function that is merely "not documented as callable" is
+therefore callable by `anon` and `authenticated`. Every such helper introduced by
+P7 — the `0014` RLS-coverage reporting function, and any helper added by `0015` —
+must carry this exact shape in the same migration that creates it:
+
+```sql
+create or replace function <schema>.<name>(<args>)
+returns <type>
+language sql
+security definer
+set search_path = ''
+as $$ ... $$;
+
+revoke execute on function <schema>.<name>(<argtypes>) from public, anon, authenticated;
+grant  execute on function <schema>.<name>(<argtypes>) to service_role;
+```
+
+Requirements:
+
+- The `revoke` and the `grant` name the **fully qualified signature**, including
+  argument types — a bare function name does not disambiguate overloads.
+- The `revoke` precedes the `grant`, and both live in the **same migration** as
+  the `create`, so no window exists in which the default `PUBLIC` grant stands.
+- No table-level grants are added for the helper's benefit; it reads catalog or
+  internal state under its own definer rights.
+- The helper returns **metadata only** (table names, flags, counts). It must never
+  return tenant rows, respondent data, or anything that would make it a read
+  path around RLS.
+- The gate script asserts the privilege model itself: `anon` and `authenticated`
+  attempting to execute the function must be **rejected**, and that assertion runs
+  as those roles, not as the service role.
+- The rollback script drops the function, which removes the grant with it.
+
 ---
 
 ## 7. Phased workstreams (dependency order)
 
 - **W1 — Urgent correctness of the release path.** Worker identity, then the
   dependency advisory work. Both are live risks that must not wait behind test
-  construction.
+  construction, and because merging to `main` deploys the beta (§2.1), both reach
+  the running environment as soon as they are approved — which is precisely why
+  their pre-merge review matters more than any later PR's.
 - **W2 — Verifiability foundations.** Executable RLS coverage; the reviewed,
   durable adversarial harness.
 - **W3 — Suites A–C.** Isolation and `data_scope`; then authorization, input,
@@ -363,16 +445,23 @@ test-only work is grouped, while authorization, migrations, secrets/config, audi
 logging, backup/restore and dependency upgrades each stay independently
 reviewable.
 
+**Merge is deployment.** Per §2.1, merging any of these PRs to `main` currently
+rebuilds and deploys the synthetic beta Worker. Every row therefore requires
+branch/preview gates plus human approval **before** merge, and one bounded
+post-merge health-and-smoke pass with the resulting version id recorded. Test-only
+PRs still deploy — a merge that changes no runtime code still produces a new
+Worker version, exactly as PR #29 did.
+
 | PR | Branch | Title | Contents | Human-review zone | Merges green? |
 |---:|---|---|---|---|---|
 | **1** | `docs/p7-evidence-plan` | docs: P7 evidence inventory and implementation plan | **This document only.** No code, tests, migrations, or config | — | n/a |
-| **2** | `p7a-worker-identity` | fix(deploy): correct the Worker identity and document deploy/rollback | `wrangler.toml` → `becommunity-v1`, superseding `origin/update_worker_name_to_becommunity-v1`; `docs/DEPLOYMENT.md` deploy/rollback procedure with commit-sha and version-id recording; the documented `production`-branch procedure and strip list (branch created only at go-live, RD4). **Configuration review only — no deployment in this PR** | **Yes — secrets/config** | Yes |
-| **3** | `p7b-supply-chain` | fix(deps): analyse and remediate dependency advisories, add the supply-chain gate | Per-advisory reachability analysis (runtime-in-Worker / build-only / dev-only) with the dependency path recorded; compatible remediation; any residual advisory carried as a §6.3 register entry; **then** `scripts/suite-d-supply-chain.mjs` wired in (audit threshold, git-history env scan, secret scan extended to `.open-next/`); offline CI workflow running the deterministic gates (RD3). Full regression suite. **Deployment is a separate, reviewed, human-triggered step after merge — never automatic** | **Yes — secrets/config** | Yes — gate and remediation land together |
-| **4** | `p7c-rls-coverage-gate` | feat(security): make RLS coverage executable | migration `0014` — an internal-only reporting function over the catalog (`security definer`, `search_path = ''`), with explicit `revoke execute on function … from public, anon, authenticated` and no table grants; `scripts/rls-coverage-test.mjs` invoking it with the narrowly scoped service role (permitted per §3, metadata only); rollback `0014_*.sql`; correct the stale `CLAUDE.md` claim | **Yes — authorization** | Yes |
+| **2** | `p7a-worker-identity` | fix(deploy): correct the Worker identity and document deploy/rollback | `wrangler.toml` → `becommunity-v1`, superseding `origin/update_worker_name_to_becommunity-v1`; `docs/DEPLOYMENT.md` deploy/rollback procedure with commit-sha and version-id recording; the documented `production`-branch procedure and strip list (branch created only at go-live, RD4); `docs/DEPLOYMENT.md` corrected to describe the automatic `main` → beta deployment as it actually behaves. **Configuration-only in source, but merging it may automatically rebuild and deploy the beta Worker** — so it requires pre-merge review and post-merge version/health verification | **Yes — secrets/config** | Yes |
+| **3** | `p7b-supply-chain` | fix(deps): analyse and remediate dependency advisories, add the supply-chain gate | Per-advisory reachability analysis (runtime-in-Worker / build-only / dev-only) with the dependency path recorded; compatible remediation; any residual advisory carried as a §6.3 register entry; **then** `scripts/suite-d-supply-chain.mjs` wired in (audit threshold, git-history env scan, secret scan extended to `.open-next/`); offline CI workflow running the deterministic gates (RD3). Full regression suite on the branch. **Because merge deploys the beta, the pre-merge review is the deployment authorization**; the post-merge bounded health-and-smoke pass and version-id record are mandatory for this PR in particular, since it changes the dependency tree the Worker is built from | **Yes — secrets/config** | Yes — gate and remediation land together |
+| **4** | `p7c-rls-coverage-gate` | feat(security): make RLS coverage executable | migration `0014` — an internal-only reporting function over the catalog (`security definer`, `search_path = ''`) with the exact privilege model in §6.4, i.e. `revoke execute … from public, anon, authenticated;` followed by `grant execute … to service_role;` and no table grants; `scripts/rls-coverage-test.mjs` invoking it with the narrowly scoped service role (permitted per §3, metadata only); rollback `0014_*.sql`; correct the stale `CLAUDE.md` claim | **Yes — authorization** | Yes |
 | **5** | `p7d-adversarial-harness` | test(p7): add the reviewed adversarial HTTP harness | `docs/P7_HARNESS_DESIGN.md` (approved per §6.1) and `scripts/lib/http-harness.mjs`: attach to an app origin, sign in as the synthetic A / B / internal identities, carry cookies, forge and expire them. No hashed action IDs, no hand-built wire payloads. No assertions of its own | Authorization | Yes |
 | **6** | `p7e-suite-a` | test(security): complete Suite A | `scripts/suite-a-isolation.mjs` — absorbs `isolation-test.mjs`, adds `data_scope` bypass attempts (dashboard path, PDF route, PostgREST), an internal-role positive control, and a service-role tenant-stamping proof. All assertions authenticate as real identities | **Yes — authorization** | Yes |
 | **7** | `p7f-suites-b-c` | test(security): add Suites B and C | `scripts/suite-b-authorization.mjs` (every admin mutation and the report route, unauthenticated and as `client`; role tampering) and `scripts/suite-c-input.mjs` (XSS payload end-to-end into dashboard HTML **and** the generated PDF; oversize/corrupt upload with a residue count; forged pivot intent; parameter-injection probes). Wires `pivot-test.mjs` in as `test:pivot`; retires or re-homes the orphaned V1-era scripts | **Yes — authorization** | Yes |
-| **8** | `p7g-suite-e-executable` | test(security): add the executable subset of Suite E | `scripts/suite-e-edge.mjs` against the deployed Worker: header set, frame denial, expired/invalid/tampered session. **E1 is recorded as red and blocked**; the script must fail loudly rather than skip silently, and must never report Suite E as green | **Yes — authorization** | Yes |
+| **8** | `p7g-suite-e-split` | test(security): add Suite E as `suite:e:available` and `suite:e:full` | `scripts/suite-e-edge.mjs` against the deployed beta Worker, exposed through the three commands in §5.1: `suite:e:available` (E2–E4, exits 0, prints the "not the complete Suite E" banner), `suite:e:full` (adds E1, exits non-zero while blocked), and `suite:e` aliasing `suite:e:full`. `npm run gates` picks up `suite:e:available` only | **Yes — authorization** | Yes — the merge gate is `suite:e:available` |
 | **9** | `p7h-audit-log` | feat(security): add hardened audit logging | migration `0015` — `audit_log` per §11; `src/lib/audit/log.ts`; instrumentation of login/logout, all admin mutations, and import commit/rollback; internal-only review surface; retention job; rollback script | **Yes — authorization** | Yes |
 | **10** | `p7i-anomaly-signals` | feat(ops): add anomaly signals and alert delivery | Bounded, indexed queries over `audit_log` (failed-login bursts, denied-action spikes, cross-tenant probes, unusual import volume), internal review surface, and the delivery channel chosen in D2; `docs/MONITORING.md` | Authorization | Yes |
 | **11** | `p7j-data-portability` | feat(ops): add application-data export and import-parity proof | `scripts/data-export.mjs` and `scripts/import-parity-verify.mjs` per §10.1; `docs/DATA_PORTABILITY.md` stating in its first paragraph that this is **not** disaster recovery. Names the R35 gap explicitly | **Yes — secrets/config** | Yes |
@@ -382,9 +471,12 @@ reviewable.
 
 ---
 
-## 9. Verification gates per PR
+## 9. Verification gates and rollback per PR
 
-**Every** PR runs, and must pass:
+### 9.1 Pre-merge gates
+
+**Every** PR runs on its branch, and must pass, **before** merge — because merge
+deploys the beta (§2.1):
 
 ```bash
 npm run typecheck && npm run lint && npm test && npm run build
@@ -394,23 +486,53 @@ Additional, per PR:
 
 | PR | Additional required gates |
 |---:|---|
-| 2 | `wrangler deployments list --name becommunity-v1` (read-only) confirms the identity the config now names; **no deploy in the PR**; the documented rollback procedure reviewed |
-| 3 | Reachability analysis reviewed per advisory; `npm run suite:d` **green** at merge (or every residual advisory carried by a complete §6.3 register entry); `npm run gates`; suites re-run; CI workflow green on the PR itself; deployment afterwards is human-triggered and separately verified with a `/login` + `/api/health` smoke check |
-| 4 | `npm run test:rls-coverage` returns zero uncovered tables; `npm run test:isolation` still green; the rollback script applied and re-applied once on the synthetic project; `anon` and `authenticated` confirmed to hold no EXECUTE on the new function |
+| 2 | `wrangler deployments list --name becommunity-v1` (read-only) confirms the identity the config now names; the documented deploy/rollback procedure reviewed. **Merging deploys the beta**, so the pre-merge review is the deployment authorization; post-merge, one bounded `/api/health` + `/login` check and the new version id recorded |
+| 3 | Reachability analysis reviewed per advisory; `npm run suite:d` **green** at merge (or every residual advisory carried by a complete §6.3 register entry); `npm run gates`; suites re-run on the branch; CI workflow green on the PR itself. Post-merge, one bounded `/api/health` + `/login` smoke check and the new version id recorded — mandatory here because this PR changes the dependency tree the Worker is built from |
+| 4 | `npm run test:rls-coverage` returns zero uncovered tables; `npm run test:isolation` still green; the rollback script applied and re-applied once on the synthetic project; **the §6.4 privilege model verified behaviorally** — `anon` and `authenticated` attempting `execute` on the new function are rejected, asserted while authenticated as those roles, not as the service role |
 | 5 | Harness design note approved **before** implementation; harness self-test against a running app; explicit check that no hashed action ID or private wire payload is constructed; `npm run test:secrets` |
 | 6 | `npm run suite:a`; `npm run test:isolation`; `npm run test:client-boundary`, `test:publication-boundary`, `test:data-scope` |
 | 7 | `npm run suite:b` and `npm run suite:c` against a local build **and** once against the deployed Worker; `npm run test:pivot` (newly wired); `npm run test:atomic-live`; post-run residue count = 0 |
-| 8 | `npm run suite:e` — the executable subset green, E1 reported as **blocked/red**; the script's exit contract reviewed so a blocked check can never be mistaken for a pass |
+| 8 | `npm run suite:e:available` exits **0** and prints its "not the complete Suite E" banner; `npm run suite:e:full` exits **non-zero** and names E1 as blocked-and-unexecuted; `npm run suite:e` confirmed to alias `suite:e:full`; `npm run gates` confirmed to include only `suite:e:available`. Both exit contracts reviewed so a blocked check can never be mistaken for a pass |
 | 9 | `npm run suite:a` + `suite:b` (audit writes must not open a read path); `npm run test:isolation`; `anon` and `authenticated` confirmed to hold zero privileges on `audit_log`; retention job exercised; a simulated failed-login flood confirms the write-amplification control (§11) holds; a forced audit-write failure confirms legitimate operations still succeed |
 | 10 | Signals reproduced from seeded synthetic audit rows; query plans bounded; no client-visible surface added |
 | 11 | Export → re-import into a fresh synthetic tenant → recomputed metrics match the source study exactly → fixture teardown verified; the documentation's non-DR disclaimer reviewed |
 | 12 | Documentation review only; no command in the playbook is executed; no database credential requested |
 | 13 | `npm run suite:a` + `suite:b`; deletion path exercised on a throwaway synthetic tenant only; audit entries confirmed |
-| 14 | `npm run gates`; suites A–D green; Suite E reported red with E1 named; parity proof re-read for accuracy |
+| 14 | `npm run gates`; suites A–D green; `suite:e:available` green and `suite:e:full` red with E1 named; parity proof re-read for accuracy; the final beta version id recorded |
 
 Standing rules: never alter an expected calculation to make a test green; never
 mark an unexecuted check as passed; never insert acceptance rows by hand to
 bypass the real workflow.
+
+### 9.2 Post-merge verification (every PR, because merge deploys)
+
+One bounded pass, then stop:
+
+1. `GET /api/health` on the production alias → expect `200 {"supabase":true}`.
+2. The focused smoke check for that PR's surface (for most PRs, `/login` returning
+   200 with the full header set; for PR 3, additionally that the app still boots
+   under the changed dependency tree).
+3. Record the resulting Worker version id, alongside the merged commit sha, in
+   `docs/CURRENT_STATE.md`.
+
+**Forbidden:** repeated deployment retriggers, burst request loops, load tests, or
+polling the deployment API in a loop. If the bounded pass fails, roll back per
+§9.3 rather than re-running it.
+
+### 9.3 Rollback and recovery per mutation
+
+| Mutation | Rollback |
+|---|---|
+| Any merged PR (all of them deploy) | Revert the merge commit on `main` and let the integration deploy the reverted tree; **or**, if the running Worker must be corrected faster than a rebuild allows, redeploy the previously recorded version id. Both require the version ids from §9.2 to have been recorded — which is why recording them is a gate, not a nicety |
+| PR 2 — Worker identity | Configuration revert. If the corrected name were ever to target the wrong script, redeploy the last known-good version id and revert the commit |
+| PR 3 — dependency remediation | Revert the commit together with `package-lock.json`; the previous lockfile is the rollback artifact. Verified by re-running the full suite and one bounded health pass |
+| Migration `0014` (RLS coverage function) | `supabase/rollbacks/0014_drop_rls_coverage_fn.sql`. Dropping the function removes its `service_role` grant with it; the function is metadata-only and grantless to the API roles, so nothing else changes |
+| Migration `0015` (`audit_log`) | `supabase/rollbacks/0015_drop_audit_log.sql`. Instrumentation sits behind `src/lib/audit/log.ts`, so reverting the app code alone stops writes without a schema change |
+| Data export runs (§10.1) | Read-only against the database; the only artifact is a local file. No rollback needed |
+| Import-parity proof (§10.1) | Imports into a **brand-new synthetic tenant**, never over existing rows. Teardown deletes exactly the fixture ids it created. The P6E acceptance study `ad275928-dbd1-4acf-9de9-fa1623b32a60` and the two draft `Satisfacción 2026 (TEST)` studies are out of bounds |
+| Audited hard-delete path (PR 13) | Exercised only on a throwaway synthetic tenant. There is no undo for a hard delete — that is the point of it — so the gate is fixture isolation, not rollback |
+| The Cloudflare Git integration itself | **Not touched.** Changing or disabling it is an external mutation outside this plan's authorization (§2.1 rule 6) |
+| Supabase project, keys, or perimeter configuration | **Not touched** during P7 implementation. Deferred to §17 under human execution |
 
 ---
 
@@ -504,10 +626,11 @@ Mandatory design requirements — each is a review checkpoint, not a suggestion:
    or `authenticated`.** Reads happen only through an internal-role server path;
    writes only via the service role. Adding the table must not widen the client
    read surface, and PR 9 re-runs Suites A and B to prove it.
-2. **Security-definer helpers, if any, are explicitly locked down:**
-   `revoke execute on function <fn> from public, anon, authenticated;` with
-   `security definer` + `search_path = ''`, and no `grant` to the API roles. The
-   same applies to the `0014` coverage function.
+2. **Any security-definer helper follows §6.4 exactly** — fully qualified
+   signature, `revoke execute … from public, anon, authenticated;` then
+   `grant execute … to service_role;`, both in the creating migration, with
+   `search_path = ''` and no table grants. The gate asserts the revocation
+   behaviorally, as `anon` and `authenticated`.
 3. **Bounded retention.** A defined retention window with a scheduled purge, and
    the window documented in `docs/DATA_PROTECTION.md`. An unbounded audit table is
    both a cost problem and a personal-data problem.
@@ -583,7 +706,9 @@ during P7:
    application-data corruption, and the §10.2 disaster-recovery procedure for
    project loss, with the latter marked **blocked until D1/D4 are approved**.
 7. **Verify** — re-run suites A–D and the isolation gate before declaring
-   recovery; note that Suite E cannot be fully verified without a zone.
+   recovery; `suite:e:available` is the most that can be verified without a
+   zone, and `suite:e:full` will still exit non-zero — that is expected, not a
+   sign the recovery failed.
 8. **Communicate** — who is told, in what order, and the LFPDPPP notification
    considerations.
 9. **Post-incident** — write the timeline, add the regression test that would have
@@ -596,29 +721,45 @@ not rotate, revoke, or rehearse rotation against live credentials.
 
 ## 13. Production branch and deployment strategy
 
-**Current reality:** manual local `cf:deploy`, no CI, no `production` branch, and
-a `wrangler.toml` naming a Worker that does not exist on the account. Deployment
-entries show `Source: Unknown (deployment)` — nothing ties a running version to a
-commit.
+**Current reality.** `main` is wired to a Cloudflare Git integration that
+**rebuilds and deploys the synthetic beta Worker automatically after every
+merge** — PR #29, a documentation-only change, produced Worker version
+`2a508633…` with no manual deploy (§2.1). There is no CI on pull requests, no
+`production` branch, and `wrangler.toml` names a Worker that does not exist on the
+account. Deployment entries show `Source: Unknown (deployment)`, so nothing ties a
+running version back to a commit.
 
 **Target state:**
 
-1. `wrangler.toml` names `becommunity-v1` (**PR 2, first implementation PR**) so a
-   local deploy updates production instead of silently creating a second Worker.
-2. `main` remains the working branch carrying prompt docs. `production` is the
+1. `wrangler.toml` names `becommunity-v1` (**PR 2, first implementation PR**), so
+   any ad-hoc `cf:deploy` targets the real beta Worker instead of silently
+   creating a second one.
+2. **Merge to `main` is the deployment decision.** Every implementation PR
+   therefore carries its full branch/preview gates and explicit human approval
+   *before* merge. There is no separate "deploy step" to review later, and no PR
+   — dependency remediation included — is auto-merged.
+3. **After every merge**, one bounded post-merge pass per §9.2: production-alias
+   health, the focused smoke check, and the resulting Worker version id recorded
+   alongside the commit sha in `docs/CURRENT_STATE.md`. That record is what makes
+   "redeploy version X" a real rollback rather than archaeology.
+4. **No retrigger loops.** One bounded verification pass per merge. If it fails,
+   roll back per §9.3.
+5. **The Git integration itself is not modified.** Changing, disabling, or
+   re-pointing it is an external Cloudflare mutation outside this plan's
+   authorization; it may be proposed to the human, never performed by a PR.
+6. The Worker being deployed is the **synthetic-data beta**, not the future
+   real-client production environment (R28). `production` remains the eventual
    deploy branch, **created only at the approved go-live transition** (RD4),
    stripped of `CLAUDE.md`, `AGENTS.md`, `system_context.md`, `AUDIT_V1.md`,
    `docs/FASE_*.md`, `docs/P0_PLAN.md`, `docs/P7_PLAN.md`,
    `docs/P7_HARNESS_DESIGN.md` and `docs/GO_LIVE_SECURITY.md`. All of `src/**` is
-   kept intact, code comments included.
-3. Every deploy records the commit sha and the resulting Worker version id in the
-   handoff, so rollback is "redeploy version X" rather than archaeology.
-4. Deploys happen only after `npm run gates` plus the suites pass, and are
-   human-triggered. **No PR in this plan deploys anything, and no dependency
-   remediation is auto-merged or auto-deployed.**
-5. CI (RD3): a GitHub Actions workflow runs `typecheck`, `lint`, `test`, `build`
-   and the deterministic offline suites on every PR, landing with PR 3. Live,
-   credential-bearing suites stay manual — putting synthetic identity credentials
+   kept intact, code comments included. Until that cutover, `main` is in practice
+   the beta's deploy branch, whatever earlier documentation implied.
+7. CI (RD3): a GitHub Actions workflow runs `typecheck`, `lint`, `test`, `build`
+   and the deterministic offline suites on every PR, landing with PR 3. This
+   matters more than it would in a manual-deploy world — with merge-deploys, the
+   pull request is the last gate before the beta changes. Live,
+   credential-bearing suites stay manual; putting synthetic identity credentials
    into CI would create a new secret-handling surface for no gain.
 
 ---
@@ -642,7 +783,7 @@ architecture's backup-restore gate stays unmet because R35 is blocked.
 
 | Blocked item | Prerequisite | Consequence |
 |---|---|---|
-| **R18 / E1** — login flood blocked at the edge | **Custom domain / Cloudflare zone** | **Suite E is red; P7 final acceptance (State 2) is blocked.** No substitute throttle will be built (RD2) |
+| **R18 / E1** — login flood blocked at the edge | **Custom domain / Cloudflare zone** | **`suite:e:full` stays red; P7 final acceptance (State 2) is blocked.** No substitute throttle will be built (RD2) |
 | **R35** — full project/database disaster recovery proof | **Approved DB-level access mechanism + isolated restore target** (D1, D4) | **The architecture's "backup restore tested" gate is unmet; State 2 is blocked.** §10.1 does not substitute |
 | R27 — WAF, bot management, edge header mirror, TLS Full (Strict), geo rules | the same zone | Perimeter checks deferred; the in-app header set is already live and will be asserted |
 | R28 — staging/production Supabase split | **Production Supabase project** (creation is human-gated) | The staging-first migration rule formally activates then; P7 must not create it |
@@ -677,8 +818,10 @@ architecture's backup-restore gate stays unmet because R35 is blocked.
 | **D5** | Privacy notice and DPA wording; retention periods per study (including the `audit_log` window and IP/user-agent treatment) | PR 13 / go-live | Legal input required; P7 ships the structure with marked placeholders |
 
 Dependency remediation (R13) is **authorized for preparation** in a reviewed PR.
-It is not authorized for automatic merge or automatic deployment; both remain
-human-triggered.
+It is not authorized for automatic merge. Because merging to `main` deploys the
+synthetic beta (§2.1), the human merge approval **is** the deployment
+authorization — which is why the reachability analysis and the full branch gates
+must be reviewed before it, not after.
 
 ---
 
@@ -688,11 +831,14 @@ human-triggered.
 
 1. Suites **A, B, C and D** exist as committed, repeatable, behavioral gates and
    all pass.
-2. The **executable subset of Suite E** passes, and E1 is reported as blocked/red
-   by the suite itself — never skipped, never counted as a pass.
+2. **`npm run suite:e:available` exits 0** with its "not the complete Suite E"
+   banner, and **`npm run suite:e:full` exits non-zero** naming E1 as
+   blocked-and-unexecuted. Suite E is *not* green; it is honestly split.
 3. `npm audit` reports no high or critical vulnerabilities, or every residual one
    carries a complete §6.3 register entry. Every merged commit is green.
-4. The Worker identity is correct and the deploy/rollback procedure is documented.
+4. The Worker identity is correct; the deploy path is documented **as it actually
+   behaves** (merge to `main` deploys the beta), and every merged commit has its
+   resulting Worker version id recorded per §9.2.
 5. `audit_log` meets every requirement in §11.1, captures the §11.2 events, and
    demonstrably did not widen the client read surface.
 6. Anomaly signals exist over that log and reach a human through a chosen channel.
@@ -701,15 +847,18 @@ human-triggered.
 8. `docs/INCIDENT_PLAYBOOK.md` exists and is reviewed, including the R35 design
    marked blocked.
 9. Deletion readiness and the personal-data register structure exist for LFPDPPP.
-10. `npm run gates` is green; `docs/CURRENT_STATE.md` records **State 1 reached,
-    State 2 blocked**, naming R18/E1 and R35 as the blockers.
+10. `npm run gates` is green (it includes `suite:e:available`, never
+    `suite:e:full`); `docs/CURRENT_STATE.md` records **State 1 reached, State 2
+    blocked**, naming R18/E1 and R35 as the blockers, and carries the current beta
+    Worker version id with the commit that produced it.
 
 ### 16.2 State 2 — P7 final acceptance (architecture gate, currently blocked)
 
 State 1, **plus**:
 
-11. A Cloudflare zone exists, the edge rate-limit rule is live, and **E1 actually
-    executes and passes** — making Suite E green.
+11. A Cloudflare zone exists, the edge rate-limit rule is live, and **`npm run
+    suite:e:full` exits 0** because E1 actually executes and passes — at which
+    point `suite:e:full` also becomes a merge gate.
 12. A **full project/database disaster recovery** has been performed into an
     isolated target and verified by running the isolation and calculation gates
     against the restored system (R35).
@@ -730,7 +879,8 @@ a human against real production infrastructure. Items marked **[gates State 2]**
 also block P7 final acceptance, not merely go-live.
 
 - [ ] Custom domain attached; Cloudflare zone active. **[gates State 2]**
-- [ ] Login rate-limit rule live; Suite E's E1 executes and passes. **[gates State 2]**
+- [ ] Login rate-limit rule live; E1 executes and passes so `npm run suite:e:full`
+      exits 0 and becomes a merge gate. **[gates State 2]**
 - [ ] Full project/database disaster recovery performed into an isolated target
       and verified by the isolation and calculation gates. **[gates State 2]**
 - [ ] Edge security-header mirror live; `curl -I` shows the full set on the custom
@@ -745,7 +895,8 @@ also block P7 final acceptance, not merely go-live.
       returns zero rows there; the provisioning gotchas re-verified (all tables
       present, service-role reads work, `profiles.role` accepts both values, anon
       denied everywhere).
-- [ ] Suites A–E run **against production** before any client link is issued.
+- [ ] Suites A–D and `suite:e:full` run **against the production project and
+      domain** before any client link is issued.
 - [ ] Worker environment matrix set for production, including the build-time
       `NEXT_PUBLIC_*` variables; the service-role key stored as an **encrypted**
       secret.
@@ -756,7 +907,9 @@ also block P7 final acceptance, not merely go-live.
 - [ ] MFA decision executed for internal accounts.
 - [ ] Uptime Robot monitor confirmed live against the production `/api/health`,
       with the `"supabase":true` keyword alert.
-- [ ] `production` branch created, stripped per §13, and made the deploy source.
+- [ ] `production` branch created, stripped per §13, and made the deploy source;
+      the Cloudflare Git integration re-pointed from `main` (beta) to `production`
+      — a human-executed Cloudflare change, never made by an implementation PR.
 - [ ] Privacy notice delivered per client; DPA executed where required; the
       per-study personal-data register completed with approved retention periods.
 - [ ] Incident playbook rehearsed once as a tabletop exercise, including a rotation
