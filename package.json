@@ -35,6 +35,7 @@
     "test:tenant-branding-live": "node --env-file=.env.local scripts/tenant-branding-live-test.mjs",
     "test:import-center-live": "node --env-file=.env.local scripts/import-center-live-test.mjs",
     "test:validation": "tsx scripts/validation-test.mjs",
+    "test:responsive-live": "node --env-file=.env.local scripts/responsive-layout-test.mjs",
     "test:isolation": "node --env-file=.env.local scripts/isolation-test.mjs",
     "test:secrets": "node --env-file=.env.local scripts/secret-leak-test.mjs",
     "gates": "npm run typecheck && npm run build && npm run test && npm run test:qualitative-live && npm run test:isolation && npm run test:secrets",
