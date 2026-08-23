@@ -17,7 +17,7 @@
 
 import { randomBytes } from "node:crypto";
 import { createServerClient } from "@supabase/ssr";
-import { browserDriverFor } from "./harness-browser.mjs";
+import { browserDriverFor, hasBrowserDriver } from "./harness-browser.mjs";
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -218,6 +218,9 @@ export const OPERATIONS = Object.freeze({
     submitLabel: "Cerrar sesión",
     fields: [],
     creates: [],
+    mutating: false,
+    // `logout` signs out and redirects to /login (`dashboard/actions.ts:11`).
+    outcome: { success: { path: "/login" } },
   }),
 
   // --- internal-only admin mutations --------------------------------------
@@ -276,6 +279,89 @@ export const OPERATIONS = Object.freeze({
   "dashboard.refresh": action("dashboard.refresh", { urlClass: "/dashboard", mechanism: "browser", page: "/dashboard", imperative: true, mutating: false, creates: [] }),
   "dashboard.pivot": action("dashboard.pivot", { urlClass: "/dashboard", mechanism: "browser", page: "/dashboard", imperative: true, mutating: false, creates: [] }),
 });
+
+// ---------------------------------------------------------------------------
+// Declared outcome contracts (§5.3) — public path/query only
+// ---------------------------------------------------------------------------
+
+/**
+ * Classifies a submitted form from its DECLARED, static outcome contract using
+ * only the public path the framework navigated to and its query keys.
+ *
+ * Rules that require a query key are strictly more specific than path-only
+ * rules, so they are matched FIRST. Checking in declaration order instead would
+ * make `/login?error=` unreachable behind a path-only `/login` denial rule.
+ * An outcome the operation did not declare is `none`, which classifies as
+ * `unclassified` and fails the run — success is never the default.
+ */
+export function evaluateOutcome(op, landedFull) {
+  const contract = op?.outcome;
+  if (!contract) {
+    throw new Error(
+      `no outcome contract for "${op?.name}" — not implemented in PR 5; a later suite ` +
+        "must declare and review one before this operation can be classified",
+    );
+  }
+  const [path, query = ""] = String(landedFull).split("?");
+  const params = new URLSearchParams(query);
+  const rules = [
+    ["denial", contract.denied],
+    ["validation", contract.validation],
+    ["success", contract.success],
+  ].filter(([, rule]) => Boolean(rule));
+  const matches = ([, rule]) => path === rule.path && (!rule.query || params.has(rule.query));
+  const specific = rules.filter(([, rule]) => Boolean(rule.query));
+  const general = rules.filter(([, rule]) => !rule.query);
+  const hit = specific.find(matches) ?? general.find(matches);
+  return hit ? hit[0] : "none";
+}
+
+// ---------------------------------------------------------------------------
+// Static capability model (§2.2) — what PR 5 can actually execute
+// ---------------------------------------------------------------------------
+
+/**
+ * Decided from the frozen catalogue alone, BEFORE any side effect. A catalogue
+ * entry exists for every inventoried surface, but PR 5 only implements a few of
+ * them; calling any other must fail before it can navigate, fill or submit a
+ * real form and mutate live data.
+ */
+export function operationSupport(op) {
+  if (!op || !op.name) return { supported: false, reason: "not a catalogue operation" };
+
+  // Mutating operations must additionally declare how ownership is proven, or
+  // the fixture ledger cannot decide whether the target belongs to this run.
+  const ownershipDeclared =
+    (op.creates?.length ?? 0) > 0 ||
+    (op.scopeParams?.length ?? 0) > 0 ||
+    (op.targetParams?.length ?? 0) > 0;
+  if (op.mutating && !ownershipDeclared) {
+    return { supported: false, reason: "mutating operation without ownership metadata" };
+  }
+
+  if (op.mechanism === "http") return { supported: true, reason: "ordinary HTTP contract" };
+  if (op.imperative) {
+    return hasBrowserDriver(op.name)
+      ? { supported: true, reason: "reviewed browser driver" }
+      : { supported: false, reason: "no reviewed browser driver in PR 5" };
+  }
+  if (!op.submitLabel) return { supported: false, reason: "no reviewed execution path" };
+  if (!op.outcome) return { supported: false, reason: "no declared outcome contract in PR 5" };
+  return { supported: true, reason: "reviewed form execution path and outcome contract" };
+}
+
+/** The mutating surface PR 5 can actually execute — used by the catalogue check. */
+export function supportedMutations() {
+  return Object.values(OPERATIONS)
+    .filter((op) => op.mutating && operationSupport(op).supported)
+    .map((op) => op.name);
+}
+
+export function unsupportedMutations() {
+  return Object.values(OPERATIONS)
+    .filter((op) => op.mutating && !operationSupport(op).supported)
+    .map((op) => op.name);
+}
 
 // ---------------------------------------------------------------------------
 // Evidence ledger — sanitized at construction, so nothing needs redacting
@@ -361,6 +447,16 @@ export async function createHarness(options) {
   const actors = new Map();
   let browser = null;
 
+  /** Cooperative cancellation: once aborted, nothing new may start. */
+  const cancelSignal = options.signal ?? null;
+  function assertLive() {
+    if (cancelSignal?.aborted) {
+      const error = new Error("run cancelled: no further work may start");
+      error.code = "RUN_CANCELLED";
+      throw error;
+    }
+  }
+
   for (const id of wanted) {
     actors.set(id, {
       id,
@@ -405,11 +501,13 @@ export async function createHarness(options) {
       const headers = {};
       const cookie = a.jar.header();
       if (cookie) headers.cookie = cookie;
+      // The operation keeps its own bounded deadline AND honours cancellation.
+      const deadline = AbortSignal.timeout(HTTP_TIMEOUT_MS);
       response = await fetch(new URL(path, origin), {
         method: op.method ?? "GET",
         headers,
         redirect: "manual",
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        signal: cancelSignal ? AbortSignal.any([deadline, cancelSignal]) : deadline,
       });
       a.jar.absorb(response.headers.getSetCookie());
     } catch {
@@ -436,30 +534,6 @@ export async function createHarness(options) {
   }
 
   // --- the form / browser mechanisms ---------------------------------------
-
-  /**
-   * Classifies a submitted form from its DECLARED, static outcome contract:
-   * the public path the framework navigated to plus a public query key. An
-   * outcome the operation did not declare is `none`, which classifies as
-   * `unclassified` and fails the run — success is never the default.
-   */
-  function evaluateOutcome(op, landedFull) {
-    const contract = op.outcome;
-    if (!contract) {
-      throw new Error(
-        `no outcome contract for "${op.name}" — not implemented in PR 5; a later suite ` +
-          "must declare and review one before this operation can be classified",
-      );
-    }
-    const [path, query = ""] = landedFull.split("?");
-    const params = new URLSearchParams(query);
-    const matches = (rule) =>
-      rule && path === rule.path && (!rule.query || params.has(rule.query));
-    if (matches(contract.denied)) return "denial";
-    if (matches(contract.validation)) return "validation";
-    if (matches(contract.success)) return "success";
-    return "none";
-  }
 
   async function browserRun(a, op, params, mechanism) {
     const javaScript = mechanism !== "form";
@@ -535,10 +609,27 @@ export async function createHarness(options) {
   // --- the single execution entry point (§8.3) ------------------------------
 
   async function run(actorId, op, params = {}) {
+    // 1. Cancellation. A cancelled run must start no further work at all, so
+    //    live work cannot overlap fixture cleanup.
+    assertLive();
+
+    // 2. Static capability, decided from the frozen catalogue BEFORE any side
+    //    effect: no context, no navigation, no field filled, no request. A
+    //    catalogued-but-unimplemented mutation must never reach a real form.
+    const support = operationSupport(op);
+    if (!support.supported) {
+      const error = new Error(
+        `operation "${op?.name ?? "(unknown)"}" is not supported in PR 5: ${support.reason}`,
+      );
+      error.code = "UNSUPPORTED_OPERATION";
+      throw error;
+    }
+
+    // 3. Ownership and scope, still before any request leaves the process.
     const a = actor(actorId);
-    // Ownership and scope are decided by the fixture ledger, before any request
-    // leaves the process (§6.2, §6.6).
     fixtures.authorizeMutation(op, params);
+
+    assertLive();
     if (op.mechanism === "http") return httpRun(a, op, params);
     return browserRun(a, op, params, op.mechanism);
   }
@@ -728,8 +819,16 @@ export async function createHarness(options) {
     return { degrades, landedOn: landed };
   }
 
+  /**
+   * Terminates the browser this harness started. Pending CDP work rejects
+   * rather than hanging, so a cancelled live phase settles quickly.
+   */
   async function close() {
-    if (browser) await browser.close();
+    if (browser) {
+      const current = browser;
+      browser = null;
+      await current.close();
+    }
   }
 
   return {
@@ -746,5 +845,6 @@ export async function createHarness(options) {
     contextFor,
     fixtures,
     close,
+    assertLive,
   };
 }
