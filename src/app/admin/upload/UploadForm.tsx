@@ -16,6 +16,7 @@ import {
   QUALITATIVE_SOURCES,
   type IngestError,
 } from "@/lib/ingestion/canonical";
+import { UPLOAD_TOO_LARGE_MESSAGE, exceedsUploadLimit } from "@/lib/validation/schemas";
 import type { ColumnTarget, ImportMapping, RecodingTable } from "@/lib/ingestion/mapping";
 
 export type TenantOption = { id: string; name: string };
@@ -256,8 +257,19 @@ export default function UploadForm({
               accept=".csv,.txt,.xlsx,.xlsm"
               className={inputClass}
               onChange={(event) => {
-                setFile(event.target.files?.[0] ?? null);
+                const selected = event.target.files?.[0] ?? null;
                 resetAfterSourceChange();
+                // Refuse an over-limit source here, before anything is
+                // dispatched. The upload action applies the same rule and stays
+                // the authoritative check, but the request never reaches it: the
+                // framework caps the request body first, and the operator would
+                // otherwise be left with no message at all.
+                if (selected && exceedsUploadLimit(selected.size)) {
+                  setFile(null);
+                  setAnalysis({ status: "error", message: UPLOAD_TOO_LARGE_MESSAGE });
+                  return;
+                }
+                setFile(selected);
               }}
             />
           </label>

@@ -91,13 +91,27 @@ const ALLOWED_PATHS = new Set([
   "scripts/fase4-realdata-check.mjs",
   "scripts/fase5-journey-check.mjs",
   "scripts/ingest-test.ts",
+  // The upload-boundary correction, and ONLY these two application files.
+  // PR 7 stopped being test-only here, deliberately and narrowly: Suite C's
+  // C2.3 found that an over-limit source was refused with no message at all,
+  // and the honest fix is in the product rather than in the assertion. The
+  // `src/` rule below still refuses every other application path, and
+  // `SCOPE_CASES` keeps neighbouring `src/` files as explicit negatives.
+  "src/app/admin/upload/UploadForm.tsx",
+  "src/lib/validation/schemas.ts",
   ...HARNESS_FILES,
   ...INSPECTOR_FILES,
   ...SUITE_FILES,
 ]);
 
+/**
+ * PR 7's upload-boundary correction touches exactly two application files, and
+ * they are allow-listed by exact name above. Everything else under `src/` stays
+ * refused: the rule is checked only after the exact allowances, so widening it
+ * to a directory would take a deliberate edit and show up in review.
+ */
 const FORBIDDEN_PATH_RULES = [
-  { test: (p) => p.startsWith("src/"), why: "application source" },
+  { test: (p) => p.startsWith("src/") && !ALLOWED_PATHS.has(p), why: "application source" },
   { test: (p) => p.startsWith("supabase/"), why: "migrations or database policy" },
   { test: (p) => p.startsWith(".github/"), why: "CI configuration" },
   { test: (p) => p === "package-lock.json", why: "lockfile" },
@@ -256,6 +270,9 @@ const NEGATIVE_CASES = [
 ];
 const SCOPE_CASES = [
   { why: "application source changed", scope: { files: ["src/app/login/actions.ts"], depsChanged: false, baseResolved: true } },
+  { why: "the upload ACTION changed, not just its form", scope: { files: ["src/app/admin/upload/actions.ts"], depsChanged: false, baseResolved: true } },
+  { why: "a sibling of an allowed upload file changed", scope: { files: ["src/app/admin/upload/page.tsx"], depsChanged: false, baseResolved: true } },
+  { why: "a sibling of the allowed validation module changed", scope: { files: ["src/lib/validation/other.ts"], depsChanged: false, baseResolved: true } },
   { why: "a migration changed", scope: { files: ["supabase/migrations/0016_x.sql"], depsChanged: false, baseResolved: true } },
   { why: "CI changed", scope: { files: [".github/workflows/ci.yml"], depsChanged: false, baseResolved: true } },
   { why: "the lockfile changed", scope: { files: ["package-lock.json"], depsChanged: false, baseResolved: true } },

@@ -927,13 +927,34 @@ export const BROWSER_DRIVERS = Object.freeze({
   "upload.analyze": async ({ context, PAGE, params }) => {
     const blocked = await selectUploadSource({ context, params });
     if (blocked) return blocked;
+
+    // `dispatch: false` selects the source and then deliberately does NOT
+    // click. It is how the pre-dispatch boundary is measured: the product must
+    // have refused the source on selection, so the analyze control must be
+    // unavailable and no Server Action may have been invoked at all. The note
+    // carries that control state as fixed tokens, never rendered text.
+    if (params.dispatch === false) {
+      const settled = await context
+        .waitForDom(`() => ${PAGE.actionOutcomeKind} !== 'none'`, params.settleTimeoutMs)
+        .catch(() => false);
+      const outcome = settled ? await context.evaluate(PAGE.actionOutcomeKind) : "none";
+      const enabled = await context.evaluate(PAGE.controlEnabled("Analizar"));
+      return {
+        status: 200,
+        domSignal: outcome,
+        note: `predispatch dispatched=false analyzeEnabled=${enabled}`,
+        dispatched: false,
+        controlEnabled: enabled,
+      };
+    }
+
     const clicked = await context.evaluate(PAGE.clickByName("Analizar"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `analyze-${clicked}` };
-    // `settleTimeoutMs` is a wider BOUND, never a retry: a deliberately
-    // over-limit source is megabytes of body that must be transferred and
-    // buffered before the action can refuse it, and the default 20s bound is
-    // about a rendered page rather than about that.
-    return settleImperative(context, PAGE, UPLOAD_READY, params.settleTimeoutMs);
+    // `settleTimeoutMs` is a wider BOUND, never a retry: a large source is
+    // megabytes of body that must be transferred and buffered before the action
+    // can answer, and the default 20s bound is about a rendered page.
+    const settled = await settleImperative(context, PAGE, UPLOAD_READY, params.settleTimeoutMs);
+    return { ...settled, dispatched: true };
   },
 
   /** `previewImportFile` — the staged validation pass; it writes nothing. */
