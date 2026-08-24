@@ -315,6 +315,10 @@ export function createFixtures({
   const tenantEntry = () => ledger.find((entry) => entry.kind === "tenant") ?? null;
   const ownershipContext = () => ({ prefix, tenantId: tenantEntry()?.id ?? null, homeTenantId });
   const ownsId = (id) => ledger.some((entry) => entry.id === id);
+  // Uniqueness is per (kind, id), not per id: a profile and the Auth identity it
+  // belongs to legitimately share one UUID, and both must be ledgered so both
+  // are deleted by exact id rather than one being left to a cascade.
+  const ownsKindId = (kind, id) => ledger.some((entry) => entry.kind === kind && entry.id === id);
 
   /**
    * The mutation precondition (§6.2, §6.6). A mutating operation may only
@@ -378,7 +382,7 @@ export function createFixtures({
       );
     }
     if (denied.has(record.id)) throw new Error("ledger: refusing to track a protected object");
-    if (ownsId(record.id)) throw new Error("ledger: this id is already tracked");
+    if (ownsKindId(record.kind, record.id)) throw new Error("ledger: this kind and id are already tracked");
     sequence += 1;
     const entry = { ...record, kind: record.kind, id: record.id, prefix, seq: sequence, createdAt: new Date().toISOString() };
     ledger.push(entry);
@@ -482,5 +486,6 @@ export function createFixtures({
     isHalted: () => halted,
     isDenied: (id) => denied.has(id),
     ownsId,
+    ownsKindId,
   };
 }
