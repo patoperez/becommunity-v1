@@ -9,6 +9,13 @@
 > No prototype directory was created. No database, external system or deployment
 > was touched.
 
+> **⚠ The `.png` files in this folder are PRE-CORRECTION historical evidence.**
+> They show the product at commit `73c931b`, which is what the owner reviewed.
+> The corrections that review produced are in commit `1056bd6` and are **not**
+> captured here — no new screenshots were taken, by instruction. Read the images
+> as "what was reviewed", and the *Owner review corrections* section below as
+> "what changed because of it". The live routes are the current truth.
+
 ---
 
 ## How to look at it yourself
@@ -40,7 +47,23 @@ adversarial suites carry a frozen catalogue of the current paths.
 
 ---
 
-## The eight screenshots
+## Owner review corrections (commit `1056bd6`) — not in the screenshots
+
+The owner reviewed the running product and agreed six corrections. All six are
+live at the routes above; none is reflected in the images below.
+
+| # | Correction | What it does now |
+|---|---|---|
+| A | Sign-in was too long on a phone | One framed entrance. `svh` frame with `clamp`ed rhythm — fits 1366×768, 390×844 and 360×640 with no document scrollbar. No fixed pixel height and no `overflow-hidden`: each column scrolls internally if a validation error, 200 % zoom or a very short viewport genuinely needs it. Secondary copy steps aside on viewport *height*; brand, promise, both fields, submit and recovery guidance never do. |
+| B | The panorama read as four equal cards | One dominant lead finding plus a compact navigator. The lead is the first finding in the order the view model already ranks results in — deterministic, never "the largest number". Selecting a secondary finding swaps value, visual, sample context, method and action in place, by pointer, Tab, arrows and Home/End. One method disclosure, not five. |
+| C | The recorrido was too documentary | One drawn spine connects the touchpoints, each with its own category colour; node *shape* still carries evidence strength. The three large boxes collapse into one compact evidence area, and empty sections are omitted rather than filled with placeholders. |
+| D | The identity was all navy and paper | Sky, magenta, green, yellow and lavender now carry grouping in navigation, selection, route stages and the Studio attention list. They are structurally separate from caution/danger/positive, so no number is coloured good or bad. |
+| E | Studio was a static directory | The internal home opens on *¿Qué necesita atención?*, built only from state the page already loads: a study with no rows, a draft with data still unpublished, a touchpoint with no result. The four destinations remain as secondary navigation. |
+| — | A published study advertised what was missing | The client view is now composed: no repeated "todavía no…". Where a study or a moment carries numbers only, one quiet sentence says so. The internal preview gets the opposite — a concise readiness notice naming what is missing, visibly marked as internal. |
+
+---
+
+## The eight screenshots (pre-correction)
 
 | File | What it shows |
 |---|---|
