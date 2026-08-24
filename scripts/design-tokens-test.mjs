@@ -384,7 +384,11 @@ for (const [file, expected] of [
 // The Studio home is the root: a back control there would point at itself.
 assert.doesNotMatch(clientDashboard, /back=\{STUDIO_HOME\}/, "the Studio home has no parent");
 const preview = await readCode("src/app/admin/preview/[studyId]/page.tsx");
-assert.match(preview, /STUDIES_LIST/, "the preview must return to the internal study list");
+// The preview's return to the internal study list now lives in the sticky
+// notice, which is where the reviewer can always reach it. Section [15] asserts
+// that the notice actually carries the link; here we assert the preview mounts
+// it, so the route can never be left without a way back.
+assert.match(preview, /<PreviewNotice \/>/, "the preview must mount the notice that returns to Studies");
 ok("explicit parents everywhere, no history interception, no root back control");
 
 console.log("\n[13] Internal surfaces speak Spanish and keep their contracts");
