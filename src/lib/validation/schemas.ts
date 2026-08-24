@@ -21,6 +21,23 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export const ALLOWED_UPLOAD_EXTENSIONS = ["csv", "txt", "xlsx", "xlsm"] as const;
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
+/** The message the product shows for an over-limit source, in one place. */
+export const UPLOAD_TOO_LARGE_MESSAGE = "El archivo supera el límite de 10 MB.";
+
+/**
+ * The upload size rule, as one predicate both boundaries share.
+ *
+ * Strictly greater than the limit: a file of exactly `MAX_UPLOAD_BYTES` is
+ * accepted, which is what "límite de 10 MB" means. The upload action applies
+ * the same rule server-side and remains the authoritative check; this exists so
+ * the browser can refuse an over-limit source before any request is dispatched,
+ * because the request would otherwise be truncated by the framework's own body
+ * cap and the operator would see nothing at all.
+ */
+export function exceedsUploadLimit(sizeInBytes: number): boolean {
+  return Number.isFinite(sizeInBytes) && sizeInBytes > MAX_UPLOAD_BYTES;
+}
+
 export const uploadSchema = z.object({
   tenant_id: z.string({ message: "Selecciona un cliente (tenant)." }).uuid("Cliente inválido."),
   study_name: z

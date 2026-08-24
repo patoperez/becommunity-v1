@@ -104,21 +104,24 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (23 gates at the P6E baseline)
+npm test             # complete deterministic suite (26 gates; PR 7 adds test:pivot and the Suite B/C self-test)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
-npm run gates:live   # credential-bearing live checks: qualitative-live, then suite:a
+npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
 npm run suite:a      # Suite A — tenant isolation, data scope, least privilege (A1-A5)
+npm run suite:b      # Suite B — behavioral server-side authorization (B1-B7)
+npm run suite:c      # Suite C — hostile input, imports, pivot boundary, injection (C1-C5)
 npm run test:isolation    # the legacy isolation gate alone; Suite A executes it as A1.5
 npm run test:rls-coverage # live RLS coverage + 0014 privilege model (service_role / anon / authenticated)
+npm run test:pivot        # the pivot allowlist gate alone; Suite C executes it as C3.1
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + wrangler deploy (Cloudflare Workers)
 ```
 
-`suite:a` — and so `gates:live` and `gates` — drives a real browser against a
-running application. It needs the app served at `HARNESS_ORIGIN` (default
+`suite:a`, `suite:b` and `suite:c` — and so `gates:live` and `gates` — each
+drive a real browser against a running application. It needs the app served at `HARNESS_ORIGIN` (default
 `http://localhost:3000`), real synthetic credentials, and a Chrome/Chromium
 binary named by `CHROME_PATH`. Run it from WSL as an ordinary (non-root) user
 with the distribution's own Linux browser, so the sandbox stays on and
@@ -140,7 +143,8 @@ Control and do not attempt a per-file bypass.
 - **Windows** is for editing, Git operations, and static/non-Node inspection
   (`git diff --check`, reading files, reviewing a diff).
 - **Node/npm verification runs in WSL 2 Ubuntu or Linux CI.** Verifier:
-  `/root/becommunity-software`, Node 24.11.1, npm 10.9.2.
+  `/home/patop/becommunity-software`, ordinary user `patop`, Node 24.11.1,
+  npm 10.9.2.
 - The Windows and WSL clones **do not auto-synchronize**. Push the exact commit
   from the Windows editing tree, then `fetch` and check out that exact remote
   commit in WSL before testing. Never assume the verifier already has your work.
@@ -175,14 +179,27 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   data. P6E completed with 108 automated checks and 0 failures.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
-- Proceed to P7 as originally planned: full hardening, adversarial suites A-E,
-  backups with restore proof, detection/alerting and the incident playbook.
-- Begin P7 with an evidence-based inventory and an explicit reviewed plan. Do
-  not mutate production infrastructure, rotate credentials, create a real-data
-  environment or enable irreversible controls during the inventory task.
-- Do not redirect the
-  roadmap toward retention UI, new role tiers, or another feature because of an
-  incidental question.
+- P7's evidence plan is approved. PRs 1-6 are merged: deployment identity,
+  supply-chain/CI, executable RLS coverage, the reviewed adversarial harness,
+  and Suite A are complete. Suite A is wired into `gates:live` and passed its
+  deployed post-merge isolation smoke with zero fixture residue.
+- The current unit is **P7 PR 7, `p7f-suites-b-c`**: behavioral authorization
+  Suite B (64/64) and hostile-input Suite C (13/13), both green on the branch
+  and **not yet merged**. `gates:live` is now
+  `test:qualitative-live -> suite:a -> suite:b -> suite:c`. Suite B reports its
+  evidence in three layers that are never summed — catalogue completeness, the
+  outer action route's own POST method and path, and the subset with an
+  observable inner Server-Action denial — and says plainly that it does not
+  claim all eighteen inner actions were invoked. PR 7 also carries one minimal
+  product correction (the upload size boundary in
+  `src/app/admin/upload/UploadForm.tsx` and `src/lib/validation/schemas.ts`), so
+  it is no longer test-only. Do not start Suite E, audit logging, anomaly
+  detection, portability, incident response or compliance work until PR 7 is
+  reviewed, merged and post-merge verified.
+- Do not mutate real-production infrastructure, rotate credentials, create a
+  real-data environment, or enable irreversible controls during synthetic P7
+  work. Do not redirect the roadmap toward retention UI, new role tiers or an
+  incidental feature question.
 
 ## When unsure
 Ask. Do not guess on security, authorization, or calculations. A stopped task is

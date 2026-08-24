@@ -1,6 +1,6 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-22**.
+> Authoritative operational handoff. Last verified: **2026-08-23**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
@@ -29,9 +29,9 @@ must use documented authoritative definitions rather than invented rules.
 
 ## Verified source and deployment baseline
 
-- Current `main`: `2fe76705cf2b98439b37cc6ff9a79c3f147f41d1`
-  (`fix(p6): keep the dashboard inside narrow viewports and fit the report into
-  two pages (#28)`). Always verify `origin/main` before beginning new work.
+- Current `main`: `e67e4adc2542c0a2993c65f517bf7445eafb83bd`
+  (`test(security): complete Suite A — tenant isolation, data scope and least
+  privilege (#36)`). Always verify `origin/main` before beginning new work.
 - **Milestone deployment baseline — P6 closure:** Worker version
   `0454021a-e307-430b-bb36-27612b5faa0c` (100% traffic at the time of the P6
   closure check). Version IDs are **not permanent identifiers**; confirm the
@@ -144,26 +144,91 @@ human review of that plan before implementing P7. Do not create infrastructure,
 change credentials, rotate keys, alter production data or enable irreversible
 edge controls during the inventory task.
 
-### P7 progress (branch state, not merged)
+### P7 execution progress
 
-`docs/P7_PLAN.md` is approved and PRs 2-4 are merged (Worker identity,
-supply-chain gate, executable RLS coverage). PR 5 - the adversarial harness
-foundation - is implemented on `p7d-adversarial-harness` and **not merged**:
+`docs/P7_PLAN.md` is approved. PRs 1-6 are merged and deployed to the synthetic
+beta: the evidence plan; Worker identity/deployment discipline; supply-chain,
+Suite D and offline CI; executable RLS/FORCE-RLS coverage; the reviewed
+adversarial harness; and Suite A.
 
-- `docs/P7_HARNESS_DESIGN.md` is the approved contract for it.
+The merged harness contract remains `docs/P7_HARNESS_DESIGN.md`:
+
 - `scripts/lib/{http-harness,harness-browser,harness-fixtures}.mjs` plus
-  `scripts/harness-selftest.mjs` (`npm run test:harness-selftest`) provide the
-  mechanism only. The harness is assertion-neutral: it reaches the app as a
-  named identity and returns sanitized observations.
-- Operation mechanisms are frozen in a checked-in catalog. `auth.login` and
-  `clients.createTenant` were verified to submit natively without client
-  JavaScript and are frozen as `form`; every other Server Action carries the
-  reviewed `browser` mechanism. There is no run-time fallback.
-- Coverage explicitly deferred: a genuinely expired access-token test (N4).
-  Sign-out revokes the refresh session; it does not invalidate an already-issued
-  access JWT before its `exp`, so the executable proof is revoked-refresh.
-- **No security suite has been run.** Suites A, B, C and E remain exactly as
-  recorded in `docs/P7_PLAN.md` §5, and PR 6 (Suite A) has not started.
+  `scripts/harness-selftest.mjs` provide the assertion-neutral mechanism;
+- mechanisms are frozen per operation; no hashed action IDs, hand-built RSC
+  payloads, hidden bypass or runtime fallback is permitted;
+- live browser execution uses Linux Chrome from WSL as the ordinary non-root
+  user, with sandboxing enabled;
+- privileged access is confined to fixture provisioning, bounded metadata
+  accounting and exact cleanup; it is never authorization evidence.
+
+Suite A is committed as `scripts/suite-a-isolation.mjs`, executes 16/16 required
+controls, and is part of the canonical live release chain. Its final gates
+passed; the merge deployed Worker version
+`654949b8-649c-4a48-a754-9d4aab7426c0` at 100% traffic. The bounded post-merge
+health, logged-out, Tenant A, Tenant B isolation and internal-route smokes all
+passed with zero `P7A-`/`P7H-` residue. The commit-to-version record lives in PR
+#36's conversation as required by `docs/DEPLOYMENT.md`.
+
+**Current unit:** PR 7, branch `p7f-suites-b-c` — behavioral Suite B
+(authorization) and Suite C (hostile input/injection). Both are implemented and
+**green on the branch, not yet merged**:
+
+- `npm run suite:b` — 64/64. Its evidence is reported in **three layers that
+  are never summed**, because conflating them is how a page-level GET gets
+  counted as action coverage:
+  1. *catalogue completeness* — one required B1 and B2 row per catalogued
+     mutation plus the report route, generated from the frozen catalogue, so a
+     new mutation arrives with no result and an unexecuted entry is red;
+  2. *outer action route* — one ordinary form-shaped POST to the exact method
+     and path each Server Action is dispatched to (no `Next-Action` header, no
+     private field, no body), with a positive discriminator and a bare-POST
+     405 negative control per path class;
+  3. *observable inner Server-Action denial* — only where the application
+     actually produces one, which is one operation of eighteen.
+  The suite states explicitly that it does **not** claim all eighteen inner
+  Server Actions were invoked; they cannot be reached without the hashed action
+  identifier or a hand-built RSC body the design forbids.
+- `npm run suite:c` — 13/13, including an inert hostile payload carried through
+  the real ingestion and human-review workflow and then **positively located**
+  in the generated PDF's decoded displayed text as well as in the rendered
+  client dashboard. C1.3 fails if the payload is absent, so it can no longer
+  pass on a report the quote never reached.
+- `npm run gates:live` now runs `test:qualitative-live -> suite:a -> suite:b ->
+  suite:c`, each exactly once. `npm test` gains `test:pivot` (previously
+  orphaned) and the credential-free Suite B/C self-test, reaching 26 gates.
+- Every run restored its exact pre-run object counts and left zero `P7A-`,
+  `P7B-`, `P7C-` or `P7H-` residue.
+
+Two behaviors PR 7 measured that a reviewer should read before merging, both
+recorded rather than asserted past:
+
+1. **The middleware answers before every per-action guard.** An unauthenticated
+   caller is denied on every non-public path — including the POST a Server
+   Action travels on — so `internalContext()`, `authorizeInternal()` and the
+   report route's own 401 are a real second layer that is shadowed from
+   outside. Suite B asserts the denial at whichever gate answered, proves the
+   outer boundary on the action route's own POST method and path, and records
+   which layer each result came from. This is defense in depth working, not a
+   gap. One path class is a stated limitation: `/admin/upload` answers a
+   wrong-role caller with HTTP 200 and a rendered denial page rather than a
+   status, so no status-level claim is made there and its denial is proven at
+   the browser layer instead.
+2. **An over-limit upload was refused silently — now corrected in the product.**
+   Next truncates the request body at its own cap and the action then throws, so
+   the upload action's own `MAX_UPLOAD_BYTES` check was unreachable and the
+   operator saw nothing. PR 7 adds the smallest correction that fixes it:
+   `exceedsUploadLimit()` joins the shared validation module and the upload form
+   refuses an over-limit source on selection, leaving the analyze control
+   disabled. The server-side check is untouched and remains authoritative. C2.3
+   now requires a rendered rejection **and** zero dispatch; C2.4 proves an
+   ordinary in-limit source is still accepted. **This makes PR 7 no longer
+   test-only:** it touches exactly two application files,
+   `src/app/admin/upload/UploadForm.tsx` and `src/lib/validation/schemas.ts`,
+   both admitted to the structural scope guard by name.
+
+Suite E is still not green. PR 8 and later P7 work must not begin until PR 7 is
+reviewed, merged and post-merge verified.
 
 ## Known constraints carried forward
 
@@ -185,7 +250,8 @@ foundation - is implemented on `p7d-adversarial-harness` and **not merged**:
   Git and static inspection. Do not disable Smart App Control and do not attempt
   a per-file bypass.
 - **The verifier does not auto-synchronize.** Node/npm verification runs in WSL 2
-  Ubuntu (`/root/becommunity-software`, Node 24.11.1, npm 10.9.2) or Linux CI.
+  Ubuntu (`/home/patop/becommunity-software`, ordinary user `patop`, Node
+  24.11.1, npm 10.9.2) or Linux CI.
   Push the exact commit from the Windows editing tree first, then fetch and check
   out that exact remote commit in WSL. The verifier clone must be full-history
   and full-blob: Suite D's D-d proves every reachable blob, which a `blob:none`

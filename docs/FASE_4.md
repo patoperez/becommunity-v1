@@ -14,7 +14,7 @@ pending a reconnected browser extension (see "Verification" note).
 | Interactive explorer (live recalc) | [src/app/dashboard/PivotExplorer.tsx](../src/app/dashboard/PivotExplorer.tsx) |
 | Dashboard wiring (rows + allowlist per study) | [src/app/dashboard/StudyCard.tsx](../src/app/dashboard/StudyCard.tsx), [page.tsx](../src/app/dashboard/page.tsx) |
 | **Validation + computation gate** | [scripts/pivot-test.mjs](../scripts/pivot-test.mjs) |
-| Real-data check | [scripts/fase4-realdata-check.mjs](../scripts/fase4-realdata-check.mjs) |
+| Real-data check | *retired in P7 PR 7* — the script was reachable by no npm script; its pivot coverage now executes as `npm run test:pivot` and, behaviorally, as Suite C's C3 |
 
 ## `PivotIntent` exactly as §5.3
 
@@ -57,7 +57,7 @@ error and **do not** compute. Results render as a cross-tab **table** and, for t
   six rejection cases (incl. injection-style metric and invalid agg), `computePivot`
   throws on invalid intent, and crosses match hand-computed values (genero × nivel
   avg, count, sum).
-- **Real data** (`tsx scripts/fase4-realdata-check.mjs`, signed in as Tenant A,
+- **Real data** (recorded 2026 with the since-retired `fase4-realdata-check.mjs`, signed in as Tenant A,
   RLS-scoped) — genero × nivel avg sat_maestros returned the correct grid
   (F: preescolar 8 / primaria 9 / secundaria 7; M: 6 / 5 / —); adversarial
   `rows:['ssn']` rejected before compute.

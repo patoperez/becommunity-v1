@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { createServerClient } from "@supabase/ssr";
 import { browserDriverFor, hasBrowserDriver } from "./harness-browser.mjs";
+import { inspectHttpResponse } from "./response-inspect.mjs";
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -38,6 +39,12 @@ export const ERROR_CATEGORIES = [
   "denied_action_result",
   "not_found",
   "validation_rejected",
+  // 405. A real, nameable HTTP answer and never an authorization one: it is
+  // what a route says when the METHOD is wrong, which the suites use as the
+  // control that distinguishes a method rejection from a denial. It is in the
+  // closed vocabulary precisely so it cannot fall through to `unclassified`
+  // and be argued about later.
+  "method_not_allowed",
   "success",
   "success_no_op",
   "network_failure",
@@ -120,9 +127,14 @@ export function classify(observation) {
     return "unclassified";
   }
   if (status === 404) return "not_found";
+  if (status === 405) return "method_not_allowed";
   if (status === 400) return "validation_rejected";
   if (status >= 200 && status < 300) {
     if (o.domSignal === "denial") return "denied_action_result";
+    // The product's own rendered wrong-role page, served with HTTP 200
+    // (`/admin/upload` for a `client`, design §1.8 AM4). It is a ROLE denial,
+    // not an action result, and the two must never collapse into one category.
+    if (o.domSignal === "denied_role") return "denied_wrong_role";
     if (o.domSignal === "validation") return "validation_rejected";
     if (o.domSignal === "success") return "success";
     if (o.domSignal === "none") return "unclassified";
@@ -138,8 +150,10 @@ export const CLASSIFIER_CASES = [
   { what: "401 from a route handler", input: { status: 401 }, expect: "denied_unauthenticated" },
   { what: "302 to /dashboard from /admin", input: { status: 307, redirectTo: "/dashboard", fromAdminPath: true }, expect: "denied_wrong_role" },
   { what: "404 not found", input: { status: 404 }, expect: "not_found" },
+  { what: "405 method not allowed", input: { status: 405 }, expect: "method_not_allowed" },
   { what: "400 in the report route's error shape", input: { status: 400 }, expect: "validation_rejected" },
   { what: "200 whose rendered DOM shows the denial region", input: { status: 200, domSignal: "denial" }, expect: "denied_action_result" },
+  { what: "200 rendering the app's own wrong-role page (AM4)", input: { status: 200, domSignal: "denied_role" }, expect: "denied_wrong_role" },
   { what: "200 with the operation's success signal", input: { status: 200, successSignal: true }, expect: "success" },
   { what: "500 server error", input: { status: 500 }, expect: "page_crash" },
   { what: "socket failure", input: { transportError: true }, expect: "network_failure" },
@@ -178,16 +192,63 @@ const page = (name, path, extra = {}) => ({
 
 const action = (name, extra) => ({ name, mutating: true, ...extra });
 
+/**
+ * An OUTER ACTION-ROUTE probe (PR 7 review pass).
+ *
+ * Every Server Action in this application is dispatched by POSTing to the page
+ * that renders it. Driving the action itself from outside would require the
+ * hashed Next-Action identifier or a hand-built RSC body, both forbidden —
+ * so the reachable, honest thing to test is the OUTER boundary on that exact
+ * method and path: one ordinary form-shaped POST, no action identifier, no
+ * private field, no mutation payload.
+ *
+ * The `content-type` is declared rather than implicit so that every probe sends
+ * the same, ordinary, form-shaped request and nothing is left to `fetch` to
+ * infer. The suite pairs these probes with a PUBLIC-path control
+ * (`route.postHealth`): the same request to a public route handler that exports
+ * only GET is answered 405 with no redirect, which is what shows the
+ * protected-path denial is specific to protected paths rather than a blanket
+ * answer to any POST.
+ */
+const routeProbe = (name, path) => ({
+  name,
+  urlClass: path,
+  path,
+  method: "POST",
+  mechanism: "http",
+  mutating: false,
+  outerRouteProbe: true,
+  /** Declared, so `httpRun` never improvises a body or a content type. */
+  contentType: "application/x-www-form-urlencoded",
+  fromAdminPath: path.startsWith("/admin"),
+});
+
+/**
+ * Outcome contracts, expressed once. Every admin Server Action in this app ends
+ * in `redirect(...)`, and each family redirects to a fixed path carrying either
+ * `?ok=` or `?error=` (`clients/actions.ts:27`, `studies/actions.ts:28`,
+ * `qualitative/actions.ts:23`). An unauthenticated caller is redirected to
+ * `/login` by the same guard before any of that (`internalContext()`).
+ *
+ * Only the PATH and the presence of a QUERY KEY are ever read — never the
+ * message those keys carry, which contains product text.
+ */
+const adminOutcome = (path) => ({
+  denied: { path: "/login" },
+  validation: { path, query: "error" },
+  success: { path, query: "ok" },
+});
+
 export const OPERATIONS = Object.freeze({
   // --- pages and route handlers: ordinary HTTP (§2.1) ----------------------
   "page.root": page("page.root", "/"),
   "page.login": page("page.login", "/login"),
-  "page.dashboard": page("page.dashboard", "/dashboard"),
-  "page.adminClients": page("page.adminClients", "/admin/clients"),
-  "page.adminStudies": page("page.adminStudies", "/admin/studies"),
-  "page.adminQualitative": page("page.adminQualitative", "/admin/qualitative"),
-  "page.adminUpload": page("page.adminUpload", "/admin/upload"),
-  "page.adminPreview": page("page.adminPreview", "/admin/preview/:studyId"),
+  "page.dashboard": page("page.dashboard", "/dashboard", { acceptsForgedHeaders: true }),
+  "page.adminClients": page("page.adminClients", "/admin/clients", { acceptsForgedHeaders: true }),
+  "page.adminStudies": page("page.adminStudies", "/admin/studies", { acceptsForgedHeaders: true }),
+  "page.adminQualitative": page("page.adminQualitative", "/admin/qualitative", { acceptsForgedHeaders: true }),
+  "page.adminUpload": page("page.adminUpload", "/admin/upload", { acceptsForgedHeaders: true }),
+  "page.adminPreview": page("page.adminPreview", "/admin/preview/:studyId", { acceptsForgedHeaders: true }),
   "health.get": page("health.get", "/api/health"),
   "report.download": page("report.download", "/api/studies/:studyId/report", {
     successSignalHeader: { header: "content-type", contains: "application/pdf" },
@@ -196,10 +257,28 @@ export const OPERATIONS = Object.freeze({
     // catalogue is what lets `run()` append them: a caller cannot improvise a
     // query on an operation that has not been reviewed for one.
     acceptsQuery: true,
+    acceptsForgedHeaders: true,
+    // PR 7: this is an ORDINARY route handler whose body is a public product
+    // contract (a PDF, or the documented JSON validation error). It is the only
+    // operation whose response may be handed to the sanitizing inspector, and
+    // the inspector returns categories and counts only (§ response-inspect).
+    inspectable: true,
   }),
-  "qualitative.selectStudy": page("qualitative.selectStudy", "/admin/qualitative", {
+  "qualitative.selectStudy": page("qualitative.selectStudy", "/admin/qualitative?study=:studyId", {
     urlClass: "/admin/qualitative?study=:studyId",
   }),
+
+  // --- outer action-route probes: the POST method and path every Server
+  // --- Action on that page is dispatched to (see `routeProbe`) ------------
+  "route.postAdminClients": routeProbe("route.postAdminClients", "/admin/clients"),
+  "route.postAdminStudies": routeProbe("route.postAdminStudies", "/admin/studies"),
+  "route.postAdminQualitative": routeProbe("route.postAdminQualitative", "/admin/qualitative"),
+  "route.postAdminUpload": routeProbe("route.postAdminUpload", "/admin/upload"),
+  // The PUBLIC-path control. `/api/health` is public by design and its route
+  // handler exports only GET, so the identical form-shaped POST is answered 405
+  // with no redirect. It is not an action route and no mutation names it: it
+  // exists so a protected-path denial can be shown to be specific.
+  "route.postHealth": routeProbe("route.postHealth", "/api/health"),
 
   // --- session lifecycle ---------------------------------------------------
   "auth.login": action("auth.login", {
@@ -234,6 +313,7 @@ export const OPERATIONS = Object.freeze({
 
   // --- internal-only admin mutations --------------------------------------
   "clients.createTenant": action("clients.createTenant", {
+    actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients",
     mechanism: "form",
     degradationVerifiedAt: "2026-08-23 discovery run (design §2.2 step 2)",
@@ -245,20 +325,63 @@ export const OPERATIONS = Object.freeze({
     // `finish()` returns to /admin/clients with either ?ok= or ?error=
     // (`clients/actions.ts:19,27`). Validation is checked BEFORE success so a
     // rejection on the same path can never be read as a success.
-    outcome: {
-      denied: { path: "/login" },
-      validation: { path: "/admin/clients", query: "error" },
-      success: { path: "/admin/clients", query: "ok" },
-    },
+    outcome: adminOutcome("/admin/clients"),
   }),
-  "clients.renameTenant": action("clients.renameTenant", { urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients", submitLabel: "Guardar", fields: ["tenant_id", "name"], creates: [] }),
-  "clients.updateTenantBrand": action("clients.updateTenantBrand", { urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients", submitLabel: "Guardar marca", fields: ["tenant_id"], creates: ["storage_object"] }),
-  "clients.inviteClientUser": action("clients.inviteClientUser", { urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients", submitLabel: "Enviar invitación", fields: ["tenant_id", "email", "full_name", "data_scope"], creates: ["profile"], deniedPathsOnly: true }),
-  "clients.updateClientUser": action("clients.updateClientUser", { urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients", submitLabel: "Guardar usuario", fields: ["user_id", "full_name", "tenant_id", "data_scope"], creates: [] }),
-  "clients.deleteClientUser": action("clients.deleteClientUser", { urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients", submitLabel: "Eliminar cuenta cliente", fields: ["user_id", "confirmation_email"], creates: [], destructive: true }),
-  "qualitative.generateSuggestions": action("qualitative.generateSuggestions", { urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative", submitLabel: "Generar sugerencias pendientes", fields: ["study_id"], creates: [] }),
-  "qualitative.reviewObservations": action("qualitative.reviewObservations", { urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative", submitLabel: "Aceptar sugerencias", fields: ["study_id", "theme", "stage_key"], creates: [] }),
+  "clients.renameTenant": action("clients.renameTenant", {
+    actionRoute: "route.postAdminClients",
+    urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
+    submitLabel: "Guardar", fields: ["name"], identifyBy: "tenant_id",
+    targetParams: ["tenant_id"], creates: [], outcome: adminOutcome("/admin/clients"),
+  }),
+  "clients.updateTenantBrand": action("clients.updateTenantBrand", {
+    actionRoute: "route.postAdminClients",
+    urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
+    // Verified against `clients/page.tsx:92`: the accessible name is
+    // "Guardar identidad". The PR-5 catalogue recorded "Guardar marca", which
+    // no control carries; the corrected value is the product's own contract.
+    submitLabel: "Guardar identidad", fields: ["display_name", "tagline"], identifyBy: "tenant_id",
+    // Writes a Storage object, and `storage_object` deliberately has no ledger
+    // kind (its safe deletion path is unverified), so only DENIAL paths run.
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
+  }),
+  "clients.inviteClientUser": action("clients.inviteClientUser", {
+    actionRoute: "route.postAdminClients",
+    urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
+    submitLabel: "Enviar invitación", fields: ["tenant_id", "email", "full_name", "data_scope"],
+    // AM2: the positive path creates an Auth identity and sends a message. The
+    // harness never creates or invites one (§6.6), so only denial paths run.
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
+  }),
+  "clients.updateClientUser": action("clients.updateClientUser", {
+    actionRoute: "route.postAdminClients",
+    urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
+    submitLabel: "Guardar usuario", fields: ["full_name", "data_scope"], identifyBy: "user_id",
+    // The run owns no client user, so this operation may only ever be denied.
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
+  }),
+  "clients.deleteClientUser": action("clients.deleteClientUser", {
+    actionRoute: "route.postAdminClients",
+    urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
+    submitLabel: "Eliminar cuenta cliente", fields: ["confirmation_email"], identifyBy: "user_id",
+    deniedPathsOnly: true, destructive: true, creates: [], outcome: adminOutcome("/admin/clients"),
+  }),
+  "qualitative.generateSuggestions": action("qualitative.generateSuggestions", {
+    actionRoute: "route.postAdminQualitative",
+    urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative?study=:studyId",
+    submitLabel: "Generar sugerencias pendientes", fields: [],
+    targetParams: ["studyId"], creates: [], outcome: adminOutcome("/admin/qualitative"),
+  }),
+  "qualitative.reviewObservations": action("qualitative.reviewObservations", {
+    actionRoute: "route.postAdminQualitative",
+    urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative?study=:studyId",
+    submitLabel: "Aceptar sugerencias", fields: ["theme", "stage_key"],
+    // The page renders only the SELECTED study's observations, so checking its
+    // own checkboxes can never reach another study's rows.
+    checkAllNamed: ["observation_id", "quote_id"],
+    targetParams: ["studyId"], creates: [], outcome: adminOutcome("/admin/qualitative"),
+  }),
   "studies.createBlank": action("studies.createBlank", {
+    actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies",
     mechanism: "browser",
     page: "/admin/studies",
@@ -274,19 +397,76 @@ export const OPERATIONS = Object.freeze({
       success: { path: "/admin/upload", query: "study" },
     },
   }),
-  "studies.createFromTemplate": action("studies.createFromTemplate", { urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies", submitLabel: "Usar plantilla", fields: ["template_id", "tenant_id", "name", "period"], creates: ["study"] }),
-  "studies.saveAsTemplate": action("studies.saveAsTemplate", { urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies", submitLabel: "Guardar como plantilla", fields: ["study_id", "template_id", "name", "description"], creates: ["study_template"] }),
-  "studies.updateTemplateMetadata": action("studies.updateTemplateMetadata", { urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies", submitLabel: "Guardar nueva versión", fields: ["template_id", "name", "description"], creates: ["study_template"] }),
-  "studies.deleteTemplate": action("studies.deleteTemplate", { urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies", submitLabel: "Eliminar plantilla", fields: ["template_id"], creates: [], destructive: true }),
-  "studies.updateConfiguration": action("studies.updateConfiguration", { urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies", submitLabel: "Guardar configuración", fields: ["study_id", "name", "period", "status"], creates: [] }),
+  "studies.createFromTemplate": action("studies.createFromTemplate", {
+    actionRoute: "route.postAdminStudies",
+    urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
+    submitLabel: "Usar plantilla", fields: ["tenant_id", "name", "period"], identifyBy: "template_id",
+    scopeParams: ["tenant_id"], targetParams: ["template_id"], creates: ["study"],
+    outcome: adminOutcome("/admin/studies"),
+  }),
+  "studies.saveAsTemplate": action("studies.saveAsTemplate", {
+    actionRoute: "route.postAdminStudies",
+    urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
+    submitLabel: "Guardar como plantilla", fields: ["study_id", "template_id", "name", "description"],
+    targetParams: ["study_id"], creates: ["studyTemplate"], outcome: adminOutcome("/admin/studies"),
+  }),
+  "studies.updateTemplateMetadata": action("studies.updateTemplateMetadata", {
+    actionRoute: "route.postAdminStudies",
+    urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
+    submitLabel: "Guardar nueva versión", fields: ["name", "description"], identifyBy: "template_id",
+    targetParams: ["template_id"], creates: [], outcome: adminOutcome("/admin/studies"),
+  }),
+  "studies.deleteTemplate": action("studies.deleteTemplate", {
+    actionRoute: "route.postAdminStudies",
+    urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
+    submitLabel: "Eliminar plantilla", fields: [], identifyBy: "template_id",
+    // The form carries a `required` confirmation checkbox; a real user ticks it.
+    checkAllInForm: true,
+    targetParams: ["template_id"], destructive: true, creates: [],
+    outcome: adminOutcome("/admin/studies"),
+  }),
+  "studies.updateConfiguration": action("studies.updateConfiguration", {
+    actionRoute: "route.postAdminStudies",
+    urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
+    submitLabel: "Guardar configuración", fields: ["name", "period", "status"], identifyBy: "study_id",
+    targetParams: ["study_id"], creates: [], outcome: adminOutcome("/admin/studies"),
+  }),
 
   // --- imperative, client-invoked: browser only (§1.7) --------------------
-  "upload.analyze": action("upload.analyze", { urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload", imperative: true, creates: [] }),
-  "upload.preview": action("upload.preview", { urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload", imperative: true, creates: [] }),
-  "upload.confirm": action("upload.confirm", { urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload", imperative: true, creates: ["import_batch"] }),
-  "upload.rollback": action("upload.rollback", { urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload", imperative: true, creates: [] }),
-  "dashboard.refresh": action("dashboard.refresh", { urlClass: "/dashboard", mechanism: "browser", page: "/dashboard", imperative: true, mutating: false, creates: [] }),
-  "dashboard.pivot": action("dashboard.pivot", { urlClass: "/dashboard", mechanism: "browser", page: "/dashboard", imperative: true, mutating: false, creates: [] }),
+  "upload.analyze": action("upload.analyze", {
+    actionRoute: "route.postAdminUpload",
+    urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
+    imperative: true, scopeParams: ["tenant_id"], creates: [],
+  }),
+  "upload.preview": action("upload.preview", {
+    actionRoute: "route.postAdminUpload",
+    urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
+    imperative: true, scopeParams: ["tenant_id"], creates: [],
+  }),
+  "upload.confirm": action("upload.confirm", {
+    actionRoute: "route.postAdminUpload",
+    urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
+    imperative: true, scopeParams: ["tenant_id"], targetParams: ["study_id"],
+    creates: ["importBatch"],
+  }),
+  "upload.rollback": action("upload.rollback", {
+    actionRoute: "route.postAdminUpload",
+    urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
+    // The control targets the LATEST COMMITTED batch, which the page derives
+    // itself and never renders as an id. Ownership therefore cannot be proven
+    // from a parameter: the caller must prove, immediately before dispatch,
+    // that the latest committed batch is one this run created. `targetParams`
+    // names the id it must have verified.
+    imperative: true, destructive: true, targetParams: ["batch_id"], creates: [],
+  }),
+  "dashboard.refresh": action("dashboard.refresh", {
+    urlClass: "/dashboard", mechanism: "browser", page: "/dashboard",
+    imperative: true, mutating: false, creates: [],
+  }),
+  "dashboard.pivot": action("dashboard.pivot", {
+    urlClass: "/dashboard", mechanism: "browser", page: "/dashboard",
+    imperative: true, mutating: false, creates: [],
+  }),
 });
 
 // ---------------------------------------------------------------------------
@@ -340,7 +520,15 @@ export function operationSupport(op) {
 
   // Mutating operations must additionally declare how ownership is proven, or
   // the fixture ledger cannot decide whether the target belongs to this run.
+  //
+  // `deniedPathsOnly` is the fourth admissible declaration and the strictest:
+  // the operation may never be driven towards a positive outcome at all, and
+  // the ledger forces every id-shaped parameter it receives to be either a
+  // ledgered object or the reserved never-existing id (§ fixtures). An
+  // operation whose success would create an Auth identity, send a message or
+  // write a Storage object carries it, because no ledger kind can undo those.
   const ownershipDeclared =
+    op.deniedPathsOnly === true ||
     (op.creates?.length ?? 0) > 0 ||
     (op.scopeParams?.length ?? 0) > 0 ||
     (op.targetParams?.length ?? 0) > 0;
@@ -414,6 +602,34 @@ export function createLedger() {
 // ---------------------------------------------------------------------------
 
 const SAFE_QUERY_KEYS = new Set(["error"]);
+
+/**
+ * The complete set of request headers a suite may forge (PR 7, Suite B3).
+ *
+ * Every entry is a header an attacker can trivially set and which a naive
+ * implementation might trust: a claimed role, a claimed tenant, a proxy hint,
+ * or the internal marker behind the 2025 Next.js middleware-bypass advisory
+ * this repository's own dependency work tracked (R13).
+ *
+ * `cookie`, `authorization` and `apikey` are deliberately ABSENT and must stay
+ * absent: forging one of those means carrying a credential the actor was never
+ * issued, which is impersonation rather than tampering (§3.6).
+ */
+export const FORGEABLE_HEADERS = new Set([
+  "x-middleware-subrequest",
+  "x-middleware-rewrite",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-forwarded-for",
+  "x-role",
+  "x-user-role",
+  "x-user-id",
+  "x-tenant-id",
+  "x-nonce",
+  "x-invoke-path",
+  "origin",
+  "referer",
+]);
 
 export function redirectPath(location, origin) {
   if (!location) return null;
@@ -503,11 +719,16 @@ export async function createHarness(options) {
 
   async function httpRun(a, op, params) {
     const path = fillPath(op.path ?? op.urlClass, params) + queryFor(op, params);
+    // Built BEFORE the try, so a refusal to forge an undeclared or
+    // credential-bearing header propagates as the caller error it is instead of
+    // being swallowed and recorded as a transport failure.
+    const headers = forgedHeadersFor(op, params);
+    const probeBody = outerRouteBody(op, params);
+    if (probeBody.contentType) headers["content-type"] = probeBody.contentType;
     const started = now();
     let response = null;
     let transportError = false;
     try {
-      const headers = {};
       const cookie = a.jar.header();
       if (cookie) headers.cookie = cookie;
       // The operation keeps its own bounded deadline AND honours cancellation.
@@ -515,6 +736,7 @@ export async function createHarness(options) {
       response = await fetch(new URL(path, origin), {
         method: op.method ?? "GET",
         headers,
+        ...(probeBody.sendBody ? { body: "" } : {}),
         redirect: "manual",
         signal: cancelSignal ? AbortSignal.any([deadline, cancelSignal]) : deadline,
       });
@@ -544,31 +766,113 @@ export async function createHarness(options) {
 
   // --- the form / browser mechanisms ---------------------------------------
 
-  async function browserRun(a, op, params, mechanism) {
+  /**
+   * Navigates to an operation's own page and resolves the §4.2 question BEFORE
+   * anything is located, filled, clicked or dispatched: was the caller denied,
+   * or did the page genuinely render?
+   *
+   * The three denial shapes this application actually produces are all covered,
+   * and none of them is inferred from a missing control:
+   *   - a redirect to `/login`               -> denied_unauthenticated
+   *   - a redirect to `/dashboard` from /admin -> denied_wrong_role
+   *   - HTTP 200 carrying the app's own "Acceso denegado" panel, which is how
+   *     `/admin/upload` answers a `client` (AM4) -> denied_wrong_role
+   *
+   * Returns an observation when the caller was denied or the page failed to
+   * render, and `null` when the page is genuinely usable.
+   */
+  async function navigateAndClassify(context, op, pagePath, reuse) {
+    // `reuse` keeps a STAGED workflow on the page it is already standing on —
+    // analyze, then preview, then confirm, exactly as one user session does.
+    // It skips the navigation, never the classification: the denial checks
+    // below still run against whatever is actually rendered.
+    if (!reuse) await context.navigate(new URL(pagePath, origin).toString());
+    const landed = await context.evaluate("location.pathname");
+    if (reuse) {
+      if (await context.evaluate(PAGE.deniedPanel)) return { status: 200, domSignal: "denied_role" };
+      if (!(await context.evaluate(PAGE.landmark))) return { status: 200, domSignal: "none" };
+      return null;
+    }
+    const requested = pagePath.split("?")[0];
+    if (landed === "/login" && requested !== "/login") {
+      return { status: 302, redirectTo: "/login" };
+    }
+    if (landed === "/dashboard" && requested !== "/dashboard") {
+      return { status: 302, redirectTo: "/dashboard", fromAdminPath: requested.startsWith("/admin") };
+    }
+    if (await context.evaluate(PAGE.deniedPanel)) {
+      // The product rendered its own denial page with HTTP 200. Reporting this
+      // as `success` because the status is 2xx is exactly the false pass the
+      // classifier exists to prevent.
+      return { status: 200, domSignal: "denied_role" };
+    }
+    if (!(await context.evaluate(PAGE.landmark))) return { status: 200, domSignal: "none" };
+    return null;
+  }
+
+  /**
+   * Ends this actor's session in one already-loaded context, without touching
+   * any other actor. This REMOVES authority; it can never add any, and it
+   * copies no credential between actors (§3.6). It exists so a Server Action
+   * can be reached with its own page already rendered — the only honest way to
+   * prove that the ACTION rejects a caller, rather than proving only that the
+   * page in front of it does.
+   */
+  async function endSessionInContext(a) {
+    a.jar.clear();
+    // Every context this actor owns, not just the one in front of us: leaving a
+    // session alive in a sibling context would make the next real sign-in skip
+    // the login form, and would make the denial below prove less than it says.
+    for (const context of Object.values(a.contexts)) await context.clearCookies();
+    a.sessionKind = "none";
+    a.sessionLabel = newSessionLabel();
+  }
+
+  async function browserRun(a, op, params, mechanism, options = {}) {
+    const { endSessionAfterLoad = false, reuseLoadedPage = false } = options;
     const javaScript = mechanism !== "form";
     const context = await contextFor(a.id, { javaScript });
     const started = now();
+    const pagePath = fillPath(op.page ?? op.urlClass, params);
+
+    const denied = await navigateAndClassify(context, op, pagePath, reuseLoadedPage);
+    if (denied) return finish(a, op, mechanism, denied, now() - started);
+
+    // The page rendered for this actor. Ending the session here is what turns a
+    // page-gate proof into an ACTION-gate proof (§ Suite B).
+    if (endSessionAfterLoad) await endSessionInContext(a);
 
     // Imperative Server Actions have no form; a reviewed, statically dispatched
     // driver drives the app's own controls (design §1.7). An operation without
-    // one throws rather than being reported as any outcome.
+    // one throws rather than being reported as any outcome. The driver receives
+    // an already-navigated, already-classified page.
     if (op.imperative) {
       const driver = browserDriverFor(op.name);
-      const observation = await driver({ context, origin, PAGE });
-      return finish(a, op, mechanism, observation, now() - started);
+      const observation = await driver({ context, PAGE, params });
+      const record = finish(a, op, mechanism, observation, now() - started);
+      // A driver may attach a short diagnostic token describing the control
+      // state it found (`confirm-disabled-checkboxes=3`). It is composed of
+      // fixed tokens and counts only — never rendered text, never product
+      // data — and it stays off the sanitized ledger.
+      if (observation.note) record.note = observation.note;
+      // Whether the driver actually invoked the Server Action. A suite that
+      // asserts "nothing was dispatched" must be able to read that from the
+      // record rather than infer it from a timing.
+      if (observation.dispatched !== undefined) record.dispatched = observation.dispatched;
+      if (observation.controlEnabled !== undefined) record.controlEnabled = observation.controlEnabled;
+      return record;
     }
 
-    const pagePath = fillPath(op.page ?? op.urlClass, params);
-    await context.navigate(new URL(pagePath, origin).toString());
-    const landed = await context.evaluate("location.pathname");
-    if (landed === "/login" && pagePath !== "/login") {
-      return finish(a, op, mechanism, { status: 302, redirectTo: "/login" }, now() - started);
-    }
-    const ready = await context.evaluate(PAGE.landmark);
-    if (!ready) {
-      return finish(a, op, mechanism, { status: 200, domSignal: "none" }, now() - started);
-    }
-    const formIndex = await context.evaluate(PAGE.formBySubmit(op.submitLabel));
+    // Where several identical forms are rendered — one per tenant, user or
+    // template — the form is located by the value of the field the Server
+    // Action itself reads (`formData.get("template_id")`). That is the server
+    // contract of §4.1 rule 3, and it is what keeps a destructive submission
+    // from reaching the neighbouring object's form.
+    const formIndex = op.identifyBy && params[op.identifyBy] !== undefined
+      ? await context.evaluate(
+          PAGE.formByFieldValue(op.identifyBy, String(params[op.identifyBy]), op.submitLabel),
+        )
+      : await context.evaluate(PAGE.formBySubmit(op.submitLabel));
     if (formIndex < 0) {
       throw new Error(
         `control_absent_on_authorized_page: "${op.submitLabel}" not found on ${pagePath} — ` +
@@ -579,6 +883,12 @@ export async function createHarness(options) {
       if (params[field] === undefined) continue;
       const result = await context.evaluate(PAGE.setField(formIndex, field, String(params[field])));
       if (result !== "ok") throw new Error(`could not fill field ${field}: ${result}`);
+    }
+    // Confirmation checkboxes and row selectors are ticked the way a user ticks
+    // them, and only within the located form.
+    if (op.checkAllInForm) await context.evaluate(PAGE.checkAllInForm(formIndex));
+    for (const name of op.checkAllNamed ?? []) {
+      await context.evaluate(PAGE.checkAllInFormNamed(formIndex, name));
     }
     const finalPath = await context.submitAndWait(PAGE.clickSubmit(formIndex));
     const observation = {
@@ -628,6 +938,57 @@ export async function createHarness(options) {
     return encoded ? `?${encoded}` : "";
   }
 
+  /**
+   * Caller-forged request headers, for the tampering cases Suite B3 must probe
+   * (a forged role claim, a forged proxy hint, the `x-middleware-subrequest`
+   * header of the 2025 Next.js middleware-bypass class).
+   *
+   * Three rules keep this from becoming a bypass rather than a probe:
+   *   1. Only an operation the frozen catalogue marks `acceptsForgedHeaders`
+   *      may receive any, so a caller cannot improvise one on an unreviewed
+   *      surface.
+   *   2. Only names on `FORGEABLE_HEADERS` are accepted. `cookie`,
+   *      `authorization` and `apikey` are absent by construction: forging one
+   *      of those would be carrying a credential the actor was not issued,
+   *      which §3.6 forbids outright.
+   *   3. Nothing here relaxes an authorization decision — the whole point is
+   *      that the answer must not change.
+   */
+  function forgedHeadersFor(op, params = {}) {
+    const forged = params.headers;
+    if (forged === undefined) return {};
+    if (!op.acceptsForgedHeaders) {
+      throw new Error(
+        `operation "${op.name}" does not declare acceptsForgedHeaders — refusing to forge a request header`,
+      );
+    }
+    const out = {};
+    for (const [name, value] of Object.entries(forged)) {
+      const lower = String(name).toLowerCase();
+      if (!FORGEABLE_HEADERS.has(lower)) {
+        throw new Error(`refusing to forge the header "${lower}": it is not on the reviewed list`);
+      }
+      out[lower] = String(value);
+    }
+    return out;
+  }
+
+  /**
+   * The body an outer action-route probe carries: ALWAYS empty, and a content
+   * type only when the probe is meant to reach the authorization boundary.
+   *
+   * Nothing here may ever carry a mutation payload or an action identifier —
+   * the body is the empty string, the content type is the declared one, and
+   * there is no code path that makes either anything else.
+   */
+  function outerRouteBody(op, params = {}) {
+    if (!op.outerRouteProbe) return { sendBody: false, contentType: null };
+    if (params.body !== undefined) {
+      throw new Error(`outer route probe "${op.name}" must never carry a body`);
+    }
+    return { sendBody: true, contentType: op.contentType };
+  }
+
   function fillPath(template, params = {}) {
     return template.replace(/:([A-Za-z]+)/g, (match, key) => {
       if (params[key] === undefined) throw new Error(`missing path parameter ${key}`);
@@ -637,7 +998,7 @@ export async function createHarness(options) {
 
   // --- the single execution entry point (§8.3) ------------------------------
 
-  async function run(actorId, op, params = {}) {
+  async function run(actorId, op, params = {}, options = {}) {
     // 1. Cancellation. A cancelled run must start no further work at all, so
     //    live work cannot overlap fixture cleanup.
     assertLive();
@@ -658,9 +1019,66 @@ export async function createHarness(options) {
     const a = actor(actorId);
     fixtures.authorizeMutation(op, params);
 
+    // 4. `endSessionAfterLoad` is only meaningful where a page is rendered
+    //    first, so asking for it on an ordinary HTTP operation is a caller
+    //    error rather than something to silently ignore.
+    if (options.endSessionAfterLoad && op.mechanism === "http") {
+      throw new Error(`endSessionAfterLoad is meaningless for the http operation "${op.name}"`);
+    }
+
     assertLive();
     if (op.mechanism === "http") return httpRun(a, op, params);
-    return browserRun(a, op, params, op.mechanism);
+    return browserRun(a, op, params, op.mechanism, options);
+  }
+
+  /**
+   * The ONE place a suite may look inside an application response, and only for
+   * an ordinary route handler the frozen catalogue marks `inspectable` — today
+   * exactly `report.download`, whose body is a public product contract (a PDF,
+   * or the documented JSON validation error) rather than framework transport.
+   *
+   * The body is read inside `response-inspect.mjs` and never leaves it: what
+   * comes back here is categories, counts, booleans and lengths, which is why
+   * the result is safe to print by construction. A Server-Action / RSC payload
+   * can never reach it, because no such operation is `inspectable` and the
+   * inspector only ever issues its own ordinary HTTP request (§2.3, G11).
+   */
+  async function inspect(actorId, op, params = {}, { expect = "text", needles = [] } = {}) {
+    assertLive();
+    if (!op?.inspectable) {
+      const error = new Error(
+        `operation "${op?.name ?? "(unknown)"}" is not declared inspectable — refusing to read its response`,
+      );
+      error.code = "NOT_INSPECTABLE";
+      throw error;
+    }
+    if (op.mechanism !== "http") {
+      throw new Error(`only an ordinary HTTP operation may be inspected, not "${op.name}"`);
+    }
+    const a = actor(actorId);
+    const started = now();
+    const path = fillPath(op.path ?? op.urlClass, params) + queryFor(op, params);
+    const inspection = await inspectHttpResponse({
+      url: new URL(path, origin).toString(),
+      cookie: a.jar.header() || undefined,
+      headers: forgedHeadersFor(op, params),
+      expect,
+      needles,
+      signal: cancelSignal ?? undefined,
+    });
+    const record = finish(
+      a,
+      op,
+      "http",
+      {
+        status: inspection.status,
+        transportError: inspection.transportError,
+        successSignal: inspection.shapeMatchesExpectation,
+        fromAdminPath: Boolean(op.fromAdminPath),
+      },
+      now() - started,
+    );
+    return { record, inspection };
   }
 
   // --- sign-in through the application's own login surface (§3.2) -----------
@@ -693,6 +1111,13 @@ export async function createHarness(options) {
   async function signIn(actorId) {
     const a = actor(actorId);
     if (!credentials[actorId]) throw new Error(`no credentials configured for ${actorId}`);
+    // Sign-in is idempotent: any session this actor still holds — in ANY of its
+    // contexts — is ended first. Without this a re-sign-in after an invalidated
+    // or ended session would find a sibling context still authenticated, be
+    // bounced from /login to /dashboard, and fail looking for a login form that
+    // is correctly absent. No credential is copied; authority is only removed.
+    a.jar.clear();
+    for (const context of Object.values(a.contexts)) await context.clearCookies();
     a.sessionLabel = newSessionLabel();
     if (OPERATIONS["auth.login"].mechanism === "form") await loginInContext(actorId, false);
     const context = await loginInContext(actorId, true);
@@ -866,6 +1291,7 @@ export async function createHarness(options) {
     actors,
     ledger,
     run,
+    inspect,
     signIn,
     assertIdentity,
     assertSessionIsolation,

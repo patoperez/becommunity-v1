@@ -77,7 +77,7 @@ implementing `SourceAdapter`. Nothing downstream changes.
 
 ## Behavioral verification
 
-`npx tsx scripts/ingest-test.ts` (against the live DB) — all passed:
+The since-retired `scripts/ingest-test.ts` (against the live DB) — all passed. Its coverage now executes as `test:ingestion-core`, `test:atomic-ingestion` and `test:atomic-live`, and behaviorally at the HTTP boundary as Suite C's C2:
 - **Good file** → 5 respondents, 10 `quant_response` (`nps`×5, `sat_maestros`×5),
   4 `qual_observation`; DB counts confirmed; `nps` values = `[6,7,8,9,10]`.
 - **Malformed file** → 2 errors flagging the exact bad cells (row + column),
