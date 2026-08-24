@@ -919,7 +919,10 @@ function offlineOutcomeCases() {
     ok("N12", "auth.login: /dashboard=success, /login?error=validation, /login=denial, other=unclassified");
   }
   try {
-    evaluateOutcome(OPERATIONS["clients.renameTenant"], "/admin/clients?ok=1");
+    // PR 7 gave every CATALOGUED form operation an outcome contract, so the
+    // negative is a descriptor that deliberately has none. Classifying one
+    // must throw rather than default to success.
+    evaluateOutcome({ name: "clients.noContract", urlClass: "/admin/clients" }, "/admin/clients?ok=1");
     bad("N12", "an operation with no declared contract was classified");
   } catch {
     ok("N12", "an operation with no declared contract throws instead of being classified");
@@ -932,7 +935,16 @@ function offlineCatalogSupport() {
   const supported = supportedMutations();
   const missingOwnership = supported.filter((name) => {
     const op = OPERATIONS[name];
-    return !((op.creates?.length ?? 0) > 0 || (op.scopeParams?.length ?? 0) > 0 || (op.targetParams?.length ?? 0) > 0);
+    // `deniedPathsOnly` is the fourth admissible declaration (PR 7): the ledger
+    // forces every uuid-shaped parameter such an operation receives to be
+    // ledgered or the reserved never-existing id, which is a STRICTER promise
+    // than `creates`/`scopeParams`/`targetParams`, not a looser one.
+    return !(
+      op.deniedPathsOnly === true ||
+      (op.creates?.length ?? 0) > 0 ||
+      (op.scopeParams?.length ?? 0) > 0 ||
+      (op.targetParams?.length ?? 0) > 0
+    );
   });
   // PR 7 completes the mutating surface: Suites B and C must reach EVERY
   // catalogued mutation, so the supported set and the catalogue's mutating set
@@ -980,7 +992,8 @@ function offlineLedgerKinds() {
   // The default sweep must stay tenant/study: PR 5's workflow creates no Auth
   // user, and a default that quietly grew would change what its preflight means.
   const defaultKinds = Object.keys(fixtures.KINDS).filter((kind) => ["tenant", "study"].includes(kind));
-  const order = ["study", "clientProfile", "authUser", "tenant"];
+  // PR 7 adds `importBatch` (deleted before its study) and `studyTemplate`.
+  const order = ["importBatch", "study", "studyTemplate", "clientProfile", "authUser", "tenant"];
   const declared = Object.entries(fixtures.KINDS).sort((a, b) => a[1].order - b[1].order).map(([kind]) => kind);
   if (defaultKinds.length === 2 && JSON.stringify(declared) === JSON.stringify(order)) {
     ok("N9", `deletion order is ${declared.join(" -> ")}; a profile is always removed before its own identity`);

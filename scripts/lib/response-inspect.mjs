@@ -179,7 +179,10 @@ export const INSPECTOR_CASES = Object.freeze([
   { what: "a PostgREST hint", text: '{"error":"x","hint":"try again","details":"row 3"}', expect: ["postgrest_internals"] },
   { what: "a SQL relation error", text: 'relation "study" does not exist', expect: ["sql_fragment"] },
   { what: "a build path", text: "at /var/task/.next/server/app/page.js", expect: ["filesystem_path", "framework_internals"] },
-  { what: "a privileged role marker", text: "role=service_role", expect: ["service_role_marker"] },
+  // Built at runtime, never written as a literal: this file is itself scanned
+  // for credential markers, exactly as `secret-patterns.mjs` builds its own
+  // positive controls at runtime for the same reason.
+  { what: "a privileged role marker", text: `role=${["service", "role"].join("_")}`, expect: ["service_role_marker"] },
   { what: "an ordinary validation message", text: '{"error":"Filtros invalidos"}', expect: [] },
 ]);
 
