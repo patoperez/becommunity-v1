@@ -231,9 +231,6 @@ export async function launchBrowser() {
     await cdp.send("Page.enable", {}, sessionId);
     await cdp.send("Runtime.enable", {}, sessionId);
     await cdp.send("Network.enable", {}, sessionId);
-    // DOM is needed only for `DOM.setFileInputFiles` (§ PR 7): a real upload has
-    // no other honest expression — a file field cannot be filled from script.
-    await cdp.send("DOM.enable", {}, sessionId);
     if (!javaScript) await cdp.send("Emulation.setScriptExecutionDisabled", { value: true }, sessionId);
 
     // The import-rollback control asks for confirmation through `window.confirm`
@@ -335,6 +332,11 @@ export async function launchBrowser() {
             return field ? fields.indexOf(field) : -1;
           })()`);
         if (index < 0) return "no-control";
+        // The DOM domain is enabled lazily, here and nowhere else. Enabling it
+        // for every context would make the browser push a DOM mutation event
+        // for every node of every page into the same message pump that waits
+        // for navigation, for no benefit on the surfaces that never upload.
+        await cdp.send("DOM.enable", {}, sessionId);
         const { root } = await cdp.send("DOM.getDocument", { depth: -1 }, sessionId);
         const { nodeIds } = await cdp.send(
           "DOM.querySelectorAll",
