@@ -1012,6 +1012,13 @@ export async function createHarness(options) {
   async function signIn(actorId) {
     const a = actor(actorId);
     if (!credentials[actorId]) throw new Error(`no credentials configured for ${actorId}`);
+    // Sign-in is idempotent: any session this actor still holds — in ANY of its
+    // contexts — is ended first. Without this a re-sign-in after an invalidated
+    // or ended session would find a sibling context still authenticated, be
+    // bounced from /login to /dashboard, and fail looking for a login form that
+    // is correctly absent. No credential is copied; authority is only removed.
+    a.jar.clear();
+    for (const context of Object.values(a.contexts)) await context.clearCookies();
     a.sessionLabel = newSessionLabel();
     if (OPERATIONS["auth.login"].mechanism === "form") await loginInContext(actorId, false);
     const context = await loginInContext(actorId, true);

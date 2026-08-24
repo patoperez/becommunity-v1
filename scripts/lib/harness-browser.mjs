@@ -831,13 +831,17 @@ export const BROWSER_DRIVERS = Object.freeze({
         : PAGE.forgeSelectValueByAriaLabel(prefix, String(params.forgedValue)),
     );
     if (driven !== "ok") return { status: 200, domSignal: "none", note: `control-${driven}` };
+    // The settled signal is EITHER a refused outcome the product rendered, or a
+    // changed live region. StudyCard renders its `{ ok: false }` error in an
+    // unmarked panel rather than a `role="alert"` region, so the refusal half
+    // must be read through `actionOutcomeKind`, which also consults the app's
+    // own fixed error constants.
     const settled = await context
       .waitForDom(
         `() => {
           const v = ${DASHBOARD_STATUS_EXPR};
-          const alerted = [...document.querySelectorAll('[role="alert"]')]
-            .some((n) => (n.textContent || '').trim().length > 0);
-          return alerted || (v !== '' && v !== window.__harnessDashboardBefore && !/Actualizando/.test(v));
+          const refused = ${PAGE.actionOutcomeKind} !== 'none';
+          return refused || (v !== '' && v !== window.__harnessDashboardBefore && !/Actualizando/.test(v));
         }`,
       )
       .catch(() => false);
