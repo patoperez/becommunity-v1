@@ -14,7 +14,7 @@
   <header class="l-head">
     <h1 class="l-title">P8 · Comparador de direcciones visuales</h1>
     <p class="l-sub">
-      Las tres direcciones muestran <strong>exactamente el mismo contenido, los
+      Las cuatro direcciones muestran <strong>exactamente el mismo contenido, los
       mismos estados y los mismos datos sintéticos</strong>. Lo único que cambia
       es la jerarquía, el ritmo, la navegación, la tipografía, el color, el
       movimiento y la forma de contar. Ninguna está marcada como preferida en
@@ -40,7 +40,15 @@
             <span class="l-choice-name">C · Recorrido</span>
             <span class="l-choice-note">Camino guiado</span>
           </button>
+          <button class="l-choice" type="button" data-dir="selected-informe-vivo-guiado" aria-pressed="false">
+            <span class="l-choice-name">S · Informe Vivo Guiado <span class="l-tag">Síntesis provisional</span></span>
+            <span class="l-choice-note">Síntesis de A, B y C — no es una cuarta opción de estilo ni una decisión tomada</span>
+          </button>
         </div>
+        <p class="l-choice-foot">
+          A, B y C se conservan como evidencia. La síntesis se ofrece para
+          compararla contra ellas, no para reemplazarlas en esta pantalla.
+        </p>
       </section>
 
       <section aria-labelledby="l-surf">
@@ -67,6 +75,7 @@
         <dl>
           <dt>Fortalezas</dt><dd data-note="strengths"></dd>
           <dt>Riesgos</dt><dd data-note="risks"></dd>
+          <dt data-note="synthdt" hidden>Qué se sintetizó</dt><dd data-note="synth" hidden></dd>
           <dt>Qué mirar</dt><dd data-note="notice"></dd>
         </dl>
       </section>
@@ -96,8 +105,10 @@
 
     <p class="l-neutral">
       <strong>Neutralidad.</strong> Este comparador no ordena, puntúa ni destaca
-      ninguna dirección: las tres se presentan con el mismo tratamiento y en un
-      orden fijo. La recomendación razonada del equipo está en
+      ninguna dirección: las cuatro se presentan con el mismo tratamiento y en
+      un orden fijo. La síntesis está marcada como <em>provisional</em> porque
+      lo es: resuelve las partes probadas de A, B y C en un solo sistema y
+      todavía no ha sido aprobada. La recomendación razonada del equipo está en
       <code>README.md</code> y en <code>VISUAL_DIRECTIONS.md</code>, fuera de
       esta pantalla, para que la comparación visual se haga primero.
       <br><br>

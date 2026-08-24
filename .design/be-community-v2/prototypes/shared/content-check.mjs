@@ -37,7 +37,15 @@ import { dirname, join, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 
-const DIRECTIONS = ["informe-vivo", "mesa-de-trabajo", "recorrido"];
+/* The three compared directions plus the provisional synthesis. The
+   synthesis is held to the SAME unchanged contract — the contract was not
+   weakened to let it pass. */
+const DIRECTIONS = [
+  "informe-vivo",
+  "mesa-de-trabajo",
+  "recorrido",
+  "selected-informe-vivo-guiado",
+];
 const SURFACES = ["entry", "studio", "story"];
 
 const fixture = JSON.parse(readFileSync(join(here, "fixture.json"), "utf8"));
@@ -86,7 +94,7 @@ for (const dir of DIRECTIONS) {
 console.log(`\nPages loaded: ${pages.size} of ${DIRECTIONS.length * SURFACES.length}\n`);
 
 // ------------------------------------------------- 1. shared content present
-console.log("1. Shared content contract — same visible content in all three directions");
+console.log(`1. Shared content contract — same visible content in all ${DIRECTIONS.length} directions`);
 for (const surface of SURFACES) {
   const required = fixture.contentContract[surface];
   let surfaceFailures = 0;
@@ -191,7 +199,7 @@ console.log("\n5. Per-page basics — language, viewport, skip link");
 // --------------------------------------------------------------------- done
 console.log(
   failures === 0
-    ? "\nRESULT: PASS — the three directions render the same semantic content, in plain language, with no external requests.\n"
+    ? `\nRESULT: PASS — all ${DIRECTIONS.length} directions render the same semantic content, in plain language, with no external requests.\n`
     : `\nRESULT: FAIL — ${failures} problem(s) above.\n`
 );
 process.exit(failures === 0 ? 1 - 1 : 1);

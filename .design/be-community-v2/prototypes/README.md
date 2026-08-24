@@ -1,8 +1,10 @@
 # P8 · Visual-direction comparison prototypes
 
 Three disposable, standalone prototypes of the directions defined in
-[`../VISUAL_DIRECTIONS.md`](../VISUAL_DIRECTIONS.md), built so the same product
-states can be compared side by side before decision **D1** is made.
+[`../VISUAL_DIRECTIONS.md`](../VISUAL_DIRECTIONS.md), plus **one provisional
+synthesis** of them, built so the same product states can be compared side by
+side before decision **D1** is made. **D1 is still open** — the synthesis is a
+proposal rendered so it can be judged, not a decision that has been taken.
 
 **These are not production code.** No framework, no build step, no npm package,
 no CDN, no external font, no network request, no analytics, no storage, no
@@ -25,10 +27,10 @@ Then open <http://127.0.0.1:8391/index.html>.
 
 The launcher lets you pick a direction, pick a surface, switch between desktop
 and 375 px framing, open any prototype at full size, and read each direction's
-thesis, strengths, risks and what to look at. It presents the three with
-identical treatment in a fixed order and marks none as preferred — the
-recommendation is in §8 of this file and in `VISUAL_DIRECTIONS.md`, deliberately
-outside the comparison UI.
+thesis, strengths, risks and what to look at. It presents all four with
+identical treatment in a fixed order; the synthesis carries a neutral
+*Síntesis provisional* tag and no promotion. The reasoned recommendation lives
+in this file, deliberately outside the comparison UI.
 
 `file://` also works for the individual pages, but the launcher's preview frame
 needs the local server.
@@ -49,7 +51,9 @@ shared/capture.mjs             screenshot harness (exact viewport emulation)
 informe-vivo/                  Direction A — style.css + entry/studio/story.html
 mesa-de-trabajo/               Direction B — style.css + entry/studio/story.html
 recorrido/                     Direction C — style.css + entry/studio/story.html
-screenshots/                   18 PNGs — final evidence only
+selected-informe-vivo-guiado/  Provisional synthesis — tokens.css + style.css
+                               + entry/studio/story.html + capture-selected.mjs
+screenshots/                   24 PNGs — final evidence only (18 + 6)
 ```
 
 Each direction is **fully independent**: its own stylesheet, its own markup, its
@@ -72,18 +76,20 @@ node .design/be-community-v2/prototypes/shared/content-check.mjs
 It checks five things:
 
 1. **Shared content** — every string in `contentContract.entry` (11),
-   `.studio` (30) and `.story` (63) appears as **visible text** in all three
-   directions' corresponding page. Attribute values do not count, so a string
+   `.studio` (30) and `.story` (63) appears as **visible text** in all **four**
+   directions' corresponding page, the synthesis included. The contract was
+   **not** weakened to let the synthesis pass; the synthesis passed it on its
+   first run. Attribute values do not count, so a string
    hidden in a `title` or `aria-label` fails — which is precisely the defect the
    P8 audit found in the current product.
 2. **Plain language (P8 contract C3)** — none of 23 implementation terms
    (`JSON`, `data_scope`, `metric_key`, `pivot`, `n=`, `CSAT`, `NPS`, raw status
-   enums, …) appears as visible text anywhere.
+   enums, …) appears as visible text in any of the 12 pages.
 3. **Local assets** — every referenced stylesheet, script and frame resolves to
    a file on disk.
 4. **No network** — no absolute `http(s)` URL appears in any direction page.
 5. **Per-page basics** — `lang="es"`, a viewport meta and a skip link on all
-   nine pages.
+   twelve pages.
 
 **It deliberately does not compare pixels, DOMs, element counts, ordering or
 markup shape.** The three directions are supposed to be structurally different;
@@ -134,8 +140,7 @@ default, and free exploration present but placed after the story.
 
 ## Screenshots
 
-18 PNGs in `screenshots/`, named `<direction>--<surface>--<viewport>.png`.
-Full-page captures, light palette, device scale 1.
+24 PNGs in `screenshots/`. Full-page captures, light palette, device scale 1.
 
 | | entry | studio | story |
 |---|---|---|---|
@@ -145,6 +150,15 @@ Full-page captures, light palette, device scale 1.
 | **mesa-de-trabajo** mobile 375 | 1138 | 2617 | 3763 |
 | **recorrido** desktop 1440 | 900 | 2201 | 2794 |
 | **recorrido** mobile 375 | 1277 | 3035 | 4589 |
+| **selected** (synthesis) desktop 1440 | 900 | **1691** | **2485** |
+| **selected** (synthesis) mobile 375 | 1334 | **1994** | **3657** |
+
+The six synthesis captures are named `selected--<surface>--<viewport>.png` and
+are produced by `selected-informe-vivo-guiado/capture-selected.mjs`, which uses
+the identical technique to `shared/capture.mjs`. There are two harnesses only
+because this pass was allowed to write inside the synthesis folder and a short
+allow-list that did not include the shared harness; **they should be
+consolidated into one parameterised script in a later pass.**
 
 Regenerate with the server running:
 
@@ -279,10 +293,119 @@ the final set was captured once. Findings, in the order they were found:
 
 ---
 
+## The provisional synthesis — *Informe Vivo Guiado*
+
+`selected-informe-vivo-guiado/` resolves the proven parts of A, B and C into one
+system. It is **not a fourth style option and not a collage**, and it is **not an
+approved decision**: D1 remains open.
+
+### What was taken from where
+
+| Aspect | Source | What it means here |
+|---|---|---|
+| Insights information architecture | **A** | Finding → the consultant's reading → evidence → exploration. The opening statement is a serif sentence, not a tile. |
+| Studio hierarchy and density | **B** | Persistent stops, a breadcrumb naming the client and the date, a step ribbon, status as glyph + word, borders and affordances over decoration. One density step tighter than Insights. |
+| Journey treatment | **C** | The route, with a result on every touchpoint and labels only where the work went deeper. Applied **only when the study has one** — Studio still shows the `Sin recorrido` block for the study that does not. |
+| Entry | **C** framing, **A** spacing | The path spine explains the two sides; the editorial statement and the form share one frame, so it reads as a product entrance rather than a landing page beside a stray form. |
+| Visual identity | **A + C** | Warm paper, ink, deep teal, amber/rust alert. **B's enterprise blue was deliberately not carried over.** |
+| Component discipline | **B** | Clear borders, real progress, form hierarchy — without letting Insights become an administration console. |
+
+One token file, `tokens.css`, serves both products: colour, type scale, spacing,
+radius/border, elevation, motion and content measures. Studio and Insights differ
+only in **density and chrome** (`.register-work` vs `.register-read`) — never in
+palette, type family, radius, motion or state semantics. That is what makes them
+read as one product family.
+
+### The corrections it was built to resolve
+
+| # | Required correction | How it was met | Evidence |
+|---|---|---|---|
+| 1 | A's story was 4 099 px desktop / 4 907 px mobile | Two-column reading layout with a sticky rail; a compact four-across evidence strip instead of four full-width rows; comparison and voices paired side by side; method and exploration behind disclosure | **2 485 px** desktop (−39 %), **3 657 px** mobile (−25 %) |
+| 2 | The alert was repeated equally loudly | One primary alert block. Elsewhere a rust left border, a rust value and a quieter, differently worded marker — *Bajo el mínimo acordado* — plus *Profundizamos aquí* on the route | `selected--story--desktop.png` |
+| 3 | Interpretation distinct, but not an error or a disclaimer | Teal top rule, a pencil badge, a name and a date. Authored and signed, not red and warned | same |
+| 4 | Exploration secondary | Collapsed in the rail, after the authored story in reading order | same |
+| 5 | Themes ranked with counts and quotes; cloud optional | Ranked 1–3 with visible counts and a pull quote each; *Ver como nube de palabras* as an explicit alternate view | same |
+| 6 | Human sample wording | *20 personas respondieron este estudio* — `n=` appears nowhere | content check |
+| 7 | No implementation vocabulary | 0 of 23 forbidden terms in any page | content check |
+| 8 | Entry must be a product entrance | One framed entrance; the telling and the door in the same object | `selected--entry--desktop.png` |
+| 9 | Studio mobile must not be an equal-weight stack | Priority order — attention, task in flight, review state — with templates, studies and clients collapsed into three compact rows | **1 994 px**, the shortest Studio mobile of the four |
+| 10 | 44 px targets, focus, non-colour cues, reduced motion, `lang="es"`, contrast, no overflow | Verified — see below | content check + capture report |
+
+### Where the length reduction came from, and what is collapsed
+
+The reduction is **hierarchy and grouping first, disclosure second**. Nothing
+required by the content contract was deleted: all 104 strings are still present
+and the check proves it.
+
+- **Two-column desktop reading layout.** A used a single 44 rem column inside a
+  1 440 px viewport, wasting roughly 700 px horizontally while growing
+  vertically.
+- **Compact evidence strip.** Four measures as one row of four blocks on desktop,
+  and as four short two-line rows on mobile, replacing four full-width bordered
+  rows. Every label, value, unit and meaning is still rendered.
+- **Comparison paired with voices** on desktop, so the taller of the two sets the
+  height instead of the sum.
+- **Collapsed by default on narrow screens only**: *Cómo se midió y cómo se lee*
+  and *Explora por tu cuenta*. On Studio mobile: *Plantillas del equipo*,
+  *Estudios recientes* and *Clientes*. Everything else is open at every width.
+
+The capture harness prints how many disclosures are open per view, so the share
+of the reduction that comes from collapsing is visible rather than implied:
+Studio mobile reports `0/3 disclosures open`, Studio desktop `3/3`.
+
+**Honest caveat.** The content check strips tags, so it counts collapsed text as
+present. That is correct for a semantic-parity check, but it means the check
+alone cannot tell you whether something is readable *without a click*. The list
+above is the human record of what sits behind one, and it is deliberately short
+and secondary.
+
+### Design review of the six synthesis screenshots
+
+One review pass, then one final capture. Fixed:
+
+1. **The comparison bars did not render on desktop.** At ≥48 rem the track, value
+   and base carried an explicit grid *column* but an automatic *row*, so sparse
+   auto-placement pushed them onto rows 2 and 3: the bars vanished and
+   *8 personas* spilled into the neighbouring voices column. Fixing the rows
+   exposed the real constraint — a four-column row cannot fit the ~300 px column
+   the comparison gets when paired — so the comparison was rebuilt as one compact
+   two-row form that holds at 300 px and at 375 px alike. *This is the same
+   inline-span/placement family of bug that hid the bars in B and C; it is worth
+   an explicit test in P8.3.*
+2. **Studio's four navigation stops wrapped to a second row** on a 375 px screen,
+   orphaning *Plantillas*. Tighter horizontal padding below 30 rem fits all four
+   on one line.
+3. **Stacked actions had ragged widths** in the mobile panel footers. They now
+   share a width below 30 rem.
+4. **The word-cloud link was a 22 px target.** A link that stands alone is a
+   control, not prose: it now has a 44 px height.
+
+Verified and unchanged: no horizontal overflow at either viewport; all 104
+contract strings present; 0 forbidden terms; every state carries a glyph and a
+word as well as a hue; focus rings visible on every control; reduced motion
+honoured through the shared reset; `lang="es"` on all three pages.
+
+### Known gaps in the synthesis
+
+- **The brand contrast resolver is still not prototyped.** The teal here is a
+  fixed value. The mechanism that guarantees a readable foreground for any
+  tenant hex — on screen and in the PDF — remains P8.1 work and should be
+  prototyped against deliberately bad colours before implementation.
+- **Only three surfaces, one state each.** The full state matrix in
+  `../INFORMATION_ARCHITECTURE.md` is not built.
+- **Dark mode is defined in `tokens.css` but not captured.** The screenshots are
+  light-palette only.
+- **No tablet capture.** Desktop and 375 px only, as scoped.
+- **Two capture harnesses exist** (`shared/capture.mjs` and
+  `selected-informe-vivo-guiado/capture-selected.mjs`) for write-boundary reasons.
+  Consolidate them later.
+
+---
+
 ## Recommendation after visual review
 
-Seeing the three rendered does not change the recommendation in
-`VISUAL_DIRECTIONS.md` §5, and it sharpens the reasons:
+Seeing the three rendered did not change the recommendation in
+`VISUAL_DIRECTIONS.md` §5, and it sharpened the reasons:
 
 **A · Informe Vivo as the system, with B's shell discipline governing Studio and
 C's route treatment confined to the journey view.**
@@ -308,3 +431,18 @@ What the screenshots actually showed:
 **This is a recommendation, not a decision.** D1 is the user's and the CEO's to
 make, and it should be made by looking at the launcher, not by reading this
 paragraph.
+
+### After building the synthesis
+
+Building it changed two things worth recording:
+
+- **The height problem was a layout problem, not a content problem.** A's story
+  lost 39 % of its desktop height with every required string still on the page.
+  The cost of A's narrative was never the narrative.
+- **B's contribution turned out to be structural, not visual.** Its navigation,
+  breadcrumb, step ribbon and status discipline all survived into the synthesis.
+  Its blue did not, and nothing was lost with it.
+
+**This is still a recommendation.** D1 is the user's and the CEO's decision, and
+it should be made from the launcher — comparing S against A, B and C on the same
+three surfaces — not from this paragraph.

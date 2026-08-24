@@ -118,3 +118,14 @@ iframe.l-frame {
 @media (min-width: 60rem) {
   .l-controls { grid-template-columns: 1fr 1fr 1.4fr; align-items: start; gap: 1.75rem; }
 }
+
+/* The synthesis is labelled, not promoted: same card treatment as A/B/C, with
+   a neutral outline tag that says "provisional" rather than "recommended". */
+.l-tag {
+  display: inline-block; margin-left: 0.35rem;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; vertical-align: 0.1em;
+  color: var(--l-ink-3); border: 1px solid var(--l-line-2);
+  border-radius: 999px; padding: 0.05rem 0.4rem;
+}
+.l-choice-foot { font-size: 0.82rem; color: var(--l-ink-3); margin-top: 0.6rem; max-width: 44ch; }

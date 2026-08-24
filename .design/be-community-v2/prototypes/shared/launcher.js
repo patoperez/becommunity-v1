@@ -38,10 +38,23 @@
         "Asume que todo estudio tiene recorrido, y no todos lo tienen. Los resultados del ciclo completo no tienen sitio natural. En móvil la metáfora cambia de horizontal a vertical: son dos maquetas, no una que fluye.",
       notice:
         "Compara escritorio y móvil en «Insights»: el cambio de metáfora es el costo real de esta dirección. En «Studio», mira el bloque «Sin recorrido»: es la prueba de que la dirección no inventa caminos falsos."
+    },
+    "selected-informe-vivo-guiado": {
+      title: "S · Informe Vivo Guiado — síntesis provisional",
+      thesis:
+        "Un solo sistema para los dos productos. Insights conserva el orden de A (primero el hallazgo y la lectura de la consultora, después la evidencia, al final la exploración); Studio adopta la jerarquía y la densidad operativa de B; el recorrido usa el tratamiento de C, pero sólo cuando el estudio tiene uno. La identidad es la familia cálida de papel, tinta y verde profundo de A y C, con una alerta ámbar/óxido; el azul corporativo de B no se trajo.",
+      synth:
+        "De A: el orden narrativo, las medidas de lectura y las declaraciones en serif. De B: la navegación fija, las migas que nombran al cliente, la cinta de pasos, los estados con glifo y palabra, y la disciplina de bordes y afordancias. De C: el recorrido como camino, con el resultado en cada momento y etiquetas sólo donde se profundizó — y el bloque «Sin recorrido» para el estudio que no tiene uno.",
+      strengths:
+        "Resuelve los problemas medidos en la comparación: la historia de Insights baja de 4 099 px a 2 470 px en escritorio sin borrar contenido; Studio en móvil baja a 1 994 px con un orden de prioridad real y la referencia secundaria plegada; la alerta se dice fuerte una sola vez y después sólo se marca en voz baja.",
+      risks:
+        "Sigue exigiendo escribir bien: la frase de apertura carga la página. Parte de la reducción viene de plegar el método y la exploración, así que hay que confirmar que nadie los echa de menos. Y aún no existe el resolutor de contraste que garantice un color de marca legible para cualquier cliente.",
+      notice:
+        "Compara «Insights» contra A: mismo orden, casi la mitad de alto. Compara «Studio» en móvil contra B: el mismo trabajo, con jerarquía en lugar de una pila de tarjetas iguales. Y fíjate en que «Fuera de lo acordado» se dice fuerte una vez y luego sólo aparece como «Bajo el mínimo acordado»."
     }
   };
 
-  var DIR_ORDER = ["informe-vivo", "mesa-de-trabajo", "recorrido"];
+  var DIR_ORDER = ["informe-vivo", "mesa-de-trabajo", "recorrido", "selected-informe-vivo-guiado"];
   var state = { dir: "informe-vivo", surface: "entry", view: "desktop" };
 
   var frame = document.getElementById("l-frame");
@@ -72,6 +85,13 @@
     notes.querySelector('[data-note="strengths"]').textContent = note.strengths;
     notes.querySelector('[data-note="risks"]').textContent = note.risks;
     notes.querySelector('[data-note="notice"]').textContent = note.notice;
+
+    // The "what was synthesised" row exists only for the synthesis.
+    var synthDt = notes.querySelector('[data-note="synthdt"]');
+    var synthDd = notes.querySelector('[data-note="synth"]');
+    synthDd.textContent = note.synth || "";
+    synthDt.hidden = !note.synth;
+    synthDd.hidden = !note.synth;
   }
 
   document.querySelectorAll("[data-dir]").forEach(function (btn) {

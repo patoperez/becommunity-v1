@@ -453,3 +453,41 @@ direction, and persisting would have written outside the P8 delivery boundary.
 question arose in this pass that discovery needed it to answer; it belongs to
 implementation, where the Cloudflare Workers runtime — not Vercel — is the
 deployment target, and its guidance must be read against that.
+
+---
+
+## Appendix — provisional synthesis: *Informe Vivo Guiado*
+
+> **Added after the comparison prototypes were built and reviewed.**
+> This appendix records that the §5 recommendation was rendered and held up. It
+> is **not an approval**, it does **not** supersede §1–§5, and **D1 remains
+> open**. Directions A, B and C stand unchanged above and remain available in
+> the gallery as evidence.
+
+§5 recommended *A as the system, with B's shell discipline governing Studio and
+C's route treatment confined to the journey view*. That hybrid has now been built
+as a fourth prototype so it can be looked at rather than imagined:
+`prototypes/selected-informe-vivo-guiado/`, offered in the launcher as
+**S · Informe Vivo Guiado**, tagged *Síntesis provisional*.
+
+**What the build settled.** The three concerns §5 raised against the hybrid were
+measurable, and the prototype answers two of them outright:
+
+| Concern from §5 | Outcome in the prototype |
+|---|---|
+| A's editorial register costs height | Insights story fell from **4 099 → 2 485 px** desktop and **4 907 → 3 657 px** mobile, with every one of the 104 contract strings still rendered. The cost was the single-column layout, not the narrative. |
+| Studio needs B's orientation without B's identity | B's persistent stops, client-naming breadcrumb, step ribbon and glyph+word status all transferred. **B's enterprise blue did not, and nothing was lost with it.** |
+| C only works where a journey exists | The route renders in the study that has one; the `Sin recorrido` case is still stated plainly rather than drawn. |
+
+**What it did not settle.** The tenant brand-contrast resolver — the mechanism
+that guarantees a readable foreground for any client hex, on screen and in the
+PDF — is still unprototyped and remains P8.1 work. Part of the height reduction
+comes from collapsing *Cómo se midió* and *Explora por tu cuenta* on narrow
+screens, which needs a human to confirm nobody misses them. Dark mode is defined
+in tokens but not captured.
+
+**Status.** One shared token file now serves both products; Studio and Insights
+differ in density and chrome only. Full synthesis rules, the corrections it was
+built to resolve, the review findings and the known gaps are in
+[`prototypes/README.md`](prototypes/README.md). The decision is still the
+user's and the CEO's to make from the launcher.
