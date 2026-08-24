@@ -62,12 +62,13 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // mirrors src/lib/validation/schemas
 export const SUITE_C_CHECKS = Object.freeze([
   { id: "C1.1", group: "C1", title: "a hostile free-text payload reaches a run-owned study through the real workflow" },
   { id: "C1.2", group: "C1", title: "the rendered client dashboard keeps the payload inert and escaped" },
-  { id: "C1.3", group: "C1", title: "the generated PDF keeps it inert: no active action, no template corruption" },
+  { id: "C1.3", group: "C1", title: "the generated PDF contains the payload as inert text: present, and no active action" },
   { id: "C2.1", group: "C2", title: "a malformed source file is refused safely with zero residue" },
   { id: "C2.2", group: "C2", title: "a corrupt / wrong-format file is refused safely with zero residue" },
-  { id: "C2.3", group: "C2", title: "a just-over-limit upload is refused safely with zero residue" },
+  { id: "C2.3", group: "C2", title: "a just-over-limit upload is refused before dispatch, with zero residue" },
+  { id: "C2.4", group: "C2", title: "an ordinary supported source is still accepted — the boundary is not a wall" },
   { id: "C3.1", group: "C3", title: "the pivot allowlist gate (scripts/pivot-test.mjs) executes and exits 0" },
-  { id: "C3.2", group: "C3", title: "a forged pivot intent is refused before compute, with no internal leakage" },
+  { id: "C3.2", group: "C3", title: "a forged pivot intent is refused by the canonical validator in the client runtime, before any request leaves the browser" },
   { id: "C4.1", group: "C4", title: "injection strings in report filter parameters are refused safely" },
   { id: "C4.2", group: "C4", title: "injection strings in path and selector parameters are refused safely" },
   { id: "C4.3", group: "C4", title: "no probe produced a 5xx, a leaked internal, or a cross-tenant expansion" },
@@ -121,36 +122,35 @@ export const INJECTION_STRINGS = Object.freeze([
 ]);
 
 /**
- * Whether an upload refusal is acceptable, as a pure function so the offline
- * self-test can prove exactly how far the one deliberate leniency reaches.
+ * Whether an upload refusal is acceptable. There is NO exception: the product
+ * must render an outcome the operator can see, and `unclassified` — the harness
+ * saying "the application produced no signal I can name" — is red everywhere.
  *
- * A RENDERED rejection is always acceptable. A refusal the product shows no
- * message for is acceptable ONLY for a check that opted in (`silentRefusal`),
- * and even then only when the outcome is `unclassified` — never a success and
- * never a crash — and the caller must still prove zero residue afterwards,
- * which `checkRejectedUpload` does unconditionally.
+ * An earlier revision of this suite carried a `silentRefusal` opt-in that let an
+ * over-limit upload pass while its outcome was unclassified. That was removed
+ * rather than narrowed, and the correction moved into the product: the upload
+ * screen now refuses an over-limit source on selection. The reversal cases
+ * below exist so the exception cannot come back by accident.
  */
-export function uploadRefusalIsAcceptable(category, silentRefusal = false) {
+export function uploadRefusalIsAcceptable(category) {
   const rendered = ["validation_rejected", "denied_action_result"].includes(category);
-  if (rendered) return { acceptable: true, rendered: true };
-  if (silentRefusal && category === "unclassified") return { acceptable: true, rendered: false };
-  return { acceptable: false, rendered: false };
+  return { acceptable: rendered, rendered };
 }
 
 export const REFUSAL_CASES = Object.freeze([
-  { what: "a rendered validation rejection", category: "validation_rejected", lenient: false, acceptable: true },
-  { what: "a rendered action denial", category: "denied_action_result", lenient: false, acceptable: true },
-  { what: "silence without opting in", category: "unclassified", lenient: false, acceptable: false },
-  { what: "silence with the opt-in", category: "unclassified", lenient: true, acceptable: true },
-  { what: "a success, even with the opt-in", category: "success", lenient: true, acceptable: false },
-  { what: "a crash, even with the opt-in", category: "page_crash", lenient: true, acceptable: false },
-  { what: "a network failure, even with the opt-in", category: "network_failure", lenient: true, acceptable: false },
-  { what: "an absence, even with the opt-in", category: "not_found", lenient: true, acceptable: false },
+  { what: "a rendered validation rejection", category: "validation_rejected", acceptable: true },
+  { what: "a rendered action denial", category: "denied_action_result", acceptable: true },
+  { what: "silence", category: "unclassified", acceptable: false },
+  { what: "a success", category: "success", acceptable: false },
+  { what: "a crash", category: "page_crash", acceptable: false },
+  { what: "a network failure", category: "network_failure", acceptable: false },
+  { what: "an absence", category: "not_found", acceptable: false },
+  { what: "a wrong-role denial", category: "denied_wrong_role", acceptable: false },
 ]);
 
 export function selfTestRefusalClassifier() {
   return REFUSAL_CASES.flatMap((testCase) => {
-    const got = uploadRefusalIsAcceptable(testCase.category, testCase.lenient).acceptable;
+    const got = uploadRefusalIsAcceptable(testCase.category).acceptable;
     return got === testCase.acceptable ? [] : [`${testCase.what}: expected ${testCase.acceptable}, got ${got}`];
   });
 }
@@ -310,8 +310,6 @@ const pass = (id, message) => reporter.pass(id, message);
 const fail = (id, message) => reporter.fail(id, message);
 
 let ORIGIN = "http://localhost:3000";
-/** Refusals C2.3 accepted as silent, so C4.3 can require exactly that many. */
-let silentRefusals = 0;
 let SUPABASE_URL = "";
 let PUBLISHABLE_KEY = "";
 let TENANT_A = "";
@@ -354,14 +352,30 @@ function writeCorruptWorkbook(directory, prefix) {
   return path;
 }
 
+/**
+ * Exactly ONE byte over the product's own limit. The boundary is what is under
+ * test, so the file is the smallest thing that crosses it rather than an
+ * arbitrarily large one — and the refusal now happens in the browser before
+ * anything is transferred at all.
+ */
 function writeOversizeCsv(directory, prefix) {
   const path = join(directory, `${prefix}-oversize.csv`);
   const header = "seg_nivel,q_satisfaccion\n";
-  const line = "primaria,8\n";
-  // Just over the product's own 10 MiB limit, and comfortably under the 11 MiB
-  // request envelope, so the ACTION's own check is what refuses it.
-  const repeats = Math.ceil((MAX_UPLOAD_BYTES + 64 * 1024 - header.length) / line.length);
-  writeFileSync(path, header + line.repeat(repeats), "utf8");
+  const filler = "primaria,8\n".repeat(64);
+  const body = header + filler;
+  const padding = MAX_UPLOAD_BYTES + 1 - Buffer.byteLength(body, "utf8");
+  writeFileSync(path, body + "#".repeat(padding), "utf8");
+  return path;
+}
+
+/**
+ * An ordinary, well within limits source. C2.4's whole job is to prove the new
+ * boundary did not become a wall: if this stopped being accepted, the
+ * over-limit refusal above would be meaningless.
+ */
+function writeOrdinaryCsv(directory, prefix) {
+  const path = join(directory, `${prefix}-ordinary.csv`);
+  writeFileSync(path, ["seg_nivel,q_satisfaccion", "primaria,8", "primaria,9"].join("\n"), "utf8");
   return path;
 }
 
@@ -522,12 +536,35 @@ async function checkPdfInert(harness, fx) {
   if (record.errorCategory !== "success" || !inspection.pdf) {
     return fail("C1.3", `the report route answered ${record.errorCategory} / HTTP ${inspection.status}, expected a PDF`);
   }
+  const displayed = inspection.pdf.displayed?.[0];
   note(
     `pdf: ${inspection.byteLength} bytes, ${inspection.pdf.objectCount} object(s), header=${inspection.pdf.header}, ` +
       `trailer=${inspection.pdf.trailer}, active constructs=[${inspection.pdf.activeClasses.join(",") || "none"}]`,
   );
+  note(
+    `content streams: ${displayed?.decodedStreams ?? 0}/${displayed?.streams ?? 0} decoded, ` +
+      `${displayed?.displayedStrings ?? 0} displayed string(s), marker occurrences in displayed text: ` +
+      `${displayed?.count ?? 0}`,
+  );
   if (!inspection.pdf.header || !inspection.pdf.trailer) {
     return fail("C1.3", "the generated PDF is structurally corrupt (missing header or trailer)");
+  }
+  // POSITIVE CONTROL, and it comes first. Without it this check would pass just
+  // as happily on a report the hostile quote never reached, which proves
+  // nothing at all about inertness. The marker is counted ONLY in the PDF's
+  // decoded displayed text, so a byte occurring in metadata or object structure
+  // can never stand in for it.
+  if (!displayed?.wellFormed) {
+    return fail("C1.3", "the PDF could not be structurally walked, so no positive control is possible");
+  }
+  if (!(displayed.count > 0)) {
+    return fail(
+      "C1.3",
+      "the approved hostile quote is NOT present in the PDF's displayed text" +
+        `${displayed.rawOnlyOccurrence ? " (it occurs in the raw bytes outside displayed text, which does not count)" : ""}` +
+        ` — ${displayed.decodedStreams}/${displayed.streams} stream(s) decoded, ` +
+        `${displayed.displayedStrings} displayed string(s) examined`,
+    );
   }
   if (inspection.pdf.activeClasses.length) {
     return fail("C1.3", `the PDF carries active constructs: ${inspection.pdf.activeClasses.join(", ")}`);
@@ -535,20 +572,12 @@ async function checkPdfInert(harness, fx) {
   if (inspection.leakClasses.length || inspection.secretClasses.length) {
     return fail("C1.3", `the PDF leaked ${[...inspection.leakClasses, ...inspection.secretClasses].join(", ")}`);
   }
-  // The marker count is an OBSERVATION, not a requirement: pdf-lib writes text
-  // into content streams that may be compressed, so a literal that is present
-  // on the page can legitimately be unfindable in the bytes. What must hold is
-  // that nothing executable was produced from it.
-  const found = inspection.needleCounts[0] ?? 0;
-  note(
-    found > 0
-      ? `the payload marker appears ${found} time(s) in the PDF byte stream, as inert text`
-      : "the payload marker is not literally findable in the byte stream (compressed content), which is expected",
-  );
   return pass(
     "C1.3",
-    `a structurally valid ${inspection.byteLength}-byte PDF with no JavaScript, OpenAction, additional-action, ` +
-      "Launch, URI, SubmitForm, embedded-file or rich-media construct",
+    `the approved hostile quote IS present in the PDF's displayed text (${displayed.count} occurrence(s) across ` +
+      `${displayed.decodedStreams} decoded content stream(s)) and the ${inspection.byteLength}-byte document ` +
+      "carries no JavaScript, OpenAction, additional-action, Launch, URI, SubmitForm, embedded-file or " +
+      "rich-media construct",
   );
 }
 
@@ -556,7 +585,7 @@ async function checkPdfInert(harness, fx) {
 // C2 — the import boundary refuses safely and writes nothing
 // -----------------------------------------------------------------------------
 
-async function checkRejectedUpload(id, harness, fixtures, fx, filePath, label, settleMs, silentRefusal = false) {
+async function checkRejectedUpload(id, harness, fixtures, fx, filePath, label, settleMs, expectPreDispatch = false) {
   console.log(`\n[${id}] ${label}:`);
   const before = await fixtures.studyResidue(fx.emptyStudyId);
   const tenantBefore = await fixtures.tenantResidue(fx.tenantId, ["import_batch", "respondent", "quant_response", "qual_observation"]);
@@ -564,18 +593,25 @@ async function checkRejectedUpload(id, harness, fixtures, fx, filePath, label, s
   const result = await harness.run("internal", OPERATIONS["upload.analyze"], {
     tenant_id: fx.tenantId,
     file: filePath,
-    // A wider BOUND for the over-limit case only: megabytes of body have to
-    // reach the server before the product can refuse them. Still one attempt,
-    // still bounded, never a retry.
     settleTimeoutMs: settleMs,
+    // For the over-limit case the product must refuse the source on selection,
+    // so the probe deliberately never clicks: the proof is that a classified
+    // rejection is rendered AND nothing was dispatched.
+    ...(expectPreDispatch ? { dispatch: false } : {}),
   });
   if (result.errorCategory === "success") {
     return fail(id, "the upload boundary ACCEPTED a source it must refuse");
   }
-  const verdict = uploadRefusalIsAcceptable(result.errorCategory, silentRefusal);
+  const verdict = uploadRefusalIsAcceptable(result.errorCategory);
   if (!verdict.acceptable) return fail(id, `the refusal was ${result.errorCategory}, expected a rendered rejection`);
-  const rendered = verdict.rendered;
-  if (!rendered) silentRefusals += 1;
+  if (expectPreDispatch) {
+    if (result.dispatched !== false) {
+      return fail(id, `the probe dispatched the action (dispatched=${result.dispatched}) — this must be refused first`);
+    }
+    if (result.controlEnabled !== false) {
+      return fail(id, "the analyze control stayed enabled, so an over-limit source could still be submitted");
+    }
+  }
 
   const after = await fixtures.studyResidue(fx.emptyStudyId);
   const tenantAfter = await fixtures.tenantResidue(fx.tenantId, ["import_batch", "respondent", "quant_response", "qual_observation"]);
@@ -586,18 +622,40 @@ async function checkRejectedUpload(id, harness, fixtures, fx, filePath, label, s
   if (drifted.length) {
     return fail(id, `the refused upload left residue in: ${[...new Set(drifted)].join(", ")}`);
   }
-  if (!rendered) {
-    console.log(
-      `  FINDING ${id}  the over-limit source is refused and writes nothing, but the product renders NO message ` +
-        "for it: the framework truncates the request body at its own 10 MB cap, so the upload action's own " +
-        "10 MB check never runs and the operator sees silence. Safety holds; feedback does not.",
-    );
-  }
   return pass(
     id,
-    `refused as ${result.errorCategory}${rendered ? "" : " (silently — see the FINDING above)"}; ` +
+    `refused as ${result.errorCategory}` +
+      `${expectPreDispatch ? ", before any dispatch and with the analyze control disabled" : ""}; ` +
       `respondent/response/observation/import-batch counts unchanged across ` +
       `${Object.keys(before).length + Object.keys(tenantBefore).length} scoped counts`,
+  );
+}
+
+/**
+ * C2.4 — an ordinary supported source is still accepted and still analyzed.
+ * This is the positive control for the new upload boundary: a client-side size
+ * check that refused everything would satisfy C2.1-C2.3 and be worthless.
+ */
+async function checkOrdinarySourceStillAccepted(harness, fx) {
+  console.log("\n[C2.4] An ordinary supported source, after the new size boundary:");
+  const result = await harness.run("internal", OPERATIONS["upload.analyze"], {
+    tenant_id: fx.tenantId,
+    file: fx.ordinaryCsvPath,
+  });
+  if (result.errorCategory !== "success") {
+    return fail("C2.4", `an ordinary in-limit source was ${result.errorCategory} — the boundary became a wall`);
+  }
+  if (result.dispatched !== true) {
+    return fail("C2.4", "an ordinary in-limit source never reached the analyze action");
+  }
+  note(
+    `the size predicate is shared with the server boundary: over the limit is refused, exactly at the limit is ` +
+      "accepted, and the upload action still applies the same rule itself",
+  );
+  return pass(
+    "C2.4",
+    "an ordinary source is still accepted and analyzed through the real workflow — the over-limit refusal " +
+      "is a boundary, not a blanket rejection",
   );
 }
 
@@ -620,7 +678,7 @@ function runPivotGate() {
 }
 
 async function checkForgedPivot(harness, fx) {
-  console.log("\n[C3.2] A pivot intent forged into the product's own controls:");
+  console.log("\n[C3.2] A pivot intent forged into the product's own controls (refused client-side, before dispatch):");
   // Positive control: the honest pivot must work first, or a rejection proves
   // nothing about the forged intent.
   const honest = await harness.run("tenantA", OPERATIONS["dashboard.pivot"]);
@@ -681,15 +739,23 @@ async function checkForgedPivot(harness, fx) {
   const resultVisible = await context.evaluate(
     "(() => Boolean(document.querySelector('table')) && /Explorador de cruces/.test(document.body.innerText))()",
   );
+  // Precisely what this proves, and what it does not. The forged intent is
+  // refused by `validatePivotIntent` running in the CLIENT runtime
+  // (`PivotExplorer.tsx:28` returns before `computeStudyPivot` is called), so
+  // no forged request is dispatched and none reaches the server. This check
+  // therefore does NOT claim a forged request was answered by the server.
+  // The server applies the SAME canonical validator
+  // (`dashboard/data-actions.ts:78`), and that server-side path is exercised
+  // directly by the offline pivot gate C3.1 — the two together are the
+  // coverage, and neither is presented as the other.
   note(
-    "the refusal comes from the canonical allowlist validator running in the browser " +
-      "(`PivotExplorer.tsx:28` returns before dispatch), so the forged intent never leaves the client; " +
-      "`data-actions.ts:78` re-runs the SAME validator server-side and C3.1 exercises it directly",
+    "layer: the canonical allowlist validator running in the client runtime refused it before dispatch, so no " +
+      "forged request left the browser; the server re-runs the same validator and C3.1 exercises that path offline",
   );
   return pass(
     "C3.2",
-    `the honest pivot succeeds; a field outside the allowlist is refused before compute (${outcome}), ` +
-      `no result grid is presented (${!resultVisible}), and zero internal detail classes leaked`,
+    `the honest pivot succeeds; a field outside the allowlist is refused before any request is dispatched ` +
+      `(${outcome}), no result grid is presented (${!resultVisible}), and zero internal detail classes leaked`,
   );
 }
 
@@ -791,27 +857,24 @@ async function checkPathAndSelectorInjection(harness, fx) {
   return pass("C4.2", `${probes} path, selector and cross-tenant probes: all refused safely, none expanded scope`);
 }
 
-function checkNoCrashOrLeak(harness, silentRefusals) {
-  console.log("\n[C4.3] Nothing in this run produced a crash or an unexplained answer:");
+function checkNoCrashOrLeak(harness) {
+  console.log("\n[C4.3] Nothing in this run produced a crash or an unclassified answer:");
   const records = harness.ledger.all();
   const crashes = records.filter((r) => r.errorCategory === "page_crash");
   const unclassified = records.filter((r) => r.errorCategory === "unclassified");
   const serverErrors = records.filter((r) => typeof r.httpStatus === "number" && r.httpStatus >= 500);
-  // The only unclassified answers this run may carry are the silent refusals
-  // C2.3 already named as a FINDING and proved wrote nothing. One more than
-  // that is an answer nobody accounted for, and it fails.
-  const unexplained = unclassified.length - silentRefusals;
-  if (crashes.length || unexplained > 0 || serverErrors.length) {
+  // No exception of any kind: an answer the classifier cannot name is an answer
+  // nobody accounted for, and it is red.
+  if (crashes.length || unclassified.length || serverErrors.length) {
     return fail(
       "C4.3",
-      `${crashes.length} crash(es), ${unexplained} unexplained answer(s) beyond the ${silentRefusals} ` +
-        `named silent refusal(s), ${serverErrors.length} 5xx response(s)`,
+      `${crashes.length} crash(es), ${unclassified.length} unclassified answer(s), ` +
+        `${serverErrors.length} 5xx response(s)`,
     );
   }
   return pass(
     "C4.3",
-    `${records.length} recorded operations: zero 5xx, zero page crashes, and the only ${silentRefusals} ` +
-      "unclassified answer(s) are the named, zero-residue silent refusal(s)",
+    `${records.length} recorded operations: zero 5xx, zero page crashes, zero unclassified answers`,
   );
 }
 
@@ -910,6 +973,7 @@ async function livePhase(signal, fixtures, prefix, tempDir) {
     emptyStudyId: null,
     importBatchId: null,
     hostileCsvPath: writeHostileCsv(tempDir, prefix, buildXssPayload(marker)),
+    ordinaryCsvPath: writeOrdinaryCsv(tempDir, prefix),
   };
 
   const tenantName = `${prefix} tenant`;
@@ -941,8 +1005,9 @@ async function livePhase(signal, fixtures, prefix, tempDir) {
   await checkRejectedUpload("C2.1", harness, fixtures, fx, writeMalformedCsv(tempDir, prefix), "A malformed source file");
   await checkRejectedUpload("C2.2", harness, fixtures, fx, writeCorruptWorkbook(tempDir, prefix), "A corrupt / wrong-format file");
   await checkRejectedUpload(
-    "C2.3", harness, fixtures, fx, writeOversizeCsv(tempDir, prefix), "A just-over-limit upload", 120_000, true,
+    "C2.3", harness, fixtures, fx, writeOversizeCsv(tempDir, prefix), "A just-over-limit upload", 30_000, true,
   );
+  await checkOrdinarySourceStillAccepted(harness, fx);
 
   // --- C3 -------------------------------------------------------------------
   runPivotGate();
@@ -951,8 +1016,7 @@ async function livePhase(signal, fixtures, prefix, tempDir) {
   // --- C4 -------------------------------------------------------------------
   await checkReportInjection(harness);
   await checkPathAndSelectorInjection(harness, fx);
-  // Exactly the refusals C2.3 accepted as silent, and no more.
-  checkNoCrashOrLeak(harness, silentRefusals);
+  checkNoCrashOrLeak(harness);
 
   // --- C5 -------------------------------------------------------------------
   checkCalculationUnchanged();
