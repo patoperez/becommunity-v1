@@ -346,8 +346,9 @@ function StageDetail({
 
         {/*
           Voices only when there is something approved to show. A published
-          study does not repeat "todavía no…" once per touchpoint; where a
-          moment carries numbers only, one quiet sentence says so.
+          study says nothing at all where a moment carries numbers only: an
+          explanation of what was not published is internal information, and it
+          appears in the preview instead.
         */}
         <div className="min-w-0">
           {hasVoices ? (
@@ -355,14 +356,11 @@ function StageDetail({
               <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-voice">
                 Lo que dijeron las personas aquí
               </h6>
-              <QualitativeInsights summary={stage.qualitative} compact />
+              <QualitativeInsights summary={stage.qualitative} compact audience={audience} />
             </>
-          ) : state === "absent" ? null : (
-            <p className="text-sm text-muted">
-              Este momento se lee con su resultado numérico; no hay comentarios
-              abiertos asociados.
-            </p>
-          )}
+          ) : audience === "preview" ? (
+            <QualitativeInsights summary={stage.qualitative} compact audience={audience} />
+          ) : null}
         </div>
       </div>
 

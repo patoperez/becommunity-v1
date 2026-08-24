@@ -31,6 +31,7 @@ import {
   peerGeometry,
 } from "../src/components/evidence/ScaleMark.tsx";
 import { sampleCopy, studyBaseSentence } from "../src/lib/language/sample.ts";
+import { hasPublishableQualitative } from "../src/app/dashboard/QualitativeInsights.tsx";
 import { humanize, resultLanguage, studyStateLabel, unitLabel } from "../src/lib/language/results.ts";
 
 let checks = 0;
@@ -420,7 +421,116 @@ for (const pinned of ["Crear cliente", "Enviar invitación", "Guardar usuario",
 }
 ok("statuses translated, stored enums untouched, every pinned action name intact");
 
-console.log("\n[14] Frozen adversarial-harness mechanisms are intact");
+console.log("\n[14] Absence is never a client-facing finding");
+// The rule: a published study is a finished editorial product. Anything Be
+// Community chose not to publish — or has not finished reviewing — produces
+// SILENCE on the client side, not a placeholder announcing the gap. The
+// internal preview owns those warnings instead.
+{
+  const empty = { themes: [], quotes: [], hasSuppressedThemes: false };
+  assert.equal(hasPublishableQualitative(empty), false, "nothing confirmed means nothing to publish");
+  assert.equal(hasPublishableQualitative({ ...empty, themes: [{ theme: "t", count: 1, n: 1, visibility: "standard" }] }), true);
+  assert.equal(hasPublishableQualitative({ ...empty, quotes: [{ quote: "q", theme: null }] }), true);
+  // A suppressed theme is a DISCLOSURE, not an omission: the client is told
+  // that something exists but is protected, which stays.
+  assert.equal(hasPublishableQualitative({ ...empty, hasSuppressedThemes: true }), true);
+}
+ok("publishable qualitative is decided by confirmed content, and suppression still counts");
+
+const qualitativeComponent = await readCode("src/app/dashboard/QualitativeInsights.tsx");
+const panoramaSource = await readCode("src/app/dashboard/NarrativeHome.tsx");
+const journeySource = await readCode("src/app/dashboard/JourneyMap.tsx");
+const studyCard = await readCode("src/app/dashboard/StudyCard.tsx");
+
+// 1 — the missing-comparison sentences must not exist in any client path.
+for (const [name, source] of [["NarrativeHome", panoramaSource], ["StudyCard", studyCard]]) {
+  assert.doesNotMatch(source, /medición anterior con la que comparar/i,
+    `${name} must not tell the client a comparison is missing`);
+  assert.doesNotMatch(source, /los cambios aparecerán aquí/i,
+    `${name} must not promise a future comparison`);
+}
+assert.doesNotMatch(panoramaSource, /view\.hasPreviousWave/,
+  "the panorama must not branch on a missing prior wave to render copy");
+// The movement line is emitted only when a comparison genuinely exists.
+assert.match(panoramaSource, /movement === "unavailable"[\s\S]{0,80}\?\s*null/,
+  "an unavailable comparison must produce no context line at all");
+ok("no comparison message, placeholder or reserved row when nothing is comparable");
+
+// 2 — the missing-qualitative sentences and the empty wrapper must not exist.
+assert.doesNotMatch(qualitativeComponent, /no hay comentarios revisados y confirmados/i,
+  "the client must not be told a review is pending");
+assert.doesNotMatch(qualitativeComponent, /Nadie dejó comentarios sobre este momento/i,
+  "the client must not be told a moment has no comments");
+assert.doesNotMatch(journeySource, /no hay comentarios abiertos asociados/i,
+  "a touchpoint with no approved voices says nothing to the client");
+assert.doesNotMatch(panoramaSource, /no incluye\s*\n?\s*comentarios abiertos/i,
+  "the panorama must not explain that the study carries no comments");
+assert.match(qualitativeComponent, /audience !== "preview"\)\s*return null/,
+  "with nothing publishable, the client branch renders nothing at all");
+// The bordered section wrapper must not survive a child that renders nothing.
+assert.match(studyCard, /hasPublishableQualitative\(view\.qualitative\)/,
+  "the qualitative section wrapper is gated on there being content");
+assert.match(studyCard, /audience === "preview"/,
+  "the wrapper survives only for the internal preview");
+ok("no empty qualitative card, heading, border or gap on the client side");
+
+// The hero must not name comments when none are published.
+assert.match(panoramaSource, /publishesVoices \? "voices" : "people"/,
+  "the base sentence drops the comment noun when nothing qualitative is published");
+assert.doesNotMatch(studyBaseSentence("standard", 20, "people"), /comentario/i,
+  "the people-only base sentence never mentions comments");
+assert.match(studyBaseSentence("standard", 20, "people"), /20 personas/,
+  "and the count itself is unchanged");
+assert.match(studyBaseSentence("standard", 20, "voices"), /20 personas y comentarios/,
+  "the voices phrasing still exists for studies that do publish them");
+ok("the hero names comments only when comments are actually published");
+
+// 3 — internal readiness must still report the omission.
+assert.match(panoramaSource, /Ningún tema cualitativo está confirmado/,
+  "internal readiness still names unconfirmed themes");
+assert.match(panoramaSource, /Ninguna cita está aprobada para publicarse/,
+  "internal readiness still names unapproved quotes");
+assert.match(qualitativeComponent, /Sólo para el equipo/,
+  "the preview says plainly that the client sees nothing here");
+assert.match(journeySource, /Sólo para el equipo/,
+  "the preview keeps its per-touchpoint readiness note");
+ok("internal readiness still reports missing confirmed qualitative content");
+
+// 4 — sample cautions are analytical honesty, not an internal omission.
+assert.match(sampleCopy("caution", 23).headline, /Pocas respuestas/,
+  "a small base still warns the reader");
+for (const [name, source] of [["NarrativeHome", panoramaSource], ["JourneyMap", journeySource],
+  ["StudyCard", studyCard]]) {
+  assert.match(source, /SampleContext|sampleCopy/, `${name} still renders sample context`);
+}
+ok("sample-size cautions that affect interpretation are preserved");
+
+console.log("\n[15] The internal preview notice is sticky, linked and dismissible");
+const notice = await readCode("src/components/shell/PreviewNotice.tsx");
+assert.match(notice, /sticky/, "the notice must remain visible while scrolling");
+assert.doesNotMatch(notice, /\bfixed\b/,
+  "sticky keeps the notice in flow so it never overlays the page at rest");
+assert.match(notice, /STUDIES_LIST/, "it carries the explicit parent link");
+assert.match(notice, /aria-label="Cerrar aviso de vista previa"/,
+  "the close control has an accessible Spanish name");
+assert.match(notice, /useState/, "dismissal is component state");
+assert.doesNotMatch(notice, /localStorage|document\.cookie|sessionStorage|fetch\(/,
+  "dismissal writes nothing anywhere");
+assert.match(notice, /flex-wrap/, "it wraps instead of overflowing on a narrow phone");
+const previewRoute = await readCode("src/app/admin/preview/[studyId]/page.tsx");
+assert.match(previewRoute, /banner=\{<PreviewNotice \/>\}/, "the preview uses it");
+assert.doesNotMatch(previewRoute, /utility=/,
+  "the duplicated header return action is gone");
+assert.match(studyCard, /scroll-mt-20/,
+  "anchor jumps clear the sticky notice instead of landing under it");
+// Editing this route must not have touched its authorization or its
+// publication boundary.
+assert.match(previewRoute, /profile\?\.role !== "internal"/, "internal-only guard intact");
+assert.match(previewRoute, /candidate\.status === "published" \|\| candidate\.id === study\.id/,
+  "the publication boundary on the preview history is intact");
+ok("sticky, linked to /admin/studies, dismissible, no duplicate action, guards intact");
+
+console.log("\n[16] Frozen adversarial-harness mechanisms are intact");
 const card = await readCode("src/app/dashboard/StudyCard.tsx");
 assert.match(card, /aria-label=\{`Filtrar por \$\{label\(option\.key\)\}`\}/,
   "Suite A locates the study filter by this exact accessible name");

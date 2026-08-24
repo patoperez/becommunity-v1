@@ -1,6 +1,7 @@
 "use client";
 
 import type { SafeQualitativeSummary } from "@/lib/dashboard/view";
+import type { Audience } from "@/lib/dashboard/audience";
 import { RankedBars } from "@/components/evidence/ScaleMark";
 import { humanize } from "@/lib/language/results";
 
@@ -15,32 +16,48 @@ import { humanize } from "@/lib/language/results";
  *  - the non-compact case returned `null` when nothing was confirmed, so a
  *    reader could not tell "no qualitative work was done" from "nothing found".
  *
+ * ABSENCE IS NOT A CLIENT-FACING FINDING. If nothing has been confirmed and
+ * approved, the client sees NOTHING here — no card, no heading, no dashed
+ * placeholder, no promise that a review is under way. That is Be Community's
+ * own unfinished work, and a published study is a finished editorial product.
+ * The internal preview says it plainly instead, marked as internal, because
+ * there it is operational information a consultant needs before publishing.
+ *
  * The quotes were the smallest type on the page and are the only part of the
  * product written by the people being studied. They are now the largest text in
  * this block.
  *
  * Qualitative results are deliberately NOT turned into a KPI or a percentage.
  */
+export function hasPublishableQualitative(summary: SafeQualitativeSummary): boolean {
+  return (
+    summary.themes.length > 0 ||
+    summary.quotes.length > 0 ||
+    summary.hasSuppressedThemes
+  );
+}
+
 export default function QualitativeInsights({
   summary,
   compact = false,
+  audience = "client",
 }: {
   summary: SafeQualitativeSummary;
   compact?: boolean;
+  audience?: Audience;
 }) {
-  const nothing =
-    summary.themes.length === 0 &&
-    summary.quotes.length === 0 &&
-    !summary.hasSuppressedThemes;
-
-  if (nothing) {
+  if (!hasPublishableQualitative(summary)) {
+    // The client gets silence. The internal preview gets the operational fact,
+    // visibly marked so it can never be mistaken for client content.
+    if (audience !== "preview") return null;
     return (
       <p
-        className={`${compact ? "mt-2" : "mt-3"} rounded-lg border border-dashed border-line-strong bg-surface px-3.5 py-3 text-sm text-muted`}
+        className={`${compact ? "mt-2" : "mt-3"} rounded-lg border border-caution-line bg-caution-surface px-3.5 py-2.5 text-xs text-caution`}
       >
+        <span className="font-semibold">Sólo para el equipo:</span>{" "}
         {compact
-          ? "Nadie dejó comentarios sobre este momento, o todavía no se han revisado."
-          : "Todavía no hay comentarios revisados y confirmados para este estudio. Cuando el equipo de Be Community termine la revisión, aparecerán aquí con sus citas."}
+          ? "ningún tema ni cita está aprobado para este momento; el cliente no ve nada aquí."
+          : "ningún tema ni cita está aprobado en este estudio; el cliente no ve esta sección."}
       </p>
     );
   }

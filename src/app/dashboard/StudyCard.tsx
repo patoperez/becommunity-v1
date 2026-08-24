@@ -5,7 +5,7 @@ import type { SegmentFilters } from "@/lib/calc/filters";
 import type { SafeMetric, StudyDashboardPayload } from "@/lib/dashboard/view";
 import PivotExplorer from "./PivotExplorer";
 import JourneyMap from "./JourneyMap";
-import QualitativeInsights from "./QualitativeInsights";
+import QualitativeInsights, { hasPublishableQualitative } from "./QualitativeInsights";
 import { refreshStudyDashboard } from "./data-actions";
 import { MethodDisclosure, SampleContext } from "@/components/SampleContext";
 import { StateBlock } from "@/components/States";
@@ -102,14 +102,25 @@ export default function StudyCard({
     });
   }
 
-  const showQualitative =
+  // The qualitative SECTION — its border, padding and heading — only exists if
+  // there is something published inside it. Rendering the wrapper around a
+  // component that returns null left an empty bordered card on the client's
+  // page, which is exactly the "something is missing" signal a finished study
+  // must never send. The internal preview keeps the wrapper so staff still get
+  // the readiness note.
+  const qualitativeVisible =
     view.selectionVisibility !== "suppressed" && !view.emptySelection;
+  const showQualitative =
+    qualitativeVisible &&
+    (hasPublishableQualitative(view.qualitative) || audience === "preview");
 
   return (
     <section
       id={`study-${study.id}`}
       aria-labelledby={`study-${study.id}-titulo`}
-      className="scroll-mt-6 min-w-0 rounded-2xl border border-line bg-surface-page p-5 sm:p-6"
+      // `scroll-mt-20` clears the sticky internal-preview notice, so an anchor
+      // jump from the panorama never lands underneath it.
+      className="scroll-mt-20 min-w-0 rounded-2xl border border-line bg-surface-page p-5 sm:p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
@@ -264,7 +275,7 @@ export default function StudyCard({
 
           {showQualitative ? (
             <section className="rounded-xl border border-line bg-surface p-5 sm:p-6">
-              <QualitativeInsights summary={view.qualitative} />
+              <QualitativeInsights summary={view.qualitative} audience={audience} />
             </section>
           ) : null}
 

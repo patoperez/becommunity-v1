@@ -65,6 +65,14 @@ data-connected journey maps for the firm's clients (schools).
 - Render user-generated qualitative content only through React's escaped text
   nodes; never introduce `dangerouslySetInnerHTML`. Only human-confirmed themes
   and independently approved quotes may cross the client/publication boundary.
+- ⓘ **Absence is not a client-facing finding.** What Be Community chose not to
+  publish — or has not finished reviewing — renders as nothing on the client
+  side: no placeholder, empty card, heading, reserved row or copy explaining the
+  gap. This does **not** apply to caveats about a result the client *is* shown
+  (small base, suppressed segment, missing data behind a visible number) — those
+  are analytical honesty and must stay. Internal Studio and
+  `/admin/preview/[studyId]` own the omission warnings, visibly marked as
+  internal. Contract C11 in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md`.
 
 ### Calculation integrity
 - Composite metrics (NPS, CSAT, Top-2-Box) are **canonical functions defined once** (`src/lib/calc/metrics.ts`), unit-tested against known-good outputs (`scripts/calculation-test.mjs`). A wrong number does not throw — it misleads a client. This is a human-review zone.

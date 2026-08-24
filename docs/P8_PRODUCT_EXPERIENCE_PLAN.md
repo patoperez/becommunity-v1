@@ -140,6 +140,28 @@ authorization guards, middleware or roles. The client continues to receive only
 sanitized aggregates. **Check:** the full deterministic suite plus the live
 chain, unchanged and green, on every P8 PR.
 
+### C11 — Absence is not a client-facing finding
+**Owner decision, 2026-08-24.** A published study is a finished editorial
+product. Where Be Community intentionally does not publish a component — or has
+simply not finished reviewing it — the client sees **nothing**: no placeholder,
+no empty-state card, no heading, no reserved row, no border or gap, and no copy
+explaining that something is missing or that a review is under way. The
+narrative must not name content it is not showing.
+
+This is a rule about the consultancy's own unfinished work, **not** about
+analytical honesty. Statements that qualify a result the client *is* being shown
+— a small base, a suppressed segment, a touchpoint with no data, a value the
+disclosure floor hides — are preserved exactly, because they change how the
+visible number should be read.
+
+Internal Studio and the internal preview own the omission warnings instead, and
+must keep naming them: they are operational information a consultant needs
+before publishing. Any such notice is visibly marked as internal.
+**Check:** deterministic assertions that the missing-comparison and
+missing-qualitative copy cannot reach client output, that the wrapper elements
+around empty content are not rendered either, and that internal readiness still
+reports the same omissions.
+
 ---
 
 ## 4. Non-goals
@@ -208,6 +230,27 @@ inside the real Studio workflow, then stop for owner testing. Getting the
 mapping step wrong compromises longitudinal comparability, which is a data
 consequence rather than a visual one.
 
+**Accepted scope, owner decision 2026-08-24 — not started in P8-A.**
+
+*Access scope, with no JSON anywhere an ordinary user can reach.* Every raw
+`data_scope` textarea is replaced by a no-code picker: a first choice between
+**Todo el cliente** and **Solo una parte**; when a part is chosen, the available
+characteristics and their values come from that client's real data, selected
+with checkboxes or multi-select rather than typed; a plain-language effective-
+access summary states what the person will actually see; and staff can inspect
+or test that person's resulting view before inviting them. JSON may remain the
+storage format — it must simply never be authored or read by an ordinary Studio
+user.
+
+*A discoverable account lifecycle.* Suspending a client user's access and
+permanently deleting that user are distinct, findable actions. **Archiving** a
+client organisation is the ordinary, reversible action. Permanent organisation
+deletion exists but only behind an impact summary naming what will be destroyed
+and an exact-name confirmation, with defined, safe handling of dependent users,
+studies, responses, reports, logos and other stored files, and audit evidence.
+None of this is implemented in P8-A: it needs its own review, and probably its
+own migration.
+
 ### P8.3 — Insights data story
 **Depends on:** P8.1. Reads best after P8.2 exists, but does not require it.
 **Delivers:** `/insights` and the study routes; the finding block; the indicator
@@ -234,6 +277,30 @@ block the foundational work.
 **Implementation review first:** add the smallest complete interpretation flow
 to the real product and stop for CEO testing before generalising it. It is the
 deliverable she sells and must be corrected against her actual workflow.
+
+**Accepted customisation scope, owner decision 2026-08-24 — not started in
+P8-A.** Presentation is configurable per study through a three-level
+inheritance: **Be Community default → client identity → study override**. A
+study inherits until it deliberately overrides, and the override is the unit
+templates carry.
+
+Controllable concepts: logo, name and tagline; the study palette; the semantic
+positive / caution / risk / neutral colours; configurable traffic-light
+thresholds *and their labels*; which modules are visible and in what order; which
+visualization variant a module uses among the supported ones; the cover and the
+editorial copy; and, for the journey, stage order, names, descriptions, icons,
+colours and metric association. The three brand modes — Be Community,
+co-branded and white-label — are selected here.
+
+**Templates must preserve this presentation configuration**, so a setup that
+worked is reusable rather than rebuilt per study.
+
+This is **bounded no-code customisation, not arbitrary CSS and not pixel
+editing**. Whatever the operator chooses, the product keeps enforcing contrast,
+responsive behaviour, semantic meaning, analytical honesty and accessible
+fallbacks — a chosen colour that would fail contrast is corrected by the
+resolver, not shipped. And C11 still holds: a module the operator switches off
+produces silence on the client side, never a placeholder announcing its absence.
 
 ### P8.5 — Responsive, accessibility and usability acceptance
 **Depends on:** all of the above.
@@ -274,6 +341,7 @@ every workstream, not once at the end.
 | C8 responsive | Extended responsive matrix at six widths | P8.5 |
 | C9 states | Every surface enumerated; zero `null` returns | P8.5 |
 | **C10 invariants** | `typecheck`, `lint`, `test`, `build` in WSL/Linux CI, plus the live chain where the PR touches an authorized path | **Every PR** |
+| C11 absence | Deterministic assertions in `scripts/design-tokens-test.mjs`: the missing-comparison and missing-qualitative copy cannot reach client output, empty wrappers are not rendered, and internal readiness still reports the same omissions | Each PR touching a client surface |
 
 P8 introduces no new security control and removes none. If any P8 change would
 alter an authorization path, a boundary schema or a calculation, that change

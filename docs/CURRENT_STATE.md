@@ -141,12 +141,39 @@ approved direction is an **Interactive Insight Experience**:
 - controlled Be Community, co-branded and white-label modes must preserve
   semantic meaning, contrast and analytical honesty.
 
-**Current unit: P8-A.** Create `p8a-product-experience-foundation` from the
-clean discovery head, then implement directly in the real Next.js application:
-semantic design/brand foundation, sign-in, Studio/Insights shells, client
-panorama and rich journey vertical slice. Stop for owner testing before P8-B.
-P8-A introduces no migration, formula, RLS/grant, role, ingestion,
-authorization, deployment or external-system change.
+**Current unit: P8-A**, on `p8a-product-experience-foundation`, implemented
+directly in the real Next.js application: semantic design/brand foundation,
+sign-in, Studio/Insights shells, client panorama and rich journey vertical
+slice, plus three rounds of owner review corrections. P8-A introduces no
+migration, formula, RLS/grant, role, ingestion, authorization, deployment or
+external-system change. The branch is not merged.
+
+**Owner decisions recorded 2026-08-24, binding on every later unit:**
+
+- **Absence is not a client-facing finding (contract C11).** A published study
+  is a finished editorial product. Anything Be Community chose not to publish,
+  or has not finished reviewing, produces silence on the client side — no
+  placeholder, empty card, heading, reserved row, border or explanatory copy.
+  Statements that qualify a result the client *is* shown (small base, suppressed
+  segment, missing data behind a visible number) are preserved: those are
+  analytical honesty, not omissions. Internal Studio and the internal preview
+  own the omission warnings and must keep naming them, visibly marked as
+  internal.
+- **P8.2 additionally owns** the no-code access-scope picker that retires every
+  raw `data_scope`/JSON textarea, and a discoverable account lifecycle: suspend
+  versus permanently delete a client user, archive a client organisation as the
+  ordinary reversible action, and permanent organisation deletion only behind an
+  impact summary and exact-name confirmation.
+- **P8.4 additionally owns** controlled per-study presentation inheritance —
+  Be Community default → client identity → study override — covering identity,
+  palette, semantic colours, threshold values and labels, module visibility and
+  order, visualization variants, editorial copy and the journey's stage
+  definition, with templates preserving that configuration. It is bounded
+  no-code customisation: contrast, responsiveness, semantic meaning, analytical
+  honesty and accessible fallbacks stay enforced by the product.
+
+Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
+P8.2 and P8.4). None of them is implemented in P8-A.
 
 ## P7 engineering record (historical; do not resume during P8)
 

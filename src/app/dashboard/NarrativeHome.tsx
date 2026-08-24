@@ -74,7 +74,13 @@ export default function NarrativeHome({
       // The mark draws its own -100/0/+100 or 0 %/100 % anchors, so the caption
       // names the measure and no longer repeats the range.
       scaleNote: unit ? unitLabel(unit) : unitLabel("score"),
-      context: movementLabel(metric.movement, metric.delta),
+      // A comparison the study does not have is not a finding. When there is no
+      // comparable prior measurement the context line is omitted entirely —
+      // `PanoramaFindings` renders no paragraph, no gap and no reserved row for
+      // a null context.
+      context: metric.movement === "unavailable" || !metric.delta
+        ? null
+        : movementLabel(metric.movement, metric.delta),
       sample: null,
       method: { summary: "Cómo se calcula", body: [language.method] },
       quote: null,
@@ -152,8 +158,10 @@ export default function NarrativeHome({
     });
   }
 
-  // The lead finding gets the headline treatment; the rest sit in the navigator.
-  const quantitativeOnly = view.themes.length === 0 && !view.voice;
+  // Whether any qualitative content is actually published to this client. It
+  // decides ONE thing: whether the hero may use the word "comentarios" when it
+  // describes the base. Nothing else about absence reaches the client.
+  const publishesVoices = view.themes.length > 0 || Boolean(view.voice);
 
   // Internal readiness — never rendered to a client. Only states the product
   // can actually prove from what it already loaded.
@@ -189,7 +197,11 @@ export default function NarrativeHome({
           </h2>
           <p className="mt-3 max-w-2xl text-base leading-relaxed opacity-90">
             {view.currentStudy.period ? `${view.currentStudy.period}. ` : ""}
-            {studyBaseSentence(view.sample.visibility, view.sample.units)}
+            {studyBaseSentence(
+              view.sample.visibility,
+              view.sample.units,
+              publishesVoices ? "voices" : "people",
+            )}
           </p>
           {/* Two actions, once, at the top — not repeated on every finding. */}
           <div className="mt-6 flex flex-wrap gap-2.5">
@@ -220,12 +232,6 @@ export default function NarrativeHome({
             <BrandMark size={14} color="var(--color-blue)" />
             Lo esencial primero; el detalle está más abajo.
           </span>
-          {!view.hasPreviousWave ? (
-            <span>
-              Todavía no hay una medición anterior con la que comparar. Cuando la
-              haya, los cambios aparecerán aquí.
-            </span>
-          ) : null}
         </div>
       </div>
 
@@ -255,15 +261,6 @@ export default function NarrativeHome({
           aquí.
         </p>
       )}
-
-      {/* One quiet sentence, not a placeholder per card, when the study carries
-          numbers only. */}
-      {quantitativeOnly && findings.length > 0 ? (
-        <p className="mt-4 text-sm text-muted">
-          Este estudio se lee con sus resultados numéricos; no incluye
-          comentarios abiertos.
-        </p>
-      ) : null}
 
       {view.characteristics.length > 0 ? (
         <p className="mt-4 text-sm text-muted">

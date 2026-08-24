@@ -110,10 +110,17 @@ export function sampleCopy(
 export function studyBaseSentence(
   visibility: SampleVisibility,
   count: number | null,
+  /**
+   * What the base is described AS. Pass `people` when the client is not being
+   * shown any qualitative content: naming comments the reader cannot see would
+   * advertise something Be Community chose not to publish. The COUNT is
+   * unchanged either way — only the noun differs.
+   */
+  unit: SampleUnit = "voices",
 ): string {
-  const copy = sampleCopy(visibility, count, "voices");
+  const copy = sampleCopy(visibility, count, unit);
   if (count != null && (copy.tone === "standard" || copy.tone === "caution")) {
-    const base = `Este estudio recoge la voz de ${noun(count, "voices")}`;
+    const base = `Este estudio recoge la voz de ${noun(count, unit)}`;
     return copy.tone === "caution"
       ? `${base} — todavía pocas, así que léelo como un indicio.`
       : `${base}.`;
