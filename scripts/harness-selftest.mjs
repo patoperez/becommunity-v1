@@ -375,8 +375,11 @@ function runDetectors(src, scope) {
 function runSuiteDetectors(src) {
   const results = [];
   const record = (id, passedCheck, message) => results.push({ id, passed: passedCheck, message });
-  const all = Object.values(src).join("\n");
-  const live = src["scripts/suite-a-isolation.mjs"] ?? "";
+  // Same exemption rule as G1-G9: ONLY a marked literal-pattern table is
+  // excluded, so a detector cannot flag its own test data. Every other line,
+  // including every success message, is scanned exactly as written.
+  const all = Object.values(src).map(scannable).join("\n");
+  const live = scannable(src["scripts/suite-a-isolation.mjs"] ?? "");
 
   record(
     "G10a",

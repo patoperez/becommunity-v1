@@ -34,6 +34,20 @@ import {
   selfTestClassifier,
 } from "./suite-a-isolation.mjs";
 
+/* <detector-vocabulary> */
+// Literal test data only. These name the very things Suite A's source must not
+// contain, so they would match themselves. The markers are the same ones the
+// harness self-test uses: its G10 detectors strip exactly this block before
+// scanning, and NOTHING else in this file is exempt - every line of executable
+// code above and below is scanned normally.
+const FORBIDDEN_IN_SUITE = [
+  [/SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SECRET_KEY/, "the suite must not read the privileged credential"],
+  [/\bawait\s+\w*[Rr]esponse\.(json|text)\s*\(/, "the suite must not read a response body"],
+  [/next-action|\$ACTION_ID|encodeReply\s*\(/, "the suite must not touch the private wire protocol"],
+  [/Date\.now\s*=(?!=)|setSystemTime/, "the suite must not manipulate the clock"],
+];
+/* </detector-vocabulary> */
+
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
 
@@ -285,10 +299,7 @@ console.log("\n[6] Secret-safe output:");
   // The suite source itself must not name the privileged credential: the
   // fixtures module is the single permitted holder of it.
   const source = readFileSync("scripts/suite-a-isolation.mjs", "utf8");
-  assert.ok(!/SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SECRET_KEY/.test(source), "the suite must not read the privileged credential");
-  assert.ok(!/\bawait\s+\w*[Rr]esponse\.(json|text)\s*\(/.test(source), "the suite must not read a response body");
-  assert.ok(!/next-action|\$ACTION_ID|encodeReply\s*\(/.test(source), "the suite must not touch the private wire protocol");
-  assert.ok(!/Date\.now\s*=(?!=)|setSystemTime/.test(source), "the suite must not manipulate the clock");
+  for (const [pattern, why] of FORBIDDEN_IN_SUITE) assert.ok(!pattern.test(source), why);
   ok("the suite reads no privileged credential, no response body, no private wire payload and no clock");
 }
 
