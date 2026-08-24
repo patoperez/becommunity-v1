@@ -1,6 +1,6 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-23**.
+> Authoritative operational handoff. Last verified: **2026-08-24**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
@@ -21,6 +21,7 @@ The V2 construction order remains:
 6. P5 client portal and longitudinal memory
 7. P6 visual backoffice
 8. P7 full hardening, adversarial suites, backups and incident response
+9. P8 product experience transformation: Insights, Studio and controlled branding
 
 Do not change that priority because of an incidental feature question. In
 particular, retention UI and separate CEO/employee permission tiers are not the
@@ -117,7 +118,37 @@ PDF retained metric parity and the human reviewer confirmed the real-phone
 layout. The PR was squash-merged and the post-merge Worker health check returned
 200 with Supabase connected. **P6 is closed.**
 
-## Current task — plan and execute P7 hardening
+## Current task — P8 product experience implementation
+
+P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`. Remote `main`
+remains at `e67e4adc2542c0a2993c65f517bf7445eafb83bd`, so the completed P7
+branch is still an explicit merge dependency. The isolated P8 worktree
+intentionally descends from that P7 head. Do not reopen P7 correction loops
+during product construction; controls blocked on custom-domain, production
+Supabase, billing, full DR or real-client prerequisites return as a bounded
+go-live pass after the product is functionally and visually complete.
+
+P8 discovery and the A/B/C/synthesis comparison are complete. Those artifacts
+remain historical evidence, but standalone visual prototyping is closed. The
+approved direction is an **Interactive Insight Experience**:
+
+- each client scene follows question → visual evidence → consultant
+  interpretation → action;
+- `Recorrido` provides guided discovery and `Explorar` provides bounded free
+  exploration over the same evidence and calculations;
+- Studio is a distinct no-code operational experience for non-technical staff;
+- text is preserved through progressive disclosure rather than becoming a wall;
+- controlled Be Community, co-branded and white-label modes must preserve
+  semantic meaning, contrast and analytical honesty.
+
+**Current unit: P8-A.** Create `p8a-product-experience-foundation` from the
+clean discovery head, then implement directly in the real Next.js application:
+semantic design/brand foundation, sign-in, Studio/Insights shells, client
+panorama and rich journey vertical slice. Stop for owner testing before P8-B.
+P8-A introduces no migration, formula, RLS/grant, role, ingestion,
+authorization, deployment or external-system change.
+
+## P7 engineering record (historical; do not resume during P8)
 
 P7 is the final V2 hardening and go-live-preparedness phase, not a feature
 reprioritization. Its acceptance gate is: all adversarial suites A-E green and a
@@ -170,7 +201,7 @@ health, logged-out, Tenant A, Tenant B isolation and internal-route smokes all
 passed with zero `P7A-`/`P7H-` residue. The commit-to-version record lives in PR
 #36's conversation as required by `docs/DEPLOYMENT.md`.
 
-**Current unit:** PR 7, branch `p7f-suites-b-c` — behavioral Suite B
+**Final engineering unit:** PR 7, branch `p7f-suites-b-c` — behavioral Suite B
 (authorization) and Suite C (hostile input/injection). Both are implemented and
 **green on the branch, not yet merged**:
 
@@ -227,8 +258,8 @@ recorded rather than asserted past:
    `src/app/admin/upload/UploadForm.tsx` and `src/lib/validation/schemas.ts`,
    both admitted to the structural scope guard by name.
 
-Suite E is still not green. PR 8 and later P7 work must not begin until PR 7 is
-reviewed, merged and post-merge verified.
+Suite E and external go-live controls were not declared green. They remain
+deferred release-state evidence, not the active product-construction unit.
 
 ## Known constraints carried forward
 

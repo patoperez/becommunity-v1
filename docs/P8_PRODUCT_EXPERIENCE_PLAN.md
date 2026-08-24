@@ -1,8 +1,8 @@
 # P8 — Product Experience Transformation
 
-> **Authoritative P8 plan and experience contract.** Status: **discovery
-> complete, plan awaiting human review.** No P8 implementation has begun and
-> none may begin until this plan is reviewed and the decisions in §7 are made.
+> **Authoritative P8 plan and experience contract.** Status: **discovery and
+> standalone visual comparison complete; implementation direction approved.**
+> P8-A is the next unit. No P8 product implementation has begun yet.
 >
 > Companion documents:
 > - `docs/P8_CURRENT_EXPERIENCE_AUDIT.md` — the evidence: route/state inventory,
@@ -167,6 +167,12 @@ is driven by dependency, not by preference. **No dates.** Every workstream runs
 `npm run typecheck && npm run lint && npm test && npm run build` in WSL or Linux
 CI — never on the Windows workstation — plus the live chain where it applies.
 
+**Delivery method approved 2026-08-24:** standalone prototyping is closed. The
+A/B/C comparison and provisional synthesis are retained as historical evidence,
+but visual refinement now happens directly in the real product through bounded
+vertical slices, owner testing and correction. No workstream creates another
+detached HTML direction before implementation.
+
 ### P8.1 — Design system, shared shell, sign-in
 **Depends on:** decision D1 (visual direction).
 **Delivers:** the token layer (colour, type scale, spacing, radius, elevation,
@@ -180,9 +186,10 @@ the redirect** and an allowlist-validated internal-only `destino`; a real
 favicon and the removal of the Next.js scaffolding in `public/`.
 **Why first:** every other workstream consumes these tokens and this shell.
 Doing it after would mean styling twice.
-**Prototype first:** the brand contrast resolver, against real tenant colours
-including deliberately bad ones. It is small, it is load-bearing for C7, and it
-touches the PDF as well as the screen.
+**First product slice (P8-A):** combine this foundation with a real client
+panorama and rich journey vertical slice so the owner reviews a functioning
+product rather than isolated design artifacts. The contrast resolver is still
+proved against real and deliberately bad tenant colours.
 
 ### P8.2 — Studio guided workflows
 **Depends on:** P8.1. Decisions D3, D5 shape it; D4 can defer to P8.4.
@@ -196,10 +203,10 @@ preview replacing the JSON dump; the destructive-action dialog replacing
 for qualitative observations and import history.
 **Why second:** it removes the largest operational risk (a consultant silently
 breaking her own study) and it is the workstream the CEO will feel first.
-**Prototype first:** the data-scope picker and the mapping step. Both are novel
-interactions with no precedent in the codebase, and getting the mapping step
-wrong compromises longitudinal comparability, which is a data consequence rather
-than a visual one.
+**Implementation review first:** deliver the data-scope picker and mapping step
+inside the real Studio workflow, then stop for owner testing. Getting the
+mapping step wrong compromises longitudinal comparability, which is a data
+consequence rather than a visual one.
 
 ### P8.3 — Insights data story
 **Depends on:** P8.1. Reads best after P8.2 exists, but does not require it.
@@ -224,9 +231,9 @@ D4 is approved; chart-as-image export; and the PDF rewrite — accents restored,
 shared vocabulary adopted, interpretation section added.
 **Why fourth:** it carries the two genuinely new product ideas and should not
 block the foundational work.
-**Prototype first:** the interpretation surface, as a paper or static prototype
-reviewed with the CEO before any implementation. It is the deliverable she sells
-and the one thing here that cannot be designed from the codebase.
+**Implementation review first:** add the smallest complete interpretation flow
+to the real product and stop for CEO testing before generalising it. It is the
+deliverable she sells and must be corrected against her actual workflow.
 
 ### P8.5 — Responsive, accessibility and usability acceptance
 **Depends on:** all of the above.
@@ -279,22 +286,22 @@ stops and returns for human review rather than proceeding.
 Seven decisions the evidence cannot settle. Each blocks or reshapes a
 workstream. Recommendations are recommendations.
 
-### D1 — Visual direction
-**Options:** (a) *Informe Vivo* editorial system, with workbench discipline in
-Studio and the route treatment in the journey view — the hybrid;
-(b) *Mesa de Trabajo* workbench-led for both products;
-(c) *Recorrido* journey-led as the whole system.
-**Recommendation: (a).**
-**Impact:** (a) makes the client-facing story structurally answerable and is
-native to the phone, but demands real writing — a weak finding sentence looks
-worse than a bare number. (b) is the cheapest and lowest-accessibility-risk, and
-would most improve the consultant's daily throughput, but risks rebuilding the
-Power BI console the product exists to replace. (c) is the most distinctive and
-closest to how the consultant explains her work, but has no home for a study
-without a journey, and the process material describes studies that are not
-journeys. Blocks P8.1, and therefore everything.
+### D1 — Visual/product direction — **RESOLVED 2026-08-24**
+The A/B/C comparison and provisional hybrid established useful hierarchy but
+the owner rejected a text-led report as the product destination. The approved
+direction is an **Interactive Insight Experience**: each scene follows question
+→ visual evidence → consultant interpretation → action; clients move between a
+guided `Recorrido` and bounded `Explorar` over the same evidence. Studio remains
+a distinct no-code operational product. The real Be Community website identity
+is provisional brand evidence, not a final immutable palette, and controlled
+per-study Be Community/co-branded/white-label theming is required. D1 no longer
+blocks P8.1. Refinement happens in the working product, not more standalone
+prototypes.
 
 ### D2 — Does the consultant's interpretation live in the product?
+**RESOLVED: (a), approved for P8.** Interpretation lives in the product as a
+separate draft → internal review → published reading workflow.
+
 The recorded sessions say the platform should show all the evidence and the pain
 points while the recommendation stays her professional judgement, delivered as a
 document she assembles. That document is currently assembled outside the product.
@@ -303,7 +310,7 @@ review, published reading, separately publishable from the numbers;
 (b) keep interpretation outside the product and let her upload a finished PDF
 against the study;
 (c) defer to V2.5.
-**Recommendation: (a).**
+**Recorded recommendation: (a), now approved.**
 **Impact:** (a) makes Insights able to answer *why does it matter* from inside
 the product and is the single largest addition in P8 — it is new product scope,
 not a re-skin, and it needs her review before implementation. (b) is far cheaper
@@ -312,6 +319,9 @@ an attachment the platform cannot connect to the evidence. (c) leaves C5
 permanently partial. Blocks P8.4.
 
 ### D3 — Approval and separation of duties inside Studio
+**RESOLVED: (a), approved for P8.** Keep the current role model and make review
+state explicit and logged; do not claim a permission boundary that does not exist.
+
 Today `internal` is one role: the CEO and every employee have identical
 permissions, and P7 recorded a distinct consultant role as intentionally out of
 scope for V2. But the CEO stated the purpose of the state model is that nothing
@@ -321,7 +331,7 @@ inventing their own method.
 that anyone internal can move, so approval is visible but not enforced;
 (b) introduce a real approver capability so only designated people can publish;
 (c) change nothing.
-**Recommendation: (a) for P8; revisit (b) with roles in V2.5.**
+**Recorded recommendation: (a) for P8; revisit (b) with roles in V2.5.**
 **Impact:** (a) is honest, buildable inside P8, and changes no authorization
 code — it gives her visibility without claiming a control that does not exist.
 (b) is a genuine authorization change that reopens the role model, touches RLS
@@ -329,6 +339,9 @@ and needs its own adversarial coverage; it does not belong inside an experience
 phase. (c) leaves her stated concern unaddressed. Shapes P8.2.
 
 ### D4 — Thresholds and the alert state
+**RESOLVED: (a), approved for P8.** Per-client thresholds produce one focused
+outside-ideal alert, not a decorative traffic-light system on every metric.
+
 The consultant maintains a per-client *semáforo* by hand in Excel today and uses
 it to decide which touchpoints to explore qualitatively. She was also explicit
 that she does not want a decorative traffic light everywhere — she wants an
@@ -337,7 +350,7 @@ alert when a result sits outside the ideal.
 state**, shown only where a result is outside the ideal;
 (b) a full multi-level colour scale on every result;
 (c) no thresholds in P8.
-**Recommendation: (a).**
+**Recorded recommendation: (a), now approved.**
 **Impact:** (a) matches what she said, replaces manual Excel work, and keeps
 colour meaningful — but it is new configuration surface and needs a defined
 default for clients who set nothing. (b) is what her Excel looks like today and
@@ -347,13 +360,16 @@ to show which touchpoints warranted going deeper. Shapes P8.4, and P8.2 if
 configuration lands earlier.
 
 ### D5 — Template ownership
+**RESOLVED: (a), approved for P8.** Templates are shared across the internal
+team with visible author attribution.
+
 Templates are filtered `.eq("created_by", user.id)`. An employee's template is
 invisible to the CEO and hers to them, with nothing in the interface saying so.
 **Options:** (a) templates are shared across the internal team, with the author
 shown;
 (b) keep them personal, and say so in the interface;
 (c) personal by default with an explicit "share with the team".
-**Recommendation: (a).**
+**Recorded recommendation: (a), now approved.**
 **Impact:** (a) matches how a small consultancy actually works and is the point
 of a template library; it is a query change, not an authorization change, but it
 does make one person's setup visible to colleagues. (b) is the cheapest and the
@@ -362,6 +378,9 @@ the team grows. (c) is the most flexible and the most interface to build.
 Shapes P8.2.
 
 ### D6 — Word cloud, or its replacement
+**RESOLVED: (c), approved for P8.** Ranked themes and attached quotes are the
+default; an accessible word cloud is an optional alternate/export view.
+
 The current theme cloud encodes count as font size, hides the count in a `title`
 attribute, and floors at 12 px — a comprehension and accessibility problem. The
 consultant values the cloud form and was clear that qualitative results must not
@@ -371,8 +390,8 @@ and quotes attached;
 (b) keep a cloud, but with accessible minimum sizes, visible counts and a list
 alternative;
 (c) both — list as the default, cloud as an alternative view.
-**Recommendation: (a) for the product, with (c) available for the report and for
-chart-as-image export.**
+**Recorded recommendation refined into approved option (c):** ranked list is
+the product default; the cloud never becomes the sole evidence view.
 **Impact:** (a) is the clearest and most accessible, and puts the quotes — the
 strongest asset in the product — where they can be read; it loses a
 presentation form she likes. (b) keeps the form but keeps most of its problems.
@@ -380,6 +399,9 @@ presentation form she likes. (b) keeps the form but keeps most of its problems.
 Shapes P8.4.
 
 ### D7 — Scope of the client's own exploration
+**RESOLVED: (a), approved for P8.** Preserve free exploration within the
+existing server-side allowlist and anchor it with consultant interpretation.
+
 The CEO was explicit that clients should be able to build their own crosses and
 that interactivity is the hook, while also noting a methodological rule that
 some characteristics should not be crossed with some indicators.
@@ -388,7 +410,7 @@ anchored by the consultant's interpretation;
 (b) additionally let the consultant mark specific combinations as not
 methodologically valid, and have the product decline them with an explanation;
 (c) restrict clients to comparisons the consultant has prepared.
-**Recommendation: (a) for P8, with (b) as a candidate for V2.5.**
+**Recorded recommendation: (a) for P8, with (b) as a candidate for V2.5.**
 **Impact:** (a) preserves her stated intent, changes no server contract, and
 relies on the interpretation (D2) as the safeguard she herself described. (b)
 encodes her methodology into the product and is genuinely valuable, but it is

@@ -98,12 +98,13 @@ tell the user nothing at all.
 
 ## Aesthetic Direction
 
-- **Philosophy**: *Editorial instrument.* The register of a well-set research
-  report — generous measure, real typographic hierarchy, restrained colour used
-  only where it carries meaning — applied to a working tool. Structure comes
-  from type and space, not from boxes and shadows. See
-  `VISUAL_DIRECTIONS.md` for the three directions this brief is written against;
-  this line records the **recommended** one (Direction A), not an approved one.
+- **Philosophy**: *Interactive insight instrument.* Each scene combines a human
+  question, dominant visual evidence, concise consultant interpretation and a
+  clear action. Typography and space still carry hierarchy, but the experience
+  is not a long editorial report: coordinated exploration, progressive
+  revelation and an ambitious journey surface are first-class product behavior.
+  `VISUAL_DIRECTIONS.md` preserves the earlier Direction A recommendation as
+  historical evidence and records the owner's superseding 2026-08-24 decision.
 - **Tone**: Considered, plain-spoken, unhurried. Authoritative because it is
   clear, not because it is dense. Warm in the qualitative sections — those are
   people talking — and quiet everywhere else.

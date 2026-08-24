@@ -460,9 +460,10 @@ deployment target, and its guidance must be read against that.
 
 > **Added after the comparison prototypes were built and reviewed.**
 > This appendix records that the §5 recommendation was rendered and held up. It
-> is **not an approval**, it does **not** supersede §1–§5, and **D1 remains
-> open**. Directions A, B and C stand unchanged above and remain available in
-> the gallery as evidence.
+> was **not an approval** at the time it was added and did not supersede §1–§5.
+> Directions A, B and C stand unchanged above as historical evidence. The
+> owner's later decision is recorded at the end of this document and supersedes
+> this provisional status for implementation.
 
 §5 recommended *A as the system, with B's shell discipline governing Studio and
 C's route treatment confined to the journey view*. That hybrid has now been built
@@ -491,3 +492,27 @@ differ in density and chrome only. Full synthesis rules, the corrections it was
 built to resolve, the review findings and the known gaps are in
 [`prototypes/README.md`](prototypes/README.md). The decision is still the
 user's and the CEO's to make from the launcher.
+
+---
+
+## Owner decision after synthesis review — 2026-08-24
+
+The synthesis remains useful information-architecture evidence, but it is not
+the implementation direction. The owner found it too text-heavy and too close
+to replacing Power BI with Word; its teal/cream treatment is explicitly not an
+approved final palette. Adding decorative charts to that page would produce a
+document with widgets rather than a custom analytical product.
+
+D1 is resolved as an **Interactive Insight Experience**. The product unit is
+question → visual evidence → consultant interpretation → action. Client studies
+connect a guided `Recorrido` with bounded `Explorar`; the journey becomes a
+coordinated evidence surface rather than a numbered stepper. Text is preserved
+through progressive disclosure. Studio is a separate no-code experience, and
+controlled Be Community/co-branded/white-label themes must preserve semantic
+meaning and accessibility.
+
+Standalone visual prototyping ends with the artifacts recorded above. Further
+design decisions are tested and corrected directly in working product slices,
+starting with P8-A. This section supersedes the earlier provisional
+recommendation for implementation purposes without deleting its historical
+evidence.

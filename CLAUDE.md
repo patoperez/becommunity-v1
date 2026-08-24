@@ -18,8 +18,10 @@ data-connected journey maps for the firm's clients (schools).
 **It is NOT a CRM.** No sales pipelines. The product is data → insight → client-facing story.
 
 - The P0-P6 V2 framework is deployed to a **synthetic-data test/beta Worker**.
-  It is not yet a real-client go-live environment; P7 and the go-live controls
-  remain outstanding.
+  P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`, but that branch
+  is not yet merged into remote `main`; the P8 worktree intentionally descends
+  from it. This is not yet a real-client go-live environment, and deferred
+  go-live controls return only after the product experience is complete.
 - Full V2 architecture lives in `BeCommunity_V2_Technical_Architecture.docx` (reference only — consult, don't inline).
 - Project background and decisions live in `system_context.md`.
 
@@ -165,6 +167,7 @@ P4 BI overhaul (cross-filter, pivot, journey map, qualitative human-in-the-loop)
 P5 Client portal + longitudinal memory
 P6 Visual backoffice
 P7 Full hardening pass + all adversarial suites + backups + incident playbook
+P8 Product experience transformation (real-product increments; Insights + Studio + theming)
 
 Each phase must pass its adversarial security suite before the next begins.
 The template **framework** ships in V2; the template **content** (real formulas,
@@ -179,23 +182,27 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   data. P6E completed with 108 automated checks and 0 failures.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
-- P7's evidence plan is approved. PRs 1-6 are merged: deployment identity,
-  supply-chain/CI, executable RLS coverage, the reviewed adversarial harness,
-  and Suite A are complete. Suite A is wired into `gates:live` and passed its
-  deployed post-merge isolation smoke with zero fixture residue.
-- The current unit is **P7 PR 7, `p7f-suites-b-c`**: behavioral authorization
-  Suite B (64/64) and hostile-input Suite C (13/13), both green on the branch
-  and **not yet merged**. `gates:live` is now
-  `test:qualitative-live -> suite:a -> suite:b -> suite:c`. Suite B reports its
-  evidence in three layers that are never summed — catalogue completeness, the
-  outer action route's own POST method and path, and the subset with an
-  observable inner Server-Action denial — and says plainly that it does not
-  claim all eighteen inner actions were invoked. PR 7 also carries one minimal
-  product correction (the upload size boundary in
-  `src/app/admin/upload/UploadForm.tsx` and `src/lib/validation/schemas.ts`), so
-  it is no longer test-only. Do not start Suite E, audit logging, anomaly
-  detection, portability, incident response or compliance work until PR 7 is
-  reviewed, merged and post-merge verified.
+- P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`: Suites B and C,
+  the canonical live chain and their review fixes are green. Remote `main`
+  remains at the Suite A baseline until that completed branch is merged. Do not
+  reopen P7 correction loops during P8. Deferred edge, production-environment,
+  backup/DR and operational controls return as a bounded go-live hardening pass
+  after the product is functionally and visually complete.
+- P8 discovery and visual comparison are complete on
+  `docs/p8-experience-discovery`. The A/B/C and provisional synthesis artifacts
+  are historical design evidence, not an instruction to build more prototypes.
+- The approved direction is an **Interactive Insight Experience**: client work
+  combines a guided `Recorrido` with bounded `Explorar`, structured as
+  question → visual evidence → consultant interpretation → action. Studio is a
+  separate no-code operational experience for non-technical internal users.
+- **Current unit: P8-A product implementation.** Work directly in the real
+  Next.js application: shared semantic design/brand foundation, sign-in and
+  shells, then a real client panorama and rich journey vertical slice. Review
+  the functioning product and iterate there. Do not create another standalone
+  HTML prototype or declare a visual direction on the owner's behalf.
+- Preserve P7 authorization/input gates, all calculation outputs, ingestion,
+  RLS, roles and publication boundaries. P8-A adds no migration, formula,
+  authorization rule, production deployment or external-system mutation.
 - Do not mutate real-production infrastructure, rotate credentials, create a
   real-data environment, or enable irreversible controls during synthetic P7
   work. Do not redirect the roadmap toward retention UI, new role tiers or an

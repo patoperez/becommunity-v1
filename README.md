@@ -80,7 +80,11 @@ free-tier anti-pause): [docs/OPERATIONS.md](docs/OPERATIONS.md).
 ## Current state
 
 P0-P6 are implemented, technically accepted and human-accepted with synthetic
-data. The remaining mobile and PDF defects were fixed and deployed in PR #28;
-P6 is closed. P7 full hardening and go-live preparedness is now the active
-phase. Read [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or
-handing off work; historical audit/phase documents are not authoritative.
+data. P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`, although the
+completed branch has not yet been merged into remote `main`. P8 product
+experience implementation is now active in an isolated worktree descending
+from that P7 head. Standalone visual prototyping is closed; the current method
+is to implement reviewable vertical slices in the real product and correct them
+through human testing. Read [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)
+before starting or handing off work; historical audit/phase documents are not
+authoritative.
