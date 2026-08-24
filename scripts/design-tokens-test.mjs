@@ -24,8 +24,9 @@ import {
   contrastRatio,
   resolveBrand,
 } from "../src/lib/brand/contrast.ts";
+import { domainFor } from "../src/components/evidence/ScaleMark.tsx";
 import { sampleCopy, studyBaseSentence } from "../src/lib/language/sample.ts";
-import { resultLanguage, studyStateLabel } from "../src/lib/language/results.ts";
+import { humanize, resultLanguage, studyStateLabel, unitLabel } from "../src/lib/language/results.ts";
 
 let checks = 0;
 const ok = (message) => { checks += 1; console.log(`  PASS  ${message}`); };
@@ -177,13 +178,26 @@ ok("the study base sentence is a sentence, not a formula");
 console.log("\n[6] Result vocabulary retires the canonical keys client-side");
 assert.equal(resultLanguage("nps", "NPS").name, "Recomendación");
 assert.match(resultLanguage("nps", "NPS").method, /NPS/, "the acronym survives in the method panel only");
-assert.match(resultLanguage("csat:sat_servicio", "CSAT sat servicio").name, /^Satisfacción · Sat servicio$/);
+assert.match(resultLanguage("csat:sat_servicio", "CSAT sat servicio").name, /^Satisfacción · Servicio$/,
+  "the measurement prefix is dropped inside its own heading");
+assert.match(resultLanguage("csat:comedor", "x").name, /^Satisfacción · Comedor$/,
+  "a subject without a measurement prefix keeps all of its words");
+assert.equal(humanize("atencion_y_servicio"), "Atencion y servicio",
+  "theme and characteristic words are never trimmed by the result-name rule");
 assert.doesNotMatch(resultLanguage("csat:sat_servicio", "x").name, /csat|:|_/i, "no canonical key in the name");
 assert.equal(resultLanguage("average:cri", "cri").name, "Cri");
 assert.equal(studyStateLabel("published"), "Publicado");
 assert.equal(studyStateLabel("draft"), "Borrador");
 assert.doesNotMatch(studyStateLabel("archived"), /archived/i, "no raw enum reaches the screen");
 ok("metric keys, CSAT/NPS acronyms and status enums are all translated at the boundary");
+
+// A score has no domain the product can honestly state, so it must not claim one.
+assert.equal(domainFor("score"), null, "a score must not be given a fabricated domain");
+assert.deepEqual(domainFor("nps"), { min: -100, max: 100, label: "de -100 a 100" });
+assert.deepEqual(domainFor("percent"), { min: 0, max: 100, label: "de 0 % a 100 %" });
+assert.doesNotMatch(unitLabel("score"), /1 a 5|escala del estudio/,
+  "the score label must not imply a range the aggregate does not carry");
+ok("only NPS and percent carry an absolute scale; a score is compared with its own peers");
 
 // --- 7. The frozen mechanisms the P7 suites settle on ----------------------
 

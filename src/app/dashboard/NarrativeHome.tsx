@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { NarrativeHomeView } from "@/lib/dashboard/narrative";
 import type { BrandConfig } from "@/lib/branding/config";
 import { studyAccentVars } from "@/lib/brand/contrast";
-import { ScaleMark, AbsentMark, domainFor } from "@/components/evidence/ScaleMark";
+import { ScaleMark, PeerMark, AbsentMark, domainFor } from "@/components/evidence/ScaleMark";
 import { MethodDisclosure, SampleContext } from "@/components/SampleContext";
 import { Forward } from "@/components/Actions";
 import { BrandMark } from "@/components/BrandMark";
@@ -93,11 +93,15 @@ export default function NarrativeHome({
   // them (recommendation first, then satisfaction, then the rest).
   for (const metric of results) {
     const language = resultLanguage(metric.key, metric.title);
+    // Only the two measures with a real, defined domain get an absolute track.
+    // A plain average lives on the client's own instrument, whose range the
+    // sanitized aggregate does not carry, so it is shown as a number with its
+    // method rather than as a bar against an invented scale.
     const unit = metric.key.startsWith("csat:")
       ? ("percent" as const)
       : metric.key === "nps" || metric.key.startsWith("nps")
         ? ("nps" as const)
-        : ("score" as const);
+        : null;
     const numeric = metric.value == null ? null : Number.parseFloat(metric.value.replace("%", ""));
 
     findings.push(
@@ -113,16 +117,20 @@ export default function NarrativeHome({
           </>
         }
         evidence={
-          numeric != null && Number.isFinite(numeric) ? (
-            <>
-              <ScaleMark value={numeric} unit={unit} tone="accent" />
-              <p className="mt-1.5 text-xs text-muted">{unitLabel(unit)}</p>
-            </>
-          ) : (
+          metric.value == null ? (
             <>
               <AbsentMark />
               <p className="mt-1.5 text-xs text-muted">Sin resultado en esta medición</p>
             </>
+          ) : unit && numeric != null && Number.isFinite(numeric) ? (
+            <>
+              <ScaleMark value={numeric} unit={unit} tone="accent" />
+              <p className="mt-1.5 text-xs text-muted">
+                {unitLabel(unit)} ({domainFor(unit)?.label})
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted">{unitLabel("score")}</p>
           )
         }
         context={
@@ -150,7 +158,8 @@ export default function NarrativeHome({
   // 4 — the weakest comparable touchpoint, when the study has a journey.
   if (view.spotlight) {
     const spot = view.spotlight;
-    const domain = domainFor(spot.unit);
+    const spotNumeric = Number.parseFloat(spot.value.replace("%", ""));
+    const spotDomain = spot.unit === "score" ? null : domainFor(spot.unit);
     findings.push(
       <Finding
         key="spotlight"
@@ -165,14 +174,21 @@ export default function NarrativeHome({
         }
         evidence={
           <>
-            <ScaleMark
-              value={Number.parseFloat(spot.value.replace("%", ""))}
-              unit={spot.unit}
-              tone="accent"
-            />
+            {spotDomain ? (
+              <ScaleMark value={spotNumeric} unit={spot.unit as "nps" | "percent"} tone="accent" />
+            ) : (
+              <PeerMark
+                value={spotNumeric}
+                min={spot.peerMin}
+                max={spot.peerMax}
+                tone="accent"
+              />
+            )}
             <p className="mt-1.5 text-xs text-muted">
-              El más bajo de los {spot.comparedWith} momentos que se miden en esta
-              misma escala ({domain.label}).
+              {spotDomain
+                ? `El más bajo de los ${spot.comparedWith} momentos medidos ${domainFor(spot.unit)?.label}.`
+                : `El más bajo de los ${spot.comparedWith} momentos que se miden en la misma escala. ` +
+                  `La barra los compara entre sí (de ${spot.peerMin} a ${spot.peerMax}), no contra un máximo.`}
             </p>
           </>
         }

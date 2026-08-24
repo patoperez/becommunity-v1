@@ -29,6 +29,13 @@ export type NarrativeSpotlight = {
   visibility: SampleVisibility;
   /** How many stages shared the scale it was chosen from. */
   comparedWith: number;
+  /**
+   * The lowest and highest of those comparable stages. A score has no absolute
+   * domain the client can be told about, so the only honest track to place it on
+   * is the range of its own peers.
+   */
+  peerMin: number;
+  peerMax: number;
 };
 
 export type NarrativeHomeView = {
@@ -87,6 +94,7 @@ function findSpotlight(journey: SafeJourneyStage[]): NarrativeSpotlight | null {
     if (group.length > best.length) best = group;
   }
   if (best.length < 2) return null;
+  const values = best.map((stage) => stage.numeric as number);
   const lowest = best.reduce((low, stage) =>
     (stage.numeric as number) < (low.numeric as number) ? stage : low,
   );
@@ -98,6 +106,8 @@ function findSpotlight(journey: SafeJourneyStage[]): NarrativeSpotlight | null {
     n: lowest.n,
     visibility: lowest.visibility,
     comparedWith: best.length,
+    peerMin: Math.min(...values),
+    peerMax: Math.max(...values),
   };
 }
 

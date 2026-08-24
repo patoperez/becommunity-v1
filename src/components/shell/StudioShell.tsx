@@ -27,6 +27,11 @@ export type StudioStop = {
 
 export const STUDIO_STOPS: StudioStop[] = [
   {
+    href: "/dashboard",
+    label: "Inicio",
+    description: "Lo que hay en marcha y por dónde seguir.",
+  },
+  {
     href: "/admin/studies",
     label: "Estudios y plantillas",
     description: "Crear, configurar y publicar el trabajo de cada cliente.",

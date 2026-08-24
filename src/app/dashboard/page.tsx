@@ -178,7 +178,7 @@ export default async function DashboardPage() {
               administration is a secondary path below, as the information
               architecture puts it — it is not part of preparing a study. */}
           <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {STUDIO_STOPS.filter((stop) => stop.href !== "/admin/clients").map((stop) => (
+            {STUDIO_STOPS.filter((stop) => stop.href !== "/admin/clients" && stop.href !== "/dashboard").map((stop) => (
               <li key={stop.href}>
                 <Link
                   href={stop.href}

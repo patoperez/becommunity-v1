@@ -12,11 +12,21 @@
  * the headline.
  */
 
-/** Turn any stored key into readable words: `sat_servicio` -> `Servicio`. */
+/** Turn any stored key into readable words: `atencion_y_servicio` -> `Atencion y servicio`. */
 export function humanize(key: string): string {
   const words = key.replace(/^(q|seg|qual)_/, "").replace(/[_:-]+/g, " ").trim();
   if (!words) return key;
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * The SUBJECT of a result, with the measurement prefix removed. `sat_general`
+ * belongs under the heading "Satisfacción", so repeating "Sat" inside the name
+ * reads as "Satisfacción · Sat general". Only the measurement prefix is
+ * stripped — never a theme or a segment key, which keep their own words.
+ */
+function subject(key: string): string {
+  return humanize(key.replace(/^(csat|sat|nps)[_-]/, ""));
 }
 
 export type ResultLanguage = {
@@ -55,10 +65,10 @@ export function resultLanguage(key: string, fallbackTitle: string): ResultLangua
   }
 
   if (key.startsWith("csat:")) {
-    const subject = humanize(key.slice("csat:".length));
+    const about = subject(key.slice("csat:".length));
     return {
-      name: `Satisfacción · ${subject}`,
-      question: `¿Qué tan satisfechas están las personas con ${subject.toLowerCase()}?`,
+      name: `Satisfacción · ${about}`,
+      question: `¿Qué tan satisfechas están las personas con ${about.toLowerCase()}?`,
       method:
         "Porcentaje de personas que eligieron una de las dos calificaciones más altas de la escala. " +
         'Quienes respondieron "no lo conozco" no cuentan. Su nombre técnico es Top-2-Box.',
@@ -66,10 +76,10 @@ export function resultLanguage(key: string, fallbackTitle: string): ResultLangua
   }
 
   if (key.startsWith("average:")) {
-    const subject = humanize(key.slice("average:".length));
+    const about = subject(key.slice("average:".length));
     return {
-      name: subject,
-      question: `¿Cómo se calificó ${subject.toLowerCase()}?`,
+      name: about,
+      question: `¿Cómo se calificó ${about.toLowerCase()}?`,
       method: "Promedio simple de las calificaciones registradas en la selección actual.",
     };
   }
@@ -82,11 +92,18 @@ export function resultLanguage(key: string, fallbackTitle: string): ResultLangua
   };
 }
 
-/** How a journey stage's unit reads under its number. */
+/**
+ * How a result's unit reads under its number.
+ *
+ * `score` deliberately does NOT claim a range. The scale a study uses is the
+ * client's own instrument — it may be 1-5, 1-10 or something else — and the
+ * aggregate the browser receives does not carry it. Inventing "de 1 a 5" here
+ * would put a wrong denominator under a right number.
+ */
 export function unitLabel(unit: "nps" | "percent" | "score"): string {
-  if (unit === "nps") return "recomendación, de -100 a 100";
+  if (unit === "nps") return "recomendación";
   if (unit === "percent") return "por ciento";
-  return "promedio, sobre la escala del estudio";
+  return "promedio de las calificaciones";
 }
 
 /** A characteristic (`area`, `antiguedad`) as the client sees it. */

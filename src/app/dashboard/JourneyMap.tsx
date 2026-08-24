@@ -193,12 +193,12 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
                 className="absolute left-[1.42rem] top-0 h-full w-0.5 md:left-0 md:top-[calc(0.625rem+13px)] md:h-0.5 md:w-full"
               >
                 <span
-                  className={`absolute inset-x-0 top-0 h-1/2 bg-line md:inset-y-0 md:left-0 md:h-full md:w-1/2 ${
+                  className={`absolute inset-x-0 top-0 h-1/2 bg-line-strong md:inset-y-0 md:left-0 md:h-full md:w-1/2 ${
                     index === 0 ? "opacity-0" : ""
                   }`}
                 />
                 <span
-                  className={`absolute inset-x-0 bottom-0 h-1/2 bg-line md:inset-y-0 md:right-0 md:left-auto md:h-full md:w-1/2 ${
+                  className={`absolute inset-x-0 bottom-0 h-1/2 bg-line-strong md:inset-y-0 md:right-0 md:left-auto md:h-full md:w-1/2 ${
                     index === stages.length - 1 ? "opacity-0" : ""
                   }`}
                 />
@@ -216,7 +216,9 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
                   {stage.value ?? "—"}
                 </span>
                 <span className="text-xs text-muted">
-                  {stage.value == null ? STATE_WORD[state] : unitLabel(stage.unit)}
+                  {stage.value == null
+                    ? STATE_WORD[state]
+                    : `${unitLabel(stage.unit)}${domainFor(stage.unit) ? ` · ${domainFor(stage.unit)?.label}` : ""}`}
                 </span>
                 {isLowest ? (
                   <span className="mt-1 inline-flex items-center gap-1 self-start rounded-full border border-caution-line bg-caution-surface px-2 py-0.5 text-[0.7rem] font-semibold text-caution md:self-center">
@@ -298,7 +300,8 @@ function StageDetail({ stage, isLowest }: { stage: SafeJourneyStage; isLowest: b
             ) : null}
             <MethodDisclosure summary="Cómo se lee este número">
               <p>
-                Se expresa {unitLabel(stage.unit)} ({domain.label}).
+                Se expresa como {unitLabel(stage.unit)}
+                {domain ? ` (${domain.label})` : ", en la escala que usa el instrumento de tu comunidad"}.
               </p>
               <p className="mt-1.5">{copy.methodology}</p>
               {isLowest ? (

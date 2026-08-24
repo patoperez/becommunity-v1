@@ -112,8 +112,11 @@ export function studyBaseSentence(
   count: number | null,
 ): string {
   const copy = sampleCopy(visibility, count, "voices");
-  if (copy.tone === "standard" && count != null) {
-    return `Este estudio recoge la voz de ${noun(count, "voices")}.`;
+  if (count != null && (copy.tone === "standard" || copy.tone === "caution")) {
+    const base = `Este estudio recoge la voz de ${noun(count, "voices")}`;
+    return copy.tone === "caution"
+      ? `${base} — todavía pocas, así que léelo como un indicio.`
+      : `${base}.`;
   }
   return copy.headline + ".";
 }
