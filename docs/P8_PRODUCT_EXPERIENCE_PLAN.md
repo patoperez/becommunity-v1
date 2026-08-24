@@ -1,0 +1,409 @@
+# P8 — Product Experience Transformation
+
+> **Authoritative P8 plan and experience contract.** Status: **discovery
+> complete, plan awaiting human review.** No P8 implementation has begun and
+> none may begin until this plan is reviewed and the decisions in §7 are made.
+>
+> Companion documents:
+> - `docs/P8_CURRENT_EXPERIENCE_AUDIT.md` — the evidence: route/state inventory,
+>   defects, terminology debt.
+> - `.design/be-community-v2/DESIGN_BRIEF.md` — problem, principles, aesthetic
+>   direction, component inventory.
+> - `.design/be-community-v2/INFORMATION_ARCHITECTURE.md` — routes, navigation,
+>   the two experience maps, naming, URL strategy.
+> - `.design/be-community-v2/VISUAL_DIRECTIONS.md` — three directions, comparison
+>   and recommendation.
+>
+> P8 does not continue, modify or reopen P7. PR 7 (Suites B and C) remains under
+> review on `p7f-suites-b-c`; Suite E, audit logging, backups, incident response
+> and the go-live controls stay exactly where `docs/P7_PLAN.md` put them.
+
+---
+
+## 1. Why P8 exists
+
+P0–P6 built a technically correct product and P7-A established the structural
+security baseline. What remains is not a defect list — it is that the product
+exposes its own implementation to the people it was built for.
+
+The evidence, in one paragraph: a non-technical CEO types JSON to scope a
+director to their own area; types a canonical metric key from memory to attach a
+number to a touchpoint; retypes a theme name to merge two themes, which is how
+one theme becomes three; and reviews five raw JSON dumps as the final human
+check before an atomic database write. A school director opens the portal and
+finds the headline result seventh on the page, below a stepper and some pills,
+next to a control called *Explorador pivote*, with the honest caveat rendered as
+`Base pequeña (n=23)`. And the thing the consultancy actually sells — the
+consultant's interpretation — has no place in the product at all.
+
+**P8 is product, service and information design supported by a strong visual
+system. It is not a visual refresh of the dashboard.**
+
+---
+
+## 2. Outcome
+
+Two connected, branded, accessible, guided experiences sharing one design system
+and one vocabulary:
+
+- **Be Community Studio** — internal. Complex operations feel safe and guided:
+  wizards, sensible defaults, selectors, chips, templates, previews, progressive
+  disclosure. Structured configuration remains behind the application boundary;
+  ordinary users never author it.
+- **Be Community Insights** — client. A data story that answers *what happened,
+  why does it matter, what should we examine next, and how much should we trust
+  this* — with the reliability of every result stated in ordinary words.
+
+**Invariants.** P8 changes presentation, language and flow. It does not change
+calculations, ingestion semantics, RLS, authorization, roles, migrations or
+data. Numerical parity, tenant isolation and server-side authorization are
+preserved and re-proved, not renegotiated.
+
+---
+
+## 3. The P8 experience contract
+
+Observable rules. Each is stated so that a reviewer can check it, and §6 names
+where each is verified.
+
+### C1 — No user-authored structured data in ordinary workflows
+No ordinary workflow requires a user to type JSON, a stable identifier, a
+canonical metric key, a theme key or a recoding-table id. Every such value is
+selected from what already exists in the study or the client's history. Creating
+a genuinely new value is possible, is labelled as new, and is never the default
+path. **Check:** no `<textarea>` or `<input>` in Studio accepts a raw structure
+or identifier as its primary means of entry; `JSON.stringify` does not reach any
+user-visible surface.
+
+### C2 — Progressive disclosure
+Every screen presents one job. What is always visible, what is one interaction
+away, and what is advanced is declared per surface in the information
+architecture (§5 and §6 of that document). **Check:** no page presents more than
+one primary job; no list renders an unbounded per-item editor.
+
+### C3 — Plain-language results
+No implementation term appears in either product: not `JSON`, `data_scope`,
+`tenant`, `pivot`, a canonical key, a raw status enum, `agregación`, `unidad de
+respuesta`, `menc.` or a bare `n=`. Acronyms appear only alongside their meaning
+and only where methodology is deliberately disclosed. **Check:** a
+deterministic string scan over rendered user-facing copy, run as a gate.
+
+### C4 — Human-readable sample context
+Every published result states what it rests on in words. The four disclosure
+levels — sufficient, small base, insufficient, no data — each have one canonical
+phrasing used everywhere, including the PDF. The suppression rule is explained
+as protection of the people who answered, not as a system limitation.
+**Check:** one component and one string table; `n=` appears in no client-facing
+surface.
+
+### C5 — Every major result explains its significance and context
+A headline result carries what it means, how it changed, what it rests on, and
+where to look next. Method is available on demand. **Check:** the finding block
+cannot render without an interpretation slot; when the consultant has published
+none, the absence is stated rather than hidden.
+
+### C6 — Safe defaults and reversible actions
+Destructive and outward-facing actions state what will happen before they happen
+and can be undone or corrected afterwards. Publication is reachable only through
+preview. No native `window.confirm()` guards a destructive action. **Check:**
+every mutation is classified reversible / confirmable / irreversible, and each
+irreversible one uses the type-to-confirm pattern already proven on client
+deletion.
+
+### C7 — Accessible behaviour — target WCAG 2.2 AA
+`lang="es"`; skip link and landmarks on every page; visible focus on every
+interactive element; keyboard operability with no hover-only affordance; 4.5:1
+body and 3:1 large-text and meaningful-non-text contrast, **including tenant
+brand colours resolved through a contrast guard in the dashboard, the preview
+and the PDF**; no meaning carried by colour alone; no quantity encoded as font
+size; no data carried only in a `title` attribute; `prefers-reduced-motion`
+honoured with no loss of meaning; charts exposed as an accessible summary plus a
+real data table. **Check:** P8.5 acceptance matrix.
+
+### C8 — Mobile-first reflow without horizontal clipping
+Single column at 320 px; no horizontal page scroll at 320 / 375 / 414 / 768 /
+1024 / 1440. Wide content scrolls inside its own container with a visible
+affordance. The two `min-w-[900px]` tables get a genuine card mode, not a wider
+scroll container. **Check:** the existing responsive matrix pattern, extended.
+
+### C9 — Explicit loading, empty, error and insufficient-data states
+Every data surface has all four, named and designed. **No surface renders `null`
+to mean "nothing to say".** `loading.tsx`, `error.tsx` and `not-found.tsx`
+boundaries exist. Every error offers a way forward — a retry or a route back —
+never a dead red box. **Check:** the six currently-silent states (C6, C15, C19,
+C33, S15, S37 in the audit) each render an explanation.
+
+### C10 — Security and calculation invariants preserved
+No change to metric formulas, the rounding policy, the aggregate-DTO client
+boundary, the pivot allowlist, the disclosure thresholds, RLS, grants,
+authorization guards, middleware or roles. The client continues to receive only
+sanitized aggregates. **Check:** the full deterministic suite plus the live
+chain, unchanged and green, on every P8 PR.
+
+---
+
+## 4. Non-goals
+
+- Continuing, modifying or reopening P7.
+- New analytical capability: retention/deserción prospecting, LTV, CRI
+  cost-of-loss modelling, sector benchmarking. These are real future work
+  described in the process material; they are product scope, not experience
+  scope, and belong to V2.5 with authoritative formula definitions. P8 leaves
+  room for them and invents none of them.
+- Kano modelling — excluded by the consultant's own process documentation.
+- Retention UI and new role tiers, which `docs/CURRENT_STATE.md` explicitly
+  excludes from the current task.
+- Fabricating a brand kit. No logo, wordmark or typeface licence has been
+  supplied. P8 proposes a system a supplied brand drops into.
+- Selecting a component library, CSS methodology or icon set as a product
+  decision. Those are implementation choices made inside a workstream.
+
+---
+
+## 5. Implementation roadmap
+
+Five workstreams, each a reviewable PR or a small ordered set of PRs. Sequence
+is driven by dependency, not by preference. **No dates.** Every workstream runs
+`npm run typecheck && npm run lint && npm test && npm run build` in WSL or Linux
+CI — never on the Windows workstation — plus the live chain where it applies.
+
+### P8.1 — Design system, shared shell, sign-in
+**Depends on:** decision D1 (visual direction).
+**Delivers:** the token layer (colour, type scale, spacing, radius, elevation,
+motion) with light and dark defined properly; the **tenant brand contrast
+resolver**; `lang="es"`; the fixed font pipeline (F1); skip link and landmarks;
+`loading` / `error` / `not-found` boundaries; the Studio shell with persistent
+navigation and breadcrumb; the Insights shell; the shared state set (empty,
+loading, error, insufficient); the flash/live-region replacement for URL-carried
+messages; sign-in serving both audiences with **destination preserved through
+the redirect** and an allowlist-validated internal-only `destino`; a real
+favicon and the removal of the Next.js scaffolding in `public/`.
+**Why first:** every other workstream consumes these tokens and this shell.
+Doing it after would mean styling twice.
+**Prototype first:** the brand contrast resolver, against real tenant colours
+including deliberately bad ones. It is small, it is load-bearing for C7, and it
+touches the PDF as well as the screen.
+
+### P8.2 — Studio guided workflows
+**Depends on:** P8.1. Decisions D3, D5 shape it; D4 can defer to P8.4.
+**Delivers:** `/studio` home answering "what needs me now"; the client and study
+routes with filter and paging; the study work surface with process tabs; the
+**picker component** and its four uses — data scope, journey metric, theme
+merge, mapping targets — which is what actually retires C1's free text; the
+rebuilt mapping step with selection over transcription; the readable import
+preview replacing the JSON dump; the destructive-action dialog replacing
+`window.confirm()`; publication reachable only through preview; visible paging
+for qualitative observations and import history.
+**Why second:** it removes the largest operational risk (a consultant silently
+breaking her own study) and it is the workstream the CEO will feel first.
+**Prototype first:** the data-scope picker and the mapping step. Both are novel
+interactions with no precedent in the codebase, and getting the mapping step
+wrong compromises longitudinal comparability, which is a data consequence rather
+than a visual one.
+
+### P8.3 — Insights data story
+**Depends on:** P8.1. Reads best after P8.2 exists, but does not require it.
+**Delivers:** `/insights` and the study routes; the finding block; the indicator
+card with method disclosure; the **sample-context component** and its single
+string table, applied on screen and in the PDF; the rebuilt journey view; the
+comparison view replacing the pivot explorer against the same server contract
+and allowlist; the trend view with its list form below four periods and its data
+table alternative; filter state in the URL with the report link built from the
+same source; explanations replacing every silent `null`.
+**Why third:** it is the client-facing payoff, and it depends on the vocabulary
+and components P8.1 and P8.2 establish.
+
+### P8.4 — Qualitative, interpretation and per-client customisation
+**Depends on:** P8.3, and on decisions D2, D4, D6.
+**Delivers:** the rebuilt qualitative presentation — ranked themes with honest
+counts, quotes as first-class content, no font-size-as-quantity, no
+`title`-only data; the two-or-three pain-point discipline on touchpoints; the
+**interpretation surface** (private draft → internal review → published
+reading), if D2 is approved; **per-client thresholds and the alert state**, if
+D4 is approved; chart-as-image export; and the PDF rewrite — accents restored,
+shared vocabulary adopted, interpretation section added.
+**Why fourth:** it carries the two genuinely new product ideas and should not
+block the foundational work.
+**Prototype first:** the interpretation surface, as a paper or static prototype
+reviewed with the CEO before any implementation. It is the deliverable she sells
+and the one thing here that cannot be designed from the codebase.
+
+### P8.5 — Responsive, accessibility and usability acceptance
+**Depends on:** all of the above.
+**Delivers:** the acceptance matrix for C7, C8 and C9; the deterministic
+plain-language string gate for C3; the responsive matrix extended to the new
+routes; keyboard and focus verification; contrast verification including
+adversarial tenant brand colours; reduced-motion verification; and a documented
+human acceptance pass on a real phone, following the precedent set by the P6
+closure record.
+**Why last:** it is acceptance, not polish. It must run against the finished
+surface.
+
+### Dependency summary
+
+```
+D1 ──▶ P8.1 ──┬──▶ P8.2 ──┐
+              └──▶ P8.3 ──┴──▶ P8.4 ──▶ P8.5
+                    ▲               ▲
+              D3,D5 ┘         D2,D4,D6
+```
+
+C10 — the security and calculation invariants — is re-proved on **every** PR in
+every workstream, not once at the end.
+
+---
+
+## 6. Verification
+
+| Contract | Verified by | When |
+|---|---|---|
+| C1 no authored structure | Source review + a scan asserting no `JSON.stringify` reaches a user-visible surface | Each PR touching Studio |
+| C2 progressive disclosure | Design review against the IA disclosure tables | P8.2, P8.3 |
+| C3 plain language | Deterministic string gate over user-facing copy | P8.5, then every PR |
+| C4 sample context | One component, one string table; `n=` absent client-side | P8.3 |
+| C5 significance | Finding block cannot render without the slot | P8.3 |
+| C6 reversibility | Mutation classification table; no `window.confirm` | P8.2 |
+| C7 accessibility | P8.5 matrix incl. adversarial brand colours | P8.5 |
+| C8 responsive | Extended responsive matrix at six widths | P8.5 |
+| C9 states | Every surface enumerated; zero `null` returns | P8.5 |
+| **C10 invariants** | `typecheck`, `lint`, `test`, `build` in WSL/Linux CI, plus the live chain where the PR touches an authorized path | **Every PR** |
+
+P8 introduces no new security control and removes none. If any P8 change would
+alter an authorization path, a boundary schema or a calculation, that change
+stops and returns for human review rather than proceeding.
+
+---
+
+## 7. Decisions required from the CEO / user
+
+Seven decisions the evidence cannot settle. Each blocks or reshapes a
+workstream. Recommendations are recommendations.
+
+### D1 — Visual direction
+**Options:** (a) *Informe Vivo* editorial system, with workbench discipline in
+Studio and the route treatment in the journey view — the hybrid;
+(b) *Mesa de Trabajo* workbench-led for both products;
+(c) *Recorrido* journey-led as the whole system.
+**Recommendation: (a).**
+**Impact:** (a) makes the client-facing story structurally answerable and is
+native to the phone, but demands real writing — a weak finding sentence looks
+worse than a bare number. (b) is the cheapest and lowest-accessibility-risk, and
+would most improve the consultant's daily throughput, but risks rebuilding the
+Power BI console the product exists to replace. (c) is the most distinctive and
+closest to how the consultant explains her work, but has no home for a study
+without a journey, and the process material describes studies that are not
+journeys. Blocks P8.1, and therefore everything.
+
+### D2 — Does the consultant's interpretation live in the product?
+The recorded sessions say the platform should show all the evidence and the pain
+points while the recommendation stays her professional judgement, delivered as a
+document she assembles. That document is currently assembled outside the product.
+**Options:** (a) build the interpretation surface — private draft, internal
+review, published reading, separately publishable from the numbers;
+(b) keep interpretation outside the product and let her upload a finished PDF
+against the study;
+(c) defer to V2.5.
+**Recommendation: (a).**
+**Impact:** (a) makes Insights able to answer *why does it matter* from inside
+the product and is the single largest addition in P8 — it is new product scope,
+not a re-skin, and it needs her review before implementation. (b) is far cheaper
+and preserves her workflow exactly, but the client's understanding then lives in
+an attachment the platform cannot connect to the evidence. (c) leaves C5
+permanently partial. Blocks P8.4.
+
+### D3 — Approval and separation of duties inside Studio
+Today `internal` is one role: the CEO and every employee have identical
+permissions, and P7 recorded a distinct consultant role as intentionally out of
+scope for V2. But the CEO stated the purpose of the state model is that nothing
+reaches a client before she approves it, and worried about consultants
+inventing their own method.
+**Options:** (a) keep one role; make review an explicit, logged workflow state
+that anyone internal can move, so approval is visible but not enforced;
+(b) introduce a real approver capability so only designated people can publish;
+(c) change nothing.
+**Recommendation: (a) for P8; revisit (b) with roles in V2.5.**
+**Impact:** (a) is honest, buildable inside P8, and changes no authorization
+code — it gives her visibility without claiming a control that does not exist.
+(b) is a genuine authorization change that reopens the role model, touches RLS
+and needs its own adversarial coverage; it does not belong inside an experience
+phase. (c) leaves her stated concern unaddressed. Shapes P8.2.
+
+### D4 — Thresholds and the alert state
+The consultant maintains a per-client *semáforo* by hand in Excel today and uses
+it to decide which touchpoints to explore qualitatively. She was also explicit
+that she does not want a decorative traffic light everywhere — she wants an
+alert when a result sits outside the ideal.
+**Options:** (a) per-client configurable thresholds producing a **single alert
+state**, shown only where a result is outside the ideal;
+(b) a full multi-level colour scale on every result;
+(c) no thresholds in P8.
+**Recommendation: (a).**
+**Impact:** (a) matches what she said, replaces manual Excel work, and keeps
+colour meaningful — but it is new configuration surface and needs a defined
+default for clients who set nothing. (b) is what her Excel looks like today and
+what she explicitly stepped away from; it also makes the accessibility story
+harder. (c) leaves the manual work in place and leaves the journey view unable
+to show which touchpoints warranted going deeper. Shapes P8.4, and P8.2 if
+configuration lands earlier.
+
+### D5 — Template ownership
+Templates are filtered `.eq("created_by", user.id)`. An employee's template is
+invisible to the CEO and hers to them, with nothing in the interface saying so.
+**Options:** (a) templates are shared across the internal team, with the author
+shown;
+(b) keep them personal, and say so in the interface;
+(c) personal by default with an explicit "share with the team".
+**Recommendation: (a).**
+**Impact:** (a) matches how a small consultancy actually works and is the point
+of a template library; it is a query change, not an authorization change, but it
+does make one person's setup visible to colleagues. (b) is the cheapest and the
+most honest about today's behaviour, but leaves the library nearly useless as
+the team grows. (c) is the most flexible and the most interface to build.
+Shapes P8.2.
+
+### D6 — Word cloud, or its replacement
+The current theme cloud encodes count as font size, hides the count in a `title`
+attribute, and floors at 12 px — a comprehension and accessibility problem. The
+consultant values the cloud form and was clear that qualitative results must not
+become a KPI or a percentage.
+**Options:** (a) replace it with a ranked list of themes with explicit counts
+and quotes attached;
+(b) keep a cloud, but with accessible minimum sizes, visible counts and a list
+alternative;
+(c) both — list as the default, cloud as an alternative view.
+**Recommendation: (a) for the product, with (c) available for the report and for
+chart-as-image export.**
+**Impact:** (a) is the clearest and most accessible, and puts the quotes — the
+strongest asset in the product — where they can be read; it loses a
+presentation form she likes. (b) keeps the form but keeps most of its problems.
+(c) costs an extra view but gives her the image she wants for a client deck.
+Shapes P8.4.
+
+### D7 — Scope of the client's own exploration
+The CEO was explicit that clients should be able to build their own crosses and
+that interactivity is the hook, while also noting a methodological rule that
+some characteristics should not be crossed with some indicators.
+**Options:** (a) keep free exploration within the existing server-side allowlist,
+anchored by the consultant's interpretation;
+(b) additionally let the consultant mark specific combinations as not
+methodologically valid, and have the product decline them with an explanation;
+(c) restrict clients to comparisons the consultant has prepared.
+**Recommendation: (a) for P8, with (b) as a candidate for V2.5.**
+**Impact:** (a) preserves her stated intent, changes no server contract, and
+relies on the interpretation (D2) as the safeguard she herself described. (b)
+encodes her methodology into the product and is genuinely valuable, but it is
+new configuration and a new server-side rule with its own boundary validation —
+real scope beyond experience design. (c) contradicts her explicit instruction
+and removes the hook. Shapes P8.3.
+
+---
+
+## 8. What P8 must not disturb
+
+- `p7f-suites-b-c` and every P7 document.
+- Calculations, the rounding policy, the calculation catalogue.
+- Ingestion semantics, the prefix convention, adapters, atomic commit, rollback.
+- RLS, grants, `data_scope` enforcement, authorization guards, middleware, CSP.
+- Roles. P8 introduces no new role and no new permission.
+- The synthetic beta environment. P8 discovery created no infrastructure,
+  touched no credentials, and made no external request.
