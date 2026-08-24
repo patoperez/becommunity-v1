@@ -860,6 +860,16 @@ async function main() {
   note(`${OUTCOME_CASES.length} cases hold: an absence, a validation rejection and a success never satisfy a denial`);
 
   const controller = new AbortController();
+  // A promise nobody is awaiting any more — an abandoned CDP waiter whose
+  // deadline fires after its operation already failed — would otherwise kill
+  // the process outright, and a dead process never reaches the `finally` block
+  // below. That is not hypothetical: it leaked a fixture pair during this PR's
+  // own development. Recording it as a run failure and cancelling keeps the run
+  // red while letting it wind down through cleanup.
+  process.on("unhandledRejection", (reason) => {
+    reporter.runFailure(`unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
+    controller.abort();
+  });
   const deadline = setTimeout(() => controller.abort(), RUN_TIMEOUT_MS);
   let beforeCounts = null;
 

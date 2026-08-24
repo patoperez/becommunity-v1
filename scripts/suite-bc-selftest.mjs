@@ -650,6 +650,22 @@ console.log("\n[6] Response and output sanitization:");
   }
   ok("neither suite reads a privileged credential, a response body, a wire payload or the clock");
 
+  // A fixture leak this PR actually caused: an abandoned CDP waiter rejected
+  // after its operation had already failed, Node killed the process, and the
+  // `finally` cleanup never ran. Every live suite must now catch that and wind
+  // down through cleanup instead of dying.
+  for (const file of [
+    "scripts/suite-a-isolation.mjs",
+    "scripts/suite-b-authorization.mjs",
+    "scripts/suite-c-input.mjs",
+  ]) {
+    const source = readFileSync(file, "utf8");
+    assert.match(source, /process\.on\("unhandledRejection"/, `${file} must not let an unhandled rejection bypass cleanup`);
+    assert.match(source, /runFailure\(`unhandled rejection/, `${file} must record it as a run failure`);
+    assert.match(source, /controller\.abort\(\)/, `${file} must cancel so the run settles before cleanup`);
+  }
+  ok("all three live suites turn an unhandled rejection into a red run that still reaches exact-id cleanup");
+
   // The inspector is the ONE place a body is read, and it never returns one.
   const inspector = readFileSync(INSPECTOR_FILE, "utf8");
   const bodyReads = inspector.split("\n").filter((line) => /await response\.(arrayBuffer|text|json)\(/.test(line));
