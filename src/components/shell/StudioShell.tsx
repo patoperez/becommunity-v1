@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { BeCommunityLockup } from "@/components/BrandMark";
+import { BackLink, type StudioParent } from "./BackLink";
 
 /**
  * Be Community Studio — the internal shell.
@@ -9,12 +10,17 @@ import { BeCommunityLockup } from "@/components/BrandMark";
  * moving between clients all day must never be confused about whose data is on
  * screen; that is a safety property, not a stylistic preference.
  *
- * MIGRATION BOUNDARY (P8-A): the shell is applied to the Studio home only. The
- * four existing internal screens keep their current routes and their own
- * chrome; the destinations below therefore point at `/admin/*` and are labelled
- * in product language rather than route language. Moving those screens onto
- * this shell — and onto the `/studio/*` addresses the information architecture
- * defines — is P8-B, and is deliberately not started here.
+ * MIGRATION BOUNDARY (P8-A): every internal screen now wears this shell, but
+ * they keep their existing `/admin/*` addresses, their forms, their Server
+ * Actions and their query semantics. The stops below are therefore labelled in
+ * product language while pointing at the real routes. Moving them onto the
+ * `/studio/*` addresses the information architecture defines is P8-B.
+ *
+ * NAVIGATION. Each page declares an explicit PARENT (`back`), never
+ * `history.back()`. Deep links, reloads and emailed URLs are the normal way
+ * these pages are reached, and in all of those the history stack is empty or
+ * wrong. Nothing here intercepts history, so browser Back still behaves
+ * normally.
  */
 
 export type StudioStop = {
@@ -56,19 +62,28 @@ export const STUDIO_STOPS: StudioStop[] = [
 export function StudioShell({
   userEmail,
   breadcrumb,
+  back,
   title,
   lead,
   utility,
   currentHref,
+  headerAccent,
   children,
 }: {
   userEmail: string;
   /** "Dónde estoy": the trail, always naming the client when there is one. */
   breadcrumb?: string[];
+  /**
+   * The explicit parent. Omitted on the Studio home, which has none — a back
+   * control that points at the page you are already on is worse than none.
+   */
+  back?: StudioParent;
   title: string;
   lead?: string;
   utility?: ReactNode;
   currentHref?: string;
+  /** An optional tinted band behind the page heading, for section identity. */
+  headerAccent?: { surface: string; line: string };
   children: ReactNode;
 }) {
   return (
@@ -113,7 +128,15 @@ export function StudioShell({
         </nav>
       </header>
 
-      <main id="contenido" className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 sm:px-6 sm:py-10">
+      <main id="contenido" className="mx-auto w-full max-w-6xl flex-1 px-5 py-6 sm:px-6 sm:py-8">
+        {/* The back control sits above the heading, in the normal flow, so it is
+            visible at every width without ever covering content. */}
+        {back ? (
+          <nav aria-label="Volver" className="mb-3">
+            <BackLink parent={back} />
+          </nav>
+        ) : null}
+
         {breadcrumb && breadcrumb.length > 0 ? (
           <nav aria-label="Ruta" className="mb-3">
             <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
@@ -129,10 +152,19 @@ export function StudioShell({
           </nav>
         ) : null}
 
-        <h1 className="text-3xl">{title}</h1>
-        {lead ? <p className="mt-2 max-w-2xl text-base text-muted">{lead}</p> : null}
+        <div
+          className={headerAccent ? "rounded-xl border px-5 py-4 sm:px-6 sm:py-5" : undefined}
+          style={
+            headerAccent
+              ? { backgroundColor: headerAccent.surface, borderColor: headerAccent.line }
+              : undefined
+          }
+        >
+          <h1 className="text-3xl">{title}</h1>
+          {lead ? <p className="mt-2 max-w-2xl text-base text-muted">{lead}</p> : null}
+        </div>
 
-        <div className="mt-8">{children}</div>
+        <div className="mt-7">{children}</div>
       </main>
     </div>
   );

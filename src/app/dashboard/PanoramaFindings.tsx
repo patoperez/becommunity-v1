@@ -200,7 +200,7 @@ export default function PanoramaFindings({
                 </>
               ) : current.unit && current.numeric != null ? (
                 <>
-                  <ScaleMark value={current.numeric} unit={current.unit} tone="accent" height={14} />
+                  <ScaleMark value={current.numeric} unit={current.unit} tone="accent" />
                   {current.scaleNote ? (
                     <p className="mt-1.5 text-xs text-muted">{current.scaleNote}</p>
                   ) : null}
@@ -212,7 +212,6 @@ export default function PanoramaFindings({
                     min={current.peer.min}
                     max={current.peer.max}
                     tone="accent"
-                    height={14}
                   />
                   {current.scaleNote ? (
                     <p className="mt-1.5 text-xs text-muted">{current.scaleNote}</p>

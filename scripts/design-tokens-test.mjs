@@ -24,12 +24,32 @@ import {
   contrastRatio,
   resolveBrand,
 } from "../src/lib/brand/contrast.ts";
-import { domainFor } from "../src/components/evidence/ScaleMark.tsx";
+import {
+  domainFor,
+  divergingGeometry,
+  proportionGeometry,
+  peerGeometry,
+} from "../src/components/evidence/ScaleMark.tsx";
 import { sampleCopy, studyBaseSentence } from "../src/lib/language/sample.ts";
 import { humanize, resultLanguage, studyStateLabel, unitLabel } from "../src/lib/language/results.ts";
 
 let checks = 0;
 const ok = (message) => { checks += 1; console.log(`  PASS  ${message}`); };
+
+/**
+ * Source with comments removed.
+ *
+ * Several files explain, in their own header, the defect they were written to
+ * fix — "a stretched viewBox", "no progress bar". A naive scan matches that
+ * explanation and fails the file for describing the thing it prevents, so every
+ * "this string must not appear" check reads the CODE.
+ */
+const codeOf = (source) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+/** Read a source file as CODE. Every structural assertion below uses this. */
+const readCode = async (path) =>
+  codeOf(await readFile(new URL(`../${path}`, import.meta.url), "utf8"));
 
 // --- 1. The token palette --------------------------------------------------
 
@@ -93,7 +113,7 @@ for (const file of ["src/app/dashboard/NarrativeHome.tsx", "src/app/dashboard/Jo
   "src/app/dashboard/page.tsx", "src/components/Actions.tsx", "src/components/States.tsx",
   "src/components/SampleContext.tsx", "src/app/login/page.tsx",
   "src/app/dashboard/PanoramaFindings.tsx"]) {
-  const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+  const source = await readCode(file);
   assert.doesNotMatch(source, /text-blue/, `${file} must use text-evidence, not the brand blue, for text`);
 }
 ok("the brand blue is used for marks only; text uses the AA-safe evidence blue");
@@ -215,15 +235,15 @@ for (const [surface, label] of [
 }
 ok("all five category tints carry strong text above 4.5:1");
 
-const categories = await readFile(new URL("../src/lib/brand/categories.ts", import.meta.url), "utf8");
+const categories = await readCode("src/lib/brand/categories.ts");
 assert.doesNotMatch(categories, /--color-(caution|danger|positive)/,
   "category accents must never be sourced from the semantic outcome tokens");
 assert.match(categories, /--color-magenta/, "category accents come from the identity's hues");
 ok("grouping colour and outcome colour are separate token families");
 
 console.log("\n[8] A published study is composed; readiness gaps stay internal");
-const panorama = await readFile(new URL("../src/app/dashboard/NarrativeHome.tsx", import.meta.url), "utf8");
-const journey = await readFile(new URL("../src/app/dashboard/JourneyMap.tsx", import.meta.url), "utf8");
+const panorama = await readCode("src/app/dashboard/NarrativeHome.tsx");
+const journey = await readCode("src/app/dashboard/JourneyMap.tsx");
 for (const [name, source] of [["NarrativeHome", panorama], ["JourneyMap", journey]]) {
   assert.match(source, /audience === "preview"/,
     `${name} must gate its readiness notice on the internal audience`);
@@ -232,16 +252,15 @@ for (const [name, source] of [["NarrativeHome", panorama], ["JourneyMap", journe
   assert.doesNotMatch(source, /no hay una lectura publicada para este momento/i,
     `${name} must not repeat a missing-interpretation placeholder`);
 }
-const previewPage = await readFile(
-  new URL("../src/app/admin/preview/[studyId]/page.tsx", import.meta.url), "utf8");
+const previewPage = await readCode("src/app/admin/preview/[studyId]/page.tsx");
 assert.match(previewPage, /audience="preview"/, "the internal preview must request the readiness view");
-const dashboardPage = await readFile(new URL("../src/app/dashboard/page.tsx", import.meta.url), "utf8");
+const dashboardPage = await readCode("src/app/dashboard/page.tsx");
 assert.doesNotMatch(dashboardPage, /audience="preview"/,
   "the client dashboard must never request the internal readiness view");
 ok("readiness gaps are reachable from the internal preview only");
 
 console.log("\n[9] Sign-in is one frame, and never fakes it with hidden overflow");
-const loginPage = await readFile(new URL("../src/app/login/page.tsx", import.meta.url), "utf8");
+const loginPage = await readCode("src/app/login/page.tsx");
 assert.match(loginPage, /min-h-svh/, "the frame must track the small viewport unit, not a fixed height");
 assert.match(loginPage, /overflow-y-auto/, "content must stay reachable when it genuinely cannot fit");
 assert.doesNotMatch(loginPage, /overflow-hidden/, "no-scroll must never be achieved by clipping");
@@ -251,8 +270,158 @@ assert.match(loginPage, /name="email"[\s\S]*name="password"/, "both fields keep 
 assert.match(loginPage, /No puedes entrar/, "recovery guidance is never gated away");
 ok("sign-in frames to the viewport, degrades to safe scrolling, and keeps its action intact");
 
-console.log("\n[10] Frozen adversarial-harness mechanisms are intact");
-const card = await readFile(new URL("../src/app/dashboard/StudyCard.tsx", import.meta.url), "utf8");
+console.log("\n[10] The three result visual contracts");
+// Diverging (recomendación, -100..100): read from zero, negative left, positive
+// right, exactly one marker. These are the geometries the mark renders from.
+{
+  const floor = divergingGeometry(-100);
+  assert.equal(floor.markerPercent, 0, "-100 sits at the far left");
+  assert.equal(floor.fillLeftPercent, 0, "a negative result fills leftwards from zero");
+  assert.equal(floor.fillWidthPercent, 50, "-100 fills the whole left half");
+
+  const zero = divergingGeometry(0);
+  assert.equal(zero.markerPercent, 50, "zero sits at the centre");
+  assert.equal(zero.fillWidthPercent, 0, "zero fills nothing");
+
+  const ceiling = divergingGeometry(100);
+  assert.equal(ceiling.markerPercent, 100, "+100 sits at the far right");
+  assert.equal(ceiling.fillLeftPercent, 50, "a positive result fills rightwards from zero");
+  assert.equal(ceiling.fillWidthPercent, 50, "+100 fills the whole right half");
+
+  const positive = divergingGeometry(20);
+  assert.equal(positive.markerPercent, 60);
+  assert.equal(positive.fillLeftPercent, 50, "a positive result never extends left of zero");
+  assert.equal(positive.fillWidthPercent, 10);
+
+  const negative = divergingGeometry(-20);
+  assert.equal(negative.markerPercent, 40);
+  assert.equal(negative.fillLeftPercent, 40, "a negative result starts at the value");
+  assert.equal(negative.fillWidthPercent, 10, "and ends at zero");
+  assert.equal(negative.zeroPercent, 50, "the neutral zero reference is always centred");
+
+  assert.equal(divergingGeometry(999).markerPercent, 100, "out-of-domain values clamp");
+  assert.equal(divergingGeometry(-999).markerPercent, 0, "out-of-domain values clamp");
+}
+ok("diverging: centred zero, correct side, one marker, clamped");
+
+// Proportional (percentage): one fill from zero, one endpoint, nothing else.
+{
+  assert.deepEqual(proportionGeometry(0), { fillWidthPercent: 0, markerPercent: 0 });
+  assert.deepEqual(proportionGeometry(50), { fillWidthPercent: 50, markerPercent: 50 });
+  assert.deepEqual(proportionGeometry(100), { fillWidthPercent: 100, markerPercent: 100 });
+  const half = proportionGeometry(35);
+  assert.equal(half.markerPercent, half.fillWidthPercent,
+    "the marker IS the end of the fill — never a second value elsewhere on the track");
+  assert.equal(proportionGeometry(140).markerPercent, 100, "out-of-domain values clamp");
+}
+ok("proportion: one fill from zero whose end is the only marker");
+
+// A score has no authoritative maximum, so it is never given an absolute track.
+{
+  assert.equal(domainFor("score"), null, "a score must not be given a fabricated domain");
+  assert.equal(peerGeometry(5, 5, 5), null, "peers that do not span a range cannot be positioned");
+  assert.equal(peerGeometry(7.5, 7.5, 8.4).markerPercent, 0, "the lowest peer sits at the left end");
+  assert.equal(peerGeometry(8.4, 7.5, 8.4).markerPercent, 100, "the highest peer sits at the right end");
+  assert.equal(peerGeometry(7.95, 7.5, 8.4).markerPercent, 50, "the midpoint sits in the middle");
+}
+ok("average without a maximum: peer comparison, never an absolute progress bar");
+
+const marksCode = await readCode("src/components/evidence/ScaleMark.tsx");
+// The distortion that made the marks look broken: a non-uniform viewBox scale
+// turned every circle into an ellipse and every rounded end into a second pill.
+assert.doesNotMatch(marksCode, /preserveAspectRatio="none"/,
+  "a stretched viewBox distorts the marker and makes one value look like two");
+for (const [kind, count] of [["diverging", 1], ["proportion", 1], ["peer", 1]]) {
+  const section = marksCode.split(`data-mark-kind="${kind}"`)[1] ?? "";
+  const untilNext = section.split("data-mark-kind=")[0];
+  const markers = untilNext.match(/<Marker /g) ?? [];
+  assert.equal(markers.length, count, `${kind} must render exactly ${count} marker`);
+}
+assert.doesNotMatch(marksCode, /data-mark-kind="absent"[\s\S]*?<Marker/,
+  "the absent mark carries no marker, because there is no value");
+ok("each mark renders exactly one marker, and absence renders none");
+
+console.log("\n[11] Cliente B is concise and promises nothing");
+const comingCode = await readCode("src/app/dashboard/StudyComingSoon.tsx");
+assert.match(comingCode, /Estamos preparando tu estudio/, "the agreed headline");
+assert.match(comingCode, /No necesitas hacer nada por ahora/, "the agreed reassurance");
+assert.match(comingCode, /Qué encontrarás aquí/, "the orientation interaction is named in ordinary Spanish");
+for (const area of ["Hallazgos", "Recorrido", "Voces"]) {
+  assert.ok(comingCode.includes(`label: "${area}"`), `the ${area} item exists`);
+}
+assert.doesNotMatch(comingCode, /analizando|%\s*completado|progress|Progreso/i,
+  "no progress bar and no invented stage");
+assert.doesNotMatch(comingCode, /publica a propósito|se vuelve visible cuando/i,
+  "publication mechanics are internal workflow, not client copy");
+assert.match(comingCode, /aria-pressed/, "the items are selectable and announce their state");
+assert.match(comingCode, /aria-live="polite"/, "the revealed sentence is announced");
+assert.match(comingCode, /ArrowRight/, "keyboard navigation between the items");
+assert.match(comingCode, /motion-reduce:/, "a complete reduced-motion state");
+const clientDashboard = await readCode("src/app/dashboard/page.tsx");
+assert.match(clientDashboard, /<StudyComingSoon \/>/, "the client portal uses it");
+ok("headline, two sentences, three orientation items, no fake progress");
+
+console.log("\n[12] Every internal route declares an explicit parent");
+const backLink = await readCode("src/components/shell/BackLink.tsx");
+assert.doesNotMatch(backLink, /history\.back|router\.back/,
+  "the parent must be an explicit href, never browser history");
+assert.match(backLink, /Volver a Studio/);
+assert.match(backLink, /Volver a Estudios y plantillas/);
+for (const [file, expected] of [
+  ["src/app/admin/studies/page.tsx", "STUDIO_HOME"],
+  ["src/app/admin/qualitative/page.tsx", "STUDIO_HOME"],
+  ["src/app/admin/clients/page.tsx", "STUDIO_HOME"],
+  ["src/app/admin/upload/page.tsx", "STUDIES_LIST"],
+]) {
+  const source = await readCode(file);
+  assert.match(source, /<StudioShell/, `${file} must wear the Studio shell`);
+  assert.ok(source.includes(expected), `${file} must declare an explicit parent`);
+  assert.doesNotMatch(source, /history\.back|router\.back/, `${file} must not use browser history`);
+  // The shell's own nav replaces the hand-rolled link clusters.
+  assert.doesNotMatch(source, />Portal</, `${file} must drop its duplicated header links`);
+}
+// The Studio home is the root: a back control there would point at itself.
+assert.doesNotMatch(clientDashboard, /back=\{STUDIO_HOME\}/, "the Studio home has no parent");
+const preview = await readCode("src/app/admin/preview/[studyId]/page.tsx");
+assert.match(preview, /STUDIES_LIST/, "the preview must return to the internal study list");
+ok("explicit parents everywhere, no history interception, no root back control");
+
+console.log("\n[13] Internal surfaces speak Spanish and keep their contracts");
+const studiesPage = await readCode("src/app/admin/studies/page.tsx");
+const configurator = await readCode("src/app/admin/studies/StudyConfigurator.tsx");
+assert.match(configurator, /studyStateLabel\(study\.status\)/,
+  "the study chip must translate the enum, not print it");
+assert.doesNotMatch(configurator, />\{study\.status\}</, "the raw enum must not reach the screen");
+for (const value of ['value="draft"', 'value="published"', 'value="archived"']) {
+  assert.ok(configurator.includes(value), `the stored enum value ${value} is unchanged`);
+}
+// Every submit label the adversarial harness signs actions with.
+for (const [source, labels] of [
+  [studiesPage, ["Crear y cargar datos", "Usar plantilla", "Guardar como plantilla",
+    "Guardar nueva versión", "Eliminar plantilla"]],
+  [configurator, ["Guardar configuración"]],
+]) {
+  for (const submitLabel of labels) {
+    assert.ok(source.includes(submitLabel), `the submit control "${submitLabel}" must keep its name`);
+  }
+}
+const qualitative = await readCode("src/app/admin/qualitative/page.tsx");
+for (const pinned of ["Generar sugerencias pendientes", "Aceptar sugerencias",
+  "Reetiquetar / fusionar", "Rechazar", 'name="observation_id"', 'name="quote_id"',
+  'name="theme"', 'name="stage_key"', 'name="study"', "Publicar cita"]) {
+  assert.ok(qualitative.includes(pinned), `qualitative must keep "${pinned}"`);
+}
+assert.match(qualitative, /no tiene observaciones cualitativas/,
+  "a study with zero observations gets a real empty state, not a naked table head");
+const clientsPage = await readCode("src/app/admin/clients/page.tsx");
+for (const pinned of ["Crear cliente", "Enviar invitación", "Guardar usuario",
+  "Eliminar cuenta cliente", "Guardar identidad", 'name="confirmation_email"', 'name="data_scope"']) {
+  assert.ok(clientsPage.includes(pinned), `clients must keep "${pinned}"`);
+}
+ok("statuses translated, stored enums untouched, every pinned action name intact");
+
+console.log("\n[14] Frozen adversarial-harness mechanisms are intact");
+const card = await readCode("src/app/dashboard/StudyCard.tsx");
 assert.match(card, /aria-label=\{`Filtrar por \$\{label\(option\.key\)\}`\}/,
   "Suite A locates the study filter by this exact accessible name");
 assert.match(card, /\$\{view\.selectedUnits\} de \$\{view\.sourceUnits\} unidades de respuesta/,
@@ -264,7 +433,7 @@ assert.match(card, /Muestra insuficiente · se ocultaron los resultados de esta 
 assert.match(card, /aria-live="polite"/, "the live region itself must remain");
 ok("the study filter aria-label and the live-region signal are unchanged");
 
-const pivot = await readFile(new URL("../src/app/dashboard/PivotExplorer.tsx", import.meta.url), "utf8");
+const pivot = await readCode("src/app/dashboard/PivotExplorer.tsx");
 for (const control of ["Filas", "Columnas", "Métrica", "Agregación"]) {
   assert.ok(
     pivot.includes(control),
@@ -274,11 +443,11 @@ for (const control of ["Filas", "Columnas", "Métrica", "Agregación"]) {
 assert.match(pivot, /Explorador de cruces/, "Suite C asserts this heading is absent after a refused cross");
 ok("the pivot control names Suites B and C drive are unchanged");
 
-const layout = await readFile(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
+const layout = await readCode("src/app/layout.tsx");
 assert.match(layout, /lang="es"/, "the document must declare Spanish");
 assert.match(layout, /next\/font\/google/, "fonts must be self-hosted through next/font, never fetched at runtime");
 assert.match(layout, /href="#contenido"/, "a skip link must reach the main landmark");
-const css = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
+const css = await readCode("src/app/globals.css");
 assert.doesNotMatch(css, /font-family:\s*Arial/i, "the Arial override that discarded the brand fonts is gone");
 assert.match(css, /prefers-reduced-motion/, "reduced motion must be honoured globally");
 ok("lang, self-hosted fonts, skip link, no Arial override, reduced motion");

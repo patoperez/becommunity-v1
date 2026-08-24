@@ -71,9 +71,9 @@ export default function NarrativeHome({
       unit,
       numeric: numeric != null && Number.isFinite(numeric) ? numeric : null,
       peer: null,
-      scaleNote: unit
-        ? `${unitLabel(unit)} (${domainFor(unit)?.label})`
-        : unitLabel("score"),
+      // The mark draws its own -100/0/+100 or 0 %/100 % anchors, so the caption
+      // names the measure and no longer repeats the range.
+      scaleNote: unit ? unitLabel(unit) : unitLabel("score"),
       context: movementLabel(metric.movement, metric.delta),
       sample: null,
       method: { summary: "Cómo se calcula", body: [language.method] },
@@ -100,7 +100,7 @@ export default function NarrativeHome({
       scaleNote: domain
         ? `El más bajo de los ${spot.comparedWith} momentos medidos ${domain.label}.`
         : `El más bajo de los ${spot.comparedWith} momentos que se miden en la misma escala. ` +
-          `La barra los compara entre sí (de ${spot.peerMin} a ${spot.peerMax}), no contra un máximo.`,
+          `La barra lo sitúa entre ellos, no contra un máximo.`,
       context: null,
       sample: { visibility: spot.visibility, count: spot.n },
       method: {

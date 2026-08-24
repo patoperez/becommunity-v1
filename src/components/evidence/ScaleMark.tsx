@@ -1,17 +1,24 @@
 /**
  * Visual evidence for a single result.
  *
- * One chart, one point, and the point is written above it. Every mark is
- * hand-written SVG — the established pattern in this codebase, compatible with
- * the Workers runtime and the strict CSP, and it adds no dependency.
+ * WHY THIS IS NOT SVG ANY MORE. The previous marks drew a `<rect>` and a
+ * `<circle>` inside `viewBox="0 0 100 12"` with `preserveAspectRatio="none"`.
+ * Stretched to ~400 px wide that scales x by ~4 and y by 1, so every circle
+ * became a wide ellipse and every rounded corner smeared — the fill's rounded
+ * end and the value marker read as TWO pills, i.e. as two values. The geometry
+ * was right and the rendering was lying about it.
  *
- * Accessibility contract, applied to every mark here:
- *  - the exact value is always present as real text next to the mark, so the
- *    drawing is never the only carrier of the number;
- *  - the mark itself is `aria-hidden`, because repeating the number to a screen
- *    reader in a second voice adds nothing;
- *  - position and length carry the quantity — never colour alone, and never
- *    font size.
+ * The marks are now plain CSS: a track, a fill positioned by percentage, and
+ * one fixed-size marker. Percentages stretch; the marker does not. There is
+ * exactly one marker per mark, and it is the same shape in all three, so "this
+ * is the result" is learned once.
+ *
+ * Accessibility contract, unchanged:
+ *  - the exact value is always real text next to the mark, so the drawing is
+ *    never the only carrier of the number;
+ *  - the drawing itself is `aria-hidden`; the scale anchors are real text;
+ *  - position and length carry the quantity — never colour alone, never font
+ *    size, and the marker is distinguishable by shape in greyscale.
  */
 
 type Unit = "nps" | "percent" | "score";
@@ -23,10 +30,10 @@ type Unit = "nps" | "percent" | "score";
  *
  * `score` returns null on purpose. The scale a study uses is the client's own
  * instrument: it may be 1-5, 1-10 or something else, and the sanitized
- * aggregate the browser receives does not carry it. An earlier draft of this
- * file assumed 1-5, which pinned a 7.5 average at the far right of a full bar —
- * a right number under a wrong denominator. A score therefore gets no absolute
- * track; it is shown as a number, and compared only against its own peers.
+ * aggregate the browser receives does not carry it. An earlier draft assumed
+ * 1-5, which pinned a 7.5 average at the far right of a full bar — a right
+ * number under a wrong denominator. A score therefore gets no absolute track;
+ * it is compared only against its own peers.
  */
 export function domainFor(unit: Unit): { min: number; max: number; label: string } | null {
   if (unit === "nps") return { min: -100, max: 100, label: "de -100 a 100" };
@@ -34,139 +41,193 @@ export function domainFor(unit: Unit): { min: number; max: number; label: string
   return null;
 }
 
-function ratio(value: number, min: number, max: number): number {
-  if (!(max > min)) return 0.5;
-  return Math.max(0, Math.min(1, (value - min) / (max - min)));
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
 }
 
 /**
- * A value placed on its own declared scale. The full track is always drawn, so
- * the reader can see how much of the scale the result occupies rather than a
- * bar that fills whatever space is available.
+ * Geometry for a DIVERGING scale (recomendación, -100..100).
+ *
+ * Read from zero, not from the floor: a negative result extends LEFT of centre
+ * and a positive result extends RIGHT. Exported so the deterministic gate can
+ * assert the contract without rendering anything.
+ */
+export function divergingGeometry(
+  value: number,
+  min = -100,
+  max = 100,
+): { zeroPercent: number; fillLeftPercent: number; fillWidthPercent: number; markerPercent: number } {
+  const span = max - min;
+  const zero = clampPercent(((0 - min) / span) * 100);
+  const marker = clampPercent(((value - min) / span) * 100);
+  return {
+    zeroPercent: zero,
+    fillLeftPercent: Math.min(zero, marker),
+    fillWidthPercent: Math.abs(marker - zero),
+    markerPercent: marker,
+  };
+}
+
+/** Geometry for a PROPORTIONAL track (0..100 %): one fill, one endpoint. */
+export function proportionGeometry(
+  value: number,
+  min = 0,
+  max = 100,
+): { fillWidthPercent: number; markerPercent: number } {
+  const marker = clampPercent(((value - min) / (max - min)) * 100);
+  return { fillWidthPercent: marker, markerPercent: marker };
+}
+
+/**
+ * Geometry for a PEER comparison: where a value sits between the lowest and
+ * highest comparable result actually being shown. Returns null when the peers
+ * do not span a range, because a single point cannot be positioned honestly.
+ */
+export function peerGeometry(
+  value: number,
+  min: number,
+  max: number,
+): { markerPercent: number } | null {
+  if (!(max > min)) return null;
+  return { markerPercent: clampPercent(((value - min) / (max - min)) * 100) };
+}
+
+/** The one marker shape, shared by all three marks. */
+function Marker({ percent, fill }: { percent: number; fill: string }) {
+  return (
+    <span
+      data-mark="marker"
+      aria-hidden="true"
+      className="absolute top-1/2 h-[1.35rem] w-[0.3rem] -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-[var(--color-surface)]"
+      style={{ left: `${percent}%`, backgroundColor: fill }}
+    />
+  );
+}
+
+function Anchors({ left, middle, right }: { left: string; middle?: string; right: string }) {
+  return (
+    <div className="tabular mt-1.5 flex items-baseline justify-between text-[0.7rem] text-muted">
+      <span>{left}</span>
+      {middle ? <span>{middle}</span> : null}
+      <span>{right}</span>
+    </div>
+  );
+}
+
+const TRACK = "relative h-3 w-full rounded-full bg-surface-sunken";
+
+/**
+ * A value on its own declared, absolute scale. Only a measure with a real
+ * domain may use this: `nps` diverges from zero, `percent` fills from zero.
  */
 export function ScaleMark({
   value,
   unit,
   tone = "evidence",
-  height = 12,
 }: {
   value: number;
-  /** Only a unit with a real, defined domain may be drawn on an absolute scale. */
   unit: "nps" | "percent";
   tone?: "evidence" | "accent";
-  height?: number;
 }) {
   const domain = domainFor(unit);
   if (!domain) return null;
-  const { min, max } = domain;
-  const position = ratio(value, min, max);
   const fill = tone === "accent" ? "var(--study-accent)" : "var(--color-evidence)";
-  // NPS is a diverging scale: it is read from zero, not from the floor.
-  const zero = unit === "nps" ? ratio(0, min, max) : 0;
-  const left = Math.min(position, zero);
-  const width = Math.abs(position - zero);
 
+  if (unit === "nps") {
+    const geometry = divergingGeometry(value, domain.min, domain.max);
+    return (
+      <div data-mark-kind="diverging">
+        <div className={TRACK}>
+          {/* The neutral zero reference, drawn once and behind the fill. */}
+          <span
+            data-mark="zero"
+            aria-hidden="true"
+            className="absolute inset-y-[-0.2rem] w-px bg-line-strong"
+            style={{ left: `${geometry.zeroPercent}%` }}
+          />
+          <span
+            data-mark="fill"
+            aria-hidden="true"
+            className="absolute inset-y-0 rounded-full"
+            style={{
+              left: `${geometry.fillLeftPercent}%`,
+              width: `${geometry.fillWidthPercent}%`,
+              backgroundColor: fill,
+            }}
+          />
+          <Marker percent={geometry.markerPercent} fill={fill} />
+        </div>
+        <Anchors left="−100" middle="0" right="+100" />
+      </div>
+    );
+  }
+
+  const geometry = proportionGeometry(value, domain.min, domain.max);
   return (
-    <svg
-      viewBox="0 0 100 12"
-      preserveAspectRatio="none"
-      role="presentation"
-      aria-hidden="true"
-      focusable="false"
-      style={{ height, width: "100%" }}
-    >
-      <rect x="0" y="4" width="100" height="4" rx="2" fill="var(--color-surface-sunken)" />
-      <rect
-        x={left * 100}
-        y="2.5"
-        width={Math.max(width * 100, 0.8)}
-        height="7"
-        rx="3.5"
-        fill={fill}
-      />
-      {unit === "nps" ? (
-        <line x1={zero * 100} y1="0" x2={zero * 100} y2="12" stroke="var(--color-line-strong)" strokeWidth="1" />
-      ) : null}
-      <circle cx={position * 100} cy="6" r="4" fill={fill} stroke="var(--color-surface)" strokeWidth="1.5" />
-      <title>{`${value} en una escala de ${min} a ${max}`}</title>
-    </svg>
+    <div data-mark-kind="proportion">
+      <div className={TRACK}>
+        <span
+          data-mark="fill"
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 rounded-full"
+          style={{ width: `${geometry.fillWidthPercent}%`, backgroundColor: fill }}
+        />
+        <Marker percent={geometry.markerPercent} fill={fill} />
+      </div>
+      <Anchors left="0 %" right="100 %" />
+    </div>
   );
 }
 
 /**
  * A value placed against its own PEERS rather than against an absolute scale.
  *
- * This is what a score gets instead of a fabricated domain: the track spans the
- * lowest and highest of the comparable results actually being shown, and the
- * caption has to say so. It answers "compared with the others" honestly and
- * never implies a denominator the product does not know.
+ * This is what an average gets instead of a fabricated domain. There is no fill
+ * — a fill would imply a zero baseline the product cannot claim — only the span
+ * of the comparable results, its two ends labelled with the real numbers, and
+ * the one marker showing where this result sits between them.
  */
 export function PeerMark({
   value,
   min,
   max,
   tone = "evidence",
-  height = 12,
 }: {
   value: number;
   min: number;
   max: number;
   tone?: "evidence" | "accent";
-  height?: number;
 }) {
-  if (!(max > min)) return null;
-  const position = ratio(value, min, max);
+  const geometry = peerGeometry(value, min, max);
+  if (!geometry) return null;
   const fill = tone === "accent" ? "var(--study-accent)" : "var(--color-evidence)";
   return (
-    <svg
-      viewBox="0 0 100 12"
-      preserveAspectRatio="none"
-      role="presentation"
-      aria-hidden="true"
-      focusable="false"
-      style={{ height, width: "100%" }}
-    >
-      <rect x="0" y="4" width="100" height="4" rx="2" fill="var(--color-surface-sunken)" />
-      <circle
-        cx={position * 100}
-        cy="6"
-        r="4"
-        fill={fill}
-        stroke="var(--color-surface)"
-        strokeWidth="1.5"
-      />
-      <title>{`${value}, entre ${min} y ${max} en los resultados comparables`}</title>
-    </svg>
+    <div data-mark-kind="peer">
+      <div className={TRACK}>
+        {/* Both ends are real, measured results, so both are marked. */}
+        <span aria-hidden="true" className="absolute inset-y-0 left-0 w-0.5 rounded-full bg-line-strong" />
+        <span aria-hidden="true" className="absolute inset-y-0 right-0 w-0.5 rounded-full bg-line-strong" />
+        <Marker percent={geometry.markerPercent} fill={fill} />
+      </div>
+      <Anchors left={String(min)} right={String(max)} />
+    </div>
   );
 }
 
 /**
- * The "no evidence yet" equivalent of a mark: a dashed empty track. Absence is
- * drawn rather than left blank, so a reader can tell "nothing measured here"
- * from "the section failed to load".
+ * The "no evidence yet" equivalent: a dashed empty track. Absence is drawn
+ * rather than left blank, so a reader can tell "nothing measured here" from
+ * "the section failed to load". It carries no marker, because there is no value.
  */
-export function AbsentMark({ height = 12 }: { height?: number }) {
+export function AbsentMark() {
   return (
-    <svg
-      viewBox="0 0 100 12"
-      preserveAspectRatio="none"
-      role="presentation"
-      aria-hidden="true"
-      focusable="false"
-      style={{ height, width: "100%" }}
-    >
-      <rect
-        x="0.5"
-        y="4"
-        width="99"
-        height="4"
-        rx="2"
-        fill="none"
-        stroke="var(--color-line-strong)"
-        strokeWidth="1.5"
-        strokeDasharray="4 4"
+    <div data-mark-kind="absent">
+      <div
+        aria-hidden="true"
+        className="h-3 w-full rounded-full border border-dashed border-line-strong"
       />
-    </svg>
+    </div>
   );
 }
 

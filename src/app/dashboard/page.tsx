@@ -18,6 +18,7 @@ import { StudioShell, STUDIO_STOPS } from "@/components/shell/StudioShell";
 import { StateBlock } from "@/components/States";
 import { Forward } from "@/components/Actions";
 import { studyStateLabel } from "@/lib/language/results";
+import StudyComingSoon from "./StudyComingSoon";
 
 export const metadata = {
   title: "Inicio",
@@ -437,21 +438,9 @@ export default async function DashboardPage() {
           </p>
         </StateBlock>
       ) : !studies || studies.length === 0 ? (
-        /* The deliberate empty state: what will appear, who puts it there, and
-           what happens next — not a grey box saying nothing is here. */
-        <div className="rounded-2xl border border-line bg-surface px-6 py-12 text-center sm:px-10">
-          <h2 className="text-2xl">Todavía no hay un estudio publicado para ti</h2>
-          <p className="mx-auto mt-3 max-w-prose text-base leading-relaxed text-muted">
-            Cuando el equipo de Be Community termine de analizar y revisar el
-            estudio de tu comunidad, aparecerá aquí: qué pasó, qué significa y
-            qué conviene mirar después. No tienes que hacer nada mientras tanto.
-          </p>
-          <p className="mx-auto mt-4 max-w-prose text-sm text-muted">
-            Un estudio solo se vuelve visible cuando alguien de Be Community lo
-            publica a propósito. Si esperabas ver algo hoy, escríbele a la
-            persona que te dio el acceso.
-          </p>
-        </div>
+        /* Concise, and with one small thing to do. Publication mechanics are
+           internal workflow and are no longer explained to the client. */
+        <StudyComingSoon />
       ) : (
         <>
           {narrative ? (

@@ -13,6 +13,7 @@ import NarrativeHome from "@/app/dashboard/NarrativeHome";
 import LongitudinalTrends from "@/app/dashboard/LongitudinalTrends";
 import StudyCard from "@/app/dashboard/StudyCard";
 import { InsightsShell } from "@/components/shell/InsightsShell";
+import { STUDIES_LIST } from "@/components/shell/BackLink";
 
 export const metadata = { title: "Vista previa de cliente · Be Community" };
 
@@ -86,10 +87,11 @@ export default async function ClientPreviewPage({ params }: { params: Promise<{ 
     brand={brand}
     logoUrl={logoUrl}
     userEmail={user.email ?? ""}
-    banner={<p className="border-b border-caution-line bg-caution-surface px-6 py-2.5 text-center text-sm font-semibold text-caution">
-      Vista previa interna · el cliente no puede ver este estudio hasta que se publique
-    </p>}
-    utility={<Link href="/admin/studies" className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken">Volver a Studio</Link>}
+    banner={<div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-b border-caution-line bg-caution-surface px-6 py-2.5 text-center text-sm font-semibold text-caution">
+      <span>Vista previa interna · el cliente no puede ver este estudio hasta que se publique</span>
+      <Link href={STUDIES_LIST.href} className="underline underline-offset-4">{STUDIES_LIST.label}</Link>
+    </div>}
+    utility={<Link href={STUDIES_LIST.href} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken">{STUDIES_LIST.label}</Link>}
   >
     {narrative ? <NarrativeHome view={narrative} brand={brand} audience="preview" /> : null}
     <LongitudinalTrends view={longitudinal} />
