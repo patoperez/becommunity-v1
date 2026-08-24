@@ -1,10 +1,12 @@
 // =============================================================================
 // P7 adversarial harness — fixture lifecycle (docs/P7_HARNESS_DESIGN.md §6).
 // =============================================================================
-// The ONLY module that owns the service credential, and it uses it only for the
-// three narrow purposes `docs/P7_PLAN.md` §3 permits: metadata preflight,
-// residue counts, and exact-id deletion. No other harness module reads that
-// environment variable or imports the privileged client (asserted by G4).
+// The ONLY module that owns the service credential. Its permitted uses are
+// fixture provisioning, bounded metadata accounting and reconciliation, and
+// exact cleanup — plus, for Suite A, the separately labelled A5.2 composite-FK
+// integrity probe, which is a DATABASE control and is never authorization
+// evidence. No other harness module reads that environment variable or imports
+// the privileged client (asserted by G4).
 //
 // Two invariants do the heavy lifting:
 //   - the run prefix is an OWNERSHIP/COLLISION namespace, never a deletion key;
@@ -28,15 +30,23 @@ export const P6E_IMPORT_BATCH_ID = "bd4f26db-093a-4e31-8fa9-de8281300c63";
  * without all three is rejected by `track()` rather than becoming a silently
  * undeletable ledger entry.
  *
- * PR 5 supports exactly `study` and `tenant`. Storage objects, import batches
+ * PR 5 supported exactly `study` and `tenant`. Storage objects, import batches
  * and templates are deliberately absent: their safe deletion paths have not
  * been verified, and guessing at one is how a cleanup pass destroys real data.
+ *
+ * PR 6 adds exactly two more, both required by Suite A's scoped-identity
+ * fixture and both with a verified deletion path: `clientProfile` (a row of
+ * `public.profiles`, keyed by `user_id`) and `authUser` (an Auth identity,
+ * which is not a PostgREST table and therefore carries `custom: "auth"`).
+ * Deletion order runs child -> parent: study, profile, auth user, tenant.
  */
 export const KINDS = Object.freeze({
   // order 0 = child, deleted before the tenant it belongs to.
   study: {
     order: 0,
     table: "study",
+    idColumn: "id",
+    prefixColumn: "name",
     columns: "id, name, tenant_id",
     owned(meta, context) {
       if (typeof meta?.name !== "string" || !meta.name.startsWith(context.prefix)) return false;
@@ -44,9 +54,37 @@ export const KINDS = Object.freeze({
       return meta.tenant_id === context.tenantId;
     },
   },
-  tenant: {
+  // The profile goes before its Auth identity: deleting the identity cascades
+  // the profile away, and a cleanup pass must never rely on a cascade it did
+  // not assert.
+  clientProfile: {
     order: 1,
+    table: "profiles",
+    idColumn: "user_id",
+    prefixColumn: "full_name",
+    columns: "user_id, tenant_id, role, full_name, data_scope",
+    owned(meta, context) {
+      if (typeof meta?.full_name !== "string" || !meta.full_name.startsWith(context.prefix)) return false;
+      if (meta.role !== "client") return false;
+      // A home tenant, when declared, must match exactly: the fixture lives in
+      // an existing synthetic tenant, so the prefix alone is not enough.
+      return !context.homeTenantId || meta.tenant_id === context.homeTenantId;
+    },
+  },
+  authUser: {
+    order: 2,
+    custom: "auth",
+    idColumn: "id",
+    prefixColumn: "email",
+    owned(meta, context) {
+      return typeof meta?.email === "string" && meta.email.startsWith(context.prefix.toLowerCase());
+    },
+  },
+  tenant: {
+    order: 3,
     table: "tenant",
+    idColumn: "id",
+    prefixColumn: "name",
     columns: "id, name",
     owned(meta, context) {
       return typeof meta?.name === "string" && meta.name.startsWith(context.prefix);
@@ -54,7 +92,7 @@ export const KINDS = Object.freeze({
   },
 });
 
-const PREFIXED_KINDS = ["tenant", "study"];
+const DEFAULT_PREFIXED_KINDS = ["tenant", "study"];
 
 function base36(bytes) {
   return [...randomBytes(bytes)].map((b) => (b % 36).toString(36)).join("");
@@ -62,8 +100,22 @@ function base36(bytes) {
 
 /** `P7H-<UTC>-<6 random base36>` — identifies the run, never selects a delete. */
 export function newRunPrefix() {
+  return stampedPrefix("P7H");
+}
+
+/**
+ * `<tag>-<UTC>-<6 random base36>`. Suite A mints `P7A-` so its residue can never
+ * be confused with PR 5's `P7H-` self-test fixtures, which remain a separate
+ * workflow that creates no Auth user.
+ */
+export function stampedPrefix(tag) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `P7H-${stamp}-${base36(6)}`;
+  return `${tag}-${stamp}-${base36(6)}`;
+}
+
+/** A password held only in memory, never printed, never persisted. */
+export function newFixtureSecret() {
+  return randomBytes(24).toString("base64url");
 }
 
 /**
@@ -80,26 +132,141 @@ export function createServiceRoleGateway() {
     );
   }
   const admin = createClient(url, key, { auth: { persistSession: false } });
+
+  /**
+   * Auth identities are not a PostgREST table, so counting them means listing a
+   * bounded page. This is pagination, not a retry: one page is requested, and a
+   * full page is a hard failure rather than a signal to fetch another.
+   */
+  const AUTH_PAGE = 200;
+  async function listAuthUsersOnce() {
+    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: AUTH_PAGE });
+    if (error) throw new Error(`auth inventory: ${error.message}`);
+    const users = data?.users ?? [];
+    if (users.length >= AUTH_PAGE) {
+      throw new Error(
+        `auth inventory returned a full page of ${AUTH_PAGE} — refusing to reason about residue from a truncated list`,
+      );
+    }
+    return users;
+  }
+
   return {
     async countPrefixed(kind, prefix) {
       const spec = KINDS[kind];
+      if (spec.custom === "auth") {
+        const needle = prefix.toLowerCase();
+        return (await listAuthUsersOnce()).filter((u) => (u.email ?? "").startsWith(needle)).length;
+      }
       const { count, error } = await admin
         .from(spec.table)
-        .select("id", { count: "exact", head: true })
-        .like("name", `${prefix}%`);
+        .select(spec.idColumn, { count: "exact", head: true })
+        .like(spec.prefixColumn, `${prefix}%`);
       if (error) throw new Error(`preflight ${spec.table}: ${error.message}`);
       return count ?? 0;
     },
     async readMeta(kind, id) {
       const spec = KINDS[kind];
-      const { data, error } = await admin.from(spec.table).select(spec.columns).eq("id", id).maybeSingle();
+      if (spec.custom === "auth") {
+        const { data, error } = await admin.auth.admin.getUserById(id);
+        // A deleted identity answers with an error, which the caller reads as
+        // "absent"; a genuine transport failure would surface the same way, so
+        // cleanup re-counts residue afterwards rather than trusting this alone.
+        if (error || !data?.user) return null;
+        return { id: data.user.id, email: data.user.email ?? null };
+      }
+      const { data, error } = await admin
+        .from(spec.table)
+        .select(spec.columns)
+        .eq(spec.idColumn, id)
+        .maybeSingle();
       if (error) throw new Error(`ownership read ${spec.table}: ${error.message}`);
       return data ?? null;
     },
     async deleteById(kind, id) {
       const spec = KINDS[kind];
-      const { error } = await admin.from(spec.table).delete().eq("id", id);
+      if (spec.custom === "auth") {
+        const { error } = await admin.auth.admin.deleteUser(id);
+        return { ok: !error };
+      }
+      const { error } = await admin.from(spec.table).delete().eq(spec.idColumn, id);
       return { ok: !error };
+    },
+
+    // --- Suite A fixture provisioning (setup and teardown ONLY) -------------
+    // Nothing below issues a request whose RESULT is an authorization verdict.
+    // Every Suite A assertion signs in as the real identity created here and
+    // reaches the application or PostgREST through the publishable key.
+
+    /**
+     * Creates one synthetic Auth identity with a confirmed address, so no
+     * invitation is generated and no message is ever sent. The password is
+     * supplied by the caller from the runtime's random source and is neither
+     * stored nor returned.
+     */
+    async createAuthUser({ email, password }) {
+      const { data, error } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+      if (error || !data?.user) {
+        throw new Error(`fixture identity could not be created (${error?.code ?? error?.message ?? "empty response"})`);
+      }
+      return { id: data.user.id };
+    },
+
+    /** Same profile shape the application's own client-user path writes. */
+    async upsertClientProfile({ userId, tenantId, fullName, dataScope }) {
+      const { error } = await admin
+        .from("profiles")
+        .upsert(
+          { user_id: userId, tenant_id: tenantId, role: "client", full_name: fullName, data_scope: dataScope },
+          { onConflict: "user_id" },
+        );
+      if (error) throw new Error(`fixture profile could not be written (${error.code ?? error.message})`);
+    },
+
+    // --- metadata reads used for before/after accounting -------------------
+    async countTable(table) {
+      const { count, error } = await admin.from(table).select("id", { count: "exact", head: true });
+      if (error) throw new Error(`count ${table}: ${error.message}`);
+      return count ?? 0;
+    },
+    async countAuthUsers() {
+      return (await listAuthUsersOnce()).length;
+    },
+    async countProfiles() {
+      const { count, error } = await admin.from("profiles").select("user_id", { count: "exact", head: true });
+      if (error) throw new Error(`count profiles: ${error.message}`);
+      return count ?? 0;
+    },
+
+    /**
+     * A5 — privileged database-integrity control, NOT client authorization
+     * evidence. Deliberately stamps a batch with a tenant that does not own the
+     * study, so the composite foreign key `(study_id, tenant_id)` must reject
+     * it. The marker makes the residue count exact. The referenced study is
+     * only an FK target: no row of it is read, written or deleted.
+     */
+    async probeCompositeTenantStamp({ studyId, mismatchedTenantId, marker }) {
+      const { error } = await admin.from("import_batch").insert({
+        tenant_id: mismatchedTenantId,
+        study_id: studyId,
+        source_signature: `sha256:${"0".repeat(64)}`,
+        file_name: marker,
+        status: "staged",
+        source_rows: 1,
+        expected_respondents: 1,
+        expected_quant: 0,
+        expected_qual: 0,
+      });
+      const { count, error: countError } = await admin
+        .from("import_batch")
+        .select("id", { count: "exact", head: true })
+        .eq("file_name", marker);
+      if (countError) throw new Error(`stamping residue count: ${countError.message}`);
+      return { code: error?.code ?? null, rejected: Boolean(error), rowsWithMarker: count ?? 0 };
     },
     async reportControl(id) {
       const { data, error } = await admin
@@ -118,7 +285,15 @@ export function createServiceRoleGateway() {
   };
 }
 
-export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}) {
+export function createFixtures({
+  prefix,
+  protectedTenantIds = [],
+  gateway,
+  /** Kinds the preflight and residue counts sweep by prefix. */
+  prefixedKinds = DEFAULT_PREFIXED_KINDS,
+  /** When set, a `clientProfile` is only owned if it sits in exactly this tenant. */
+  homeTenantId = null,
+} = {}) {
   const data = gateway ?? createServiceRoleGateway();
   const ledger = [];
   const denied = new Set([P6E_STUDY_ID, P6E_IMPORT_BATCH_ID, ...protectedTenantIds.filter(Boolean)]);
@@ -140,8 +315,12 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
   }
 
   const tenantEntry = () => ledger.find((entry) => entry.kind === "tenant") ?? null;
-  const ownershipContext = () => ({ prefix, tenantId: tenantEntry()?.id ?? null });
+  const ownershipContext = () => ({ prefix, tenantId: tenantEntry()?.id ?? null, homeTenantId });
   const ownsId = (id) => ledger.some((entry) => entry.id === id);
+  // Uniqueness is per (kind, id), not per id: a profile and the Auth identity it
+  // belongs to legitimately share one UUID, and both must be ledgered so both
+  // are deleted by exact id rather than one being left to a cascade.
+  const ownsKindId = (kind, id) => ledger.some((entry) => entry.kind === kind && entry.id === id);
 
   /**
    * The mutation precondition (§6.2, §6.6). A mutating operation may only
@@ -178,7 +357,7 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
 
   async function countAllPrefixed() {
     const counts = {};
-    for (const kind of PREFIXED_KINDS) counts[kind] = await data.countPrefixed(kind, prefix);
+    for (const kind of prefixedKinds) counts[kind] = await data.countPrefixed(kind, prefix);
     return counts;
   }
 
@@ -205,7 +384,7 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
       );
     }
     if (denied.has(record.id)) throw new Error("ledger: refusing to track a protected object");
-    if (ownsId(record.id)) throw new Error("ledger: this id is already tracked");
+    if (ownsKindId(record.kind, record.id)) throw new Error("ledger: this kind and id are already tracked");
     sequence += 1;
     const entry = { ...record, kind: record.kind, id: record.id, prefix, seq: sequence, createdAt: new Date().toISOString() };
     ledger.push(entry);
@@ -291,6 +470,15 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
     prefix,
     ledger,
     KINDS,
+    /**
+     * The narrow privileged surface: fixture provisioning, bounded metadata
+     * accounting and reconciliation, exact cleanup, and the separately labelled
+     * A5.2 composite-FK integrity probe. Exposed so a suite can do fixture
+     * setup and before/after accounting WITHOUT holding the credential itself.
+     * Nothing here may be used to produce an AUTHORIZATION verdict — A5.2
+     * included, which reports itself as a database-integrity control.
+     */
+    gateway: data,
     authorizeMutation,
     preflight,
     track,
@@ -302,5 +490,6 @@ export function createFixtures({ prefix, protectedTenantIds = [], gateway } = {}
     isHalted: () => halted,
     isDenied: (id) => denied.has(id),
     ownsId,
+    ownsKindId,
   };
 }

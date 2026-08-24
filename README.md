@@ -37,13 +37,23 @@ npm run lint         # eslint
 npm run test         # complete deterministic suite
 npm run gates        # gates:offline + gates:live — the complete release chain
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
-npm run gates:live   # live credential-bearing checks (qualitative-live, isolation, rls-coverage)
+npm run gates:live   # live credential-bearing checks: qualitative-live, then suite:a
+npm run suite:a      # Suite A: tenant isolation, data scope, least privilege (A1-A5)
+npm run test:isolation      # the legacy isolation gate on its own (Suite A runs it as A1.5)
+npm run test:rls-coverage   # the RLS/FORCE-RLS gate on its own (Suite A runs it as A4.1)
 npm run suite:d      # Suite D: dependency advisories, pins, lockfile, history, artifacts
 npm run test:import-center-live # mapping version/RPC gate against linked dev DB
 npm run cf:build     # opennextjs-cloudflare build -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
 npm run cf:deploy    # build + deploy to Cloudflare Workers
 ```
+
+`suite:a` — and therefore `gates:live` and `gates` — drives a real browser
+against a running application. It needs the app served at `HARNESS_ORIGIN`
+(default `http://localhost:3000`), real synthetic credentials in `.env.local`,
+and a Chrome/Chromium binary named by `CHROME_PATH`. On Windows workstations
+run it from WSL as an ordinary (non-root) user with the distribution's own Linux
+browser, so the browser sandbox stays on.
 
 ## Verification gates (run before deploying)
 

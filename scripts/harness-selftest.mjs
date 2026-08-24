@@ -43,12 +43,30 @@ const HARNESS_FILES = [
   "scripts/harness-selftest.mjs",
 ];
 
-/** The complete PR 5 surface. Anything else changing makes G7 fail. */
+/**
+ * Suite files are NOT harness files: they own security verdicts, which the
+ * harness never may. They are scanned by their own additive detector group
+ * (G10) rather than by G1-G9, because a suite legitimately constructs an
+ * unprivileged PostgREST identity — the very thing G4 forbids a harness module
+ * to do. Nothing in G1-G9 is relaxed to accommodate them.
+ */
+const SUITE_FILES = [
+  "scripts/suite-a-isolation.mjs",
+  "scripts/suite-a-selftest.mjs",
+];
+
+/** The complete PR 5 + PR 6 surface. Anything else changing makes G7 fail. */
 const ALLOWED_PATHS = new Set([
   "docs/P7_HARNESS_DESIGN.md",
   "docs/CURRENT_STATE.md",
+  // PR 6 rewires `gates:live` to run the complete Suite A, so the two files
+  // that document the release chain are legitimate PR-6 changes. Exactly
+  // these two, named individually: `docs/**` and "any Markdown" stay refused.
+  "README.md",
+  "CLAUDE.md",
   "package.json",
   ...HARNESS_FILES,
+  ...SUITE_FILES,
 ]);
 
 const FORBIDDEN_PATH_RULES = [
@@ -108,6 +126,10 @@ const CREDENTIALS = {
 
 function sources() {
   return Object.fromEntries(HARNESS_FILES.map((file) => [file, readFileSync(file, "utf8")]));
+}
+
+function suiteSources() {
+  return Object.fromEntries(SUITE_FILES.map((file) => [file, readFileSync(file, "utf8")]));
 }
 
 /**
@@ -208,6 +230,8 @@ const SCOPE_CASES = [
   { why: "the lockfile changed", scope: { files: ["package-lock.json"], depsChanged: false, baseResolved: true } },
   { why: "a dependency changed", scope: { files: ["package.json"], depsChanged: true, baseResolved: true } },
   { why: "an unrelated path changed", scope: { files: ["scripts/isolation-test.mjs"], depsChanged: false, baseResolved: true } },
+  { why: "a neighbouring documentation path changed", scope: { files: ["docs/P7_PLAN.md"], depsChanged: false, baseResolved: true } },
+  { why: "an unrelated Markdown file changed", scope: { files: ["docs/OPERATIONS.md"], depsChanged: false, baseResolved: true } },
   { why: "the baseline could not be resolved", scope: { files: [], depsChanged: false, baseResolved: false } },
 ];
 /* </detector-vocabulary> */
@@ -335,6 +359,75 @@ function runDetectors(src, scope) {
     "G9",
     !FORBIDDEN.clock.test(all) && !SESSION_KINDS.includes("expired"),
     `no clock or token-lifetime manipulation; session kinds are ${SESSION_KINDS.join("/")}`,
+  );
+
+  return results;
+}
+
+/**
+ * G10 - additive structural guarantees over the SUITE sources (PR 6 onwards).
+ *
+ * G1-G9 above are untouched and still run over exactly the harness files. G10
+ * applies the same prohibitions that make sense for a suite: no private wire
+ * protocol, no application response body, no undocumented environment switch,
+ * no credential hashing or printing, no application polling, no clock control
+ * and no run-time mechanism assignment.
+ *
+ * The credential-confinement rule (G10e) is asserted on the suite that talks to
+ * the live system. `suite-a-selftest.mjs` is exempt from that one rule alone
+ * because it NAMES the forbidden variables as its own test data - and it
+ * asserts the identical property over the suite source itself, so the guarantee
+ * is proven twice rather than dropped.
+ */
+function runSuiteDetectors(src) {
+  const results = [];
+  const record = (id, passedCheck, message) => results.push({ id, passed: passedCheck, message });
+  // Same exemption rule as G1-G9: ONLY a marked literal-pattern table is
+  // excluded, so a detector cannot flag its own test data. Every other line,
+  // including every success message, is scanned exactly as written.
+  const all = Object.values(src).map(scannable).join("\n");
+  const live = scannable(src["scripts/suite-a-isolation.mjs"] ?? "");
+
+  record(
+    "G10a",
+    !FORBIDDEN.actionId.some((pattern) => pattern.test(all)) && !FORBIDDEN.privateImport.test(all),
+    "no suite synthesizes a hashed action identifier or imports a private transport",
+  );
+
+  const bodyReads = all
+    .split(/\r?\n/)
+    .filter((line) => FORBIDDEN.bodyRead.test(line) || FORBIDDEN.bodyRetained.test(line));
+  record(
+    "G10b",
+    bodyReads.length === 0,
+    bodyReads.length ? `${bodyReads.length} response body read(s) present` : "no suite reads an application response body",
+  );
+
+  const rogueEnv = [...new Set([...all.matchAll(/process\.env\.([A-Z_][A-Z_0-9]*)/g)].map((m) => m[1]))]
+    .filter((name) => !ALLOWED_ENV.includes(name));
+  record("G10c", rogueEnv.length === 0, `no bypass switch; undocumented reads: ${rogueEnv.join(", ") || "none"}`);
+
+  record(
+    "G10d",
+    !FORBIDDEN.hashing.test(all) && !FORBIDDEN.printsCredential.test(all) && !FORBIDDEN.clock.test(all) &&
+      !FORBIDDEN.runtimeMechanism.test(all),
+    "no credential hashing or printing, no clock manipulation, no run-time mechanism assignment",
+  );
+
+  const credentialConfined = live.length > 0 && !CREDENTIAL_ENV.test(live);
+  record(
+    "G10e",
+    credentialConfined,
+    credentialConfined
+      ? "the live suite never names the privileged credential; the fixtures module remains its only holder"
+      : "the privileged credential leaked into the live suite source, or that source could not be read",
+  );
+
+  const appPollers = loopBodies(all).filter((body) => /fetch\(/.test(body));
+  record(
+    "G10f",
+    appPollers.length === 0,
+    appPollers.length ? `${appPollers.length} loop(s) issue an application request` : "no suite polls an application endpoint",
   );
 
   return results;
@@ -738,6 +831,35 @@ function offlineCatalogSupport() {
   }
 }
 
+/**
+ * N9 — every ledger kind, including the two PR 6 added for Suite A's scoped
+ * identity, carries the three things `track()` requires: a place to live, an
+ * ownership validator and a position in the deletion order. A kind that is
+ * merely declared is exactly how a cleanup pass silently leaves residue.
+ *
+ * This also pins PR 5's own defaults: the self-test's fixture workflow sweeps
+ * `tenant` and `study` and creates NO Auth user. PR 6 must not change that.
+ */
+function offlineLedgerKinds() {
+  console.log("\n[N9] Ledger kinds are complete, and PR 5's own fixture defaults are unchanged:");
+  const fixtures = createFixtures({ prefix: "P7H-OFFLINE", gateway: mockGateway([]) });
+  const incomplete = Object.entries(fixtures.KINDS).filter(([, spec]) =>
+    typeof spec.order !== "number" || typeof spec.owned !== "function" ||
+    !(spec.table || spec.custom) || !spec.idColumn,
+  );
+  if (incomplete.length) bad("N9", `kind(s) without a complete contract: ${incomplete.map(([k]) => k).join(", ")}`);
+  else ok("N9", `all ${Object.keys(fixtures.KINDS).length} ledger kinds declare a location, an ownership validator and an order`);
+
+  // The default sweep must stay tenant/study: PR 5's workflow creates no Auth
+  // user, and a default that quietly grew would change what its preflight means.
+  const defaultKinds = Object.keys(fixtures.KINDS).filter((kind) => ["tenant", "study"].includes(kind));
+  const order = ["study", "clientProfile", "authUser", "tenant"];
+  const declared = Object.entries(fixtures.KINDS).sort((a, b) => a[1].order - b[1].order).map(([kind]) => kind);
+  if (defaultKinds.length === 2 && JSON.stringify(declared) === JSON.stringify(order)) {
+    ok("N9", `deletion order is ${declared.join(" -> ")}; a profile is always removed before its own identity`);
+  } else bad("N9", `unexpected kind order: ${declared.join(" -> ")}`);
+}
+
 function offlineDetectorNegatives() {
   console.log("\n[N] Detector negatives (each injected violation must be caught):");
   const real = sources();
@@ -1018,6 +1140,7 @@ await offlineTimeoutCleanup();
 await offlineUnsupportedOperations();
 offlineOutcomeCases();
 offlineCatalogSupport();
+offlineLedgerKinds();
 offlineDetectorNegatives();
 
 const bounded = await runCancellable((signal) => livePhase(signal), {
@@ -1072,6 +1195,13 @@ try {
 // --- G1-G9 against the real sources and the real branch diff ---------------
 console.log("\n[G] Structural guarantees over every harness source:");
 for (const result of runDetectors(sources(), readBranchScope())) {
+  if (result.passed) ok(result.id, result.message);
+  else bad(result.id, result.message);
+}
+
+// --- G10 against every suite source (additive; G1-G9 stay exactly as they were)
+console.log("\n[G10] Structural guarantees over every suite source:");
+for (const result of runSuiteDetectors(suiteSources())) {
   if (result.passed) ok(result.id, result.message);
   else bad(result.id, result.message);
 }
