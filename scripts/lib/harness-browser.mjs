@@ -572,6 +572,24 @@ export const PAGE = {
       return 'ok';
     })()`,
 
+  /**
+   * Ticks the one checkbox whose own `<label>` text starts with `prefix`. Used
+   * where the product labels a confirmation in prose rather than with an
+   * `aria-label`, and deliberately narrow: ticking a neighbouring checkbox can
+   * reset unrelated state the user never touched.
+   */
+  checkByLabelTextPrefix: (prefix) => `
+    (() => {
+      const labels = [...document.querySelectorAll('label')]
+        .filter((item) => item.textContent.trim().startsWith(${JSON.stringify(prefix)}));
+      if (labels.length === 0) return 'no-control';
+      if (labels.length > 1) return 'ambiguous';
+      const box = labels[0].querySelector('input[type=checkbox]');
+      if (!box) return 'no-checkbox';
+      if (!box.checked) box.click();
+      return box.checked ? 'ok' : 'not-checked';
+    })()`,
+
   /** Checks a checkbox located by its `aria-label` — the product's own contract. */
   checkByAriaLabel: (label) => `
     (() => {
@@ -934,24 +952,34 @@ export const BROWSER_DRIVERS = Object.freeze({
       const chosen = await context.evaluate(PAGE.selectOptionByTextPrefix(params.study_option));
       if (chosen !== "ok") return { status: 200, domSignal: "none", note: `study-${chosen}` };
     }
-    // Tick the product's own confirmation checkbox the way a user does, then
-    // let React settle before reading the submit control: `canConfirm` is
+    // Tick EXACTLY the product's own confirmation checkbox, located by its own
+    // label text. Ticking every checkbox on the page also toggles the mapping
+    // controls, and those call `updateMapping`, which clears the preview and
+    // unmounts the confirm step — the control then legitimately disappears.
+    const boxes = await context.evaluate(PAGE.checkByLabelTextPrefix("Confirmo que"));
+    if (boxes !== "ok") return { status: 200, domSignal: "none", note: `confirm-checkbox-${boxes}` };
+    // Let React settle before reading the submit control: `canConfirm` is
     // derived at render time, so reading it in the same turn would observe the
-    // state before the change.
-    const boxes = await context.evaluate(`
-      (() => {
-        const all = [...document.querySelectorAll('input[type=checkbox]')];
-        for (const box of all) if (!box.checked) box.click();
-        return all.length;
-      })()`);
+    // state as it was before the change.
     const enabled = await context
       .waitForDom(`() => ${PAGE.controlEnabled("Confirmar importación")}`, 5000)
       .catch(() => false);
     const clicked = enabled ? await context.evaluate(PAGE.clickByName("Confirmar importación")) : "disabled";
     if (clicked !== "ok") {
-      // The note carries control-state tokens and counts only — never a
-      // rendered message and never product data.
-      return { status: 200, domSignal: "none", note: `confirm-${clicked}-checkboxes=${boxes}` };
+      // The note carries control-state tokens, counts and booleans only —
+      // never a rendered message and never product data.
+      const state = await context.evaluate(`
+        (() => {
+          const boxes = [...document.querySelectorAll('input[type=checkbox]')];
+          const selects = [...document.querySelectorAll('select')];
+          return [
+            'checked=' + boxes.filter((b) => b.checked).length + '/' + boxes.length,
+            'selects=' + selects.length,
+            'selectsWithValue=' + selects.filter((s) => s.value !== '').length,
+            'confirmStepPresent=' + /Revisa y confirma/.test(document.body.innerText),
+          ].join(' ');
+        })()`);
+      return { status: 200, domSignal: "none", note: `confirm-${clicked} ${state}` };
     }
     return settleImperative(context, PAGE, CONFIRM_DONE);
   },
