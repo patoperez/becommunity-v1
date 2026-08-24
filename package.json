@@ -48,7 +48,7 @@
     "suite:d:local": "node scripts/suite-d-supply-chain.mjs --local-subset",
     "gates": "npm run gates:offline && npm run gates:live",
     "gates:offline": "npm run typecheck && npm run lint && npm run test && npm run build && npm run cf:build && npm run suite:d",
-    "gates:live": "npm run test:qualitative-live && npm run test:isolation && npm run test:rls-coverage",
+    "gates:live": "npm run test:qualitative-live && npm run suite:a",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",

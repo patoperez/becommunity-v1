@@ -14,11 +14,13 @@
 // Every authorization verdict is produced by a REAL identity that signed in
 // through the publishable-key path — the application's own login form for the
 // app surfaces, `signInWithPassword` for the PostgREST surfaces. The privileged
-// fixture gateway in `lib/harness-fixtures.mjs` is used for three things only:
-// provisioning the temporary scoped identity, before/after metadata counts, and
-// exact-id cleanup. It never issues a request whose result is asserted, with one
-// deliberate and explicitly labelled exception: A5.2, which is a database
-// integrity control and is reported as such, not as client authorization.
+// fixture gateway in `lib/harness-fixtures.mjs` is used for four things, and
+// only these: provisioning the temporary scoped identity; bounded metadata
+// accounting and reconciliation; exact cleanup; and the A5.2 composite-FK
+// integrity probe. The first three never issue a request whose result is
+// asserted. A5.2 does, and is labelled throughout — in its own heading, its own
+// output line and its roster title — as a privileged DATABASE-INTEGRITY control.
+// It is never client-authorization evidence.
 //
 // WHAT IS NEVER PRINTED
 // No email, password, token, cookie, key, JWT fragment, response body or row of

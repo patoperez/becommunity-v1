@@ -59,6 +59,11 @@ const SUITE_FILES = [
 const ALLOWED_PATHS = new Set([
   "docs/P7_HARNESS_DESIGN.md",
   "docs/CURRENT_STATE.md",
+  // PR 6 rewires `gates:live` to run the complete Suite A, so the two files
+  // that document the release chain are legitimate PR-6 changes. Exactly
+  // these two, named individually: `docs/**` and "any Markdown" stay refused.
+  "README.md",
+  "CLAUDE.md",
   "package.json",
   ...HARNESS_FILES,
   ...SUITE_FILES,
@@ -225,6 +230,8 @@ const SCOPE_CASES = [
   { why: "the lockfile changed", scope: { files: ["package-lock.json"], depsChanged: false, baseResolved: true } },
   { why: "a dependency changed", scope: { files: ["package.json"], depsChanged: true, baseResolved: true } },
   { why: "an unrelated path changed", scope: { files: ["scripts/isolation-test.mjs"], depsChanged: false, baseResolved: true } },
+  { why: "a neighbouring documentation path changed", scope: { files: ["docs/P7_PLAN.md"], depsChanged: false, baseResolved: true } },
+  { why: "an unrelated Markdown file changed", scope: { files: ["docs/OPERATIONS.md"], depsChanged: false, baseResolved: true } },
   { why: "the baseline could not be resolved", scope: { files: [], depsChanged: false, baseResolved: false } },
 ];
 /* </detector-vocabulary> */

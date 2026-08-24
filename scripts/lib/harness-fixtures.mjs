@@ -1,10 +1,12 @@
 // =============================================================================
 // P7 adversarial harness — fixture lifecycle (docs/P7_HARNESS_DESIGN.md §6).
 // =============================================================================
-// The ONLY module that owns the service credential, and it uses it only for the
-// three narrow purposes `docs/P7_PLAN.md` §3 permits: metadata preflight,
-// residue counts, and exact-id deletion. No other harness module reads that
-// environment variable or imports the privileged client (asserted by G4).
+// The ONLY module that owns the service credential. Its permitted uses are
+// fixture provisioning, bounded metadata accounting and reconciliation, and
+// exact cleanup — plus, for Suite A, the separately labelled A5.2 composite-FK
+// integrity probe, which is a DATABASE control and is never authorization
+// evidence. No other harness module reads that environment variable or imports
+// the privileged client (asserted by G4).
 //
 // Two invariants do the heavy lifting:
 //   - the run prefix is an OWNERSHIP/COLLISION namespace, never a deletion key;
@@ -469,10 +471,12 @@ export function createFixtures({
     ledger,
     KINDS,
     /**
-     * The narrow privileged surface: provisioning, metadata counts and exact-id
-     * deletion. Exposed so a suite can perform fixture setup and before/after
-     * accounting WITHOUT holding the credential itself. Nothing here may be
-     * used to produce an authorization verdict.
+     * The narrow privileged surface: fixture provisioning, bounded metadata
+     * accounting and reconciliation, exact cleanup, and the separately labelled
+     * A5.2 composite-FK integrity probe. Exposed so a suite can do fixture
+     * setup and before/after accounting WITHOUT holding the credential itself.
+     * Nothing here may be used to produce an AUTHORIZATION verdict — A5.2
+     * included, which reports itself as a database-integrity control.
      */
     gateway: data,
     authorizeMutation,

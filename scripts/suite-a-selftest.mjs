@@ -303,4 +303,53 @@ console.log("\n[6] Secret-safe output:");
   ok("the suite reads no privileged credential, no response body, no private wire payload and no clock");
 }
 
+// --- [7] Canonical gate wiring ----------------------------------------------
+//
+// README.md and CLAUDE.md call `npm run gates` the complete release chain. That
+// is only true if the chain actually executes Suite A. Suite A already runs
+// isolation-test.mjs (A1.5) and rls-coverage-test.mjs (A4.1) as child processes,
+// so chaining those separately after it would duplicate two of its sixteen
+// checks while still omitting the other fourteen. These assertions pin the
+// shape rather than the prose.
+
+console.log("\n[7] Canonical gate wiring:");
+{
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+  const scripts = pkg.scripts ?? {};
+  const occurrences = (haystack, needle) => haystack.split(needle).length - 1;
+
+  const live = scripts["gates:live"] ?? "";
+  assert.equal(occurrences(live, "run suite:a"), 1, "gates:live must run suite:a exactly once");
+  ok("gates:live executes the complete Suite A exactly once");
+
+  assert.equal(occurrences(live, "run test:isolation"), 0, "gates:live must not chain test:isolation separately");
+  assert.equal(occurrences(live, "run test:rls-coverage"), 0, "gates:live must not chain test:rls-coverage separately");
+  ok("gates:live does not separately re-run the two children Suite A already executes");
+
+  for (const name of ["test:isolation", "test:rls-coverage", "suite:a"]) {
+    assert.ok(scripts[name], `${name} must remain independently runnable`);
+  }
+  assert.match(scripts["test:isolation"], /scripts\/isolation-test\.mjs/);
+  assert.match(scripts["test:rls-coverage"], /scripts\/rls-coverage-test\.mjs/);
+  ok("test:isolation and test:rls-coverage remain independently runnable standalone scripts");
+
+  const gates = scripts.gates ?? "";
+  assert.match(gates, /run gates:offline/, "gates must compose gates:offline");
+  assert.match(gates, /run gates:live/, "gates must compose gates:live");
+  assert.ok(gates.indexOf("gates:offline") < gates.indexOf("gates:live"), "offline runs before live");
+  ok("gates still composes gates:offline then gates:live");
+
+  // The offline chain must stay credentials-free: Suite A is live, so it must
+  // not appear there, and CI must run the offline chain and nothing else.
+  const offline = scripts["gates:offline"] ?? "";
+  assert.equal(occurrences(offline, "suite:a"), 0, "gates:offline must stay credentials-free");
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  assert.match(ci, /npm run gates:offline/, "CI must run the offline chain");
+  assert.ok(!/run:.*npm run gates:live/.test(ci), "CI must never execute gates:live");
+  for (const name of ["TEST_USER_A_PASSWORD", "TEST_INTERNAL_PASSWORD", "SUPABASE_SERVICE_ROLE_KEY: "]) {
+    assert.ok(!ci.includes(name), `CI must receive no live credential (${name})`);
+  }
+  ok("gates:offline stays credentials-free; CI runs only gates:offline and receives no live credential");
+}
+
 console.log(`\nSuite A offline self-test: ${passed} checks passed.`);
