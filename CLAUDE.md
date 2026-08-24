@@ -191,9 +191,9 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
 - P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`: Suites B and C,
-  the canonical live chain and their review fixes are green. Remote `main`
-  remains at the Suite A baseline until that completed branch is merged. Do not
-  reopen P7 correction loops during P8. Deferred edge, production-environment,
+  the canonical live chain and their review fixes are green; PR #38 is the
+  separate delivery unit. Do not reopen P7 correction loops during P8.
+  Deferred edge, production-environment,
   backup/DR and operational controls return as a bounded go-live hardening pass
   after the product is functionally and visually complete.
 - P8 discovery and visual comparison are complete on
@@ -203,14 +203,18 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   combines a guided `Recorrido` with bounded `Explorar`, structured as
   question → visual evidence → consultant interpretation → action. Studio is a
   separate no-code operational experience for non-technical internal users.
-- **Current unit: P8-A product implementation.** Work directly in the real
-  Next.js application: shared semantic design/brand foundation, sign-in and
-  shells, then a real client panorama and rich journey vertical slice. Review
-  the functioning product and iterate there. Do not create another standalone
-  HTML prototype or declare a visual direction on the owner's behalf.
+- **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
+  semantic foundation, sign-in, shells, client panorama and journey slice are
+  established. Do not reopen its visual-prototype loop.
+- **Current next unit: P8.2 Studio guided workflows.** Start from updated
+  `main` only after the accepted P7/P8-A delivery PRs are integrated. The first
+  owner-review slice is the no-code access-scope picker and visual mapping
+  experience; do not type raw JSON, internal identifiers or metric keys in an
+  ordinary Studio workflow.
 - Preserve P7 authorization/input gates, all calculation outputs, ingestion,
-  RLS, roles and publication boundaries. P8-A adds no migration, formula,
-  authorization rule, production deployment or external-system mutation.
+  RLS, roles and publication boundaries. P8.2 changes presentation and guided
+  workflow first; migrations or authorization changes require a separate,
+  explicit design and review boundary.
 - Do not mutate real-production infrastructure, rotate credentials, create a
   real-data environment, or enable irreversible controls during synthetic P7
   work. Do not redirect the roadmap toward retention UI, new role tiers or an

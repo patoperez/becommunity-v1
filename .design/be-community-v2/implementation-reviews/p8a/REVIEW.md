@@ -1,20 +1,17 @@
 # P8-A implementation review — the real product
 
-> Evidence from the **running Be Community application**, not a prototype.
+> Record of the **running Be Community application**, not a prototype.
 > Branch `p8a-product-experience-foundation`, built from the P8 discovery head
-> `df35e0f`. Every screenshot below was taken from `npm start` on the built
-> application, signed in with the synthetic fixture accounts, against the
-> published P6E acceptance study.
+> `df35e0f`, was reviewed through `npm start` with the synthetic fixture
+> accounts and the published P6E acceptance study.
 >
 > No prototype directory was created. No database, external system or deployment
 > was touched.
 
-> **⚠ The `.png` files in this folder are PRE-CORRECTION historical evidence.**
-> They show the product at commit `73c931b`, which is what the owner reviewed.
-> The corrections that review produced are in commit `1056bd6` and are **not**
-> captured here — no new screenshots were taken, by instruction. Read the images
-> as "what was reviewed", and the *Owner review corrections* section below as
-> "what changed because of it". The live routes are the current truth.
+> The temporary pre-correction captures were pruned after final owner
+> acceptance. They were not the product and are no longer needed as active
+> context. This report preserves the findings and corrections; the live routes
+> and tests are the source of truth.
 
 ---
 
@@ -42,15 +39,15 @@ this document, in the screenshots, in the source or in any log.**
 
 `/dashboard` is deliberately still the address for both products. Splitting it
 into `/insights/**` and `/studio/**`, and adding `/acceso` so an emailed deep
-link survives sign-in, is P8-B: those are route and middleware changes, and the
+link survives sign-in, is later P8 work: those are route and middleware changes, and the
 adversarial suites carry a frozen catalogue of the current paths.
 
 ---
 
-## Owner review corrections (commit `1056bd6`) — not in the screenshots
+## Owner review corrections (commit `1056bd6`)
 
 The owner reviewed the running product and agreed six corrections. All six are
-live at the routes above; none is reflected in the images below.
+live at the routes above.
 
 | # | Correction | What it does now |
 |---|---|---|
@@ -60,24 +57,6 @@ live at the routes above; none is reflected in the images below.
 | D | The identity was all navy and paper | Sky, magenta, green, yellow and lavender now carry grouping in navigation, selection, route stages and the Studio attention list. They are structurally separate from caution/danger/positive, so no number is coloured good or bad. |
 | E | Studio was a static directory | The internal home opens on *¿Qué necesita atención?*, built only from state the page already loads: a study with no rows, a draft with data still unpublished, a touchpoint with no result. The four destinations remain as secondary navigation. |
 | — | A published study advertised what was missing | The client view is now composed: no repeated "todavía no…". Where a study or a moment carries numbers only, one quiet sentence says so. The internal preview gets the opposite — a concise readiness notice naming what is missing, visibly marked as internal. |
-
----
-
-## The eight screenshots (pre-correction)
-
-| File | What it shows |
-|---|---|
-| `login--desktop.png` | The product entrance at 1440 px |
-| `login--mobile.png` | The same, at 390 px |
-| `client-panorama--desktop.png` | The client's first impression — findings, not tiles |
-| `client-panorama--mobile.png` | The same on a phone |
-| `journey-default--desktop.png` | The recorrido as first rendered |
-| `journey-selected--desktop.png` | A touchpoint selected, everything updated together |
-| `journey-selected--mobile.png` | The recorrido as a vertical route on a phone |
-| `studio-shell--desktop.png` | Be Community Studio — the internal home |
-
-One extra, because the review needs it: `extra-tenant-b-empty--desktop.png` —
-the client portal of a tenant with nothing published.
 
 ---
 

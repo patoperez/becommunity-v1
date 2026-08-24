@@ -141,12 +141,14 @@ approved direction is an **Interactive Insight Experience**:
 - controlled Be Community, co-branded and white-label modes must preserve
   semantic meaning, contrast and analytical honesty.
 
-**Current unit: P8-A**, on `p8a-product-experience-foundation`, implemented
-directly in the real Next.js application: semantic design/brand foundation,
-sign-in, Studio/Insights shells, client panorama and rich journey vertical
-slice, plus three rounds of owner review corrections. P8-A introduces no
-migration, formula, RLS/grant, role, ingestion, authorization, deployment or
-external-system change. The branch is not merged.
+**P8-A is implementation-complete and owner-accepted**, delivered on
+`p8a-product-experience-foundation` at `3659a38` through PR #37. It implements
+the semantic design/brand foundation, sign-in, Studio/Insights shells, client
+panorama and rich journey vertical slice, plus the owner-review corrections.
+P8-A introduces no migration, formula, RLS/grant, role, ingestion,
+authorization or external-system change. **The next implementation unit is
+P8.2: Studio guided workflows**, and it starts from updated `main` only after
+the accepted P7/P8-A delivery PRs are integrated.
 
 **Owner decisions recorded 2026-08-24, binding on every later unit:**
 

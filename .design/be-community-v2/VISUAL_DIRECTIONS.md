@@ -466,10 +466,10 @@ deployment target, and its guidance must be read against that.
 > this provisional status for implementation.
 
 §5 recommended *A as the system, with B's shell discipline governing Studio and
-C's route treatment confined to the journey view*. That hybrid has now been built
-as a fourth prototype so it can be looked at rather than imagined:
-`prototypes/selected-informe-vivo-guiado/`, offered in the launcher as
-**S · Informe Vivo Guiado**, tagged *Síntesis provisional*.
+C's route treatment confined to the journey view*. That hybrid was built and
+reviewed as a temporary fourth prototype. The rendered prototype and capture
+artifacts were pruned after the owner selected the real-product direction; the
+measured findings that remain relevant are preserved below.
 
 **What the build settled.** The three concerns §5 raised against the hybrid were
 measurable, and the prototype answers two of them outright:
@@ -487,11 +487,10 @@ comes from collapsing *Cómo se midió* and *Explora por tu cuenta* on narrow
 screens, which needs a human to confirm nobody misses them. Dark mode is defined
 in tokens but not captured.
 
-**Status.** One shared token file now serves both products; Studio and Insights
-differ in density and chrome only. Full synthesis rules, the corrections it was
-built to resolve, the review findings and the known gaps are in
-[`prototypes/README.md`](prototypes/README.md). The decision is still the
-user's and the CEO's to make from the launcher.
+**Historical status.** The synthesis established that Studio and Insights need
+one semantic system with different density and chrome. It was evidence, not a
+deliverable. The owner's decision below supersedes it; future review happens in
+the functioning product rather than in a detached launcher.
 
 ---
 

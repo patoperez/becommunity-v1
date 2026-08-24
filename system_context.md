@@ -80,21 +80,24 @@ pagination. PR #28 fixed both without changing calculations or security
 boundaries; the real-phone and final two-page PDF checks passed, the change was
 merged and deployed, and P6 is now closed.
 
-P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`, although that
-completed branch has not yet been merged into remote `main`. Deferred controls
+P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`; PR #38 is its
+separate delivery unit so P8 does not obscure P7 provenance. Deferred controls
 that require a custom domain, final production environment, billing or full DR
 return as a bounded go-live pass after the product experience is complete; they
 are not silently treated as green.
 
-P8 product experience implementation is active in an isolated worktree based on
-that P7 head. Discovery and standalone visual comparison are finished. The
+P8 product experience implementation is active in an isolated worktree that
+intentionally descended from that P7 head. Discovery and standalone visual
+comparison are finished. The
 approved direction is an Interactive Insight Experience: guided `Recorrido` and
 bounded `Explorar` for clients, a no-code Studio for internal staff, progressive
 disclosure, rich evidence-connected journeys and controlled Be Community /
 co-branded / white-label presentation. Work now proceeds in reviewable slices
-of the real product, not additional detached HTML prototypes. P8-A begins with
-the semantic brand foundation, sign-in and shells, then a client panorama and
-journey vertical slice. V2.5 content still follows authoritative documented
+of the real product, not additional detached HTML prototypes. P8-A is complete
+and owner-accepted at `3659a38` (delivery PR #37). The next unit is P8.2 Studio
+guided workflows: remove technical entry from ordinary workflows, starting
+with the access-scope picker and mapping experience, while preserving every P7
+and calculation boundary. V2.5 content still follows authoritative documented
 business definitions; never invent formulas.
 
 ## 8. How we work with AI
