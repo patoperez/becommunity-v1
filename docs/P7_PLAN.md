@@ -1,10 +1,16 @@
 # P7 — Full hardening, adversarial suites A–E, backups and incident response
 
+> **Execution status (2026-08-23):** this remains the approved plan and its
+> evidence tables preserve the planning baseline. Operational completion status
+> lives in `docs/CURRENT_STATE.md`. PRs 1-6 are merged; Suite A is green and
+> deployed. The next unit is PR 7, `p7f-suites-b-c`. Historical “current” or
+> “missing” wording below must not override that operational handoff.
+
 > **Type:** implementation-ready plan produced by a read-only evidence inventory.
 > **Evidence date:** 2026-08-22 (local). Live probes returned UTC timestamps of
 > `2026-08-23T04:0x`.
-> **Status:** plan only, not yet approved. No control in this document has been
-> implemented, executed, or enabled.
+> **Status:** approved execution plan. Its original evidence inventory is
+> intentionally retained below; use `docs/CURRENT_STATE.md` for live progress.
 > Read `CLAUDE.md` and `docs/CURRENT_STATE.md` first; this document does not
 > replace them.
 

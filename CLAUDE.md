@@ -140,7 +140,8 @@ Control and do not attempt a per-file bypass.
 - **Windows** is for editing, Git operations, and static/non-Node inspection
   (`git diff --check`, reading files, reviewing a diff).
 - **Node/npm verification runs in WSL 2 Ubuntu or Linux CI.** Verifier:
-  `/root/becommunity-software`, Node 24.11.1, npm 10.9.2.
+  `/home/patop/becommunity-software`, ordinary user `patop`, Node 24.11.1,
+  npm 10.9.2.
 - The Windows and WSL clones **do not auto-synchronize**. Push the exact commit
   from the Windows editing tree, then `fetch` and check out that exact remote
   commit in WSL before testing. Never assume the verifier already has your work.
@@ -175,14 +176,18 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   data. P6E completed with 108 automated checks and 0 failures.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
-- Proceed to P7 as originally planned: full hardening, adversarial suites A-E,
-  backups with restore proof, detection/alerting and the incident playbook.
-- Begin P7 with an evidence-based inventory and an explicit reviewed plan. Do
-  not mutate production infrastructure, rotate credentials, create a real-data
-  environment or enable irreversible controls during the inventory task.
-- Do not redirect the
-  roadmap toward retention UI, new role tiers, or another feature because of an
-  incidental question.
+- P7's evidence plan is approved. PRs 1-6 are merged: deployment identity,
+  supply-chain/CI, executable RLS coverage, the reviewed adversarial harness,
+  and Suite A are complete. Suite A is wired into `gates:live` and passed its
+  deployed post-merge isolation smoke with zero fixture residue.
+- The current unit is **P7 PR 7, `p7f-suites-b-c`**: behavioral authorization
+  Suite B and hostile-input Suite C. Do not start Suite E, audit logging,
+  anomaly detection, portability, incident response or compliance work until
+  PR 7 is reviewed, merged and post-merge verified.
+- Do not mutate real-production infrastructure, rotate credentials, create a
+  real-data environment, or enable irreversible controls during synthetic P7
+  work. Do not redirect the roadmap toward retention UI, new role tiers or an
+  incidental feature question.
 
 ## When unsure
 Ask. Do not guess on security, authorization, or calculations. A stopped task is
