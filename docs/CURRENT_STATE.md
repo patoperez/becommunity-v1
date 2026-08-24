@@ -170,10 +170,40 @@ health, logged-out, Tenant A, Tenant B isolation and internal-route smokes all
 passed with zero `P7A-`/`P7H-` residue. The commit-to-version record lives in PR
 #36's conversation as required by `docs/DEPLOYMENT.md`.
 
-**Current unit:** PR 7, branch `p7f-suites-b-c`, implementing behavioral Suite B
-(authorization) and Suite C (hostile input/injection). Suites B, C and E are not
-yet green. PR 8 and later P7 work must not begin until PR 7 is reviewed, merged
-and post-merge verified.
+**Current unit:** PR 7, branch `p7f-suites-b-c` — behavioral Suite B
+(authorization) and Suite C (hostile input/injection). Both are implemented and
+**green on the branch, not yet merged**:
+
+- `npm run suite:b` — 52/52, one required check per catalogued mutation for B1
+  and B2 (the roster is generated from the frozen catalogue, so a new mutation
+  arrives with no result and an unexecuted entry is red), plus B3-B7.
+- `npm run suite:c` — 12/12, including an inert hostile payload carried through
+  the real ingestion and human-review workflow and inspected in both the
+  rendered client dashboard and the generated PDF.
+- `npm run gates:live` now runs `test:qualitative-live -> suite:a -> suite:b ->
+  suite:c`, each exactly once. `npm test` gains `test:pivot` (previously
+  orphaned) and the credential-free Suite B/C self-test, reaching 26 gates.
+- Every run restored its exact pre-run object counts and left zero `P7A-`,
+  `P7B-`, `P7C-` or `P7H-` residue.
+
+Two behaviors PR 7 measured that a reviewer should read before merging, both
+recorded rather than asserted past:
+
+1. **The middleware answers before every per-action guard.** An unauthenticated
+   caller is denied on every non-public path — including the POST a Server
+   Action travels on — so `internalContext()`, `authorizeInternal()` and the
+   report route's own 401 are a real second layer that is shadowed from
+   outside. Suite B asserts the denial at whichever gate answered and records
+   which one. This is defense in depth working, not a gap.
+2. **An over-limit upload is refused silently.** Next truncates the request body
+   at its own 10 MB middleware cap and the action then throws, so
+   `readUpload`'s own `MAX_UPLOAD_BYTES` check is unreachable and the operator
+   sees no message. Nothing is written and nothing leaks, so C2.3 passes on the
+   safety property and prints the missing feedback as a FINDING. Fixing the
+   feedback is a product change, deliberately not made in a test-only PR.
+
+Suite E is still not green. PR 8 and later P7 work must not begin until PR 7 is
+reviewed, merged and post-merge verified.
 
 ## Known constraints carried forward
 

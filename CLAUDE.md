@@ -184,9 +184,11 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   and Suite A are complete. Suite A is wired into `gates:live` and passed its
   deployed post-merge isolation smoke with zero fixture residue.
 - The current unit is **P7 PR 7, `p7f-suites-b-c`**: behavioral authorization
-  Suite B and hostile-input Suite C. Do not start Suite E, audit logging,
-  anomaly detection, portability, incident response or compliance work until
-  PR 7 is reviewed, merged and post-merge verified.
+  Suite B (52/52) and hostile-input Suite C (12/12), both green on the branch
+  and **not yet merged**. `gates:live` is now
+  `test:qualitative-live -> suite:a -> suite:b -> suite:c`. Do not start Suite
+  E, audit logging, anomaly detection, portability, incident response or
+  compliance work until PR 7 is reviewed, merged and post-merge verified.
 - Do not mutate real-production infrastructure, rotate credentials, create a
   real-data environment, or enable irreversible controls during synthetic P7
   work. Do not redirect the roadmap toward retention UI, new role tiers or an
