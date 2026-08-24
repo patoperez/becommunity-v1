@@ -62,8 +62,11 @@
   --color-line: #e3ded1;
   --color-line-strong: #c6bda8;
 
-  /* Evidence — the colour a calculated result is drawn in */
-  --color-evidence: #1b72b8;
+  /* Evidence — the colour a calculated result is drawn in.
+     `--color-blue` is the BRAND blue and is used for fills and non-text marks;
+     `--color-evidence` is its AA-safe text derivative, because the brand blue
+     reaches only 4.33:1 on the sunken surface. Text uses evidence, never blue. */
+  --color-evidence: #176394;
   --color-evidence-strong: #14547f;
   --color-evidence-surface: #eaf2fa;
   --color-evidence-line: #bcd7ee;
@@ -85,7 +88,7 @@
   --color-positive-line: #cbe3a5;
 
   /* Focus */
-  --color-focus: #1b72b8;
+  --color-focus: #176394;
 
   /* ---- Typography ------------------------------------------------------ */
   --font-display: var(--font-bricolage), "Segoe UI", system-ui, sans-serif;

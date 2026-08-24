@@ -41,7 +41,7 @@ const TEXT_TOKENS = [
   ["--color-strong", "#0e2a45"],
   ["--color-body", "#24405c"],
   ["--color-muted", "#4a6076"],
-  ["--color-evidence", "#1b72b8"],
+  ["--color-evidence", "#176394"],
   ["--color-voice", "#5f4a94"],
   ["--color-caution", "#7c5200"],
   ["--color-danger", "#a11a44"],
@@ -66,7 +66,7 @@ for (const [text, surface, label] of [
   ["#a11a44", "#fdecf2", "danger"],
   ["#3d660f", "#eff7e3", "positive"],
   ["#5f4a94", "#f1ecf9", "voice"],
-  ["#1b72b8", "#eaf2fa", "evidence"],
+  ["#176394", "#eaf2fa", "evidence"],
 ]) {
   const ratio = contrastRatio(text, surface);
   assert.ok(ratio >= CONTRAST_AA_TEXT, `${label} text on its own surface is ${ratio.toFixed(2)}:1`);
@@ -77,10 +77,24 @@ console.log("\n[3] Studio chrome (paper on ink) and the focus ring");
 assert.ok(contrastRatio("#faf8f3", INK) >= CONTRAST_AA_TEXT, "paper on ink");
 ok(`paper on ink: ${contrastRatio("#faf8f3", INK).toFixed(2)}:1`);
 assert.ok(
-  contrastRatio("#1b72b8", PAGE) >= CONTRAST_AA_LARGE,
+  contrastRatio("#176394", PAGE) >= CONTRAST_AA_LARGE,
   "the focus ring must be a visible non-text mark",
 );
-ok(`focus ring on page: ${contrastRatio("#1b72b8", PAGE).toFixed(2)}:1`);
+ok(`focus ring on page: ${contrastRatio("#176394", PAGE).toFixed(2)}:1`);
+
+// The BRAND blue is an expression token used for fills and non-text marks only;
+// its AA-safe text derivative is `--color-evidence`. Asserting the split keeps a
+// later change from quietly promoting the brand blue back into body text, where
+// it reaches only 4.33:1 on the sunken surface.
+assert.ok(contrastRatio("#1b72b8", SUNKEN) >= CONTRAST_AA_LARGE, "the brand blue must clear the non-text floor");
+assert.ok(contrastRatio("#1b72b8", SUNKEN) < CONTRAST_AA_TEXT, "the brand blue is deliberately not a text colour");
+for (const file of ["src/app/dashboard/NarrativeHome.tsx", "src/app/dashboard/JourneyMap.tsx",
+  "src/app/dashboard/page.tsx", "src/components/Actions.tsx", "src/components/States.tsx",
+  "src/components/SampleContext.tsx", "src/app/login/page.tsx"]) {
+  const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+  assert.doesNotMatch(source, /text-blue/, `${file} must use text-evidence, not the brand blue, for text`);
+}
+ok("the brand blue is used for marks only; text uses the AA-safe evidence blue");
 
 // --- 4. The brand resolver, against colours a client can actually pick ------
 
@@ -117,8 +131,22 @@ for (const [hex, why] of HOSTILE) {
 // The resolver must not repaint a colour that was already fine.
 assert.equal(resolveBrand("#0c4a6e", PAGE).adjusted, false, "a safe brand colour is left alone");
 ok("a brand colour that already reads is passed through unchanged");
-assert.equal(resolveBrand("#ffffff", PAGE).adjusted, true, "pure white must be corrected");
-ok("a brand colour that cannot read is corrected, and says so");
+
+// The defect this replaces was HARDCODED WHITE TEXT on the tenant hex. The
+// resolver's first move is to flip the foreground, and it only repaints the fill
+// when neither foreground clears the floor.
+assert.equal(resolveBrand("#ffffff", PAGE).accentOn, "#0e2a45", "a white brand must get ink text");
+assert.equal(resolveBrand("#f4b72a", PAGE).accentOn, "#0e2a45", "the light brand yellow must get ink text");
+assert.equal(resolveBrand("#ffffff", PAGE).adjusted, false, "flipping the foreground is enough for white");
+assert.equal(resolveBrand("#0c4a6e", PAGE).accentOn, "#ffffff", "a dark brand keeps white text");
+ok("the foreground is chosen per brand colour instead of being hardcoded white");
+
+// Mid grey is the one case where neither foreground reaches 4.5:1, so the fill
+// itself has to move — and the resolver reports that it did.
+const grey = resolveBrand("#808080", PAGE);
+assert.equal(grey.adjusted, true, "mid grey must be corrected because no foreground clears it unaided");
+assert.notEqual(grey.accent, "#808080", "the corrected fill must actually differ");
+ok("a brand colour that no foreground can rescue is corrected, and says so");
 
 // --- 5. Plain language ------------------------------------------------------
 

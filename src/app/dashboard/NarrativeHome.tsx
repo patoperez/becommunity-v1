@@ -1,50 +1,354 @@
+import type { ReactNode } from "react";
 import type { NarrativeHomeView } from "@/lib/dashboard/narrative";
 import type { BrandConfig } from "@/lib/branding/config";
+import { studyAccentVars } from "@/lib/brand/contrast";
+import { ScaleMark, AbsentMark, domainFor } from "@/components/evidence/ScaleMark";
+import { MethodDisclosure, SampleContext } from "@/components/SampleContext";
+import { Forward } from "@/components/Actions";
+import { BrandMark } from "@/components/BrandMark";
+import {
+  characteristicLabel,
+  movementLabel,
+  resultLanguage,
+  unitLabel,
+  humanize,
+} from "@/lib/language/results";
+import { studyBaseSentence } from "@/lib/language/sample";
 
-function Delta({ metric }: { metric: NarrativeHomeView["metrics"][number] }) {
-  if (!metric.delta) return <span className="text-zinc-400">Sin comparativo inmediato</span>;
-  const arrow = metric.movement === "up" ? "↑" : metric.movement === "down" ? "↓" : "→";
-  return <span className="text-sky-700 dark:text-sky-300">{arrow} {metric.delta} vs. periodo anterior</span>;
+/**
+ * The study panorama — the client's first impression.
+ *
+ * It replaces a coloured band, a strip of tiles and a card wall in which the
+ * headline result appeared seventh on the page, below a stepper and some pills.
+ *
+ * The unit here is a FINDING, and every finding has the same four parts:
+ *   1. a human question,
+ *   2. visual evidence for it,
+ *   3. what that evidence rests on, in ordinary words,
+ *   4. a way into the study to check it.
+ *
+ * Plus a fifth, structural part: the consultant's reading. The finding block
+ * cannot render without that slot (P8 contract C5) — where nothing has been
+ * published, the block says so rather than quietly omitting it.
+ *
+ * Nothing is calculated here. Every number arrives already computed, already
+ * rounded and already suppression-checked from `buildNarrativeHome`, which
+ * reads only sanitized aggregate DTOs.
+ */
+
+function Finding({
+  question,
+  headline,
+  evidence,
+  context,
+  action,
+  method,
+  tone = "evidence",
+}: {
+  question: string;
+  headline: ReactNode;
+  evidence?: ReactNode;
+  context?: ReactNode;
+  action?: ReactNode;
+  method?: ReactNode;
+  tone?: "evidence" | "voice";
+}) {
+  const kicker = tone === "voice" ? "text-voice" : "text-evidence";
+  return (
+    <article className="flex min-w-0 flex-col rounded-xl border border-line bg-surface p-5">
+      <h3 className={`text-sm font-semibold ${kicker}`}>{question}</h3>
+      <div className="mt-2.5">{headline}</div>
+      {evidence ? <div className="mt-3.5">{evidence}</div> : null}
+      {context ? <div className="mt-3">{context}</div> : null}
+      {method}
+      <div className="mt-auto pt-4">
+        {action}
+        {/*
+          C5: the interpretation slot is structural. P8-A adds no migration, so
+          there is nowhere yet to store a published reading — and the honest
+          rendering of that is a labelled empty state, not a hidden section.
+        */}
+        <p className="mt-3 border-t border-line pt-3 text-xs text-muted">
+          <span className="font-semibold text-strong">Lectura del consultor:</span>{" "}
+          todavía no publicada para este estudio.
+        </p>
+      </div>
+    </article>
+  );
 }
 
-export default function NarrativeHome({ view, brand }: { view: NarrativeHomeView; brand: BrandConfig }) {
+export default function NarrativeHome({
+  view,
+  brand,
+}: {
+  view: NarrativeHomeView;
+  brand: BrandConfig;
+}) {
   const studyAnchor = `study-${view.currentStudy.id}`;
   const reportHref = `/api/studies/${encodeURIComponent(view.currentStudy.id)}/report`;
+  const results = view.metrics.slice(0, 3);
+  const findings: ReactNode[] = [];
 
-  return <section className="mb-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-    <div className="px-6 py-7 text-white" style={{ background: `linear-gradient(135deg, ${brand.primaryColor}, ${brand.accentColor})` }}>
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/75">Panorama actual</p>
-      <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold">{view.currentStudy.name}</h2>
-          <p className="mt-1 text-sm text-white/80">{view.currentStudy.period ?? "Periodo actual"} · Lo esencial antes de explorar</p>
+  // 1-3 — the results that matter, in the order the view model already ranked
+  // them (recommendation first, then satisfaction, then the rest).
+  for (const metric of results) {
+    const language = resultLanguage(metric.key, metric.title);
+    const unit = metric.key.startsWith("csat:")
+      ? ("percent" as const)
+      : metric.key === "nps" || metric.key.startsWith("nps")
+        ? ("nps" as const)
+        : ("score" as const);
+    const numeric = metric.value == null ? null : Number.parseFloat(metric.value.replace("%", ""));
+
+    findings.push(
+      <Finding
+        key={metric.key}
+        question={language.question}
+        headline={
+          <>
+            <p className="tabular font-display text-4xl font-semibold leading-none text-strong">
+              {metric.value ?? "—"}
+            </p>
+            <p className="mt-1 text-sm font-medium text-strong">{language.name}</p>
+          </>
+        }
+        evidence={
+          numeric != null && Number.isFinite(numeric) ? (
+            <>
+              <ScaleMark value={numeric} unit={unit} tone="accent" />
+              <p className="mt-1.5 text-xs text-muted">{unitLabel(unit)}</p>
+            </>
+          ) : (
+            <>
+              <AbsentMark />
+              <p className="mt-1.5 text-xs text-muted">Sin resultado en esta medición</p>
+            </>
+          )
+        }
+        context={
+          <p className="text-sm text-muted">
+            {movementLabel(metric.movement, metric.delta)}
+          </p>
+        }
+        method={
+          <MethodDisclosure summary="Cómo se calcula">
+            <p>{language.method}</p>
+          </MethodDisclosure>
+        }
+        action={
+          <a
+            href={`#${studyAnchor}`}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
+          >
+            Ver el detalle en el estudio <Forward />
+          </a>
+        }
+      />,
+    );
+  }
+
+  // 4 — the weakest comparable touchpoint, when the study has a journey.
+  if (view.spotlight) {
+    const spot = view.spotlight;
+    const domain = domainFor(spot.unit);
+    findings.push(
+      <Finding
+        key="spotlight"
+        question="¿Dónde se siente más flojo el recorrido?"
+        headline={
+          <>
+            <p className="tabular font-display text-4xl font-semibold leading-none text-strong">
+              {spot.value}
+            </p>
+            <p className="mt-1 text-sm font-medium text-strong">{spot.label}</p>
+          </>
+        }
+        evidence={
+          <>
+            <ScaleMark
+              value={Number.parseFloat(spot.value.replace("%", ""))}
+              unit={spot.unit}
+              tone="accent"
+            />
+            <p className="mt-1.5 text-xs text-muted">
+              El más bajo de los {spot.comparedWith} momentos que se miden en esta
+              misma escala ({domain.label}).
+            </p>
+          </>
+        }
+        context={<SampleContext visibility={spot.visibility} count={spot.n} />}
+        method={
+          <MethodDisclosure summary="Qué significa “el más bajo”">
+            <p>
+              Es una ordenación de los números que ya se calcularon, no un juicio.
+              Solo se comparan momentos medidos en la misma escala, y que sea el
+              más bajo no significa por sí solo que esté mal.
+            </p>
+          </MethodDisclosure>
+        }
+        action={
+          <a
+            href={`#${studyAnchor}`}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
+          >
+            Recorrer los {view.stageCount} momentos <Forward />
+          </a>
+        }
+      />,
+    );
+  }
+
+  // 5 — what people said.
+  if (view.themes.length > 0 || view.voice) {
+    const top = view.themes[0];
+    findings.push(
+      <Finding
+        key="voces"
+        tone="voice"
+        question="¿Qué están diciendo las personas?"
+        headline={
+          top ? (
+            <>
+              <p className="font-display text-2xl font-semibold leading-tight text-strong">
+                {humanize(top.theme)}
+              </p>
+              <p className="mt-1 text-sm text-muted">
+                {top.count === 1
+                  ? "1 comentario lo menciona"
+                  : `${top.count} comentarios lo mencionan`}
+                {view.themes.length > 1
+                  ? `, por delante de ${humanize(view.themes[1].theme).toLowerCase()}`
+                  : ""}
+                .
+              </p>
+            </>
+          ) : (
+            <p className="text-base text-muted">
+              Hay citas aprobadas, y los temas siguen en revisión.
+            </p>
+          )
+        }
+        evidence={
+          view.voice ? (
+            <figure className="rounded-lg border-l-4 border-voice bg-voice-surface px-4 py-3">
+              <blockquote className="text-base leading-snug text-strong">
+                {`“${view.voice.quote}”`}
+              </blockquote>
+              {view.voice.theme ? (
+                <figcaption className="mt-1.5 text-xs font-semibold uppercase tracking-wide text-voice">
+                  {humanize(view.voice.theme)}
+                </figcaption>
+              ) : null}
+            </figure>
+          ) : null
+        }
+        context={
+          <p className="text-sm text-muted">
+            Los comentarios no se convierten en porcentaje: se leen.
+          </p>
+        }
+        action={
+          <a
+            href={`#${studyAnchor}`}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-voice underline-offset-4 hover:underline"
+          >
+            Leer todos los temas y citas <Forward />
+          </a>
+        }
+      />,
+    );
+  }
+
+  return (
+    <section
+      aria-labelledby="panorama-titulo"
+      className="mb-10"
+      // The tenant's own colour, resolved against a contrast floor before it can
+      // paint anything. Set here as well as on the shell so the panorama stays
+      // readable wherever it is rendered — including the internal preview.
+      style={studyAccentVars(brand.primaryColor)}
+    >
+      {/* The opening statement: what this is and what it rests on. */}
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface">
+        <div
+          className="px-6 py-8 sm:px-8 sm:py-10"
+          style={{
+            backgroundColor: "var(--study-accent)",
+            color: "var(--study-accent-on)",
+          }}
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">
+            Panorama del estudio
+          </p>
+          <h2 id="panorama-titulo" className="mt-3 max-w-3xl text-[clamp(1.7rem,4vw,2.6rem)]" style={{ color: "inherit" }}>
+            {view.currentStudy.name}
+          </h2>
+          <p className="mt-3 max-w-2xl text-base leading-relaxed opacity-90">
+            {view.currentStudy.period ? `${view.currentStudy.period}. ` : ""}
+            {studyBaseSentence(view.sample.visibility, view.sample.units)}
+          </p>
+          <div className="mt-6 flex flex-wrap gap-2.5">
+            <a
+              href={`#${studyAnchor}`}
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold"
+              style={{
+                backgroundColor: "var(--study-accent-on)",
+                color: "var(--study-accent)",
+              }}
+            >
+              Explorar el estudio <Forward />
+            </a>
+            {view.currentStudy.reportAvailable ? (
+              <a
+                href={reportHref}
+                className="inline-flex min-h-11 items-center rounded-lg border px-4 py-2.5 text-sm font-semibold"
+                style={{ borderColor: "currentColor", color: "inherit" }}
+              >
+                Descargar el informe
+              </a>
+            ) : null}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <a href={`#${studyAnchor}`} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold hover:bg-white/90" style={{ color: brand.primaryColor }}>Explorar estudio</a>
-          {view.currentStudy.reportAvailable ? <a href={reportHref} className="rounded-lg border border-white/40 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10">Descargar informe PDF</a> : null}
+
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line px-6 py-3.5 text-xs text-muted sm:px-8">
+          <span className="flex items-center gap-1.5">
+            <BrandMark size={14} color="var(--color-blue)" />
+            Lo esencial primero; el detalle está más abajo.
+          </span>
+          {!view.hasPreviousWave ? (
+            <span>
+              Todavía no hay una medición anterior con la que comparar. Cuando la
+              haya, los cambios aparecerán aquí.
+            </span>
+          ) : null}
         </div>
       </div>
-    </div>
 
-    <div className="p-6">
-      <div>
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Qué cambió</h3>
-        {view.metrics.length ? <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {view.metrics.map((metric) => <div key={metric.key} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
-            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{metric.title}</p>
-            <p className="mt-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">{metric.value ?? "—"}</p>
-            <p className="mt-1 text-[11px]"><Delta metric={metric} /></p>
-          </div>)}
-        </div> : <p className="mt-2 text-sm text-zinc-500">El estudio actual aún no tiene indicadores publicables.</p>}
-      </div>
+      {findings.length > 0 ? (
+        <>
+          <h3 className="mt-8 text-xl">Lo que encontramos</h3>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {findings}
+          </div>
+        </>
+      ) : (
+        <p className="mt-6 rounded-xl border border-dashed border-line-strong bg-surface px-5 py-6 text-sm text-muted">
+          Este estudio todavía no tiene resultados publicables. En cuanto el
+          equipo de Be Community termine de revisarlo, el panorama aparecerá
+          aquí.
+        </p>
+      )}
 
-      <div className="mt-6 border-t border-zinc-200 pt-5 dark:border-zinc-800">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Qué está apareciendo</h3>
-        {view.themes.length ? <div className="mt-3 flex flex-wrap gap-2">
-          {view.themes.map((theme) => <span key={theme.theme} className="rounded-full bg-violet-50 px-3 py-1.5 text-sm text-violet-800 dark:bg-violet-950 dark:text-violet-200">{theme.theme.replace(/_/g, " ")} <span className="ml-1 text-xs text-violet-500">{theme.count} menc.</span></span>)}
-        </div> : <p className="mt-2 text-sm text-zinc-500">Todavía no hay temas cualitativos confirmados para mostrar.</p>}
-        {!view.hasPreviousWave ? <p className="mt-4 text-xs text-zinc-400">Cuando exista otra ola comparable, esta portada mostrará automáticamente los cambios.</p> : null}
-      </div>
-    </div>
-  </section>;
+      {view.characteristics.length > 0 ? (
+        <p className="mt-5 text-sm text-muted">
+          Más abajo puedes ver los mismos resultados{" "}
+          {view.characteristics
+            .slice(0, 3)
+            .map((key) => `por ${characteristicLabel(key).toLowerCase()}`)
+            .join(", ")}
+          .
+        </p>
+      ) : null}
+    </section>
+  );
 }

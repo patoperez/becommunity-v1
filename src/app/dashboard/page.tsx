@@ -13,9 +13,14 @@ import { buildNarrativeHome } from "@/lib/dashboard/narrative";
 import NarrativeHome from "./NarrativeHome";
 import { parseDashboardConfig } from "@/lib/dashboard/config";
 import { logoPublicUrl, parseBrandConfig } from "@/lib/branding/config";
+import { InsightsShell } from "@/components/shell/InsightsShell";
+import { StudioShell, STUDIO_STOPS } from "@/components/shell/StudioShell";
+import { StateBlock } from "@/components/States";
+import { Forward } from "@/components/Actions";
+import { studyStateLabel } from "@/lib/language/results";
 
 export const metadata = {
-  title: "Portal · Be Community",
+  title: "Inicio",
 };
 
 type Profile = {
@@ -34,6 +39,24 @@ type Study = {
   journey_definition: unknown;
   created_at: string;
 };
+
+/** The sign-out control, identical in both shells. */
+function SignOut({ tone = "ink" }: { tone?: "ink" | "paper" }) {
+  return (
+    <form action={logout}>
+      <button
+        type="submit"
+        className={
+          tone === "paper"
+            ? "min-h-11 rounded-lg border border-paper/40 px-3 py-1.5 text-sm font-medium text-paper transition-colors duration-[var(--motion-state)] hover:bg-paper/10"
+            : "min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong transition-colors duration-[var(--motion-state)] hover:bg-surface-sunken"
+        }
+      >
+        Cerrar sesión
+      </button>
+    </form>
+  );
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -125,83 +148,177 @@ export default async function DashboardPage() {
   const brandName = brand.displayName ?? tenant?.name ?? "Be Community";
   const brandLogo = logoPublicUrl(brand.logoPath);
 
-  return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
-      <header
-        className="flex items-center justify-between border-b px-6 py-4 text-white"
-        style={{ backgroundColor: brand.primaryColor, borderColor: brand.accentColor }}
+  // ---------------------------------------------------------------------------
+  // Be Community Studio — the internal home.
+  //
+  // Internal staff previously landed on the CLIENT product with a grey "Panel
+  // interno" strip bolted on top, and then saw every tenant's studies in one
+  // undifferentiated list. They now get their own shell, their own orientation
+  // and their own primary task hierarchy.
+  //
+  // MIGRATION BOUNDARY: the four internal screens keep their `/admin/*`
+  // addresses and their current chrome. Moving them onto this shell and onto
+  // the `/studio/*` routes the information architecture defines is P8-B.
+  // ---------------------------------------------------------------------------
+  if (profile?.role === "internal") {
+    return (
+      <StudioShell
+        userEmail={user.email ?? ""}
+        currentHref="/dashboard"
+        breadcrumb={["Studio", "Inicio"]}
+        title="Tu espacio de trabajo"
+        lead="Desde aquí preparas, revisas y publicas los estudios de cada cliente. Nada llega a un cliente hasta que se publica."
+        utility={<SignOut tone="paper" />}
       >
-        <div className="flex min-w-0 items-center gap-3">
-          {brandLogo ? <>
-            {/* Dynamic tenant Storage URLs cannot use a static Next Image remote allowlist. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={brandLogo} alt={`Logotipo de ${brandName}`} className="h-11 w-11 shrink-0 rounded-lg bg-white object-contain p-1" />
-          </> : null}
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold">{profile?.role === "internal" ? "Be Community" : brandName}</h1>
-            <p className="truncate text-xs text-white/75">
-              {profile?.role === "internal" ? "Equipo interno" : brand.tagline}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="hidden text-sm text-white/80 sm:inline">
-            {user.email}
-          </span>
-          <form action={logout}>
-            <button
-              type="submit"
-              className="rounded-lg border border-white/40 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-white/10"
+        <section aria-labelledby="studio-tareas">
+          <h2 id="studio-tareas" className="text-xl">
+            ¿Por dónde quieres empezar?
+          </h2>
+          {/* The three things the consultant actually does to a study. Client
+              administration is a secondary path below, as the information
+              architecture puts it — it is not part of preparing a study. */}
+          <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {STUDIO_STOPS.filter((stop) => stop.href !== "/admin/clients").map((stop) => (
+              <li key={stop.href}>
+                <Link
+                  href={stop.href}
+                  className="flex h-full min-w-0 flex-col rounded-xl border border-line bg-surface p-5 transition-colors duration-[var(--motion-state)] hover:border-line-strong hover:bg-surface-sunken/50"
+                >
+                  <span className="flex items-center gap-2 font-display text-lg font-semibold text-strong">
+                    {stop.label}
+                    <Forward />
+                  </span>
+                  <span className="mt-1 text-sm text-muted">{stop.description}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-sm text-muted">
+            ¿Necesitas dar o quitar acceso a alguien?{" "}
+            <Link
+              href="/admin/clients"
+              className="font-semibold text-evidence underline-offset-4 hover:underline"
             >
-              Cerrar sesión
-            </button>
-          </form>
-        </div>
-      </header>
+              Ir a clientes y accesos
+            </Link>
+            .
+          </p>
+        </section>
 
-      <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
-        {profile?.role === "internal" ? (
-          <div className="mb-8 flex items-center justify-between rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-            <div>
-              <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Panel interno</h2>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                Carga datos de un estudio hacia el modelo canónico.
-              </p>
+        <section aria-labelledby="studio-estudios" className="mt-10">
+          <h2 id="studio-estudios" className="text-xl">
+            Estudios recientes
+          </h2>
+          {studyData.length === 0 ? (
+            <div className="mt-4">
+              <StateBlock title="Todavía no hay ningún estudio">
+                <p>
+                  Crea el primero desde <strong>Estudios y plantillas</strong>, o
+                  empieza trayendo un archivo de datos.
+                </p>
+              </StateBlock>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Link href="/admin/clients" className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium">Clientes y usuarios</Link>
-              <Link href="/admin/qualitative" className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium">Revisión cualitativa</Link>
-              <Link
-                href="/admin/studies"
-                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-              >
-                Estudios y plantillas
+          ) : (
+            <ul className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+              {studyData.slice(0, 8).map(({ study, dashboard }) => (
+                <li
+                  key={study.id}
+                  className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5"
+                >
+                  <div className="min-w-0">
+                    <p className="break-words font-medium text-strong">{study.name}</p>
+                    <p className="text-sm text-muted">
+                      {study.period ?? "Sin periodo"} ·{" "}
+                      {dashboard.view.emptyStudy
+                        ? "sin datos cargados"
+                        : "con datos cargados"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-full border border-line bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-muted">
+                      {studyStateLabel(study.status)}
+                    </span>
+                    <Link
+                      href={`/admin/preview/${study.id}`}
+                      className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
+                    >
+                      Ver como el cliente <Forward />
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {studyData.length > 8 ? (
+            <p className="mt-3 text-sm text-muted">
+              Se muestran los 8 más recientes.{" "}
+              <Link href="/admin/studies" className="font-semibold text-evidence underline-offset-4 hover:underline">
+                Ver todos los estudios
               </Link>
-            </div>
-          </div>
-        ) : null}
-
-        {narrative ? <NarrativeHome view={narrative} brand={brand} /> : null}
-        <LongitudinalTrends view={longitudinal} />
-
-        <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          Tus estudios
-        </h2>
-
-        {!profile ? (
-          <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-            Tu cuenta aún no está vinculada a un cliente. Contacta al equipo de
-            Be Community.
-          </div>
-        ) : !studies || studies.length === 0 ? (
-          <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-10 text-center dark:border-zinc-800 dark:bg-zinc-900">
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Todavía no hay estudios disponibles. Aparecerán aquí en cuanto Be
-              Community los publique.
+              .
             </p>
-          </div>
-        ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4">
+          ) : null}
+        </section>
+      </StudioShell>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Be Community Insights — the client home.
+  // ---------------------------------------------------------------------------
+  return (
+    <InsightsShell
+      brandName={brandName}
+      tagline={brand.tagline}
+      brand={brand}
+      logoUrl={brandLogo}
+      userEmail={user.email ?? ""}
+      utility={<SignOut />}
+    >
+      {!profile ? (
+        <StateBlock tone="caution" title="Tu cuenta todavía no está vinculada">
+          <p>
+            No encontramos a qué comunidad perteneces, así que no podemos
+            mostrarte ningún estudio. Escríbele al equipo de Be Community y lo
+            resolvemos.
+          </p>
+        </StateBlock>
+      ) : !studies || studies.length === 0 ? (
+        /* The deliberate empty state: what will appear, who puts it there, and
+           what happens next — not a grey box saying nothing is here. */
+        <div className="rounded-2xl border border-line bg-surface px-6 py-12 text-center sm:px-10">
+          <h2 className="text-2xl">Todavía no hay un estudio publicado para ti</h2>
+          <p className="mx-auto mt-3 max-w-prose text-base leading-relaxed text-muted">
+            Cuando el equipo de Be Community termine de analizar y revisar el
+            estudio de tu comunidad, aparecerá aquí: qué pasó, qué significa y
+            qué conviene mirar después. No tienes que hacer nada mientras tanto.
+          </p>
+          <p className="mx-auto mt-4 max-w-prose text-sm text-muted">
+            Un estudio solo se vuelve visible cuando alguien de Be Community lo
+            publica a propósito. Si esperabas ver algo hoy, escríbele a la
+            persona que te dio el acceso.
+          </p>
+        </div>
+      ) : (
+        <>
+          {narrative ? (
+            <NarrativeHome view={narrative} brand={brand} />
+          ) : (
+            /* The panorama is switched off for this study. Say so — the page
+               used to open on a bare heading with no explanation (C5). */
+            <div className="mb-10">
+              <StateBlock title="Este estudio se muestra sin panorama">
+                <p>
+                  El equipo de Be Community configuró este estudio para leerse
+                  directamente en el detalle, más abajo.
+                </p>
+              </StateBlock>
+            </div>
+          )}
+          <LongitudinalTrends view={longitudinal} />
+
+          <h2 className="sr-only">Tus estudios</h2>
+          <div className="grid grid-cols-1 gap-6">
             {studyData.map(({ study, dashboard }) => (
               <StudyCard
                 key={study.id}
@@ -210,8 +327,8 @@ export default async function DashboardPage() {
               />
             ))}
           </div>
-        )}
-      </main>
-    </div>
+        </>
+      )}
+    </InsightsShell>
   );
 }

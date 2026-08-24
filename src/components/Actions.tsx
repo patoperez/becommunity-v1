@@ -16,7 +16,7 @@ export const secondaryAction =
   "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong transition-colors duration-[var(--motion-state)] hover:bg-surface-sunken";
 
 export const quietAction =
-  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-blue underline-offset-4 transition-colors duration-[var(--motion-state)] hover:underline";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-evidence underline-offset-4 transition-colors duration-[var(--motion-state)] hover:underline";
 
 export function ActionLink({
   href,

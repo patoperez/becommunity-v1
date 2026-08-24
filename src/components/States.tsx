@@ -74,7 +74,7 @@ export function PageState({
       className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-6 py-20"
     >
       {kicker ? (
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-evidence">
           {kicker}
         </p>
       ) : null}
