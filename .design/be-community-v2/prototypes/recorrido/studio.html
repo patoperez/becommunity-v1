@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Tu trabajo de hoy — Dirección C: Recorrido</title>
+<link rel="stylesheet" href="../shared/reset.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Saltar al contenido</a>
+
+<div class="wrap">
+  <header class="top">
+    <p class="brand">
+      <span class="brand-dot" aria-hidden="true"></span>
+      Be Community <span class="brand-sub">Studio</span>
+    </p>
+    <p class="top-meta">Prototipo · Dirección C · Recorrido</p>
+  </header>
+  <div class="spine-rule" style="--spine-progress: 55%;" aria-hidden="true"></div>
+
+  <nav class="spine-nav" aria-label="Secciones de Studio">
+    <a href="#main" aria-current="page">Inicio</a>
+    <a href="#c-clientes">Clientes</a>
+    <a href="#c-estudios">Estudios</a>
+    <a href="#c-plantillas">Plantillas</a>
+  </nav>
+
+  <main id="main">
+    <span class="eyebrow">Miércoles 12 de agosto de 2026</span>
+    <h1 class="title">Tu trabajo de hoy</h1>
+    <p class="lead">Tres estudios esperan una decisión tuya. Uno ya llegó a revisión.</p>
+
+    <div class="studio-grid" style="margin-top:1.75rem;">
+      <div>
+
+        <section aria-labelledby="c-atencion">
+          <div class="section-head">
+            <h2 class="section-title" id="c-atencion">Necesitan tu atención</h2>
+          </div>
+          <div class="queue">
+            <article class="q-item is-review">
+              <div>
+                <p class="q-client">Colegio del Valle</p>
+                <p class="q-study">Salida de estudiantes · Ciclo 2026</p>
+              </div>
+              <span class="state state-ok">En revisión</span>
+              <p class="q-need">Esperando revisión antes de publicar</p>
+            </article>
+            <article class="q-item is-work">
+              <div>
+                <p class="q-client">Instituto Norte</p>
+                <p class="q-study">Clima laboral · 2026</p>
+              </div>
+              <span class="state state-watch">En análisis</span>
+              <p class="q-need">Carga de datos a medio terminar</p>
+            </article>
+            <article class="q-item is-work">
+              <div>
+                <p class="q-client">Colegio del Valle</p>
+                <p class="q-study">Voces docentes · 2026</p>
+              </div>
+              <span class="state state-watch">En análisis</span>
+              <p class="q-need">14 comentarios sin revisar</p>
+            </article>
+          </div>
+        </section>
+
+        <!-- the task, shown as a position along the process spine -->
+        <section aria-labelledby="c-tarea">
+          <div class="section-head">
+            <h2 class="section-title" id="c-tarea">Carga de datos a medio terminar</h2>
+            <p class="muted">Instituto Norte · Clima laboral · 2026</p>
+          </div>
+
+          <div class="card">
+            <div class="process">
+              <div class="phase is-done">
+                <span class="phase-node" aria-hidden="true">1</span>
+                <span class="phase-name">Elegir el archivo</span>
+                <span class="phase-meta">Listo</span>
+              </div>
+              <div class="phase is-now" aria-current="step">
+                <span class="phase-node" aria-hidden="true">2</span>
+                <span class="phase-name">Acordar qué significa cada columna</span>
+                <span class="phase-meta">Aquí vas</span>
+              </div>
+              <div class="phase">
+                <span class="phase-node" aria-hidden="true">3</span>
+                <span class="phase-name">Revisar y confirmar</span>
+                <span class="phase-meta">Pendiente</span>
+              </div>
+            </div>
+
+            <p class="muted" style="margin-bottom:0.35rem;">Paso 2 de 3 · Acordar qué significa cada columna</p>
+            <p style="font-size:1.5rem; font-weight:800; letter-spacing:-0.02em;" class="num">18 de 24 columnas listas</p>
+            <p class="muted">Faltan 6 columnas por decidir.</p>
+
+            <div class="callout callout-ok" style="margin-top:0.85rem;">
+              <span class="callout-mark" aria-hidden="true">●</span>
+              <div>
+                <strong>Formato reconocido</strong>
+                <p>Ya sabemos leer este formato: es el mismo del estudio anterior de este cliente.</p>
+              </div>
+            </div>
+
+            <div class="actions">
+              <a class="btn" href="#continuar">Continuar la carga</a>
+              <a class="btn btn-quiet" href="#descartar">Descartar y empezar de nuevo</a>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="c-plantillas">
+          <div class="section-head">
+            <h2 class="section-title" id="c-plantillas">Plantillas del equipo</h2>
+            <p class="muted">Visibles para todo el equipo, con quien las creó.</p>
+          </div>
+          <div class="tmpl">
+            <article class="tmpl-item">
+              <p class="tmpl-name">Salida de estudiantes</p>
+              <p class="tmpl-meta">Usada 4 veces</p>
+              <p class="tmpl-meta">A. Moreno · 5 puntos de contacto</p>
+            </article>
+            <article class="tmpl-item">
+              <p class="tmpl-name">Clima laboral</p>
+              <p class="tmpl-meta">Usada 2 veces</p>
+              <p class="tmpl-meta">L. Rivas · sin recorrido</p>
+            </article>
+            <article class="tmpl-item">
+              <p class="tmpl-name">Solo recorrido, sin indicadores</p>
+              <p class="tmpl-meta">Usada 1 vez</p>
+              <p class="tmpl-meta">A. Moreno · 5 puntos de contacto, sin resultados numéricos</p>
+            </article>
+          </div>
+        </section>
+
+        <section aria-labelledby="c-estudios">
+          <div class="section-head">
+            <h2 class="section-title" id="c-estudios">Estudios recientes</h2>
+          </div>
+          <div class="table-scroll">
+            <table class="studies-t">
+              <thead>
+                <tr><th scope="col">Cliente</th><th scope="col">Estudio</th><th scope="col">Estado</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Colegio del Valle</td><th scope="row">Salida de estudiantes · Ciclo 2026</th><td><span class="state state-ok">En revisión</span></td></tr>
+                <tr><td>Instituto Norte</td><th scope="row">Clima laboral · 2026</th><td><span class="state state-watch">En análisis</span></td></tr>
+                <tr><td>Colegio del Valle</td><th scope="row">Salida de estudiantes · Ciclo 2025</th><td><span class="state state-ok">Publicado</span></td></tr>
+                <tr><td>Escuela Ribera</td><th scope="row">Recorrido de familias · 2026</th><td><span class="state state-draft">Borrador</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- The honesty case this direction must pass -->
+          <div class="no-route">
+            <strong>Sin recorrido</strong>
+            <p>Clima laboral · 2026 no tiene recorrido: se presenta como resumen, no como un camino inventado.</p>
+          </div>
+        </section>
+
+        <section aria-labelledby="c-clientes">
+          <div class="section-head">
+            <h2 class="section-title" id="c-clientes">Clientes</h2>
+            <p class="muted">Quién ve qué se decide eligiendo de una lista de características reales del cliente.</p>
+          </div>
+        </section>
+
+      </div>
+
+      <aside aria-labelledby="c-revision">
+        <div class="card" style="border-top:4px solid var(--spine);">
+          <h2 class="section-title" id="c-revision">Marcada para revisión</h2>
+          <p class="q-client" style="margin-top:0.5rem;">Colegio del Valle</p>
+          <p class="q-study" style="margin-bottom:0.7rem;">Salida de estudiantes · Ciclo 2026</p>
+
+          <div class="callout callout-ok">
+            <span class="callout-mark" aria-hidden="true">●</span>
+            <div>
+              <strong>Estado del proceso</strong>
+              <p>Marcada por A. Moreno · 12 de agosto de 2026</p>
+            </div>
+          </div>
+
+          <p style="font-size:0.89rem; color:var(--ink-2); margin-top:0.75rem;">
+            Es un estado del proceso, no un permiso: cualquiera del equipo puede
+            publicar, y queda constancia de quién lo hizo.
+          </p>
+
+          <div class="actions">
+            <a class="btn" href="#preview">Ver como lo verá el cliente</a>
+            <a class="btn btn-quiet" href="#publicar">Publicar</a>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <p class="foot">Prototipo estático de comparación visual. Datos y nombres sintéticos.</p>
+  </main>
+</div>
+</body>
+</html>

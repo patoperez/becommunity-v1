@@ -1,0 +1,120 @@
+/* Launcher chrome ONLY.
+
+   Deliberately neutral: it uses none of the three directions' type, colour or
+   rhythm, so the frame around the comparison cannot flatter one option. The
+   three directions are presented with identical treatment, in a fixed order,
+   with no badge, highlight, ordering cue or default selection that favours any
+   of them. The recommendation lives in README.md, not in this UI. */
+
+:root {
+  --l-bg:     #ffffff;
+  --l-ink:    #1c1c1c;
+  --l-ink-2:  #4a4a4a;
+  --l-ink-3:  #6c6c6c;
+  --l-line:   #d8d8d8;
+  --l-line-2: #b4b4b4;
+  --l-sunk:   #f2f2f2;
+  --l-focus:  #1c1c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --l-bg:     #141414;
+    --l-ink:    #ededed;
+    --l-ink-2:  #c4c4c4;
+    --l-ink-3:  #9a9a9a;
+    --l-line:   #333333;
+    --l-line-2: #4d4d4d;
+    --l-sunk:   #1e1e1e;
+    --l-focus:  #ededed;
+  }
+}
+
+body {
+  background: var(--l-bg);
+  color: var(--l-ink);
+  font-family: "Segoe UI", "Noto Sans", "DejaVu Sans", "Liberation Sans", sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.l-wrap { max-width: 78rem; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
+
+.l-head { border-bottom: 2px solid var(--l-ink); padding-bottom: 0.9rem; margin-bottom: 1.5rem; }
+.l-title { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.015em; }
+.l-sub { color: var(--l-ink-2); font-size: 0.95rem; margin-top: 0.3rem; max-width: 72ch; }
+
+.l-section-title {
+  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--l-ink-3);
+  margin-bottom: 0.6rem;
+}
+
+.l-controls { display: grid; gap: 1.25rem; margin-bottom: 1.5rem; }
+
+.l-choices { display: grid; gap: 0.5rem; }
+.l-choice {
+  display: block; width: 100%; text-align: left;
+  min-height: 44px; padding: 0.7rem 0.85rem;
+  border: 1px solid var(--l-line); background: var(--l-bg);
+  color: var(--l-ink); border-radius: 3px;
+  font-size: 0.95rem;
+}
+.l-choice:hover { background: var(--l-sunk); }
+.l-choice[aria-pressed="true"] {
+  border-color: var(--l-ink); border-width: 2px; padding: calc(0.7rem - 1px) calc(0.85rem - 1px);
+  background: var(--l-sunk); font-weight: 700;
+}
+.l-choice[aria-pressed="true"]::before { content: "▸ "; }
+.l-choice-name { display: block; }
+.l-choice-note { display: block; font-size: 0.83rem; color: var(--l-ink-3); font-weight: 400; margin-top: 0.15rem; }
+
+.l-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+:focus-visible { outline: 3px solid var(--l-focus); outline-offset: 2px; }
+
+.l-open {
+  display: inline-flex; align-items: center; min-height: 44px;
+  padding: 0 1rem; border: 2px solid var(--l-ink);
+  background: var(--l-ink); color: var(--l-bg);
+  font-weight: 700; font-size: 0.9rem; text-decoration: none; border-radius: 3px;
+}
+.l-open:hover { background: var(--l-bg); color: var(--l-ink); }
+
+.l-notes {
+  border: 1px solid var(--l-line); border-left: 4px solid var(--l-line-2);
+  padding: 0.9rem 1rem; border-radius: 3px; background: var(--l-sunk);
+}
+.l-notes h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.2rem; }
+.l-notes .l-thesis { color: var(--l-ink-2); font-size: 0.95rem; margin-bottom: 0.75rem; max-width: 68ch; }
+.l-notes dl { display: grid; gap: 0.55rem; }
+.l-notes dt {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--l-ink-3);
+}
+.l-notes dd { font-size: 0.92rem; color: var(--l-ink-2); max-width: 68ch; }
+
+.l-stage {
+  margin-top: 1.5rem; border-top: 1px solid var(--l-line); padding-top: 1.25rem;
+}
+.l-stage-head {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1rem;
+  align-items: baseline; justify-content: space-between; margin-bottom: 0.7rem;
+}
+.l-frame-outer { background: var(--l-sunk); border: 1px solid var(--l-line); padding: 0.75rem; border-radius: 3px; overflow-x: auto; }
+.l-frame-shell { margin: 0 auto; transition: width 160ms ease; }
+.l-frame-shell.is-mobile { width: 375px; max-width: 100%; }
+.l-frame-shell.is-desktop { width: 100%; }
+.l-frame-label { font-size: 0.78rem; color: var(--l-ink-3); text-align: center; margin-bottom: 0.4rem; }
+iframe.l-frame {
+  width: 100%; height: 78vh; min-height: 32rem;
+  border: 1px solid var(--l-line-2); background: #fff; display: block;
+}
+.l-frame-shell.is-mobile iframe.l-frame { height: 812px; min-height: 0; }
+
+.l-neutral {
+  margin-top: 1.75rem; border-top: 1px solid var(--l-line); padding-top: 1rem;
+  font-size: 0.87rem; color: var(--l-ink-3); max-width: 76ch;
+}
+
+@media (min-width: 60rem) {
+  .l-controls { grid-template-columns: 1fr 1fr 1.4fr; align-items: start; gap: 1.75rem; }
+}

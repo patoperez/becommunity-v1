@@ -1,0 +1,485 @@
+/* ============================================================
+   DIRECTION C — RECORRIDO  (Guided Path)
+   Prototype-only styles. Proposed direction, not an approved brand.
+
+   Thesis: the journey is the product. Evidence appears where it
+   belongs along the route people actually walked. One thing is
+   large at any moment; the rest is peripheral.
+
+   HONESTY REQUIREMENT built into this prototype: a study without a
+   route must NOT be given a fake one. Both the Studio surface and
+   the story surface show the fallback explicitly.
+
+   TYPE NOTE — no external fonts are permitted in this prototype
+   (CSP: font-src 'self'; no network requests). The stack below is
+   a deliberate local approximation, NOT the intended face.
+   Arial is explicitly excluded.
+   A future self-hosted face must deliver: a geometric-humanist sans
+   with a genuine display cut for the focused value (very large,
+   tight tracking, tabular figures) and a compact cut for the
+   peripheral route labels.
+   ============================================================ */
+
+:root {
+  --ground:      #f7f6f3;
+  --surface:     #ffffff;
+  --ink:         #17211f;   /* 15.4:1 on --surface */
+  --ink-2:       #3c4a47;   /* 9.4:1 */
+  --ink-3:       #5d6b67;   /* 5.8:1 */
+  --line:        #dcd9d1;
+  --line-2:      #bdb8ab;
+
+  /* The route itself carries the client's colour, resolved for contrast. */
+  --spine:       #14504a;   /* 8.4:1 on --surface */
+  --spine-soft:  #e2eeeb;
+  --spine-ink:   #ffffff;
+
+  /* Fixed, accessible state ramp. Brand may NOT override it.
+     Every state is carried by a shape and a value as well as a hue. */
+  --ok:          #1f6141;   /* 6.2:1 */
+  --ok-soft:     #e6f2ea;
+  --watch:       #74540a;   /* 6.0:1 */
+  --watch-soft:  #f8f1da;
+  --alert:       #9d3212;   /* 6.6:1 */
+  --alert-soft:  #fbeae3;
+
+  --r: 6px;
+  --fast: 130ms;
+  --mid:  200ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground:     #101614;
+    --surface:    #18211f;
+    --ink:        #eef2f0;
+    --ink-2:      #c3cdc9;
+    --ink-3:      #9aa5a1;
+    --line:       #2c3835;
+    --line-2:     #405049;
+    --spine:      #6fc0b2;
+    --spine-soft: #17322e;
+    --spine-ink:  #08110f;
+    --ok:         #67c396;
+    --ok-soft:    #12291e;
+    --watch:      #dcbc63;
+    --watch-soft: #2a2412;
+    --alert:      #ef9370;
+    --alert-soft: #301b12;
+  }
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Segoe UI", "Noto Sans", "DejaVu Sans", "Liberation Sans", sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.num { font-variant-numeric: tabular-nums lining-nums; }
+
+.wrap { max-width: 68rem; margin: 0 auto; padding: 0 1rem 4rem; }
+.narrow { max-width: 52rem; }
+
+/* ---------- header with the spine motif ---------- */
+.top {
+  display: flex; flex-wrap: wrap; gap: 0.6rem 1rem;
+  align-items: center; justify-content: space-between;
+  padding: 1rem 0 0.85rem;
+}
+.brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; }
+.brand-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--spine); box-shadow: 0 0 0 4px var(--spine-soft);
+}
+.brand-sub { color: var(--ink-3); font-weight: 500; }
+.top-meta { font-size: 0.8rem; color: var(--ink-3); }
+
+.spine-rule {
+  height: 3px; background: var(--line);
+  position: relative; margin-bottom: 1.75rem; border-radius: 2px;
+}
+.spine-rule::before {
+  content: ""; position: absolute; inset: 0 auto 0 0;
+  width: var(--spine-progress, 40%); background: var(--spine); border-radius: 2px;
+}
+
+h1.title { font-size: clamp(1.7rem, 5.5vw, 2.5rem); line-height: 1.12; letter-spacing: -0.02em; }
+.lead { color: var(--ink-2); font-size: 1.02rem; max-width: 56ch; margin-top: 0.5rem; }
+.eyebrow {
+  display: block; font-size: 0.76rem; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--spine);
+  margin-bottom: 0.45rem;
+}
+.section-title { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
+.muted { color: var(--ink-3); font-size: 0.88rem; }
+
+section + section { margin-top: 2.25rem; }
+.section-head { margin-bottom: 0.9rem; }
+
+/* ---------- controls ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  min-height: 44px; padding: 0 1.15rem; border-radius: 999px;
+  background: var(--spine); color: var(--spine-ink);
+  border: 2px solid var(--spine);
+  font-weight: 650; font-size: 0.92rem;
+  transition: transform var(--fast) ease, filter var(--fast) ease;
+}
+.btn:hover { filter: brightness(1.12); }
+.btn:active { transform: translateY(1px); }
+.btn-quiet { background: transparent; color: var(--spine); border-color: var(--line-2); }
+.btn-quiet:hover { border-color: var(--spine); background: var(--spine-soft); }
+:focus-visible { outline: 3px solid var(--spine); outline-offset: 3px; }
+a.link { color: var(--spine); text-decoration: underline; text-underline-offset: 3px; }
+
+.field { margin-bottom: 1rem; }
+.field label { display: block; font-size: 0.87rem; font-weight: 650; margin-bottom: 0.3rem; }
+.field input, .field select {
+  width: 100%; min-height: 46px; padding: 0 0.75rem;
+  border: 1px solid var(--line-2); border-radius: var(--r); background: var(--surface);
+}
+.field input:focus-visible { border-color: var(--spine); }
+.field-hint { font-size: 0.85rem; color: var(--ink-3); margin-top: 0.3rem; }
+
+/* ---------- state tokens: shape + word + value, never hue alone ---------- */
+.state {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-size: 0.76rem; font-weight: 750; white-space: nowrap;
+  padding: 0.2rem 0.55rem; border-radius: 999px; border: 1.5px solid currentColor;
+}
+.state::before { font-size: 0.9em; }
+.state-ok    { color: var(--ok);    background: var(--ok-soft); }
+.state-ok::before    { content: "●"; }
+.state-watch { color: var(--watch); background: var(--watch-soft); }
+.state-watch::before { content: "◐"; }
+.state-alert { color: var(--alert); background: var(--alert-soft); }
+.state-alert::before { content: "▲"; }
+.state-draft { color: var(--ink-3); }
+.state-draft::before { content: "○"; }
+
+.callout {
+  display: grid; grid-template-columns: auto 1fr; gap: 0.7rem;
+  padding: 0.85rem 1rem; border-radius: var(--r);
+  border: 1.5px solid currentColor;
+}
+.callout-mark { font-weight: 800; }
+.callout strong { display: block; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.callout p { color: var(--ink-2); font-size: 0.93rem; }
+.callout-alert { color: var(--alert); background: var(--alert-soft); }
+.callout-watch { color: var(--watch); background: var(--watch-soft); }
+.callout-ok    { color: var(--ok);    background: var(--ok-soft); }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 1rem;
+}
+
+/* =========================================================
+   THE ROUTE — mobile-first: a vertical timeline.
+   The metaphor deliberately changes at >=52rem to a horizontal
+   route. This is the direction's real cost and is shown, not hidden.
+   ========================================================= */
+.route { margin-top: 0.5rem; }
+
+.stops { display: grid; }
+.stop {
+  position: relative;
+  display: grid; grid-template-columns: 2.6rem 1fr auto; gap: 0.85rem;
+  align-items: center; width: 100%; text-align: left;
+  padding: 0.7rem 0.5rem; min-height: 56px;
+  border-radius: var(--r);
+  transition: background var(--fast) ease;
+}
+.stop:hover { background: var(--spine-soft); }
+/* the connecting spine */
+.stop::before {
+  content: ""; position: absolute;
+  left: 1.3rem; top: 0; bottom: 0; width: 3px;
+  background: var(--line); transform: translateX(-50%);
+}
+.stop:first-child::before { top: 50%; }
+.stop:last-of-type::before { bottom: 50%; }
+.stop-node {
+  position: relative; z-index: 1;
+  width: 2.6rem; height: 2.6rem; border-radius: 50%;
+  background: var(--surface); border: 3px solid var(--line-2);
+  display: grid; place-items: center;
+  font-size: 0.82rem; font-weight: 800; color: var(--ink-3);
+}
+.stop.is-ok    .stop-node { border-color: var(--ok);    color: var(--ok); }
+.stop.is-watch .stop-node { border-color: var(--watch); color: var(--watch); }
+.stop.is-alert .stop-node { border-color: var(--alert); color: var(--alert); }
+.stop[aria-expanded="true"] .stop-node {
+  background: var(--spine); border-color: var(--spine); color: var(--spine-ink);
+}
+.stop-name { font-weight: 650; font-size: 0.97rem; }
+.stop-sub { display: block; font-size: 0.78rem; font-weight: 700; color: var(--alert); }
+.stop-val { font-size: 1.35rem; font-weight: 750; letter-spacing: -0.01em; }
+.stop.is-alert .stop-val { color: var(--alert); }
+
+/* the focused stop: one thing large */
+.focus-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--alert);
+  border-radius: var(--r);
+  padding: 1.15rem 1.15rem 1.25rem;
+  margin-top: 0.75rem;
+}
+.focus-eyebrow { font-size: 0.76rem; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; color: var(--alert); }
+.focus-name { font-size: 1.3rem; font-weight: 750; margin-top: 0.15rem; }
+.focus-value { font-size: clamp(3rem, 13vw, 4.5rem); font-weight: 800; line-height: 1; letter-spacing: -0.035em; color: var(--alert); margin: 0.4rem 0 0.1rem; }
+.focus-unit { font-size: 0.9rem; color: var(--ink-3); }
+.focus-pains { margin-top: 1rem; display: grid; gap: 0.5rem; }
+.focus-pains h3 { font-size: 0.95rem; font-weight: 750; }
+.pain { display: grid; gap: 0.45rem; }
+.pain li { display: grid; grid-template-columns: auto 1fr; gap: 0.6rem; font-size: 0.94rem; color: var(--ink-2); }
+.pain li::before { content: "▲"; color: var(--alert); font-size: 0.7rem; line-height: 1.7; }
+
+/* ---------- results as stops off the route ---------- */
+.results { display: grid; gap: 0.6rem; }
+.result {
+  display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 1rem;
+  align-items: start;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 0.85rem 0.95rem;
+}
+.result.is-alert { border-color: var(--alert); border-width: 1.5px; }
+.result-name { font-weight: 700; font-size: 0.95rem; }
+.result-val { font-size: 1.9rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em; }
+.result.is-alert .result-val { color: var(--alert); }
+.result-val-wrap { grid-column: 2; grid-row: 1; text-align: right; }
+.result-unit { font-size: 0.78rem; color: var(--ink-3); margin-top: 0.15rem; }
+.result-meaning { grid-column: 1 / -1; font-size: 0.89rem; color: var(--ink-2); max-width: 48ch; margin-top: 0.35rem; }
+.result-flag { grid-column: 1 / -1; margin-top: 0.5rem; }
+
+/* ---------- reading ---------- */
+.reading {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--spine);
+  border-radius: var(--r);
+  padding: 1.2rem 1.1rem;
+}
+.reading-badge {
+  display: inline-block; font-size: 0.72rem; font-weight: 750;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--spine); background: var(--spine-soft);
+  padding: 0.25rem 0.55rem; border-radius: 999px; margin-bottom: 0.75rem;
+}
+.reading h2 { font-size: 1.25rem; font-weight: 750; }
+.reading-author { font-size: 0.83rem; color: var(--ink-3); margin-bottom: 0.85rem; }
+.reading p { max-width: 60ch; color: var(--ink-2); }
+.reading p + p { margin-top: 0.6rem; }
+.reading .lede { color: var(--ink); font-size: 1.12rem; font-weight: 650; line-height: 1.45; }
+
+/* ---------- comparison: the route redrawn for a segment ---------- */
+.seg { display: grid; gap: 0.55rem; }
+.seg-row {
+  display: grid; grid-template-columns: 8.5rem 1fr auto; gap: 0.7rem;
+  align-items: center;
+  padding: 0.55rem 0; border-bottom: 1px solid var(--line);
+}
+.seg-name { font-weight: 650; font-size: 0.93rem; }
+.seg-track { display: block; position: relative; height: 14px; background: var(--ground); border: 1px solid var(--line); border-radius: 999px; }
+.seg-fill { display: block; height: 100%; border-radius: 999px; background: var(--ok); }
+.seg-fill.is-alert { background: var(--alert); }
+.seg-fill.is-watch { background: var(--watch); }
+.seg-target { display: block; position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+.seg-val { font-weight: 750; font-size: 1rem; min-width: 3.4rem; text-align: right; }
+.seg-base { grid-column: 1 / -1; font-size: 0.8rem; color: var(--ink-3); }
+.seg-hidden { grid-column: 1 / -1; font-size: 0.88rem; color: var(--ink-3); font-style: italic; }
+
+/* ---------- themes ---------- */
+.themes { display: grid; gap: 1rem; }
+.theme {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 0.9rem 1rem;
+}
+.theme-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.7rem; }
+.theme-rank {
+  width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: var(--spine-soft); color: var(--spine);
+  display: inline-grid; place-items: center; font-size: 0.78rem; font-weight: 800;
+}
+.theme-name { font-size: 1.02rem; font-weight: 700; }
+.theme-count { font-size: 0.85rem; color: var(--ink-3); }
+.theme-where { font-size: 0.79rem; font-weight: 700; color: var(--spine); }
+.theme-bar { height: 7px; border-radius: 999px; background: var(--spine); margin: 0.5rem 0 0.6rem; }
+.theme-quote { font-size: 0.97rem; color: var(--ink-2); font-style: italic; border-left: 3px solid var(--line-2); padding-left: 0.8rem; }
+
+/* ---------- studio: the spine as process progress ---------- */
+.process { display: grid; gap: 0; margin: 0.5rem 0 1.25rem; }
+.phase {
+  position: relative;
+  display: grid; grid-template-columns: 2.2rem 1fr auto; gap: 0.8rem;
+  align-items: center; padding: 0.55rem 0.4rem; min-height: 48px;
+}
+.phase::before {
+  content: ""; position: absolute; left: 1.1rem; top: 0; bottom: 0;
+  width: 3px; background: var(--line); transform: translateX(-50%);
+}
+.phase:first-child::before { top: 50%; }
+.phase:last-child::before { bottom: 50%; }
+.phase-node {
+  position: relative; z-index: 1;
+  width: 2.2rem; height: 2.2rem; border-radius: 50%;
+  background: var(--surface); border: 3px solid var(--line-2);
+  display: grid; place-items: center; font-size: 0.75rem; font-weight: 800; color: var(--ink-3);
+}
+.phase.is-done .phase-node { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.phase.is-now  .phase-node { background: var(--spine); border-color: var(--spine); color: var(--spine-ink); }
+.phase-name { font-weight: 650; font-size: 0.94rem; }
+.phase.is-now .phase-name { font-weight: 750; }
+.phase-meta { font-size: 0.82rem; color: var(--ink-3); }
+
+.queue { display: grid; gap: 0.6rem; }
+.q-item {
+  display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 0.8rem;
+  background: var(--surface); border: 1px solid var(--line);
+  border-left: 4px solid var(--line-2); border-radius: var(--r);
+  padding: 0.8rem 0.9rem; align-items: center;
+}
+.q-item.is-review { border-left-color: var(--spine); }
+.q-item.is-work   { border-left-color: var(--watch); }
+.q-client { font-size: 0.76rem; font-weight: 750; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+.q-study { font-weight: 650; }
+.q-need { grid-column: 1 / -1; font-size: 0.88rem; color: var(--ink-2); }
+
+.tmpl { display: grid; gap: 0.55rem; }
+.tmpl-item {
+  display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 0.8rem;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 0.75rem 0.9rem; align-items: baseline;
+}
+.tmpl-name { font-weight: 700; font-size: 0.97rem; }
+.tmpl-meta { font-size: 0.83rem; color: var(--ink-3); }
+
+.studies-t th, .studies-t td { text-align: left; padding: 0.6rem 0.55rem; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+.studies-t thead th { font-size: 0.74rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); font-weight: 750; }
+.studies-t tbody th { font-weight: 650; color: var(--ink); }
+.table-scroll { overflow-x: auto; }
+
+/* the honesty case: a study with no route */
+.no-route {
+  border: 1.5px dashed var(--line-2); background: var(--surface);
+  border-radius: var(--r); padding: 0.9rem 1rem; margin-top: 0.8rem;
+}
+.no-route strong { display: block; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 0.2rem; }
+.no-route p { font-size: 0.9rem; color: var(--ink-2); max-width: 56ch; }
+
+/* ---------- entry ---------- */
+.entry-grid { display: grid; gap: 2rem; }
+.sides { display: grid; gap: 0; margin-top: 1.25rem; }
+.side {
+  position: relative;
+  display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.85rem;
+  padding: 0.75rem 0; min-height: 48px; align-items: start;
+}
+.side::before {
+  content: ""; position: absolute; left: 1.1rem; top: 0; bottom: 0;
+  width: 3px; background: var(--line); transform: translateX(-50%);
+}
+.side:first-child::before { top: 1.4rem; }
+.side:last-child::before  { bottom: calc(100% - 1.4rem); }
+.side-node {
+  position: relative; z-index: 1;
+  width: 2.2rem; height: 2.2rem; border-radius: 50%;
+  background: var(--spine-soft); border: 3px solid var(--spine);
+  display: grid; place-items: center; font-size: 0.7rem; font-weight: 800; color: var(--spine);
+}
+.side-name { font-size: 0.76rem; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; color: var(--spine); }
+.side p { font-size: 0.94rem; color: var(--ink-2); max-width: 44ch; }
+
+.entry-card { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--spine); border-radius: var(--r); padding: 1.35rem 1.2rem; }
+
+.disclosure { border-top: 1px solid var(--line); margin-top: 0.9rem; }
+.disclosure > summary {
+  cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.45rem;
+  font-size: 0.88rem; font-weight: 650; color: var(--spine); list-style: none;
+}
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before { content: "▸"; }
+.disclosure[open] > summary::before { content: "▾"; }
+.disclosure-body { font-size: 0.89rem; color: var(--ink-2); padding-bottom: 0.9rem; max-width: 58ch; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.25rem; }
+.foot { font-size: 0.8rem; color: var(--ink-3); margin-top: 2.5rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+
+/* =========================================================
+   DESKTOP — the route turns horizontal.
+   ========================================================= */
+@media (min-width: 52rem) {
+  .entry-grid { grid-template-columns: 1.1fr 0.9fr; gap: 3.5rem; align-items: start; }
+  .results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .stops {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.35rem;
+    padding-top: 0.5rem;
+  }
+  .stop {
+    grid-template-columns: 1fr; grid-auto-rows: min-content;
+    justify-items: center; text-align: center; gap: 0.3rem;
+    padding: 0.9rem 0.35rem;
+  }
+  .stop::before {
+    left: 0; right: 0; top: calc(0.9rem + 1.3rem); bottom: auto;
+    width: auto; height: 3px; transform: none;
+  }
+  .stop:first-child::before { left: 50%; top: calc(0.9rem + 1.3rem); }
+  .stop:last-of-type::before { right: 50%; left: 0; }
+  .stop-name { font-size: 0.88rem; }
+  .stop-val { font-size: 1.5rem; }
+
+  .focus-panel {
+    display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+    gap: 1.5rem; align-items: start;
+  }
+  .focus-head { grid-column: 1; }
+  .focus-pains { grid-column: 2; margin-top: 0; }
+
+  .seg-row { grid-template-columns: 9rem minmax(0, 1fr) 4rem 7rem; }
+  .seg-base { grid-column: 4; font-size: 0.82rem; text-align: right; }
+  .seg-hidden { grid-column: 2 / -1; }
+
+  .themes { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+
+  .studio-grid { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1.5rem; align-items: start; }
+}
+
+@media (min-width: 64rem) {
+  body { font-size: 17px; }
+  .results { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Study framing line. In the route register this is the sign at the trailhead:
+   present and readable, but the route below it is what carries the attention. */
+.summary-line {
+  margin-top: 0.85rem;
+  max-width: 58ch;
+  font-size: 1.08rem;
+  line-height: 1.5;
+  font-weight: 650;
+  color: var(--ink);
+  padding-left: 0.9rem;
+  border-left: 4px solid var(--spine);
+}
+
+/* Studio navigation, in this direction's idiom: stops along the spine. */
+.spine-nav { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; margin-bottom: 1.5rem; }
+.spine-nav a {
+  position: relative; display: inline-flex; align-items: center; gap: 0.45rem;
+  min-height: 44px; padding: 0 0.7rem; border-radius: 999px;
+  font-size: 0.88rem; font-weight: 650; color: var(--ink-3); text-decoration: none;
+  transition: background var(--fast) ease, color var(--fast) ease;
+}
+.spine-nav a::before {
+  content: ""; width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--line-2); background: var(--surface);
+}
+.spine-nav a:hover { color: var(--ink); background: var(--spine-soft); }
+.spine-nav a[aria-current="page"] { color: var(--spine); background: var(--spine-soft); }
+.spine-nav a[aria-current="page"]::before { border-color: var(--spine); background: var(--spine); }
