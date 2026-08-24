@@ -720,7 +720,7 @@ export async function createHarness(options) {
       response = await fetch(new URL(path, origin), {
         method: op.method ?? "GET",
         headers,
-        ...(probeBody.send ? { body: "" } : {}),
+        ...(probeBody.sendBody ? { body: "" } : {}),
         redirect: "manual",
         signal: cancelSignal ? AbortSignal.any([deadline, cancelSignal]) : deadline,
       });
@@ -961,20 +961,24 @@ export async function createHarness(options) {
    * The body an outer action-route probe carries: ALWAYS empty, and a content
    * type only when the probe is meant to reach the authorization boundary.
    *
-   * `bareMethod` deliberately omits the content type. That is the negative
-   * control: the framework answers such a POST 405 by method routing alone,
-   * before the middleware runs, so it can never be mistaken for an
-   * authorization denial. Nothing here may ever carry a mutation payload or an
-   * action identifier — the body is the empty string and there is no code path
-   * that makes it anything else.
+   * `bareMethod` sends NEITHER — no body and therefore no content type at all.
+   * That is the negative control: the framework answers such a POST 405 by
+   * method routing alone, before the middleware runs, so it can never be
+   * mistaken for an authorization denial. It matters that no body is sent:
+   * `fetch` derives a `text/plain` content type from any string body, and a
+   * POST that carries one does reach the authorization boundary.
+   *
+   * Nothing here may ever carry a mutation payload or an action identifier —
+   * the body is the empty string and there is no code path that makes it
+   * anything else.
    */
   function outerRouteBody(op, params = {}) {
-    if (!op.outerRouteProbe) return { send: false, contentType: null };
+    if (!op.outerRouteProbe) return { sendBody: false, contentType: null };
     if (params.body !== undefined) {
       throw new Error(`outer route probe "${op.name}" must never carry a body`);
     }
-    if (params.bareMethod) return { send: true, contentType: null };
-    return { send: true, contentType: op.contentType };
+    if (params.bareMethod) return { sendBody: false, contentType: null };
+    return { sendBody: true, contentType: op.contentType };
   }
 
   function fillPath(template, params = {}) {
