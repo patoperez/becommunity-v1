@@ -39,6 +39,12 @@ export const ERROR_CATEGORIES = [
   "denied_action_result",
   "not_found",
   "validation_rejected",
+  // 405. A real, nameable HTTP answer and never an authorization one: it is
+  // what a route says when the METHOD is wrong, which the suites use as the
+  // control that distinguishes a method rejection from a denial. It is in the
+  // closed vocabulary precisely so it cannot fall through to `unclassified`
+  // and be argued about later.
+  "method_not_allowed",
   "success",
   "success_no_op",
   "network_failure",
@@ -121,6 +127,7 @@ export function classify(observation) {
     return "unclassified";
   }
   if (status === 404) return "not_found";
+  if (status === 405) return "method_not_allowed";
   if (status === 400) return "validation_rejected";
   if (status >= 200 && status < 300) {
     if (o.domSignal === "denial") return "denied_action_result";
@@ -143,6 +150,7 @@ export const CLASSIFIER_CASES = [
   { what: "401 from a route handler", input: { status: 401 }, expect: "denied_unauthenticated" },
   { what: "302 to /dashboard from /admin", input: { status: 307, redirectTo: "/dashboard", fromAdminPath: true }, expect: "denied_wrong_role" },
   { what: "404 not found", input: { status: 404 }, expect: "not_found" },
+  { what: "405 method not allowed", input: { status: 405 }, expect: "method_not_allowed" },
   { what: "400 in the report route's error shape", input: { status: 400 }, expect: "validation_rejected" },
   { what: "200 whose rendered DOM shows the denial region", input: { status: 200, domSignal: "denial" }, expect: "denied_action_result" },
   { what: "200 rendering the app's own wrong-role page (AM4)", input: { status: 200, domSignal: "denied_role" }, expect: "denied_wrong_role" },

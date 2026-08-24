@@ -294,6 +294,7 @@ export const OUTCOME_CASES = Object.freeze([
   { what: "a validation rejection never satisfies a denial", expected: "denied", observed: "validation_rejected", ok: false },
   { what: "a success never satisfies a denial", expected: "denied", observed: "success", ok: false },
   { what: "an unclassified answer satisfies nothing", expected: "denied", observed: "unclassified", ok: false },
+  { what: "a method rejection never satisfies a denial", expected: "denied", observed: "method_not_allowed", ok: false },
   { what: "a crash satisfies nothing", expected: "success", observed: "page_crash", ok: false },
   { what: "a denial never satisfies an absence", expected: "not_found", observed: "denied_unauthenticated", ok: false },
   { what: "an absence satisfies an absence", expected: "not_found", observed: "not_found", ok: true },
@@ -868,7 +869,12 @@ async function checkDestructiveConfinement(harness, fx) {
 function checkReasonDistinctness(harness) {
   console.log("\n[B6.1] Refusal reasons are distinct, not merely 'non-200':");
   const categories = new Set(harness.ledger.all().map((record) => record.errorCategory));
-  const required = ["denied_unauthenticated", "denied_wrong_role", "not_found", "validation_rejected", "success"];
+  const required = [
+    "denied_unauthenticated", "denied_wrong_role", "not_found", "validation_rejected", "success",
+    // The public-path control's answer. Its presence is what proves a method
+    // rejection is recorded as its own thing rather than as a denial.
+    "method_not_allowed",
+  ];
   const missing = required.filter((category) => !categories.has(category));
   if (missing.length) {
     return fail("B6.1", `this run never observed: ${missing.join(", ")} — the categories are not being distinguished`);
