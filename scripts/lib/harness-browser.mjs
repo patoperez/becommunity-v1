@@ -154,7 +154,17 @@ function createCdp(socket) {
     });
   }
 
-  return { send, waitForEvent, close: () => socket.close() };
+  /**
+   * A persistent subscription, used for exactly one thing: answering the
+   * browser's own modal dialogs (§ PR 7). It consumes pushed messages and never
+   * issues an application request, so it is not a poller (§4.4.1).
+   */
+  function on(handler) {
+    listeners.add(handler);
+    return () => listeners.delete(handler);
+  }
+
+  return { send, waitForEvent, on, close: () => socket.close() };
 }
 
 /** In-page readiness: a MutationObserver resolves it; Node never polls (§4.3). */
@@ -221,7 +231,22 @@ export async function launchBrowser() {
     await cdp.send("Page.enable", {}, sessionId);
     await cdp.send("Runtime.enable", {}, sessionId);
     await cdp.send("Network.enable", {}, sessionId);
+    // DOM is needed only for `DOM.setFileInputFiles` (§ PR 7): a real upload has
+    // no other honest expression — a file field cannot be filled from script.
+    await cdp.send("DOM.enable", {}, sessionId);
     if (!javaScript) await cdp.send("Emulation.setScriptExecutionDisabled", { value: true }, sessionId);
+
+    // The import-rollback control asks for confirmation through `window.confirm`
+    // (UploadForm.tsx:208). A headless page blocks on that dialog until it is
+    // answered, so the context answers it the way the user who clicked the
+    // control would. Nothing else is automated: the dialog is the browser's own
+    // event, and accepting it neither adds authority nor changes a request.
+    let dialogsAccepted = 0;
+    cdp.on((message) => {
+      if (message.sessionId !== sessionId || message.method !== "Page.javascriptDialogOpening") return;
+      dialogsAccepted += 1;
+      cdp.send("Page.handleJavaScriptDialog", { accept: true }, sessionId).catch(() => {});
+    });
 
     const context = {
       label,
@@ -229,6 +254,7 @@ export async function launchBrowser() {
       browserContextId,
       targetId,
       sessionId,
+      dialogsAccepted: () => dialogsAccepted,
 
       async navigate(url) {
         const loaded = cdp.waitForEvent(
@@ -288,6 +314,37 @@ export async function launchBrowser() {
         await context.evaluate(clickExpression);
         await navigated;
         return context.location();
+      },
+
+      /**
+       * Attaches a real file to a real `<input type=file>`, the way a user's
+       * file picker does. The browser reads the bytes itself; the harness never
+       * builds a multipart body and never touches the framework's transport.
+       * The input is located by the accessible text of its own `<label>` (§4.1).
+       */
+      async setFileInput(labelPrefix, absolutePaths) {
+        // The index is derived from the label the product renders; nothing is
+        // added to the page. No `data-*` test attribute is ever introduced
+        // here or in application source (§4.1).
+        const index = await context.evaluate(`
+          (() => {
+            const fields = [...document.querySelectorAll('input[type=file]')];
+            const label = [...document.querySelectorAll('label')]
+              .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
+            const field = label && label.querySelector('input[type=file]');
+            return field ? fields.indexOf(field) : -1;
+          })()`);
+        if (index < 0) return "no-control";
+        const { root } = await cdp.send("DOM.getDocument", { depth: -1 }, sessionId);
+        const { nodeIds } = await cdp.send(
+          "DOM.querySelectorAll",
+          { nodeId: root.nodeId, selector: "input[type=file]" },
+          sessionId,
+        );
+        const nodeId = nodeIds?.[index];
+        if (!nodeId) return "no-node";
+        await cdp.send("DOM.setFileInputFiles", { files: absolutePaths, nodeId }, sessionId);
+        return "ok";
       },
 
       /** Cookies for this context only — values never leave the harness (§5.2). */
@@ -351,6 +408,44 @@ export const PAGE = {
         .some((control) => (control.textContent || control.value || '').trim() === ${JSON.stringify(label)}));
     })()`,
 
+  /**
+   * Locates one form among several identical ones by the VALUE of a field the
+   * Server Action itself reads (`formData.get("template_id")`). This is §4.1
+   * rule 3 — a server contract, not a framework hidden field — and it is what
+   * stops a destructive submission from landing on the neighbouring object's
+   * form when a page renders one form per tenant, user or template.
+   */
+  formByFieldValue: (name, value, label) => `
+    (() => {
+      const forms = [...document.querySelectorAll('form')];
+      return forms.findIndex((form) => {
+        const field = form.querySelector('[name=' + ${JSON.stringify(JSON.stringify(name))} + ']');
+        if (!field || field.value !== ${JSON.stringify(value)}) return false;
+        return [...form.querySelectorAll('button, input[type=submit]')]
+          .some((control) => (control.textContent || control.value || '').trim() === ${JSON.stringify(label)});
+      });
+    })()`,
+
+  /** Ticks every checkbox inside ONE located form, the way a user would. */
+  checkAllInForm: (formIndex) => `
+    (() => {
+      const form = document.querySelectorAll('form')[${formIndex}];
+      if (!form) return -1;
+      const boxes = [...form.querySelectorAll('input[type=checkbox]')];
+      for (const box of boxes) if (!box.checked) box.click();
+      return boxes.length;
+    })()`,
+
+  /** Ticks every checkbox of one NAME inside one located form. */
+  checkAllInFormNamed: (formIndex, name) => `
+    (() => {
+      const form = document.querySelectorAll('form')[${formIndex}];
+      if (!form) return -1;
+      const boxes = [...form.querySelectorAll('input[type=checkbox][name=' + ${JSON.stringify(JSON.stringify(name))} + ']')];
+      for (const box of boxes) if (!box.checked) box.click();
+      return boxes.length;
+    })()`,
+
   /** Sets a named field the way a user would, so React sees a real change. */
   setField: (formIndex, name, value) => `
     (() => {
@@ -376,6 +471,114 @@ export const PAGE = {
       if (!control) return 'no-submit';
       control.click();
       return 'ok';
+    })()`,
+
+  /**
+   * The application's own wrong-role denial page (§1.8 AM4). `/admin/upload`
+   * answers a `client` caller with HTTP 200 and this rendered panel instead of
+   * a redirect, so "not a successful render of the upload UI" is read from the
+   * product's own user-visible heading — a stable UX contract, not a class name.
+   */
+  deniedPanel: `
+    (() => {
+      const headings = [...document.querySelectorAll('h1, h2')];
+      return headings.some((node) => (node.textContent || '').trim() === 'Acceso denegado');
+    })()`,
+
+  /**
+   * The app's own error region for an imperative Server Action, as a BOOLEAN.
+   * `UploadForm` marks it `role="alert"` (`:270`, `:432`); the dashboard's
+   * `StudyCard` and `PivotExplorer` render their `{ ok: false }` error text in
+   * an unmarked panel instead, which is why `actionOutcomeKind` below also
+   * consults the application's own fixed error constants.
+   */
+  alertPresent: `
+    (() => [...document.querySelectorAll('[role="alert"]')]
+      .some((node) => (node.textContent || '').trim().length > 0))()`,
+
+  /**
+   * Classifies an imperative action's rendered outcome into the closed
+   * vocabulary, WITHOUT letting any product text escape: it returns one of
+   * "denial" / "validation" / "none" and nothing else.
+   *
+   * Design §5.3 sanctions exactly this — `denied_wrong_role` is recognized by
+   * "an action result carrying the app's fixed denial string". The two lists
+   * below are application CONSTANTS read from `upload/actions.ts:78-93` and
+   * `dashboard/data-actions.ts:33-46`, not user data and not framework
+   * internals, and the DENIAL list is tested first so an authorization refusal
+   * can never be reported as a mere validation rejection.
+   *
+   * A `role="alert"` region carrying anything else is still a refusal — it is
+   * the product's own error region — so it classifies as "validation" rather
+   * than as success. Silence classifies as "none", which the outcome
+   * classifier turns into `unclassified` and which fails the run.
+   */
+  actionOutcomeKind: `
+    (() => {
+      const body = document.body.innerText || '';
+      const denials = [
+        'No autenticado.',
+        'Acceso denegado',
+        'Estudio no disponible',
+      ];
+      if (denials.some((marker) => body.includes(marker))) return 'denial';
+      const validations = [
+        'Solicitud invalida',
+        'Filtros no permitidos',
+        'No fue posible recalcular el estudio',
+        'No fue posible calcular el cruce',
+        'Dimensión de filtro no permitida',
+        'Valor no permitido para',
+        'El archivo supera el límite',
+        'Formato no soportado',
+        'Adjunta un archivo CSV o Excel',
+        'No se pudo leer el archivo',
+        'El cliente seleccionado no existe.',
+        'El mapeo no contiene JSON válido.',
+        'Mapeo inválido',
+        'Cliente inválido.',
+        'Estudio inválido.',
+      ];
+      if (validations.some((marker) => body.includes(marker))) return 'validation';
+      const alerted = [...document.querySelectorAll('[role="alert"]')]
+        .some((node) => (node.textContent || '').trim().length > 0);
+      return alerted ? 'validation' : 'none';
+    })()`,
+
+  /** True when a named control is present and enabled — a readiness condition. */
+  controlEnabled: (label) => `
+    (() => {
+      const control = [...document.querySelectorAll('button, input[type=submit]')]
+        .find((node) => (node.textContent || node.value || '').trim() === ${JSON.stringify(label)});
+      return Boolean(control) && !control.disabled;
+    })()`,
+
+  /** Clicks a control located by its accessible name anywhere on the page. */
+  clickByName: (label) => `
+    (() => {
+      const control = [...document.querySelectorAll('button, input[type=submit]')]
+        .find((node) => (node.textContent || node.value || '').trim() === ${JSON.stringify(label)});
+      if (!control) return 'no-control';
+      if (control.disabled) return 'disabled';
+      control.click();
+      return 'ok';
+    })()`,
+
+  /** Checks a checkbox located by its `aria-label` — the product's own contract. */
+  checkByAriaLabel: (label) => `
+    (() => {
+      const box = document.querySelector('input[type=checkbox][aria-label=' + ${JSON.stringify(JSON.stringify(label))} + ']');
+      if (!box) return 'no-control';
+      if (!box.checked) box.click();
+      return 'ok';
+    })()`,
+
+  /** Checks every observation checkbox the selected study rendered. */
+  checkAllByFieldName: (name) => `
+    (() => {
+      const boxes = [...document.querySelectorAll('input[type=checkbox][name=' + ${JSON.stringify(JSON.stringify(name))} + ']')];
+      for (const box of boxes) if (!box.checked) box.click();
+      return boxes.length;
     })()`,
 
   /** Reads a labelled control's surrounding panel text — a stable DOM signal. */
@@ -411,6 +614,21 @@ export const PAGE = {
       if (!select) return null;
       const option = [...select.options].find((item) => item.textContent.trim() === ${JSON.stringify(text)});
       return option ? option.value : null;
+    })()`,
+
+  /**
+   * The same read, matched on a run-prefix rather than an exact label, for the
+   * lists whose option text decorates the name it carries (the template
+   * selector renders 'Sobrescribir "<name>" (vN)'). Returns exactly one value
+   * or null: two matches mean the run's namespace is ambiguous and the caller
+   * must fail rather than guess which object it owns.
+   */
+  onlyOptionValueContaining: (selectName, needle) => `
+    (() => {
+      const select = document.querySelector('select[name=' + ${JSON.stringify(JSON.stringify(selectName))} + ']');
+      if (!select) return null;
+      const matches = [...select.options].filter((item) => item.textContent.includes(${JSON.stringify(needle)}));
+      return matches.length === 1 ? matches[0].value : null;
     })()`,
 };
 
@@ -450,6 +668,76 @@ const PIVOT_PANEL_EXPR = `(() => {
   return panel ? panel.innerText.trim().slice(0, 400) : null;
 })()`;
 
+/** The dashboard's own settled-result signal (StudyCard.tsx:57's live region). */
+const DASHBOARD_STATUS_EXPR = `(() => {
+  const node = [...document.querySelectorAll('[aria-live="polite"]')]
+    .find((n) => /unidades de respuesta|Muestra insuficiente|Actualizando/.test(n.textContent || ''));
+  return node ? (node.textContent || '').trim() : '';
+})()`;
+
+/**
+ * Settles an imperative action on the application's own rendered outcome: its
+ * error region, or a caller-supplied success predicate. Returns the outcome as
+ * a CATEGORY, never as rendered text (§2.3).
+ */
+async function settleImperative(context, PAGE, successPredicate) {
+  const settled = await context
+    .waitForDom(`() => {
+      const outcome = ${PAGE.actionOutcomeKind};
+      const success = (${successPredicate})();
+      return outcome !== 'none' || success;
+    }`)
+    .catch(() => false);
+  if (!settled) return { status: 200, domSignal: "none" };
+  // A refusal is read FIRST: an action that both rendered an error and left an
+  // earlier success panel on screen was refused, and reporting it as a success
+  // would be exactly the false pass the classifier exists to prevent.
+  const outcome = await context.evaluate(PAGE.actionOutcomeKind);
+  if (outcome !== "none") return { status: 200, domSignal: outcome };
+  const success = await context.evaluate(`(${successPredicate})()`);
+  return { status: 200, domSignal: success ? "success" : "none" };
+}
+
+/** Selects the option whose value equals `value`, under a labelled control. */
+const selectByValue = (labelPrefix, value) => `
+  (() => {
+    const label = [...document.querySelectorAll('label')]
+      .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
+    const select = label && label.querySelector('select');
+    if (!select) return 'no-control';
+    const option = [...select.options].find((item) => item.value === ${JSON.stringify(value)});
+    if (!option) return 'no-option';
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+    setter.call(select, option.value);
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'ok';
+  })()`;
+
+/** The upload screen's own "analysis is ready" signal (UploadForm.tsx:272). */
+const UPLOAD_READY = "() => /filas detectadas/.test(document.body.innerText)";
+/** The preview screen's own "preview is ready" signal (its confirm control). */
+const PREVIEW_READY =
+  "() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim().startsWith('Confirmar importaci'))";
+/** The confirm stage's own success signal (UploadForm renders the batch id). */
+const CONFIRM_DONE = "() => /importaci[oó]n\\s+(confirmada|completada)|filas importadas|lote\\s+creado/i.test(document.body.innerText)";
+/** The rollback control's own settled signal. */
+const ROLLBACK_DONE = "() => /revertid/i.test(document.body.innerText)";
+
+/**
+ * The `upload.*` stages share one sequence, so each driver assumes the previous
+ * stage already ran IN THE SAME CONTEXT — exactly as a real user's session
+ * does. `params.file` is an absolute path to a run-owned temporary file; the
+ * BROWSER reads it, so no multipart body is ever constructed here.
+ */
+async function selectUploadSource({ context, params }) {
+  const tenant = await context.evaluate(selectByValue("Cliente", params.tenant_id));
+  if (tenant !== "ok") return { status: 200, domSignal: "none", note: `tenant-${tenant}` };
+  const attached = await context.setFileInput("Archivo CSV o Excel", [params.file]);
+  if (attached !== "ok") return { status: 200, domSignal: "none", note: `file-${attached}` };
+  return null;
+}
+
 export const BROWSER_DRIVERS = Object.freeze({
   /**
    * `computeStudyPivot` — fired by the dashboard's own pivot controls. The
@@ -457,10 +745,11 @@ export const BROWSER_DRIVERS = Object.freeze({
    * application telling us the round-trip completed. The "before" snapshot is
    * kept in the page rather than interpolated back into a predicate, so no
    * rendered text is ever spliced into generated source.
+   *
+   * No driver navigates: `run()` has already navigated and classified the
+   * page-level outcome, so a denial can never be misread as "no panel".
    */
-  "dashboard.pivot": async ({ context, origin, PAGE }) => {
-    await context.navigate(new URL("/dashboard", origin).toString());
-    if (!(await context.evaluate(PAGE.landmark))) return { status: 200, domSignal: "none" };
+  "dashboard.pivot": async ({ context, PAGE }) => {
     const before = await context.evaluate(
       `(() => { const value = ${PIVOT_PANEL_EXPR}; window.__harnessPivotBefore = value; return value; })()`,
     );
@@ -473,6 +762,98 @@ export const BROWSER_DRIVERS = Object.freeze({
       )
       .catch(() => false);
     return { status: 200, domSignal: changed ? "success" : "none" };
+  },
+
+  /**
+   * `refreshStudyDashboard` — fired by a study's own segment filter. The
+   * settled signal is the live region StudyCard renders, which stops saying
+   * "Actualizando…" once the server has answered.
+   */
+  "dashboard.refresh": async ({ context, PAGE, params }) => {
+    const before = await context.evaluate(
+      `(() => { const v = ${DASHBOARD_STATUS_EXPR}; window.__harnessDashboardBefore = v; return v; })()`,
+    );
+    if (before === "") return { status: 200, domSignal: "none" };
+    // `forgedValue` is the visible-client-state tampering case (Suite B3): a
+    // value the server never offered is inserted into the product's own filter
+    // control and then selected, exactly as a user with developer tools would.
+    // The framework still constructs the request; only the value is hostile.
+    const driven = params.forgedValue === undefined
+      ? await context.evaluate(PAGE.changeSelectByLabel(params.dimension ?? "Filtrar por"))
+      : await context.evaluate(`
+          (() => {
+            const select = [...document.querySelectorAll('select')].find(
+              (s) => (s.getAttribute('aria-label') || '').startsWith(${JSON.stringify(params.dimension ?? "Filtrar por")}),
+            );
+            if (!select) return 'no-control';
+            const option = document.createElement('option');
+            option.value = ${JSON.stringify(String(params.forgedValue))};
+            option.textContent = 'forged';
+            select.appendChild(option);
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+            setter.call(select, option.value);
+            select.dispatchEvent(new Event('input', { bubbles: true }));
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return 'ok';
+          })()`);
+    if (driven !== "ok") return { status: 200, domSignal: "none", note: `control-${driven}` };
+    const settled = await context
+      .waitForDom(
+        `() => {
+          const v = ${DASHBOARD_STATUS_EXPR};
+          const alerted = [...document.querySelectorAll('[role="alert"]')]
+            .some((n) => (n.textContent || '').trim().length > 0);
+          return alerted || (v !== '' && v !== window.__harnessDashboardBefore && !/Actualizando/.test(v));
+        }`,
+      )
+      .catch(() => false);
+    if (!settled) return { status: 200, domSignal: "none" };
+    const outcome = await context.evaluate(PAGE.actionOutcomeKind);
+    return { status: 200, domSignal: outcome === "none" ? "success" : outcome };
+  },
+
+  /** `analyzeImportFile` — a real file attached to the real file control. */
+  "upload.analyze": async ({ context, PAGE, params }) => {
+    const blocked = await selectUploadSource({ context, params });
+    if (blocked) return blocked;
+    const clicked = await context.evaluate(PAGE.clickByName("Analizar"));
+    if (clicked !== "ok") return { status: 200, domSignal: "none", note: `analyze-${clicked}` };
+    return settleImperative(context, PAGE, UPLOAD_READY);
+  },
+
+  /** `previewImportFile` — the staged validation pass; it writes nothing. */
+  "upload.preview": async ({ context, PAGE }) => {
+    const clicked = await context.evaluate(PAGE.clickByName("Generar vista previa"));
+    if (clicked !== "ok") return { status: 200, domSignal: "none", note: `preview-${clicked}` };
+    return settleImperative(context, PAGE, PREVIEW_READY);
+  },
+
+  /** `confirmImportFile` — the only upload stage that writes. */
+  "upload.confirm": async ({ context, PAGE, params }) => {
+    if (params.study_id) {
+      const chosen = await context.evaluate(selectByValue("Estudio", params.study_id));
+      if (chosen === "no-option") return { status: 200, domSignal: "none", note: "study-no-option" };
+    }
+    await context.evaluate(`
+      (() => {
+        const boxes = [...document.querySelectorAll('input[type=checkbox]')];
+        for (const box of boxes) if (!box.checked) box.click();
+        return boxes.length;
+      })()`);
+    const clicked = await context.evaluate(PAGE.clickByName("Confirmar importación"));
+    if (clicked !== "ok") return { status: 200, domSignal: "none", note: `confirm-${clicked}` };
+    return settleImperative(context, PAGE, CONFIRM_DONE);
+  },
+
+  /**
+   * `rollbackLatestImport` — takes a bare string, so no form can express it.
+   * Its control asks `window.confirm` first; the context answers that dialog
+   * exactly as the user who clicked it would (see `dialogsAccepted`).
+   */
+  "upload.rollback": async ({ context, PAGE }) => {
+    const clicked = await context.evaluate(PAGE.clickByName("Revertir último lote"));
+    if (clicked !== "ok") return { status: 200, domSignal: "none", note: `rollback-${clicked}` };
+    return settleImperative(context, PAGE, ROLLBACK_DONE);
   },
 });
 

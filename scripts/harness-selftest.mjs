@@ -53,9 +53,21 @@ const HARNESS_FILES = [
 const SUITE_FILES = [
   "scripts/suite-a-isolation.mjs",
   "scripts/suite-a-selftest.mjs",
+  "scripts/suite-b-authorization.mjs",
+  "scripts/suite-c-input.mjs",
+  "scripts/suite-bc-selftest.mjs",
 ];
 
-/** The complete PR 5 + PR 6 surface. Anything else changing makes G7 fail. */
+/**
+ * The sanitizing response inspector (PR 7). It is deliberately NOT a harness
+ * file: it is the one module in this repository allowed to read an ordinary
+ * route handler's response body, which G2 forbids a harness module to do. It
+ * gets its own detector group, G11, which asserts the properties that make
+ * that read safe rather than relaxing G2 to accommodate it.
+ */
+const INSPECTOR_FILES = ["scripts/lib/response-inspect.mjs"];
+
+/** The complete PR 5 + PR 6 + PR 7 surface. Anything else makes G7 fail. */
 const ALLOWED_PATHS = new Set([
   "docs/P7_HARNESS_DESIGN.md",
   "docs/CURRENT_STATE.md",
@@ -65,7 +77,22 @@ const ALLOWED_PATHS = new Set([
   "README.md",
   "CLAUDE.md",
   "package.json",
+  // PR 7 additions, each named individually and each justified:
+  //   - the plan's execution-status banner, which PR 7 advances;
+  //   - the three FASE records that LINK to the V1-era scripts PR 7 retires,
+  //     so retiring them leaves no dangling reference behind.
+  // `docs/**`, "any Markdown" and `scripts/**` all stay refused.
+  "docs/P7_PLAN.md",
+  "docs/FASE_2.md",
+  "docs/FASE_4.md",
+  "docs/FASE_5.md",
+  // The three orphaned V1-era checks PR 7 retires (§8, PR 7 row). They are
+  // reachable by no npm script and their coverage is executed elsewhere.
+  "scripts/fase4-realdata-check.mjs",
+  "scripts/fase5-journey-check.mjs",
+  "scripts/ingest-test.ts",
   ...HARNESS_FILES,
+  ...INSPECTOR_FILES,
   ...SUITE_FILES,
 ]);
 
@@ -130,6 +157,10 @@ function sources() {
 
 function suiteSources() {
   return Object.fromEntries(SUITE_FILES.map((file) => [file, readFileSync(file, "utf8")]));
+}
+
+function inspectorSources() {
+  return Object.fromEntries(INSPECTOR_FILES.map((file) => [file, readFileSync(file, "utf8")]));
 }
 
 /**
@@ -230,8 +261,10 @@ const SCOPE_CASES = [
   { why: "the lockfile changed", scope: { files: ["package-lock.json"], depsChanged: false, baseResolved: true } },
   { why: "a dependency changed", scope: { files: ["package.json"], depsChanged: true, baseResolved: true } },
   { why: "an unrelated path changed", scope: { files: ["scripts/isolation-test.mjs"], depsChanged: false, baseResolved: true } },
-  { why: "a neighbouring documentation path changed", scope: { files: ["docs/P7_PLAN.md"], depsChanged: false, baseResolved: true } },
+  { why: "a neighbouring documentation path changed", scope: { files: ["docs/GO_LIVE_SECURITY.md"], depsChanged: false, baseResolved: true } },
   { why: "an unrelated Markdown file changed", scope: { files: ["docs/OPERATIONS.md"], depsChanged: false, baseResolved: true } },
+  { why: "another FASE record changed", scope: { files: ["docs/FASE_6.md"], depsChanged: false, baseResolved: true } },
+  { why: "a neighbouring script changed", scope: { files: ["scripts/secret-leak-test.mjs"], depsChanged: false, baseResolved: true } },
   { why: "the baseline could not be resolved", scope: { files: [], depsChanged: false, baseResolved: false } },
 ];
 /* </detector-vocabulary> */
@@ -428,6 +461,73 @@ function runSuiteDetectors(src) {
     "G10f",
     appPollers.length === 0,
     appPollers.length ? `${appPollers.length} loop(s) issue an application request` : "no suite polls an application endpoint",
+  );
+
+  return results;
+}
+
+/**
+ * G11 - the sanitizing response inspector (PR 7).
+ *
+ * `docs/P7_HARNESS_DESIGN.md` §2.3 forbids reading a SERVER-ACTION / RSC
+ * response body, because that couples the harness to a private, version-coupled
+ * serialization (R-7g). Suites C1 and C4 must nonetheless prove that the
+ * application's own PUBLIC output — a generated PDF, a documented JSON
+ * validation error — carries no executable action, stack trace, SQL fragment,
+ * filesystem path, secret or framework internal. That is a product contract,
+ * not framework transport, and it cannot be proven without looking at it.
+ *
+ * G2 is therefore NOT relaxed to accommodate it. The read is confined to one
+ * module that is deliberately not a harness module, and G11 asserts the
+ * properties that make that read safe: exactly one read, nothing printed, no
+ * body returned, no credential, no privileged client, no clock, and no loop
+ * that re-issues a request.
+ */
+function runInspectorDetectors(src) {
+  const results = [];
+  const record = (id, passedCheck, message) => results.push({ id, passed: passedCheck, message });
+  const all = Object.values(src).map(scannable).join("\n");
+
+  const reads = all.split(/\r?\n/).filter((line) => /await response\.(arrayBuffer|text|json)\(/.test(line));
+  record(
+    "G11a",
+    reads.length === 1,
+    reads.length === 1
+      ? "exactly one response-body read exists, and it is inside the inspector"
+      : `${reads.length} body read(s) present, expected exactly 1`,
+  );
+
+  record(
+    "G11b",
+    !/console\.(log|error|warn|info)/.test(all),
+    "the inspector prints nothing, so no body fragment can reach an output stream",
+  );
+
+  // The body is bound to locals and never handed back. A returned property
+  // whose value is the decoded text or the raw bytes would defeat the module.
+  const returnsBody =
+    /\breturn\s+(text|bytes|body)\b/.test(all) || /\b(text|bytes|body)\s*:\s*(text|bytes)\b/.test(all);
+  record("G11c", !returnsBody, "the decoded body and the raw bytes are never returned, stored or thrown");
+
+  record(
+    "G11d",
+    !CREDENTIAL_ENV.test(all) && !PRIVILEGED_CLIENT_IMPORT.test(all),
+    "the inspector holds no privileged credential and imports no privileged client",
+  );
+
+  record(
+    "G11e",
+    !FORBIDDEN.clock.test(all) && !FORBIDDEN.hashing.test(all) && !FORBIDDEN.actionId.some((p) => p.test(all)),
+    "no clock manipulation, no credential hashing, no private action identifier",
+  );
+
+  const inspectorPollers = loopBodies(all).filter((body) => /fetch\(/.test(body));
+  record(
+    "G11f",
+    inspectorPollers.length === 0,
+    inspectorPollers.length
+      ? `${inspectorPollers.length} loop(s) issue an application request`
+      : "no loop issues an application request",
   );
 
   return results;
@@ -751,7 +851,21 @@ async function offlineUnsupportedOperations() {
   globalThis.fetch = async (...args) => { calls.fetches += 1; return realFetch(...args); };
 
   let refused = 0;
-  const probes = ["clients.renameTenant", "clients.deleteClientUser", "upload.confirm", "studies.deleteTemplate"];
+  /**
+   * PR 7 makes every CATALOGUED mutation executable, which is the whole point
+   * of Suites B and C. The pre-dispatch guard must therefore still be proven
+   * against descriptors that are deliberately incomplete — an imperative
+   * operation with no reviewed driver, a form with no declared outcome
+   * contract, and a mutation with no ownership metadata at all. These are
+   * constructed here rather than taken from the catalogue precisely because
+   * the catalogue no longer contains one.
+   */
+  const probes = [
+    { name: "upload.notImplementedYet", urlClass: "/admin/upload", page: "/admin/upload", mechanism: "browser", imperative: true, mutating: true, creates: ["study"] },
+    { name: "clients.noOutcomeContract", urlClass: "/admin/clients", page: "/admin/clients", mechanism: "browser", mutating: true, creates: ["tenant"], submitLabel: "Guardar" },
+    { name: "clients.noSubmitControl", urlClass: "/admin/clients", page: "/admin/clients", mechanism: "browser", mutating: true, creates: ["tenant"] },
+    { name: "x.noOwnershipMetadata", urlClass: "/x", path: "/x", mechanism: "http", mutating: true },
+  ];
   try {
     const spyHarness = await createHarness({
       origin: "http://127.0.0.1:1",
@@ -763,13 +877,13 @@ async function offlineUnsupportedOperations() {
       launchBrowser: async () => spyBrowser,
       PAGE,
     });
-    for (const name of probes) {
+    for (const op of probes) {
       try {
-        await spyHarness.run("internal", OPERATIONS[name], { tenant_id: "x", user_id: "x", template_id: "x" });
-        bad("N11", `${name} executed despite having no PR 5 support`);
+        await spyHarness.run("internal", op, { tenant_id: "x", user_id: "x", template_id: "x" });
+        bad("N11", `${op.name} executed despite having no reviewed execution path`);
       } catch (error) {
         if (error.code === "UNSUPPORTED_OPERATION") refused += 1;
-        else bad("N11", `${name} threw an unexpected error: ${error.message}`);
+        else bad("N11", `${op.name} threw an unexpected error: ${error.message}`);
       }
     }
     await spyHarness.close();
@@ -783,7 +897,7 @@ async function offlineUnsupportedOperations() {
   if (refused !== probes.length) bad("N11", `${refused}/${probes.length} unsupported operations were refused`);
   else if (!noEffects) bad("N11", `side effects occurred: ${JSON.stringify(calls)}`);
   else {
-    ok("N11", `${refused}/${probes.length} unsupported form/imperative mutations refused before dispatch`);
+    ok("N11", `${refused}/${probes.length} incomplete mutation descriptors refused before dispatch`);
     ok("N11", "zero contexts, navigations, requests, ownership checks and ledger calls");
   }
 }
@@ -820,14 +934,27 @@ function offlineCatalogSupport() {
     const op = OPERATIONS[name];
     return !((op.creates?.length ?? 0) > 0 || (op.scopeParams?.length ?? 0) > 0 || (op.targetParams?.length ?? 0) > 0);
   });
-  const expected = ["clients.createTenant", "studies.createBlank"];
-  if (JSON.stringify(supported) !== JSON.stringify(expected)) {
-    bad("N13", `supported mutation surface drifted: ${supported.join(", ")}`);
+  // PR 7 completes the mutating surface: Suites B and C must reach EVERY
+  // catalogued mutation, so the supported set and the catalogue's mutating set
+  // are now the same set. What must not drift is the requirement behind it —
+  // every one of them still declares how ownership is proven, and the four
+  // whose success cannot be undone are still marked denial-only.
+  const catalogued = Object.values(OPERATIONS).filter((op) => op.mutating).map((op) => op.name);
+  const deniedOnly = Object.values(OPERATIONS).filter((op) => op.deniedPathsOnly).map((op) => op.name).sort();
+  const expectedDeniedOnly = [
+    "clients.deleteClientUser", "clients.inviteClientUser",
+    "clients.updateClientUser", "clients.updateTenantBrand",
+  ];
+  if (JSON.stringify([...supported].sort()) !== JSON.stringify([...catalogued].sort())) {
+    bad("N13", `supported mutation surface drifted from the catalogue: ${supported.join(", ")}`);
   } else if (missingOwnership.length) {
     bad("N13", `supported mutations without ownership metadata: ${missingOwnership.join(", ")}`);
+  } else if (JSON.stringify(deniedOnly) !== JSON.stringify(expectedDeniedOnly)) {
+    bad("N13", `the denial-only set drifted: ${deniedOnly.join(", ")}`);
   } else {
-    ok("N13", `supported mutations are exactly ${supported.join(", ")}; each declares ownership metadata`);
-    note(`${unsupportedMutations().length} catalogued mutations remain unsupported and cannot reach dispatch`);
+    ok("N13", `all ${supported.length} catalogued mutations are executable and each declares ownership metadata`);
+    ok("N13", `${deniedOnly.length} of them are denial-only: their success would create an identity, a message or a Storage object`);
+    note(`${unsupportedMutations().length} catalogued mutations remain unsupported`);
   }
 }
 
@@ -1041,7 +1168,18 @@ async function livePhase(signal) {
   // a context, a navigation or a real control. UnsupportedDriverError remains
   // in the dispatcher as defense in depth behind this guard.
   try {
-    await harness.run("internal", OPERATIONS["upload.rollback"]);
+    // Constructed rather than catalogued: PR 7 gave every catalogued imperative
+    // operation a reviewed driver, so the guard is proven against a descriptor
+    // that deliberately has none.
+    await harness.run("internal", {
+      name: "upload.notImplementedYet",
+      urlClass: "/admin/upload",
+      page: "/admin/upload",
+      mechanism: "browser",
+      imperative: true,
+      mutating: true,
+      creates: ["study"],
+    });
     bad("S8", "an imperative operation with no reviewed driver was executed");
   } catch (error) {
     if (error.code === "UNSUPPORTED_OPERATION") {
@@ -1202,6 +1340,13 @@ for (const result of runDetectors(sources(), readBranchScope())) {
 // --- G10 against every suite source (additive; G1-G9 stay exactly as they were)
 console.log("\n[G10] Structural guarantees over every suite source:");
 for (const result of runSuiteDetectors(suiteSources())) {
+  if (result.passed) ok(result.id, result.message);
+  else bad(result.id, result.message);
+}
+
+// --- G11 against the sanitizing inspector (additive; G1-G10 stay unchanged) --
+console.log("\n[G11] Structural guarantees over the sanitizing response inspector:");
+for (const result of runInspectorDetectors(inspectorSources())) {
   if (result.passed) ok(result.id, result.message);
   else bad(result.id, result.message);
 }

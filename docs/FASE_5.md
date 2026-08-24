@@ -14,7 +14,7 @@ Status: ✅ **Code-complete; data-connected hover values verified headlessly.**
 | Interactive journey component | [src/app/dashboard/JourneyMap.tsx](../src/app/dashboard/JourneyMap.tsx) |
 | Dashboard wiring | [src/app/dashboard/page.tsx](../src/app/dashboard/page.tsx), [StudyCard.tsx](../src/app/dashboard/StudyCard.tsx) |
 | Journey demo seed | [scripts/seed-journey-demo.mjs](../scripts/seed-journey-demo.mjs) |
-| Headless verification | [scripts/fase5-journey-check.mjs](../scripts/fase5-journey-check.mjs) |
+| Headless verification | *retired in P7 PR 7* — the script was reachable by no npm script; `computeStageMetric` and `parseJourneyDefinition` are covered by `test:calc`, `test:cloudflare-calc`, `test:study-config` and `test:workers-runtime` |
 
 ## Configuración sobre código (§8.1, §8.3)
 
@@ -42,7 +42,7 @@ All of these reuse the canonical definitions from `metrics.ts` (§5.2 golden rul
 
 ## Verification (headless, real RLS-scoped data)
 
-`tsx scripts/fase5-journey-check.mjs` (signed in as Tenant A) parsed all 6 stages
+The since-retired `fase5-journey-check.mjs` (signed in as Tenant A) parsed all 6 stages
 from `journey_definition` and computed each stage's metric:
 
 | Stage | Metric | Kind | Value | Detail |
