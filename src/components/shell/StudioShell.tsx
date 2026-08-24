@@ -1,0 +1,134 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+import { BeCommunityLockup } from "@/components/BrandMark";
+
+/**
+ * Be Community Studio — the internal shell.
+ *
+ * Studio wears Be Community's own colours, never the client's. A consultant
+ * moving between clients all day must never be confused about whose data is on
+ * screen; that is a safety property, not a stylistic preference.
+ *
+ * MIGRATION BOUNDARY (P8-A): the shell is applied to the Studio home only. The
+ * four existing internal screens keep their current routes and their own
+ * chrome; the destinations below therefore point at `/admin/*` and are labelled
+ * in product language rather than route language. Moving those screens onto
+ * this shell — and onto the `/studio/*` addresses the information architecture
+ * defines — is P8-B, and is deliberately not started here.
+ */
+
+export type StudioStop = {
+  href: string;
+  label: string;
+  description: string;
+  /** True for the destination the reader is currently in. */
+  current?: boolean;
+};
+
+export const STUDIO_STOPS: StudioStop[] = [
+  {
+    href: "/admin/studies",
+    label: "Estudios y plantillas",
+    description: "Crear, configurar y publicar el trabajo de cada cliente.",
+  },
+  {
+    href: "/admin/upload",
+    label: "Carga de datos",
+    description: "Traer un archivo nuevo y revisarlo antes de guardarlo.",
+  },
+  {
+    href: "/admin/qualitative",
+    label: "Lo que dijeron las personas",
+    description: "Confirmar temas y aprobar citas antes de publicarlas.",
+  },
+  {
+    href: "/admin/clients",
+    label: "Clientes y accesos",
+    description: "Quién es cliente, quién entra y qué puede ver cada persona.",
+  },
+];
+
+export function StudioShell({
+  userEmail,
+  breadcrumb,
+  title,
+  lead,
+  utility,
+  currentHref,
+  children,
+}: {
+  userEmail: string;
+  /** "Dónde estoy": the trail, always naming the client when there is one. */
+  breadcrumb?: string[];
+  title: string;
+  lead?: string;
+  utility?: ReactNode;
+  currentHref?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-1 flex-col bg-surface-page">
+      <header className="border-b border-line bg-ink text-paper">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-5 py-3.5 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <BeCommunityLockup tone="paper" size="sm" />
+            <span className="rounded-full border border-paper/30 px-2.5 py-0.5 text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-paper/80">
+              Studio
+            </span>
+          </div>
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="min-w-0 max-w-[9rem] truncate text-sm text-paper/75 sm:max-w-xs">
+              {userEmail}
+            </span>
+            {utility}
+          </div>
+        </div>
+
+        <nav aria-label="Secciones de Studio" className="border-t border-paper/15">
+          <ul className="mx-auto flex w-full max-w-6xl gap-1 overflow-x-auto px-3 sm:px-4">
+            {STUDIO_STOPS.map((stop) => {
+              const current = stop.current ?? stop.href === currentHref;
+              return (
+                <li key={stop.href} className="shrink-0">
+                  <Link
+                    href={stop.href}
+                    aria-current={current ? "page" : undefined}
+                    className={`inline-flex min-h-11 items-center border-b-[3px] px-3 text-sm font-medium transition-colors duration-[var(--motion-state)] ${
+                      current
+                        ? "border-yellow text-paper"
+                        : "border-transparent text-paper/70 hover:border-paper/40 hover:text-paper"
+                    }`}
+                  >
+                    {stop.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      </header>
+
+      <main id="contenido" className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 sm:px-6 sm:py-10">
+        {breadcrumb && breadcrumb.length > 0 ? (
+          <nav aria-label="Ruta" className="mb-3">
+            <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+              {breadcrumb.map((crumb, index) => (
+                <li key={crumb} className="flex items-center gap-2">
+                  {index > 0 ? <span aria-hidden="true">›</span> : null}
+                  <span className={index === breadcrumb.length - 1 ? "text-strong" : undefined}>
+                    {crumb}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        ) : null}
+
+        <h1 className="text-3xl">{title}</h1>
+        {lead ? <p className="mt-2 max-w-2xl text-base text-muted">{lead}</p> : null}
+
+        <div className="mt-8">{children}</div>
+      </main>
+    </div>
+  );
+}

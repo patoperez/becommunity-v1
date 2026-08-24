@@ -114,7 +114,7 @@ export default async function UploadPage({
         </Link>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
+      <main id="contenido" className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
         <UploadForm
           tenants={tenants ?? []}
           studies={studyOptions}

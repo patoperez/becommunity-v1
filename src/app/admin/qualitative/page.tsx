@@ -44,7 +44,7 @@ export default async function QualitativePage({ searchParams }: { searchParams: 
 
   return <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
     <header className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900"><div className="mx-auto flex max-w-7xl items-center justify-between"><div><h1 className="text-lg font-semibold">Revisión cualitativa</h1><p className="text-xs text-zinc-500">Las sugerencias nunca se publican sin confirmación humana.</p></div><div className="flex gap-2"><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/admin/studies">Estudios</Link><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/dashboard">Portal</Link></div></div></header>
-    <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
+    <main id="contenido" className="mx-auto max-w-7xl space-y-6 px-6 py-8">
       {query.ok ? <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{query.ok}</p> : null}
       {query.error ? <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{query.error}</p> : null}
       <form className="flex flex-wrap items-end gap-3" method="get"><label className="flex flex-col gap-1 text-sm font-medium">Estudio<select name="study" defaultValue={selected?.id ?? ""} className={input}>{(studies ?? []).map((study) => <option key={study.id} value={study.id}>{study.name}{study.period ? ` · ${study.period}` : ""}</option>)}</select></label><button className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white">Abrir</button></form>

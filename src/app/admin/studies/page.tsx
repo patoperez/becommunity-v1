@@ -52,7 +52,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
         <div className="flex gap-2"><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/admin/qualitative">Revisión cualitativa</Link><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/admin/upload">Cargar datos</Link><Link className="rounded-lg border px-3 py-1.5 text-sm" href="/dashboard">Portal</Link></div>
       </div>
     </header>
-    <main className="mx-auto max-w-7xl space-y-10 px-6 py-10">
+    <main id="contenido" className="mx-auto max-w-7xl space-y-10 px-6 py-10">
       {query.ok ? <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{query.ok}</p> : null}
       {query.error ? <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{query.error}</p> : null}
 

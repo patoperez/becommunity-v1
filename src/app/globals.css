@@ -1,26 +1,185 @@
 @import "tailwindcss";
 
+/*
+ * P8-A semantic token layer.
+ *
+ * Two layers, deliberately separated:
+ *   1. BRAND EXPRESSION  — the Be Community palette and voices. Swapping these
+ *      changes how the product feels.
+ *   2. PRODUCT MEANING   — surface / text / line / evidence / caution / danger /
+ *      positive / voice / focus. Components only ever reference this layer, so a
+ *      future co-branded or white-label study mode re-points the expression
+ *      tokens without touching a single component.
+ *
+ * A per-study accent (the tenant's own colour) arrives at runtime as
+ * `--study-accent*` custom properties, always resolved through
+ * `src/lib/brand/contrast.ts` so a client-chosen hex can never produce
+ * unreadable text. Components read the study accent, never a raw tenant hex.
+ */
+
+/*
+ * Dark mode is deliberately NOT shipped in P8-A.
+ *
+ * The audit (F6) recorded it as half-built: `dark:` variants existed across the
+ * product while the two branded surfaces ignored the mode entirely, so a client
+ * on a dark phone got a light hero inside a near-black page. Rather than keep an
+ * incoherent mode alive, the `dark` variant is re-pointed at an opt-in class
+ * that the product never sets. Every existing `dark:` utility becomes inert
+ * without editing the screens that P8-A does not touch, and a real dark theme
+ * can be introduced later by defining the second palette and setting the class.
+ */
+@custom-variant dark (&:where(.be-dark, .be-dark *));
+
+@theme {
+  /* ---- 1. Brand expression (source: the Be Community identity) ---------- */
+  --color-ink: #0e2a45;
+  --color-blue: #1b72b8;
+  --color-sky: #7fb2dd;
+  --color-magenta: #e23b8a;
+  --color-green: #7db52e;
+  --color-yellow: #f4b72a;
+  --color-lavender: #9b84c4;
+  --color-paper: #faf8f3;
+  --color-paper-2: #f0ede4;
+
+  /* ---- 2. Product meaning ---------------------------------------------- */
+
+  /* Surfaces */
+  --color-surface: #ffffff;
+  --color-surface-page: #faf8f3;
+  --color-surface-sunken: #f0ede4;
+  --color-surface-inverse: #0e2a45;
+
+  /* Text — every value verified at >= 4.5:1 on its intended surface by
+     `scripts/design-tokens-test.mjs`. */
+  --color-strong: #0e2a45;
+  --color-body: #24405c;
+  --color-muted: #4a6076;
+  --color-on-inverse: #f3f6fa;
+  --color-on-inverse-muted: #c3d2e0;
+
+  /* Lines */
+  --color-line: #e3ded1;
+  --color-line-strong: #c6bda8;
+
+  /* Evidence — the colour a calculated result is drawn in */
+  --color-evidence: #1b72b8;
+  --color-evidence-strong: #14547f;
+  --color-evidence-surface: #eaf2fa;
+  --color-evidence-line: #bcd7ee;
+
+  /* Voice — the colour of what people said */
+  --color-voice: #5f4a94;
+  --color-voice-surface: #f1ecf9;
+  --color-voice-line: #d6c9ee;
+
+  /* Caution / danger / positive */
+  --color-caution: #7c5200;
+  --color-caution-surface: #fdf3dd;
+  --color-caution-line: #ebd39c;
+  --color-danger: #a11a44;
+  --color-danger-surface: #fdecf2;
+  --color-danger-line: #f2c0d3;
+  --color-positive: #3d660f;
+  --color-positive-surface: #eff7e3;
+  --color-positive-line: #cbe3a5;
+
+  /* Focus */
+  --color-focus: #1b72b8;
+
+  /* ---- Typography ------------------------------------------------------ */
+  --font-display: var(--font-bricolage), "Segoe UI", system-ui, sans-serif;
+  --font-text: var(--font-hanken), "Segoe UI", system-ui, sans-serif;
+
+  /* ---- Radius ---------------------------------------------------------- */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.75rem;
+
+  /* ---- Elevation — one level only; nested cards are not permitted ------- */
+  --shadow-raised: 0 1px 2px rgb(14 42 69 / 0.05), 0 8px 24px -16px rgb(14 42 69 / 0.22);
+  --shadow-lifted: 0 2px 4px rgb(14 42 69 / 0.06), 0 18px 40px -24px rgb(14 42 69 / 0.3);
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --ease-brand: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Motion durations. Two only: state, and content arriving. */
+  --motion-state: 120ms;
+  --motion-content: 220ms;
+
+  /*
+   * Default study accent. Overridden per study by the contrast resolver, which
+   * guarantees `--study-accent-on` reads at >= 4.5:1 against `--study-accent`.
+   */
+  --study-accent: #1b72b8;
+  --study-accent-on: #ffffff;
+  --study-accent-surface: #eaf2fa;
+  --study-accent-line: #bcd7ee;
+  --study-accent-quiet: #14547f;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  body {
+    background-color: var(--color-surface-page);
+    color: var(--color-body);
+    font-family: var(--font-text);
+    font-size: 1rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    color: var(--color-strong);
+    text-wrap: balance;
+  }
+
+  /* Consistently visible focus on every interactive element, everywhere. */
+  :focus-visible {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  ::selection {
+    background: var(--color-yellow);
+    color: var(--color-ink);
+  }
+
+  /* Numbers must align in columns and between periods. */
+  .tabular {
+    font-variant-numeric: tabular-nums lining-nums;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/*
+ * `prefers-reduced-motion` is honoured globally and without exception. Nothing
+ * in P8-A carries meaning through motion, so removing it costs no information.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
