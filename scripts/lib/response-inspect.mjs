@@ -46,7 +46,7 @@ const LEAK_CLASSES = Object.freeze([
   ["postgrest_internals", /"(hint|details)"\s*:\s*"[^"]/],
   ["filesystem_path", /(\/home\/[a-z0-9._-]+\/|\/var\/task\/|[A-Za-z]:\\\\?(Users|dev)\\|\/usr\/src\/app\/|node_modules\/\.pnpm\/)/],
   ["framework_internals", /(\.next\/server\/|webpack-internal:|__webpack_require__|node:internal\/|next\/dist\/(server|compiled)\/)/],
-  ["service_role_marker", /service_role|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SECRET_KEY/],
+  ["privileged_role_marker", /service_role|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SECRET_KEY/],
 ]);
 
 /** Active constructs a PDF must not contain (C1). Names only — never offsets. */
@@ -182,7 +182,7 @@ export const INSPECTOR_CASES = Object.freeze([
   // Built at runtime, never written as a literal: this file is itself scanned
   // for credential markers, exactly as `secret-patterns.mjs` builds its own
   // positive controls at runtime for the same reason.
-  { what: "a privileged role marker", text: `role=${["service", "role"].join("_")}`, expect: ["service_role_marker"] },
+  { what: "a privileged role marker", text: `role=${["service", "role"].join("_")}`, expect: ["privileged_role_marker"] },
   { what: "an ordinary validation message", text: '{"error":"Filtros invalidos"}', expect: [] },
 ]);
 
