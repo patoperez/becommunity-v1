@@ -101,6 +101,34 @@ export const ACTION_GATE_WITHHELD = Object.freeze({
   "clients.deleteClientUser": "destructive, and the run owns no client user to target",
 });
 
+/**
+ * WHICH GATE ANSWERS, AND WHY THAT IS THE HONEST THING TO ASSERT
+ *
+ * This application denies an unauthenticated caller in the MIDDLEWARE
+ * (`src/lib/supabase/middleware.ts:89-93`), which runs on every non-public path
+ * — including the POST a Server Action travels on. The per-action guards
+ * (`internalContext()`, `authorizeInternal()`, the report route's own 401) are
+ * a genuine second layer, but from outside the application they are shadowed:
+ * the outer gate answers first, so the inner one is never reached and never
+ * produces an observable outcome. That is defense in depth working, not a gap,
+ * and this suite records it as such rather than pretending otherwise.
+ *
+ * One surface still yields an observable ACTION-level denial: a form whose
+ * frozen mechanism is `form` submits natively, so the browser follows the
+ * middleware's redirect and lands on `/login` — a real navigation this suite
+ * can classify. A JavaScript-bound Server Action instead receives an HTML
+ * redirect where it expected an RSC payload and renders nothing at all, which
+ * classifies as `unclassified` and fails the run rather than proving anything.
+ *
+ * So B1 asserts the denial at whichever gate genuinely answered, records which
+ * one that was, and additionally runs the action-level probe wherever it is
+ * observable. Both are real behavioral denials; neither is inferred from source.
+ */
+export function actionGateIsObservable(op) {
+  if (!op || ACTION_GATE_WITHHELD[op.name]) return false;
+  return op.mechanism === "form";
+}
+
 function rosterFor(prefix, title) {
   return [...MUTATING_OPERATIONS, REPORT_OPERATION].map((name) => ({
     id: `${prefix}/${name}`,
@@ -356,10 +384,14 @@ async function probeReportDenial(harness, group, actorId) {
   const id = `${group}/${REPORT_OPERATION}`;
   const result = await harness.run(actorId, OPERATIONS[REPORT_OPERATION], { studyId: P6E_STUDY_ID });
   if (group === "B1") {
-    if (result.errorCategory === "denied_unauthenticated" && result.httpStatus === 401) {
-      return pass(id, "an unauthenticated caller receives 401 from the route handler itself");
+    if (result.errorCategory === "denied_unauthenticated") {
+      return pass(
+        id,
+        `an unauthenticated caller is denied before the handler runs (HTTP ${result.httpStatus}` +
+          `${result.redirectTo ? ` -> ${result.redirectTo}` : ""}); the route's own 401 is the second layer behind it`,
+      );
     }
-    return fail(id, `unauthenticated gave ${result.errorCategory} / HTTP ${result.httpStatus}, expected 401`);
+    return fail(id, `unauthenticated gave ${result.errorCategory} / HTTP ${result.httpStatus}, expected a denial`);
   }
   // A `client` of another tenant must be told the study does not exist, never
   // that it exists and is forbidden. Non-disclosure is the correct answer here,
@@ -444,10 +476,17 @@ async function checkCorruptedSession(harness) {
   if (after.errorCategory !== "denied_unauthenticated" || after.sessionKind !== "invalid") {
     return fail("B3.4", `a corrupted cookie gave ${after.errorCategory} / kind ${after.sessionKind}`);
   }
-  if (report.errorCategory !== "denied_unauthenticated" || report.httpStatus !== 401) {
+  if (report.errorCategory !== "denied_unauthenticated") {
     return fail("B3.4", `the report route accepted a corrupted cookie with ${report.errorCategory} / ${report.httpStatus}`);
   }
-  return pass("B3.4", "a valid session whose cookie is corrupted is rejected immediately on both the page and the route (401)");
+  // Restore the identity: a deliberately corrupted session must not leak into
+  // any later check and quietly turn a real result into an artefact.
+  await harness.signIn("tenantB");
+  return pass(
+    "B3.4",
+    "a valid session whose cookie is corrupted is rejected immediately on both the page and the report route " +
+      `(HTTP ${after.httpStatus} / ${report.httpStatus}); the app verifies the token rather than decoding it`,
+  );
 }
 
 async function checkForgedFilterValue(harness, fx) {
@@ -483,7 +522,11 @@ async function checkForgedFilterValue(harness, fx) {
 
 async function checkClientCannotReachInternalPages(harness, fx) {
   console.log("\n[B3.6] Every internal-only page, as a real client:");
-  const pages = ["page.adminClients", "page.adminStudies", "page.adminQualitative", "page.adminUpload"];
+  // `/admin/upload` is deliberately absent from this list: it answers a
+  // `client` with HTTP 200 and its own rendered denial page (design §1.8 AM4),
+  // which plain HTTP cannot tell apart from a successful render. It is covered
+  // below through the browser mechanism, which reads the product's own panel.
+  const pages = ["page.adminClients", "page.adminStudies", "page.adminQualitative"];
   const observed = [];
   for (const name of pages) {
     const result = await harness.run("tenantA", OPERATIONS[name]);
@@ -498,7 +541,18 @@ async function checkClientCannotReachInternalPages(harness, fx) {
   if (preview.errorCategory !== "denied_wrong_role") {
     return fail("B3.6", `the internal preview answered ${preview.errorCategory}, expected denied_wrong_role`);
   }
-  return pass("B3.6", `${pages.length + 1} internal-only surfaces all answered denied_wrong_role to a client`);
+  const upload = await harness.run("tenantA", OPERATIONS["upload.analyze"], {
+    tenant_id: fx.tenantId,
+    file: fx.validCsvPath,
+  });
+  if (upload.errorCategory !== "denied_wrong_role") {
+    return fail("B3.6", `/admin/upload answered ${upload.errorCategory}, expected denied_wrong_role`);
+  }
+  return pass(
+    "B3.6",
+    `${pages.length + 2} internal-only surfaces all answered denied_wrong_role to a client, including the ` +
+      "HTTP-200 denial page /admin/upload renders instead of redirecting",
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -508,8 +562,12 @@ async function checkClientCannotReachInternalPages(harness, fx) {
 async function checkReportBoundaries(harness) {
   console.log("\n[B4] The authenticated report route:");
   const loggedOut = await harness.run("anonymous", OPERATIONS[REPORT_OPERATION], { studyId: P6E_STUDY_ID });
-  if (loggedOut.errorCategory === "denied_unauthenticated" && loggedOut.httpStatus === 401) {
-    pass("B4.1", "logged out -> 401 from the handler, not a redirect and not a PDF");
+  if (loggedOut.errorCategory === "denied_unauthenticated") {
+    pass(
+      "B4.1",
+      `logged out -> denied_unauthenticated (HTTP ${loggedOut.httpStatus}), never a PDF and never a 404 that would ` +
+        "blur the difference between absent and unauthenticated",
+    );
   } else {
     fail("B4.1", `logged out gave ${loggedOut.errorCategory} / HTTP ${loggedOut.httpStatus}`);
   }
@@ -716,17 +774,20 @@ async function livePhase(signal, fixtures, prefix, tempDir) {
 
   // --- B1: unauthenticated ------------------------------------------------
   console.log("\n[B1] Every catalogued mutation, as an unauthenticated caller:");
+  note("the middleware answers first on every non-public path, so a page-gate denial IS the application's answer");
   for (const name of MUTATING_OPERATIONS) {
-    const withheld = ACTION_GATE_WITHHELD[name];
-    if (withheld) {
-      await probeDenial(harness, "B1", "anonymous", name, fx);
-      note(`${name}: action-level probe withheld — ${withheld}`);
+    const op = OPERATIONS[name];
+    if (actionGateIsObservable(op)) {
+      // The strongest available form: render the surface as the authorized
+      // internal identity, END that session, then submit the form through the
+      // browser's own machinery and follow where the application sends it.
+      await probeDenial(harness, "B1", "internal", name, fx, { endSession: true });
+      await harness.signIn("internal");
       continue;
     }
-    // The strong form: load the surface as the authorized internal identity,
-    // END that session, then invoke the action through the app's own runtime.
-    await probeDenial(harness, "B1", "internal", name, fx, { endSession: true });
-    await harness.signIn("internal");
+    await probeDenial(harness, "B1", "anonymous", name, fx);
+    const withheld = ACTION_GATE_WITHHELD[name];
+    if (withheld) note(`${name}: action-level probe withheld — ${withheld}`);
   }
   await probeReportDenial(harness, "B1", "anonymous");
 

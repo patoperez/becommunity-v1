@@ -609,6 +609,46 @@ export const PAGE = {
       return 'ok';
     })()`,
 
+  /**
+   * Changes a select located by the PREFIX of its own `aria-label`. The study
+   * filters are bare `<select aria-label="Filtrar por nivel">` controls with no
+   * `<label>` wrapper, so `changeSelectByLabel` cannot see them.
+   */
+  changeSelectByAriaLabel: (prefix) => `
+    (() => {
+      const select = [...document.querySelectorAll('select')]
+        .find((node) => (node.getAttribute('aria-label') || '').startsWith(${JSON.stringify(prefix)}));
+      if (!select) return 'no-control';
+      const target = [...select.options].find((option) => option.value !== select.value);
+      if (!target) return 'no-alternative';
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, target.value);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    })()`,
+
+  /**
+   * Inserts a value the server never offered into the product's own control and
+   * selects it — the visible-client-state tampering case. The framework still
+   * builds the request; only the value is hostile.
+   */
+  forgeSelectValueByAriaLabel: (prefix, value) => `
+    (() => {
+      const select = [...document.querySelectorAll('select')]
+        .find((node) => (node.getAttribute('aria-label') || '').startsWith(${JSON.stringify(prefix)}));
+      if (!select) return 'no-control';
+      const option = document.createElement('option');
+      option.value = ${JSON.stringify(value)};
+      option.textContent = 'forged';
+      select.appendChild(option);
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, option.value);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    })()`,
+
   /** Selects an option by its visible text and returns the option's value. */
   optionValueByText: (selectName, text) => `
     (() => {
@@ -776,28 +816,20 @@ export const BROWSER_DRIVERS = Object.freeze({
       `(() => { const v = ${DASHBOARD_STATUS_EXPR}; window.__harnessDashboardBefore = v; return v; })()`,
     );
     if (before === "") return { status: 200, domSignal: "none" };
+    // The study's segment filters are `<select>` elements carrying their own
+    // `aria-label` ("Filtrar por <dimension>"), not `<label>` wrappers — the
+    // same locator `scripts/suite-a-isolation.mjs` already uses.
+    //
     // `forgedValue` is the visible-client-state tampering case (Suite B3): a
     // value the server never offered is inserted into the product's own filter
     // control and then selected, exactly as a user with developer tools would.
     // The framework still constructs the request; only the value is hostile.
-    const driven = params.forgedValue === undefined
-      ? await context.evaluate(PAGE.changeSelectByLabel(params.dimension ?? "Filtrar por"))
-      : await context.evaluate(`
-          (() => {
-            const select = [...document.querySelectorAll('select')].find(
-              (s) => (s.getAttribute('aria-label') || '').startsWith(${JSON.stringify(params.dimension ?? "Filtrar por")}),
-            );
-            if (!select) return 'no-control';
-            const option = document.createElement('option');
-            option.value = ${JSON.stringify(String(params.forgedValue))};
-            option.textContent = 'forged';
-            select.appendChild(option);
-            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-            setter.call(select, option.value);
-            select.dispatchEvent(new Event('input', { bubbles: true }));
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-            return 'ok';
-          })()`);
+    const prefix = params.dimension ?? "Filtrar por";
+    const driven = await context.evaluate(
+      params.forgedValue === undefined
+        ? PAGE.changeSelectByAriaLabel(prefix)
+        : PAGE.forgeSelectValueByAriaLabel(prefix, String(params.forgedValue)),
+    );
     if (driven !== "ok") return { status: 200, domSignal: "none", note: `control-${driven}` };
     const settled = await context
       .waitForDom(

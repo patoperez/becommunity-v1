@@ -55,6 +55,7 @@ import {
   SUITE_B_CHECKS,
   MUTATING_OPERATIONS,
   ACTION_GATE_WITHHELD,
+  actionGateIsObservable,
   DENIED_PATHS_ONLY,
   isDenial,
   outcomeSatisfies,
@@ -136,6 +137,21 @@ console.log("\n[1] Must-execute rosters, generated from the frozen catalogue:");
     "the denial-only set must stay exactly the operations whose success this run cannot undo",
   );
   ok("the denial-only set is exactly the four operations whose success creates an Auth identity, a message or a Storage object");
+
+  // The gate model. B1 asserts a denial at whichever gate genuinely answered;
+  // the ACTION-level probe runs only where the application produces something
+  // observable. Pinning this offline stops it from quietly widening into a
+  // claim the run cannot actually support.
+  const observable = MUTATING_OPERATIONS.filter((name) => actionGateIsObservable(OPERATIONS[name]));
+  assert.deepEqual(observable, ["clients.createTenant"], "only a natively-submitting form yields an observable action-gate denial");
+  for (const name of observable) {
+    assert.equal(OPERATIONS[name].mechanism, "form", "an observable action gate requires the frozen `form` mechanism");
+    assert.ok(OPERATIONS[name].degradationVerifiedAt, "and that mechanism must rest on a recorded discovery run");
+  }
+  for (const name of Object.keys(ACTION_GATE_WITHHELD)) {
+    assert.equal(actionGateIsObservable(OPERATIONS[name]), false, `${name} must never be action-probed`);
+  }
+  ok("the action-level probe runs only on the natively-submitting form, and never on a withheld operation");
 }
 
 // --- [2] Outcome classification ---------------------------------------------
