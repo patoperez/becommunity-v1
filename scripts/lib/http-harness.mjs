@@ -197,7 +197,7 @@ const action = (name, extra) => ({ name, mutating: true, ...extra });
  *
  * Every Server Action in this application is dispatched by POSTing to the page
  * that renders it. Driving the action itself from outside would require the
- * hashed `Next-Action` identifier or a hand-built RSC body, both forbidden —
+ * hashed Next-Action identifier or a hand-built RSC body, both forbidden —
  * so the reachable, honest thing to test is the OUTER boundary on that exact
  * method and path: one ordinary form-shaped POST, no action identifier, no
  * private field, no mutation payload.
