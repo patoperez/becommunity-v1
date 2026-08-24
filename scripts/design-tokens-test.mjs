@@ -503,9 +503,17 @@ ok("internal readiness still reports missing confirmed qualitative content");
 // 4 — sample cautions are analytical honesty, not an internal omission.
 assert.match(sampleCopy("caution", 23).headline, /Pocas respuestas/,
   "a small base still warns the reader");
-for (const [name, source] of [["NarrativeHome", panoramaSource], ["JourneyMap", journeySource],
-  ["StudyCard", studyCard]]) {
-  assert.match(source, /SampleContext|sampleCopy/, `${name} still renders sample context`);
+// The panorama builds finding DATA; `PanoramaFindings` renders it. Assert each
+// file at the layer it actually owns.
+assert.match(panoramaSource, /sample: \{ visibility: spot\.visibility, count: spot\.n \}/,
+  "the panorama still hands the spotlight's base to the finding");
+assert.match(panoramaSource, /studyBaseSentence\(/, "the hero still states the study's base");
+for (const [name, source] of [
+  ["PanoramaFindings", await readCode("src/app/dashboard/PanoramaFindings.tsx")],
+  ["JourneyMap", journeySource],
+  ["StudyCard", studyCard],
+]) {
+  assert.match(source, /SampleContext/, `${name} still renders sample context`);
 }
 ok("sample-size cautions that affect interpretation are preserved");
 
