@@ -39,7 +39,7 @@ npm run gates        # gates:offline + gates:live — the complete release chain
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # live credential-bearing chain: qualitative-live -> suite:a -> suite:b -> suite:c
 npm run suite:a      # Suite A: tenant isolation, data scope, least privilege (A1-A5)
-npm run suite:b      # Suite B: behavioral server-side authorization (B1-B7)
+npm run suite:b      # Suite B: server-side authorization (B1-B11, three evidence layers)
 npm run suite:c      # Suite C: hostile input, imports, pivot boundary, injection (C1-C5)
 npm run test:isolation      # the legacy isolation gate on its own (Suite A runs it as A1.5)
 npm run test:rls-coverage   # the RLS/FORCE-RLS gate on its own (Suite A runs it as A4.1)

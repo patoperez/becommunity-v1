@@ -174,12 +174,26 @@ passed with zero `P7A-`/`P7H-` residue. The commit-to-version record lives in PR
 (authorization) and Suite C (hostile input/injection). Both are implemented and
 **green on the branch, not yet merged**:
 
-- `npm run suite:b` — 52/52, one required check per catalogued mutation for B1
-  and B2 (the roster is generated from the frozen catalogue, so a new mutation
-  arrives with no result and an unexecuted entry is red), plus B3-B7.
-- `npm run suite:c` — 12/12, including an inert hostile payload carried through
-  the real ingestion and human-review workflow and inspected in both the
-  rendered client dashboard and the generated PDF.
+- `npm run suite:b` — 64/64. Its evidence is reported in **three layers that
+  are never summed**, because conflating them is how a page-level GET gets
+  counted as action coverage:
+  1. *catalogue completeness* — one required B1 and B2 row per catalogued
+     mutation plus the report route, generated from the frozen catalogue, so a
+     new mutation arrives with no result and an unexecuted entry is red;
+  2. *outer action route* — one ordinary form-shaped POST to the exact method
+     and path each Server Action is dispatched to (no `Next-Action` header, no
+     private field, no body), with a positive discriminator and a bare-POST
+     405 negative control per path class;
+  3. *observable inner Server-Action denial* — only where the application
+     actually produces one, which is one operation of eighteen.
+  The suite states explicitly that it does **not** claim all eighteen inner
+  Server Actions were invoked; they cannot be reached without the hashed action
+  identifier or a hand-built RSC body the design forbids.
+- `npm run suite:c` — 13/13, including an inert hostile payload carried through
+  the real ingestion and human-review workflow and then **positively located**
+  in the generated PDF's decoded displayed text as well as in the rendered
+  client dashboard. C1.3 fails if the payload is absent, so it can no longer
+  pass on a report the quote never reached.
 - `npm run gates:live` now runs `test:qualitative-live -> suite:a -> suite:b ->
   suite:c`, each exactly once. `npm test` gains `test:pivot` (previously
   orphaned) and the credential-free Suite B/C self-test, reaching 26 gates.
@@ -193,14 +207,25 @@ recorded rather than asserted past:
    caller is denied on every non-public path — including the POST a Server
    Action travels on — so `internalContext()`, `authorizeInternal()` and the
    report route's own 401 are a real second layer that is shadowed from
-   outside. Suite B asserts the denial at whichever gate answered and records
-   which one. This is defense in depth working, not a gap.
-2. **An over-limit upload is refused silently.** Next truncates the request body
-   at its own 10 MB middleware cap and the action then throws, so
-   `readUpload`'s own `MAX_UPLOAD_BYTES` check is unreachable and the operator
-   sees no message. Nothing is written and nothing leaks, so C2.3 passes on the
-   safety property and prints the missing feedback as a FINDING. Fixing the
-   feedback is a product change, deliberately not made in a test-only PR.
+   outside. Suite B asserts the denial at whichever gate answered, proves the
+   outer boundary on the action route's own POST method and path, and records
+   which layer each result came from. This is defense in depth working, not a
+   gap. One path class is a stated limitation: `/admin/upload` answers a
+   wrong-role caller with HTTP 200 and a rendered denial page rather than a
+   status, so no status-level claim is made there and its denial is proven at
+   the browser layer instead.
+2. **An over-limit upload was refused silently — now corrected in the product.**
+   Next truncates the request body at its own cap and the action then throws, so
+   the upload action's own `MAX_UPLOAD_BYTES` check was unreachable and the
+   operator saw nothing. PR 7 adds the smallest correction that fixes it:
+   `exceedsUploadLimit()` joins the shared validation module and the upload form
+   refuses an over-limit source on selection, leaving the analyze control
+   disabled. The server-side check is untouched and remains authoritative. C2.3
+   now requires a rendered rejection **and** zero dispatch; C2.4 proves an
+   ordinary in-limit source is still accepted. **This makes PR 7 no longer
+   test-only:** it touches exactly two application files,
+   `src/app/admin/upload/UploadForm.tsx` and `src/lib/validation/schemas.ts`,
+   both admitted to the structural scope guard by name.
 
 Suite E is still not green. PR 8 and later P7 work must not begin until PR 7 is
 reviewed, merged and post-merge verified.
