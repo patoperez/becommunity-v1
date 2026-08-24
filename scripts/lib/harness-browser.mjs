@@ -649,6 +649,55 @@ export const PAGE = {
       return 'ok';
     })()`,
 
+  /**
+   * Selects, in whichever `<select>` offers it, the option whose visible text
+   * starts with `prefix`. For controls the product renders without a label
+   * wrapper or a `name`, the option's own text is the stable user-visible
+   * contract (§4.1 rule 4). Exactly one match is required: two would mean the
+   * run's namespace is ambiguous, and guessing which is ours is how a test
+   * writes to the wrong object.
+   */
+  selectOptionByTextPrefix: (prefix) => `
+    (() => {
+      const hits = [];
+      for (const select of document.querySelectorAll('select')) {
+        for (const option of select.options) {
+          if ((option.textContent || '').trim().startsWith(${JSON.stringify(prefix)})) hits.push([select, option]);
+        }
+      }
+      if (hits.length === 0) return 'no-option';
+      if (hits.length > 1) return 'ambiguous';
+      const [select, option] = hits[0];
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, option.value);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    })()`,
+
+  /**
+   * The forged-value tamper for a select the product wraps in a `<label>` —
+   * the shape `PivotExplorer` renders ("Filas", "Columnas", "Métrica",
+   * "Agregación"). Its aria-label counterpart above serves the dashboard
+   * filters, which carry no wrapper.
+   */
+  forgeSelectValueByLabel: (labelPrefix, value) => `
+    (() => {
+      const label = [...document.querySelectorAll('label')]
+        .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
+      const select = label && label.querySelector('select');
+      if (!select) return 'no-control';
+      const option = document.createElement('option');
+      option.value = ${JSON.stringify(value)};
+      option.textContent = 'forged';
+      select.appendChild(option);
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, option.value);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    })()`,
+
   /** Selects an option by its visible text and returns the option's value. */
   optionValueByText: (selectName, text) => `
     (() => {
@@ -722,13 +771,13 @@ const DASHBOARD_STATUS_EXPR = `(() => {
  * error region, or a caller-supplied success predicate. Returns the outcome as
  * a CATEGORY, never as rendered text (§2.3).
  */
-async function settleImperative(context, PAGE, successPredicate) {
+async function settleImperative(context, PAGE, successPredicate, timeoutMs) {
   const settled = await context
     .waitForDom(`() => {
       const outcome = ${PAGE.actionOutcomeKind};
       const success = (${successPredicate})();
       return outcome !== 'none' || success;
-    }`)
+    }`, timeoutMs)
     .catch(() => false);
   if (!settled) return { status: 200, domSignal: "none" };
   // A refusal is read FIRST: an action that both rendered an error and left an
@@ -856,7 +905,11 @@ export const BROWSER_DRIVERS = Object.freeze({
     if (blocked) return blocked;
     const clicked = await context.evaluate(PAGE.clickByName("Analizar"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `analyze-${clicked}` };
-    return settleImperative(context, PAGE, UPLOAD_READY);
+    // `settleTimeoutMs` is a wider BOUND, never a retry: a deliberately
+    // over-limit source is megabytes of body that must be transferred and
+    // buffered before the action can refuse it, and the default 20s bound is
+    // about a rendered page rather than about that.
+    return settleImperative(context, PAGE, UPLOAD_READY, params.settleTimeoutMs);
   },
 
   /** `previewImportFile` — the staged validation pass; it writes nothing. */
@@ -868,9 +921,12 @@ export const BROWSER_DRIVERS = Object.freeze({
 
   /** `confirmImportFile` — the only upload stage that writes. */
   "upload.confirm": async ({ context, PAGE, params }) => {
-    if (params.study_id) {
-      const chosen = await context.evaluate(selectByValue("Estudio", params.study_id));
-      if (chosen === "no-option") return { status: 200, domSignal: "none", note: "study-no-option" };
+    // Step 3's destination control is a bare `<select>` with no label wrapper
+    // and no `name`, so it is located by the visible text of the option the
+    // user would pick — the study's own name, which carries the run prefix.
+    if (params.study_option) {
+      const chosen = await context.evaluate(PAGE.selectOptionByTextPrefix(params.study_option));
+      if (chosen !== "ok") return { status: 200, domSignal: "none", note: `study-${chosen}` };
     }
     await context.evaluate(`
       (() => {
