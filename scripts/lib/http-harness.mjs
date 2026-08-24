@@ -777,7 +777,13 @@ export async function createHarness(options) {
     if (op.imperative) {
       const driver = browserDriverFor(op.name);
       const observation = await driver({ context, PAGE, params });
-      return finish(a, op, mechanism, observation, now() - started);
+      const record = finish(a, op, mechanism, observation, now() - started);
+      // A driver may attach a short diagnostic token describing the control
+      // state it found (`confirm-disabled-checkboxes=3`). It is composed of
+      // fixed tokens and counts only — never rendered text, never product
+      // data — and it stays off the sanitized ledger.
+      if (observation.note) record.note = observation.note;
+      return record;
     }
 
     // Where several identical forms are rendered — one per tenant, user or

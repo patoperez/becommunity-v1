@@ -71,6 +71,9 @@ import {
   xssObservationIsInert,
   selfTestInjectionClassifier,
   selfTestXssClassifier,
+  selfTestRefusalClassifier,
+  uploadRefusalIsAcceptable,
+  REFUSAL_CASES,
 } from "./suite-c-input.mjs";
 
 /* <detector-vocabulary> */
@@ -181,7 +184,23 @@ console.log("\n[2] Outcome classification:");
   assert.deepEqual(selfTestInjectionClassifier(), []);
   assert.deepEqual(selfTestXssClassifier(), []);
   assert.deepEqual(selfTestInspector(), []);
-  ok("the Suite C injection, XSS and leak classifiers all hold on their fixed cases");
+  assert.deepEqual(selfTestRefusalClassifier(), []);
+  ok(`the Suite C injection, XSS, leak and refusal classifiers all hold (${REFUSAL_CASES.length} refusal cases)`);
+
+  // Suite C carries exactly ONE deliberate leniency: an over-limit upload that
+  // the product refuses without rendering any message. Its reach is pinned here
+  // so it can never widen into "an unclassified answer is fine".
+  assert.equal(uploadRefusalIsAcceptable("unclassified", false).acceptable, false, "silence is never acceptable by default");
+  assert.equal(uploadRefusalIsAcceptable("unclassified", true).acceptable, true, "and only where a check opts in");
+  assert.equal(uploadRefusalIsAcceptable("unclassified", true).rendered, false, "an opted-in silence is never reported as rendered");
+  for (const category of ["success", "page_crash", "network_failure", "not_found", "denied_wrong_role"]) {
+    assert.equal(
+      uploadRefusalIsAcceptable(category, true).acceptable,
+      false,
+      `${category} must never be accepted as an upload refusal, opt-in or not`,
+    );
+  }
+  ok("the one upload leniency reaches exactly `unclassified` on an opted-in check, and nothing else");
 
   assert.equal(injectionResponseIsSafe({ status: 500, leakClasses: [], secretClasses: [] }).safe, false);
   assert.equal(

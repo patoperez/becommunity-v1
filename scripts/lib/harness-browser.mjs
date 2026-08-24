@@ -540,6 +540,12 @@ export const PAGE = {
         'Mapeo inválido',
         'Cliente inválido.',
         'Estudio inválido.',
+        'Dimensión de fila no permitida',
+        'Dimensión de columna no permitida',
+        'Métrica no permitida',
+        'Agregación no permitida',
+        'Una dimensión no puede ser fila y columna',
+        'Selecciona al menos una',
       ];
       if (validations.some((marker) => body.includes(marker))) return 'validation';
       const alerted = [...document.querySelectorAll('[role="alert"]')]
@@ -928,14 +934,25 @@ export const BROWSER_DRIVERS = Object.freeze({
       const chosen = await context.evaluate(PAGE.selectOptionByTextPrefix(params.study_option));
       if (chosen !== "ok") return { status: 200, domSignal: "none", note: `study-${chosen}` };
     }
-    await context.evaluate(`
+    // Tick the product's own confirmation checkbox the way a user does, then
+    // let React settle before reading the submit control: `canConfirm` is
+    // derived at render time, so reading it in the same turn would observe the
+    // state before the change.
+    const boxes = await context.evaluate(`
       (() => {
-        const boxes = [...document.querySelectorAll('input[type=checkbox]')];
-        for (const box of boxes) if (!box.checked) box.click();
-        return boxes.length;
+        const all = [...document.querySelectorAll('input[type=checkbox]')];
+        for (const box of all) if (!box.checked) box.click();
+        return all.length;
       })()`);
-    const clicked = await context.evaluate(PAGE.clickByName("Confirmar importación"));
-    if (clicked !== "ok") return { status: 200, domSignal: "none", note: `confirm-${clicked}` };
+    const enabled = await context
+      .waitForDom(`() => ${PAGE.controlEnabled("Confirmar importación")}`, 5000)
+      .catch(() => false);
+    const clicked = enabled ? await context.evaluate(PAGE.clickByName("Confirmar importación")) : "disabled";
+    if (clicked !== "ok") {
+      // The note carries control-state tokens and counts only — never a
+      // rendered message and never product data.
+      return { status: 200, domSignal: "none", note: `confirm-${clicked}-checkboxes=${boxes}` };
+    }
     return settleImperative(context, PAGE, CONFIRM_DONE);
   },
 
