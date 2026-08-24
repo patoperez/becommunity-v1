@@ -40,6 +40,101 @@ type Study = {
   created_at: string;
 };
 
+/**
+ * What needs attention, derived only from what this page already loaded.
+ *
+ * The rule this obeys: state nothing the current model cannot prove. A study
+ * with no rows genuinely has no data; a draft with data genuinely has not been
+ * published; a touchpoint whose metric produced no value genuinely has no
+ * result. Everything else a consultant might want here — who it is assigned to,
+ * when it is due, whether someone approved it — does not exist in the schema,
+ * and P8-A adds no migration, so it is not claimed.
+ *
+ * The colour groups the KIND of work. It is never a verdict on a number.
+ */
+type AttentionItem = {
+  studyId: string;
+  studyName: string;
+  period: string | null;
+  kind: "sin-datos" | "sin-publicar" | "recorrido-incompleto";
+  headline: string;
+  actionLabel: string;
+  href: string;
+  accent: { fill: string; surface: string; line: string };
+};
+
+const ATTENTION_ACCENT = {
+  "sin-datos": {
+    fill: "var(--color-blue)",
+    surface: "var(--color-sky-surface)",
+    line: "var(--color-sky-line)",
+  },
+  "sin-publicar": {
+    fill: "var(--color-lavender)",
+    surface: "var(--color-lavender-surface)",
+    line: "var(--color-lavender-line)",
+  },
+  "recorrido-incompleto": {
+    fill: "var(--color-yellow)",
+    surface: "var(--color-yellow-surface)",
+    line: "var(--color-yellow-line)",
+  },
+} as const;
+
+function attentionItems(
+  studies: { study: Study; dashboard: StudyDashboardPayload }[],
+): AttentionItem[] {
+  const items: AttentionItem[] = [];
+
+  for (const { study, dashboard } of studies) {
+    const base = { studyId: study.id, studyName: study.name, period: study.period };
+
+    if (dashboard.view.emptyStudy) {
+      items.push({
+        ...base,
+        kind: "sin-datos",
+        headline: "Todavía no tiene datos cargados",
+        actionLabel: "Cargar datos",
+        href: "/admin/upload",
+        accent: ATTENTION_ACCENT["sin-datos"],
+      });
+      continue;
+    }
+
+    if (study.status === "draft") {
+      items.push({
+        ...base,
+        kind: "sin-publicar",
+        headline: "Tiene datos y sigue sin publicarse",
+        actionLabel: "Revisarlo como el cliente",
+        href: `/admin/preview/${study.id}`,
+        accent: ATTENTION_ACCENT["sin-publicar"],
+      });
+    }
+
+    const withoutResult = dashboard.view.journey.filter((stage) => stage.value == null).length;
+    if (withoutResult > 0) {
+      items.push({
+        ...base,
+        kind: "recorrido-incompleto",
+        headline:
+          withoutResult === 1
+            ? "Un momento del recorrido no tiene resultado"
+            : `${withoutResult} momentos del recorrido no tienen resultado`,
+        actionLabel: "Ver el recorrido",
+        href: `/admin/preview/${study.id}`,
+        accent: ATTENTION_ACCENT["recorrido-incompleto"],
+      });
+    }
+  }
+
+  // Missing data first, then unpublished work, then gaps inside a study that is
+  // otherwise ready. Cap the list: a home page that lists forty things is a
+  // backlog, not an answer to "what needs me now".
+  const rank = { "sin-datos": 0, "sin-publicar": 1, "recorrido-incompleto": 2 };
+  return items.sort((a, b) => rank[a.kind] - rank[b.kind]).slice(0, 6);
+}
+
 /** The sign-out control, identical in both shells. */
 function SignOut({ tone = "ink" }: { tone?: "ink" | "paper" }) {
   return (
@@ -161,6 +256,7 @@ export default async function DashboardPage() {
   // the `/studio/*` routes the information architecture defines is P8-B.
   // ---------------------------------------------------------------------------
   if (profile?.role === "internal") {
+    const attention = attentionItems(studyData);
     return (
       <StudioShell
         userEmail={user.email ?? ""}
@@ -170,9 +266,66 @@ export default async function DashboardPage() {
         lead="Desde aquí preparas, revisas y publicas los estudios de cada cliente. Nada llega a un cliente hasta que se publica."
         utility={<SignOut tone="paper" />}
       >
-        <section aria-labelledby="studio-tareas">
+        {/*
+          What needs attention, first.
+          Every item is derived from state the page already loaded, and says
+          only what the current model can prove. No deadline, no assignee, no
+          approval state and no count that would need a query this page does not
+          make. When nothing qualifies, the section says so rather than
+          inventing work.
+        */}
+        <section aria-labelledby="studio-atencion">
+          <h2 id="studio-atencion" className="text-xl">
+            ¿Qué necesita atención?
+          </h2>
+          {attention.length === 0 ? (
+            <div className="mt-4">
+              <StateBlock title="Nada pendiente que el producto pueda detectar">
+                <p>
+                  Todos los estudios con datos están publicados y sus recorridos
+                  tienen resultado. Lo que siga depende de tu criterio, no de un
+                  aviso automático.
+                </p>
+              </StateBlock>
+            </div>
+          ) : (
+            <ul className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {attention.map((item) => (
+                <li key={`${item.studyId}-${item.kind}`}>
+                  <Link
+                    href={item.href}
+                    className="flex h-full min-w-0 items-start gap-3.5 rounded-xl border p-4 transition-colors duration-[var(--motion-state)] hover:shadow-raised"
+                    style={{ borderColor: item.accent.line, backgroundColor: item.accent.surface }}
+                  >
+                    {/* The dot groups the KIND of work. It is not a verdict on
+                        any number. */}
+                    <span
+                      aria-hidden="true"
+                      className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: item.accent.fill }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-strong">
+                        {item.headline}
+                      </span>
+                      <span className="mt-0.5 block break-words text-sm text-muted">
+                        {item.studyName}
+                        {item.period ? ` · ${item.period}` : ""}
+                      </span>
+                      <span className="mt-1.5 inline-flex items-center gap-1.5 text-sm font-semibold text-evidence">
+                        {item.actionLabel} <Forward />
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section aria-labelledby="studio-tareas" className="mt-10">
           <h2 id="studio-tareas" className="text-xl">
-            ¿Por dónde quieres empezar?
+            Ir a
           </h2>
           {/* The three things the consultant actually does to a study. Client
               administration is a secondary path below, as the information

@@ -54,6 +54,14 @@ export type NarrativeHomeView = {
   spotlight: NarrativeSpotlight | null;
   /** How many touchpoints the journey holds at all. */
   stageCount: number;
+  /**
+   * How many of those touchpoints have no result yet. Internal preview names
+   * this as a readiness gap before publication; the client never sees a count
+   * of what is missing.
+   */
+  stagesWithoutResult: number;
+  /** Whether any approved quote exists at all, for the readiness notice. */
+  hasVoices: boolean;
   /** One already-approved quote, if the study has any. */
   voice: { quote: string; theme: string | null } | null;
   /** The characteristics a reader may explore by, as stored keys. */
@@ -145,6 +153,8 @@ export function buildNarrativeHome(
     },
     spotlight: findSpotlight(dashboard.view.journey),
     stageCount: dashboard.view.journey.length,
+    stagesWithoutResult: dashboard.view.journey.filter((stage) => stage.value == null).length,
+    hasVoices: dashboard.view.qualitative.quotes.length > 0,
     voice: dashboard.view.qualitative.quotes[0] ?? null,
     characteristics: dashboard.filterOptions.map((option) => option.key),
   };

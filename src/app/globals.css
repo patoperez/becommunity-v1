@@ -87,6 +87,32 @@
   --color-positive-surface: #eff7e3;
   --color-positive-line: #cbe3a5;
 
+  /*
+   * Category accents — grouping and interaction, never judgement.
+   *
+   * The five secondary hues from the identity earn their place by telling one
+   * thing apart from another: which touchpoint of the route you are on, which
+   * finding the selector is showing, which kind of work needs attention. They
+   * are deliberately NOT wired to outcome: nothing here says a number is good
+   * or bad. That meaning stays with `caution` / `danger` / `positive`, which are
+   * separate tokens and are only used where the product can actually justify a
+   * verdict.
+   *
+   * Each hue is used as a FILL or a mark; text sits on the paired `-surface` in
+   * `--color-strong`, which the token gate verifies. That keeps the palette
+   * broad without putting a mid-tone hue under body text.
+   */
+  --color-sky-surface: #eef4fa;
+  --color-sky-line: #cfe0ef;
+  --color-magenta-surface: #fbeef4;
+  --color-magenta-line: #f2c4da;
+  --color-green-surface: #f2f7e9;
+  --color-green-line: #d3e5b6;
+  --color-yellow-surface: #fdf5e2;
+  --color-yellow-line: #f0dcac;
+  --color-lavender-surface: #f3f0f8;
+  --color-lavender-line: #d9d0e8;
+
   /* Focus */
   --color-focus: #176394;
 

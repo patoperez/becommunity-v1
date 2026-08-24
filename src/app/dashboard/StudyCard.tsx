@@ -17,6 +17,7 @@ import {
   studyStateLabel,
 } from "@/lib/language/results";
 import { sampleCopy } from "@/lib/language/sample";
+import type { Audience } from "@/lib/dashboard/audience";
 
 type Study = { id: string; name: string; period: string | null; status: string };
 
@@ -65,7 +66,16 @@ function ResultCard({ metric }: { metric: SafeMetric }) {
   );
 }
 
-export default function StudyCard({ study, initialDashboard }: { study: Study; initialDashboard: StudyDashboardPayload }) {
+export default function StudyCard({
+  study,
+  initialDashboard,
+  audience = "client",
+}: {
+  study: Study;
+  initialDashboard: StudyDashboardPayload;
+  /** Presentation only: the internal preview names readiness gaps, the client view never does. */
+  audience?: Audience;
+}) {
   const [filters, setFilters] = useState<SegmentFilters>({});
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [error, setError] = useState<string | null>(null);
@@ -250,7 +260,7 @@ export default function StudyCard({ study, initialDashboard }: { study: Study; i
             </StateBlock>
           ) : null}
 
-          {view.journey.length ? <JourneyMap stages={view.journey} /> : null}
+          {view.journey.length ? <JourneyMap stages={view.journey} audience={audience} /> : null}
 
           {showQualitative ? (
             <section className="rounded-xl border border-line bg-surface p-5 sm:p-6">

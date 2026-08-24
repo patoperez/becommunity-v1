@@ -1,11 +1,10 @@
-import type { ReactNode } from "react";
 import type { NarrativeHomeView } from "@/lib/dashboard/narrative";
 import type { BrandConfig } from "@/lib/branding/config";
 import { studyAccentVars } from "@/lib/brand/contrast";
-import { ScaleMark, PeerMark, AbsentMark, domainFor } from "@/components/evidence/ScaleMark";
-import { MethodDisclosure, SampleContext } from "@/components/SampleContext";
+import { domainFor } from "@/components/evidence/ScaleMark";
 import { Forward } from "@/components/Actions";
 import { BrandMark } from "@/components/BrandMark";
+import PanoramaFindings, { type PanoramaFinding } from "./PanoramaFindings";
 import {
   characteristicLabel,
   movementLabel,
@@ -14,266 +13,151 @@ import {
   humanize,
 } from "@/lib/language/results";
 import { studyBaseSentence } from "@/lib/language/sample";
+import type { Audience } from "@/lib/dashboard/audience";
 
 /**
  * The study panorama — the client's first impression.
  *
- * It replaces a coloured band, a strip of tiles and a card wall in which the
- * headline result appeared seventh on the page, below a stepper and some pills.
+ * This Server Component builds the finding DATA; `PanoramaFindings` renders one
+ * dominant finding and a compact navigator for the rest. Nothing is calculated
+ * here: every number arrives already computed, already rounded and already
+ * suppression-checked from `buildNarrativeHome`, which reads only sanitized
+ * aggregate DTOs.
  *
- * The unit here is a FINDING, and every finding has the same four parts:
- *   1. a human question,
- *   2. visual evidence for it,
- *   3. what that evidence rests on, in ordinary words,
- *   4. a way into the study to check it.
- *
- * Plus a fifth, structural part: the consultant's reading. The finding block
- * cannot render without that slot (P8 contract C5) — where nothing has been
- * published, the block says so rather than quietly omitting it.
- *
- * Nothing is calculated here. Every number arrives already computed, already
- * rounded and already suppression-checked from `buildNarrativeHome`, which
- * reads only sanitized aggregate DTOs.
+ * AUDIENCE. A published client study is a composed piece of work, not a
+ * checklist of what the consultancy has not finished. So the client view never
+ * advertises a missing reading or missing comments; where the study is
+ * quantitative-only it says so once, quietly, and moves on. The internal
+ * preview gets the opposite treatment: a concise readiness notice naming
+ * exactly what is still missing, marked as internal so it can never be mistaken
+ * for client content.
  */
-
-function Finding({
-  question,
-  headline,
-  evidence,
-  context,
-  action,
-  method,
-  tone = "evidence",
-}: {
-  question: string;
-  headline: ReactNode;
-  evidence?: ReactNode;
-  context?: ReactNode;
-  action?: ReactNode;
-  method?: ReactNode;
-  tone?: "evidence" | "voice";
-}) {
-  const kicker = tone === "voice" ? "text-voice" : "text-evidence";
-  return (
-    <article className="flex min-w-0 flex-col rounded-xl border border-line bg-surface p-5">
-      <h3 className={`text-sm font-semibold ${kicker}`}>{question}</h3>
-      <div className="mt-2.5">{headline}</div>
-      {evidence ? <div className="mt-3.5">{evidence}</div> : null}
-      {context ? <div className="mt-3">{context}</div> : null}
-      {method}
-      <div className="mt-auto pt-4">
-        {action}
-        {/*
-          C5: the interpretation slot is structural. P8-A adds no migration, so
-          there is nowhere yet to store a published reading — and the honest
-          rendering of that is a labelled empty state, not a hidden section.
-        */}
-        <p className="mt-3 border-t border-line pt-3 text-xs text-muted">
-          <span className="font-semibold text-strong">Lectura del consultor:</span>{" "}
-          todavía no publicada para este estudio.
-        </p>
-      </div>
-    </article>
-  );
-}
-
 export default function NarrativeHome({
   view,
   brand,
+  audience = "client",
 }: {
   view: NarrativeHomeView;
   brand: BrandConfig;
+  audience?: Audience;
 }) {
   const studyAnchor = `study-${view.currentStudy.id}`;
   const reportHref = `/api/studies/${encodeURIComponent(view.currentStudy.id)}/report`;
-  const results = view.metrics.slice(0, 3);
-  const findings: ReactNode[] = [];
+  const findings: PanoramaFinding[] = [];
 
-  // 1-3 — the results that matter, in the order the view model already ranked
-  // them (recommendation first, then satisfaction, then the rest).
-  for (const metric of results) {
+  // 1 — the results, in the order the view model already ranked them. The
+  // FIRST is the lead; the rest become secondary findings in the same order.
+  for (const metric of view.metrics.slice(0, 3)) {
     const language = resultLanguage(metric.key, metric.title);
     // Only the two measures with a real, defined domain get an absolute track.
     // A plain average lives on the client's own instrument, whose range the
-    // sanitized aggregate does not carry, so it is shown as a number with its
-    // method rather than as a bar against an invented scale.
+    // sanitized aggregate does not carry.
     const unit = metric.key.startsWith("csat:")
       ? ("percent" as const)
       : metric.key === "nps" || metric.key.startsWith("nps")
         ? ("nps" as const)
         : null;
-    const numeric = metric.value == null ? null : Number.parseFloat(metric.value.replace("%", ""));
+    const numeric = metric.value == null
+      ? null
+      : Number.parseFloat(metric.value.replace("%", ""));
 
-    findings.push(
-      <Finding
-        key={metric.key}
-        question={language.question}
-        headline={
-          <>
-            <p className="tabular font-display text-4xl font-semibold leading-none text-strong">
-              {metric.value ?? "—"}
-            </p>
-            <p className="mt-1 text-sm font-medium text-strong">{language.name}</p>
-          </>
-        }
-        evidence={
-          metric.value == null ? (
-            <>
-              <AbsentMark />
-              <p className="mt-1.5 text-xs text-muted">Sin resultado en esta medición</p>
-            </>
-          ) : unit && numeric != null && Number.isFinite(numeric) ? (
-            <>
-              <ScaleMark value={numeric} unit={unit} tone="accent" />
-              <p className="mt-1.5 text-xs text-muted">
-                {unitLabel(unit)} ({domainFor(unit)?.label})
-              </p>
-            </>
-          ) : (
-            <p className="text-xs text-muted">{unitLabel("score")}</p>
-          )
-        }
-        context={
-          <p className="text-sm text-muted">
-            {movementLabel(metric.movement, metric.delta)}
-          </p>
-        }
-        method={
-          <MethodDisclosure summary="Cómo se calcula">
-            <p>{language.method}</p>
-          </MethodDisclosure>
-        }
-        action={
-          <a
-            href={`#${studyAnchor}`}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
-          >
-            Ver el detalle en el estudio <Forward />
-          </a>
-        }
-      />,
-    );
+    findings.push({
+      id: metric.key,
+      kind: "result",
+      label: language.name,
+      question: language.question,
+      value: metric.value,
+      caption: language.name,
+      unit,
+      numeric: numeric != null && Number.isFinite(numeric) ? numeric : null,
+      peer: null,
+      scaleNote: unit
+        ? `${unitLabel(unit)} (${domainFor(unit)?.label})`
+        : unitLabel("score"),
+      context: movementLabel(metric.movement, metric.delta),
+      sample: null,
+      method: { summary: "Cómo se calcula", body: [language.method] },
+      quote: null,
+      actionLabel: "Ver el detalle en el estudio",
+    });
   }
 
-  // 4 — the weakest comparable touchpoint, when the study has a journey.
+  // 2 — the weakest comparable touchpoint, when the study has a journey.
   if (view.spotlight) {
     const spot = view.spotlight;
-    const spotNumeric = Number.parseFloat(spot.value.replace("%", ""));
-    const spotDomain = spot.unit === "score" ? null : domainFor(spot.unit);
-    findings.push(
-      <Finding
-        key="spotlight"
-        question="¿Dónde se siente más flojo el recorrido?"
-        headline={
-          <>
-            <p className="tabular font-display text-4xl font-semibold leading-none text-strong">
-              {spot.value}
-            </p>
-            <p className="mt-1 text-sm font-medium text-strong">{spot.label}</p>
-          </>
-        }
-        evidence={
-          <>
-            {spotDomain ? (
-              <ScaleMark value={spotNumeric} unit={spot.unit as "nps" | "percent"} tone="accent" />
-            ) : (
-              <PeerMark
-                value={spotNumeric}
-                min={spot.peerMin}
-                max={spot.peerMax}
-                tone="accent"
-              />
-            )}
-            <p className="mt-1.5 text-xs text-muted">
-              {spotDomain
-                ? `El más bajo de los ${spot.comparedWith} momentos medidos ${domainFor(spot.unit)?.label}.`
-                : `El más bajo de los ${spot.comparedWith} momentos que se miden en la misma escala. ` +
-                  `La barra los compara entre sí (de ${spot.peerMin} a ${spot.peerMax}), no contra un máximo.`}
-            </p>
-          </>
-        }
-        context={<SampleContext visibility={spot.visibility} count={spot.n} />}
-        method={
-          <MethodDisclosure summary="Qué significa “el más bajo”">
-            <p>
-              Es una ordenación de los números que ya se calcularon, no un juicio.
-              Solo se comparan momentos medidos en la misma escala, y que sea el
-              más bajo no significa por sí solo que esté mal.
-            </p>
-          </MethodDisclosure>
-        }
-        action={
-          <a
-            href={`#${studyAnchor}`}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
-          >
-            Recorrer los {view.stageCount} momentos <Forward />
-          </a>
-        }
-      />,
-    );
+    const numeric = Number.parseFloat(spot.value.replace("%", ""));
+    const domain = spot.unit === "score" ? null : domainFor(spot.unit);
+    findings.push({
+      id: "spotlight",
+      kind: "spotlight",
+      label: `Más flojo: ${spot.label}`,
+      question: "¿Dónde se siente más flojo el recorrido?",
+      value: spot.value,
+      caption: spot.label,
+      unit: domain ? (spot.unit as "nps" | "percent") : null,
+      numeric: Number.isFinite(numeric) ? numeric : null,
+      peer: domain ? null : { min: spot.peerMin, max: spot.peerMax },
+      scaleNote: domain
+        ? `El más bajo de los ${spot.comparedWith} momentos medidos ${domain.label}.`
+        : `El más bajo de los ${spot.comparedWith} momentos que se miden en la misma escala. ` +
+          `La barra los compara entre sí (de ${spot.peerMin} a ${spot.peerMax}), no contra un máximo.`,
+      context: null,
+      sample: { visibility: spot.visibility, count: spot.n },
+      method: {
+        summary: "Qué significa “el más bajo”",
+        body: [
+          "Es una ordenación de los números que ya se calcularon, no un juicio. " +
+            "Solo se comparan momentos medidos en la misma escala, y que sea el " +
+            "más bajo no significa por sí solo que esté mal.",
+        ],
+      },
+      quote: null,
+      actionLabel: `Recorrer los ${view.stageCount} momentos`,
+    });
   }
 
-  // 5 — what people said.
+  // 3 — what people said, when there is anything approved to show.
   if (view.themes.length > 0 || view.voice) {
     const top = view.themes[0];
-    findings.push(
-      <Finding
-        key="voces"
-        tone="voice"
-        question="¿Qué están diciendo las personas?"
-        headline={
-          top ? (
-            <>
-              <p className="font-display text-2xl font-semibold leading-tight text-strong">
-                {humanize(top.theme)}
-              </p>
-              <p className="mt-1 text-sm text-muted">
-                {top.count === 1
-                  ? "1 comentario lo menciona"
-                  : `${top.count} comentarios lo mencionan`}
-                {view.themes.length > 1
-                  ? `, por delante de ${humanize(view.themes[1].theme).toLowerCase()}`
-                  : ""}
-                .
-              </p>
-            </>
-          ) : (
-            <p className="text-base text-muted">
-              Hay citas aprobadas, y los temas siguen en revisión.
-            </p>
-          )
-        }
-        evidence={
-          view.voice ? (
-            <figure className="rounded-lg border-l-4 border-voice bg-voice-surface px-4 py-3">
-              <blockquote className="text-base leading-snug text-strong">
-                {`“${view.voice.quote}”`}
-              </blockquote>
-              {view.voice.theme ? (
-                <figcaption className="mt-1.5 text-xs font-semibold uppercase tracking-wide text-voice">
-                  {humanize(view.voice.theme)}
-                </figcaption>
-              ) : null}
-            </figure>
-          ) : null
-        }
-        context={
-          <p className="text-sm text-muted">
-            Los comentarios no se convierten en porcentaje: se leen.
-          </p>
-        }
-        action={
-          <a
-            href={`#${studyAnchor}`}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-voice underline-offset-4 hover:underline"
-          >
-            Leer todos los temas y citas <Forward />
-          </a>
-        }
-      />,
-    );
+    findings.push({
+      id: "voces",
+      kind: "voices",
+      label: "Lo que dicen",
+      question: "¿Qué están diciendo las personas?",
+      value: null,
+      caption: top ? humanize(top.theme) : "Comentarios aprobados",
+      unit: null,
+      numeric: null,
+      peer: null,
+      scaleNote: top
+        ? `${top.count === 1 ? "1 comentario lo menciona" : `${top.count} comentarios lo mencionan`}` +
+          (view.themes.length > 1
+            ? `, por delante de ${humanize(view.themes[1].theme).toLowerCase()}.`
+            : ".")
+        : null,
+      context: "Los comentarios no se convierten en porcentaje: se leen.",
+      sample: null,
+      method: {
+        summary: "Cómo se eligen los temas",
+        body: [
+          "Cada tema fue confirmado por una persona del equipo, nunca por el " +
+            "sistema, y cada cita se aprueba por separado. Se ordenan por cuántas " +
+            "veces aparecen, no por importancia.",
+        ],
+      },
+      quote: view.voice
+        ? { quote: view.voice.quote, theme: view.voice.theme ? humanize(view.voice.theme) : null }
+        : null,
+      actionLabel: "Leer todos los temas y citas",
+    });
   }
+
+  // The lead finding gets the headline treatment; the rest sit in the navigator.
+  const quantitativeOnly = view.themes.length === 0 && !view.voice;
+
+  // Internal readiness — never rendered to a client. Only states the product
+  // can actually prove from what it already loaded.
+  const readiness = audience === "preview" ? gaps(view) : [];
 
   return (
     <section
@@ -296,13 +180,18 @@ export default function NarrativeHome({
           <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">
             Panorama del estudio
           </p>
-          <h2 id="panorama-titulo" className="mt-3 max-w-3xl text-[clamp(1.7rem,4vw,2.6rem)]" style={{ color: "inherit" }}>
+          <h2
+            id="panorama-titulo"
+            className="mt-3 max-w-3xl text-[clamp(1.7rem,4vw,2.6rem)]"
+            style={{ color: "inherit" }}
+          >
             {view.currentStudy.name}
           </h2>
           <p className="mt-3 max-w-2xl text-base leading-relaxed opacity-90">
             {view.currentStudy.period ? `${view.currentStudy.period}. ` : ""}
             {studyBaseSentence(view.sample.visibility, view.sample.units)}
           </p>
+          {/* Two actions, once, at the top — not repeated on every finding. */}
           <div className="mt-6 flex flex-wrap gap-2.5">
             <a
               href={`#${studyAnchor}`}
@@ -340,13 +229,25 @@ export default function NarrativeHome({
         </div>
       </div>
 
+      {readiness.length > 0 ? (
+        <div className="mt-5 rounded-xl border border-caution-line bg-caution-surface px-5 py-4">
+          <p className="text-sm font-semibold text-caution">
+            Sólo para el equipo · qué falta antes de publicar
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-caution">
+            {readiness.map((gap) => (
+              <li key={gap}>{gap}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-caution/90">
+            El cliente no ve este aviso ni ningún hueco: su vista se compone sólo
+            con lo que sí está listo.
+          </p>
+        </div>
+      ) : null}
+
       {findings.length > 0 ? (
-        <>
-          <h3 className="mt-8 text-xl">Lo que encontramos</h3>
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {findings}
-          </div>
-        </>
+        <PanoramaFindings findings={findings} studyAnchor={studyAnchor} />
       ) : (
         <p className="mt-6 rounded-xl border border-dashed border-line-strong bg-surface px-5 py-6 text-sm text-muted">
           Este estudio todavía no tiene resultados publicables. En cuanto el
@@ -355,8 +256,17 @@ export default function NarrativeHome({
         </p>
       )}
 
+      {/* One quiet sentence, not a placeholder per card, when the study carries
+          numbers only. */}
+      {quantitativeOnly && findings.length > 0 ? (
+        <p className="mt-4 text-sm text-muted">
+          Este estudio se lee con sus resultados numéricos; no incluye
+          comentarios abiertos.
+        </p>
+      ) : null}
+
       {view.characteristics.length > 0 ? (
-        <p className="mt-5 text-sm text-muted">
+        <p className="mt-4 text-sm text-muted">
           Más abajo puedes ver los mismos resultados{" "}
           {view.characteristics
             .slice(0, 3)
@@ -367,4 +277,38 @@ export default function NarrativeHome({
       ) : null}
     </section>
   );
+}
+
+/**
+ * The readiness gaps, for internal preview only.
+ *
+ * Every line is derivable from the aggregate the page already loaded. Nothing
+ * is invented: no deadline, no assignee, no approval state, and no count the
+ * current model cannot prove.
+ */
+function gaps(view: NarrativeHomeView): string[] {
+  const list: string[] = [];
+  if (view.metrics.length === 0) {
+    list.push("No hay ningún resultado publicable todavía.");
+  }
+  if (view.stageCount > 0 && view.stagesWithoutResult > 0) {
+    list.push(
+      view.stagesWithoutResult === 1
+        ? "1 momento del recorrido no tiene resultado."
+        : `${view.stagesWithoutResult} momentos del recorrido no tienen resultado.`,
+    );
+  }
+  if (view.themes.length === 0) {
+    list.push("Ningún tema cualitativo está confirmado.");
+  }
+  if (!view.hasVoices) {
+    list.push("Ninguna cita está aprobada para publicarse.");
+  }
+  if (view.sample.visibility === "caution") {
+    list.push("La base del estudio es pequeña; el cliente verá la advertencia de cautela.");
+  }
+  // Structural, and true for every study until the interpretation surface
+  // exists: there is nowhere yet to store a published reading.
+  list.push("La lectura del consultor todavía no se puede publicar desde el producto.");
+  return list;
 }

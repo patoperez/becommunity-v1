@@ -2,31 +2,35 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { SafeJourneyStage } from "@/lib/dashboard/view";
+import type { Audience } from "@/lib/dashboard/audience";
 import { SampleContext, MethodDisclosure } from "@/components/SampleContext";
 import { domainFor } from "@/components/evidence/ScaleMark";
+import { categoryAccent } from "@/lib/brand/categories";
 import { unitLabel } from "@/lib/language/results";
 import { sampleCopy } from "@/lib/language/sample";
 import QualitativeInsights from "./QualitativeInsights";
 
 /**
- * The experience map — the first proof of the Interactive Insight Experience.
+ * The experience map — the route itself carries the information.
  *
- * What changed from the stepper it replaces:
- *  - it is a route, not a numbered sequence. The number under each touchpoint is
- *    its own result, never its position in a list;
- *  - every touchpoint carries its score, which is the method this has to serve;
- *  - selection works by click, tap, arrow key and tab — the old component told
- *    the reader to "pasa el cursor", which means nothing on a phone;
- *  - evidence state is carried by SHAPE (solid / half / hollow-dashed) as well
- *    as colour, so the map survives a colour-blind reader and a grayscale print;
- *  - selecting a touchpoint updates its number, its plain-language base, its
- *    calculated breakdown and what people said there, together;
- *  - the three kinds of content are labelled for what they are: calculated
- *    evidence, the consultant's reading, and the opportunity. Where the product
- *    holds no reading yet, it says so instead of leaving a gap.
+ * The route is one drawn trajectory, not a row of tiles: a single SVG spine
+ * connects the touchpoints, each touchpoint owns a category colour from the
+ * identity, and selection moves along it. Colour here means IDENTITY, never
+ * verdict — the third stage is green because it is the third stage. Whether a
+ * number is good is a judgement the product is not entitled to make, and the
+ * semantic caution tokens stay reserved for the one thing it can prove: how
+ * much evidence sits behind the number.
  *
- * It computes nothing. Every number here was calculated server-side and arrived
- * already rounded and already suppression-checked.
+ * Evidence strength is carried by SHAPE as well as colour — solid, half,
+ * hollow-dashed — so the map survives a colour-blind reader and a grayscale
+ * print.
+ *
+ * Selecting a touchpoint updates ONE compact evidence area: the number, the
+ * plain-language base, the breakdown and, when they exist, the voices. Sections
+ * that would be empty are omitted rather than rendered as placeholder boxes.
+ *
+ * It computes nothing. Every number arrived already rounded and already
+ * suppression-checked.
  */
 
 type EvidenceState = "measured" | "thin" | "hidden" | "absent";
@@ -44,51 +48,58 @@ const STATE_WORD: Record<EvidenceState, string> = {
   absent: "Sin medición",
 };
 
-/** The node drawn on the route. Shape carries the state; colour only reinforces. */
-function StageNode({ state, selected }: { state: EvidenceState; selected: boolean }) {
-  const fill =
-    state === "measured"
-      ? "var(--study-accent)"
-      : state === "thin"
-        ? "var(--color-caution-line)"
-        : "var(--color-surface)";
-  const stroke =
-    state === "measured"
-      ? "var(--study-accent)"
-      : state === "thin"
-        ? "var(--color-caution)"
-        : "var(--color-line-strong)";
-
+/**
+ * The node on the route.
+ *
+ * Fill = the touchpoint's own category colour (identity).
+ * Shape = how much evidence is behind it (a claim the product can prove).
+ */
+function StageNode({
+  state,
+  selected,
+  fill,
+}: {
+  state: EvidenceState;
+  selected: boolean;
+  fill: string;
+}) {
+  const hasEvidence = state === "measured" || state === "thin";
   return (
     <svg
-      width="28"
-      height="28"
-      viewBox="0 0 28 28"
+      width="34"
+      height="34"
+      viewBox="0 0 34 34"
       aria-hidden="true"
       focusable="false"
       className="shrink-0"
     >
       {selected ? (
-        <circle cx="14" cy="14" r="13" fill="none" stroke="var(--color-strong)" strokeWidth="2" />
+        <circle cx="17" cy="17" r="15.5" fill="none" stroke={fill} strokeWidth="2.5" />
       ) : null}
+      <circle cx="17" cy="17" r="10" fill="var(--color-surface)" />
       <circle
-        cx="14"
-        cy="14"
-        r="8"
-        fill={fill}
-        stroke={stroke}
-        strokeWidth="2"
-        strokeDasharray={state === "absent" || state === "hidden" ? "3 3" : undefined}
+        cx="17"
+        cy="17"
+        r="10"
+        fill={hasEvidence ? fill : "none"}
+        fillOpacity={state === "thin" ? 0.28 : 1}
+        stroke={hasEvidence ? fill : "var(--color-line-strong)"}
+        strokeWidth="2.5"
+        strokeDasharray={hasEvidence ? undefined : "3 3"}
       />
       {/* A half-filled node reads as "partial evidence" without relying on hue. */}
-      {state === "thin" ? (
-        <path d="M14 6a8 8 0 0 1 0 16z" fill="var(--color-caution)" />
-      ) : null}
+      {state === "thin" ? <path d="M17 7a10 10 0 0 1 0 20z" fill={fill} /> : null}
     </svg>
   );
 }
 
-export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
+export default function JourneyMap({
+  stages,
+  audience = "client",
+}: {
+  stages: SafeJourneyStage[];
+  audience?: Audience;
+}) {
   const [active, setActive] = useState(0);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   // Derived during render rather than synced through an effect: if the stage
@@ -125,6 +136,7 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
   if (stages.length === 0) return null;
 
   const measured = stages.filter((stage) => stage.value != null).length;
+  const accent = categoryAccent(activeIndex);
 
   return (
     <section
@@ -147,17 +159,24 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
         </p>
       </div>
 
-      {/* The route. Horizontal on wide screens, a vertical trajectory on a
-          phone — the same component, not a strip the reader has to drag. */}
+      {/* The route: one continuous spine, drawn behind the touchpoints.
+          Horizontal on a wide screen, vertical on a phone — the same component
+          reflowing, never a strip the reader has to drag. */}
       <div
         role="group"
         aria-label="Momentos del recorrido"
-        className="relative mt-6 flex flex-col gap-1 md:flex-row md:items-stretch md:gap-0"
+        className="relative mt-6 flex flex-col md:flex-row md:items-stretch"
       >
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-[1.68rem] top-6 bottom-6 w-[3px] rounded-full bg-surface-sunken md:left-[8%] md:right-[8%] md:top-[1.55rem] md:bottom-auto md:h-[3px] md:w-auto"
+        />
+
         {stages.map((stage, index) => {
           const state = evidenceState(stage);
           const selected = index === activeIndex;
           const isLowest = stage.id === lowestId;
+          const tone = categoryAccent(index);
           return (
             <button
               key={stage.id}
@@ -182,30 +201,17 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
                   move(stages.length - 1);
                 }
               }}
-              className={`group relative flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors duration-[var(--motion-state)] md:flex-col md:items-center md:gap-0 md:px-1.5 md:text-center ${
-                selected ? "bg-surface-sunken" : "hover:bg-surface-sunken/60"
+              className={`group relative z-10 flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl border px-2.5 py-2.5 text-left transition-colors duration-[var(--motion-state)] md:flex-col md:items-center md:gap-0 md:px-2 md:py-3 md:text-center ${
+                selected ? "shadow-raised" : "border-transparent hover:bg-surface-sunken/60"
               }`}
+              style={
+                selected
+                  ? { backgroundColor: tone.surface, borderColor: tone.line }
+                  : undefined
+              }
             >
-              {/* The connecting route: a segment on each side of the node, drawn
-                  vertically on a phone and horizontally on a wide screen. */}
-              <span
-                aria-hidden="true"
-                className="absolute left-[1.42rem] top-0 h-full w-0.5 md:left-0 md:top-[calc(0.625rem+13px)] md:h-0.5 md:w-full"
-              >
-                <span
-                  className={`absolute inset-x-0 top-0 h-1/2 bg-line-strong md:inset-y-0 md:left-0 md:h-full md:w-1/2 ${
-                    index === 0 ? "opacity-0" : ""
-                  }`}
-                />
-                <span
-                  className={`absolute inset-x-0 bottom-0 h-1/2 bg-line-strong md:inset-y-0 md:right-0 md:left-auto md:h-full md:w-1/2 ${
-                    index === stages.length - 1 ? "opacity-0" : ""
-                  }`}
-                />
-              </span>
-
               <span className="relative z-10 rounded-full bg-surface md:mb-2">
-                <StageNode state={state} selected={selected} />
+                <StageNode state={state} selected={selected} fill={tone.fill} />
               </span>
 
               <span className="relative z-10 flex min-w-0 flex-1 flex-col md:w-full md:flex-none">
@@ -221,7 +227,7 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
                     : `${unitLabel(stage.unit)}${domainFor(stage.unit) ? ` · ${domainFor(stage.unit)?.label}` : ""}`}
                 </span>
                 {isLowest ? (
-                  <span className="mt-1 inline-flex items-center gap-1 self-start rounded-full border border-caution-line bg-caution-surface px-2 py-0.5 text-[0.7rem] font-semibold text-caution md:self-center">
+                  <span className="mt-1 inline-flex items-center gap-1 self-start rounded-full border border-line bg-surface px-2 py-0.5 text-[0.7rem] font-semibold text-muted md:self-center">
                     <span aria-hidden="true">▼</span> El más bajo
                   </span>
                 ) : null}
@@ -231,113 +237,147 @@ export default function JourneyMap({ stages }: { stages: SafeJourneyStage[] }) {
         })}
       </div>
 
-      {current ? <StageDetail stage={current} isLowest={current.id === lowestId} /> : null}
+      {current ? (
+        <StageDetail
+          stage={current}
+          isLowest={current.id === lowestId}
+          audience={audience}
+          accentLine={accent.line}
+          accentSurface={accent.surface}
+        />
+      ) : null}
     </section>
   );
 }
 
-function StageDetail({ stage, isLowest }: { stage: SafeJourneyStage; isLowest: boolean }) {
+function StageDetail({
+  stage,
+  isLowest,
+  audience,
+  accentLine,
+  accentSurface,
+}: {
+  stage: SafeJourneyStage;
+  isLowest: boolean;
+  audience: Audience;
+  accentLine: string;
+  accentSurface: string;
+}) {
   const state = evidenceState(stage);
   const domain = domainFor(stage.unit);
   const copy = sampleCopy(stage.visibility, stage.n, "people");
+  const hasVoices =
+    stage.qualitative.themes.length > 0 ||
+    stage.qualitative.quotes.length > 0 ||
+    stage.qualitative.hasSuppressedThemes;
 
   return (
     <div
       // Announcing the change means a screen-reader user gets the same
       // "everything updated together" experience a sighted reader gets.
       aria-live="polite"
-      className="mt-5 rounded-xl border border-line bg-surface-page p-5"
+      className="mt-5 overflow-hidden rounded-xl border"
+      style={{ borderColor: accentLine, backgroundColor: accentSurface }}
     >
-      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+      {/* ONE compact evidence area, not three document-sized boxes. */}
+      <div className="grid gap-x-8 gap-y-4 p-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:items-start">
         <div className="min-w-0">
-          <h5 className="text-lg">{stage.label}</h5>
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <h5 className="text-lg">{stage.label}</h5>
+            <p className="tabular font-display text-3xl font-semibold leading-none text-strong">
+              {stage.value ?? "—"}
+            </p>
+          </div>
           {stage.description ? (
-            <p className="mt-1 max-w-prose text-sm text-muted">{stage.description}</p>
+            <p className="mt-1.5 max-w-prose text-sm text-muted">{stage.description}</p>
           ) : null}
+
+          {state === "absent" ? (
+            <p className="mt-3 text-sm text-muted">
+              Este momento todavía no tiene resultados en el estudio.
+            </p>
+          ) : state === "hidden" ? (
+            <p className="mt-3 text-sm text-caution">
+              {copy.headline}. {copy.detail}
+            </p>
+          ) : (
+            <>
+              <div className="mt-3">
+                <SampleContext
+                  visibility={stage.visibility}
+                  count={stage.n}
+                  detail={stage.visibility === "caution"}
+                />
+              </div>
+              {stage.detail.length > 0 ? (
+                <dl className="mt-3 flex flex-wrap gap-x-7 gap-y-2">
+                  {stage.detail.map((item) => (
+                    <div key={item.label}>
+                      <dt className="text-xs uppercase tracking-wide text-muted">
+                        {item.label}
+                      </dt>
+                      <dd className="tabular text-base font-semibold text-strong">
+                        {item.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              <MethodDisclosure summary="Cómo se lee este número">
+                <p>
+                  Se expresa como {unitLabel(stage.unit)}
+                  {domain
+                    ? ` (${domain.label})`
+                    : ", en la escala que usa el instrumento de tu comunidad"}
+                  .
+                </p>
+                <p className="mt-1.5">{copy.methodology}</p>
+                {isLowest ? (
+                  <p className="mt-1.5">
+                    Es el más bajo entre los momentos que se miden en esta misma
+                    escala. Que sea el más bajo no significa por sí solo que esté
+                    mal: esa lectura la hace el equipo de Be Community.
+                  </p>
+                ) : null}
+              </MethodDisclosure>
+            </>
+          )}
         </div>
-        <p className="tabular font-display text-4xl font-semibold leading-none text-strong">
-          {stage.value ?? "—"}
-        </p>
+
+        {/*
+          Voices only when there is something approved to show. A published
+          study does not repeat "todavía no…" once per touchpoint; where a
+          moment carries numbers only, one quiet sentence says so.
+        */}
+        <div className="min-w-0">
+          {hasVoices ? (
+            <>
+              <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-voice">
+                Lo que dijeron las personas aquí
+              </h6>
+              <QualitativeInsights summary={stage.qualitative} compact />
+            </>
+          ) : state === "absent" ? null : (
+            <p className="text-sm text-muted">
+              Este momento se lee con su resultado numérico; no hay comentarios
+              abiertos asociados.
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* 1 — Calculated evidence. */}
-      <section className="mt-5">
-        <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-evidence">
-          Lo que dicen los números
-        </h6>
-
-        {state === "absent" ? (
-          <p className="mt-2 rounded-lg border border-line bg-surface px-3.5 py-3 text-sm text-muted">
-            Este momento todavía no tiene resultados en el estudio. Puede ser que
-            no se haya preguntado por él, o que nadie lo haya contestado aún.
-          </p>
-        ) : state === "hidden" ? (
-          <p className="mt-2 rounded-lg border border-caution-line bg-caution-surface px-3.5 py-3 text-sm text-caution">
-            {copy.headline}. {copy.detail}
-          </p>
-        ) : (
-          <>
-            <div className="mt-2.5">
-              <SampleContext
-                visibility={stage.visibility}
-                count={stage.n}
-                detail={stage.visibility === "caution"}
-              />
-            </div>
-            {stage.detail.length > 0 ? (
-              <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2">
-                {stage.detail.map((item) => (
-                  <div key={item.label}>
-                    <dt className="text-xs uppercase tracking-wide text-muted">
-                      {item.label}
-                    </dt>
-                    <dd className="tabular text-base font-semibold text-strong">
-                      {item.value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : null}
-            <MethodDisclosure summary="Cómo se lee este número">
-              <p>
-                Se expresa como {unitLabel(stage.unit)}
-                {domain ? ` (${domain.label})` : ", en la escala que usa el instrumento de tu comunidad"}.
-              </p>
-              <p className="mt-1.5">{copy.methodology}</p>
-              {isLowest ? (
-                <p className="mt-1.5">
-                  Es el más bajo entre los momentos que se miden en esta misma
-                  escala. Que sea el más bajo no significa por sí solo que esté
-                  mal: esa lectura la hace el equipo de Be Community.
-                </p>
-              ) : null}
-            </MethodDisclosure>
-          </>
-        )}
-      </section>
-
-      {/* 2 — What people said there. */}
-      <section className="mt-5 border-t border-line pt-4">
-        <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-voice">
-          Lo que dijeron las personas aquí
-        </h6>
-        <QualitativeInsights summary={stage.qualitative} compact />
-      </section>
-
-      {/* 3 — The consultant's reading, and the opportunity. Both are honest
-             placeholders: the product holds no field for them yet, and P8-A
-             adds no migration. What it will contain is stated, so the absence
-             is a state rather than a gap. */}
-      <section className="mt-5 border-t border-line pt-4">
-        <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-          Lectura del consultor
-        </h6>
-        <p className="mt-2 rounded-lg border border-dashed border-line-strong bg-surface px-3.5 py-3 text-sm text-muted">
-          Todavía no hay una lectura publicada para este momento. Aquí aparecerá
-          lo que el equipo de Be Community concluye a partir de la evidencia de
-          arriba, y la oportunidad concreta que propone atender.
+      {/*
+        Internal readiness, marked as internal. The client's view never carries
+        it — a published study is a composed piece of work, not a list of what
+        the consultancy has not finished.
+      */}
+      {audience === "preview" ? (
+        <p className="border-t border-caution-line bg-caution-surface px-5 py-2.5 text-xs text-caution">
+          <span className="font-semibold">Sólo para el equipo:</span> este momento
+          {hasVoices ? "" : " no tiene comentarios aprobados y"} todavía no puede
+          llevar una lectura del consultor publicada.
         </p>
-      </section>
+      ) : null}
     </div>
   );
 }

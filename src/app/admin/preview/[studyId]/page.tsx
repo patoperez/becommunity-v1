@@ -91,9 +91,9 @@ export default async function ClientPreviewPage({ params }: { params: Promise<{ 
     </p>}
     utility={<Link href="/admin/studies" className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken">Volver a Studio</Link>}
   >
-    {narrative ? <NarrativeHome view={narrative} brand={brand} /> : null}
+    {narrative ? <NarrativeHome view={narrative} brand={brand} audience="preview" /> : null}
     <LongitudinalTrends view={longitudinal} />
     <h2 className="sr-only">Vista del estudio</h2>
-    <StudyCard study={study} initialDashboard={dashboard} />
+    <StudyCard study={study} initialDashboard={dashboard} audience="preview" />
   </InsightsShell>;
 }

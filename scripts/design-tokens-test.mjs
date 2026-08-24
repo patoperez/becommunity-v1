@@ -91,7 +91,8 @@ assert.ok(contrastRatio("#1b72b8", SUNKEN) >= CONTRAST_AA_LARGE, "the brand blue
 assert.ok(contrastRatio("#1b72b8", SUNKEN) < CONTRAST_AA_TEXT, "the brand blue is deliberately not a text colour");
 for (const file of ["src/app/dashboard/NarrativeHome.tsx", "src/app/dashboard/JourneyMap.tsx",
   "src/app/dashboard/page.tsx", "src/components/Actions.tsx", "src/components/States.tsx",
-  "src/components/SampleContext.tsx", "src/app/login/page.tsx"]) {
+  "src/components/SampleContext.tsx", "src/app/login/page.tsx",
+  "src/app/dashboard/PanoramaFindings.tsx"]) {
   const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
   assert.doesNotMatch(source, /text-blue/, `${file} must use text-evidence, not the brand blue, for text`);
 }
@@ -201,7 +202,56 @@ ok("only NPS and percent carry an absolute scale; a score is compared with its o
 
 // --- 7. The frozen mechanisms the P7 suites settle on ----------------------
 
-console.log("\n[7] Frozen adversarial-harness mechanisms are intact");
+console.log("\n[7] Category accents group; they never render a verdict");
+for (const [surface, label] of [
+  ["#eef4fa", "sky"],
+  ["#fbeef4", "magenta"],
+  ["#f2f7e9", "green"],
+  ["#fdf5e2", "yellow"],
+  ["#f3f0f8", "lavender"],
+]) {
+  const ratio = contrastRatio("#0e2a45", surface);
+  assert.ok(ratio >= CONTRAST_AA_TEXT, `strong text on the ${label} tint is ${ratio.toFixed(2)}:1`);
+}
+ok("all five category tints carry strong text above 4.5:1");
+
+const categories = await readFile(new URL("../src/lib/brand/categories.ts", import.meta.url), "utf8");
+assert.doesNotMatch(categories, /--color-(caution|danger|positive)/,
+  "category accents must never be sourced from the semantic outcome tokens");
+assert.match(categories, /--color-magenta/, "category accents come from the identity's hues");
+ok("grouping colour and outcome colour are separate token families");
+
+console.log("\n[8] A published study is composed; readiness gaps stay internal");
+const panorama = await readFile(new URL("../src/app/dashboard/NarrativeHome.tsx", import.meta.url), "utf8");
+const journey = await readFile(new URL("../src/app/dashboard/JourneyMap.tsx", import.meta.url), "utf8");
+for (const [name, source] of [["NarrativeHome", panorama], ["JourneyMap", journey]]) {
+  assert.match(source, /audience === "preview"/,
+    `${name} must gate its readiness notice on the internal audience`);
+  assert.doesNotMatch(source, /no publicada para este estudio/i,
+    `${name} must not advertise a missing reading to a client`);
+  assert.doesNotMatch(source, /no hay una lectura publicada para este momento/i,
+    `${name} must not repeat a missing-interpretation placeholder`);
+}
+const previewPage = await readFile(
+  new URL("../src/app/admin/preview/[studyId]/page.tsx", import.meta.url), "utf8");
+assert.match(previewPage, /audience="preview"/, "the internal preview must request the readiness view");
+const dashboardPage = await readFile(new URL("../src/app/dashboard/page.tsx", import.meta.url), "utf8");
+assert.doesNotMatch(dashboardPage, /audience="preview"/,
+  "the client dashboard must never request the internal readiness view");
+ok("readiness gaps are reachable from the internal preview only");
+
+console.log("\n[9] Sign-in is one frame, and never fakes it with hidden overflow");
+const loginPage = await readFile(new URL("../src/app/login/page.tsx", import.meta.url), "utf8");
+assert.match(loginPage, /min-h-svh/, "the frame must track the small viewport unit, not a fixed height");
+assert.match(loginPage, /overflow-y-auto/, "content must stay reachable when it genuinely cannot fit");
+assert.doesNotMatch(loginPage, /overflow-hidden/, "no-scroll must never be achieved by clipping");
+assert.doesNotMatch(loginPage, /(min-)?h-\[\d+px\]/, "no fragile fixed pixel height");
+assert.match(loginPage, /Iniciar sesi/, "the submit control keeps the name the harness signs in with");
+assert.match(loginPage, /name="email"[\s\S]*name="password"/, "both fields keep their names");
+assert.match(loginPage, /No puedes entrar/, "recovery guidance is never gated away");
+ok("sign-in frames to the viewport, degrades to safe scrolling, and keeps its action intact");
+
+console.log("\n[10] Frozen adversarial-harness mechanisms are intact");
 const card = await readFile(new URL("../src/app/dashboard/StudyCard.tsx", import.meta.url), "utf8");
 assert.match(card, /aria-label=\{`Filtrar por \$\{label\(option\.key\)\}`\}/,
   "Suite A locates the study filter by this exact accessible name");
