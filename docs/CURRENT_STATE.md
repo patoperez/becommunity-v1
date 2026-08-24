@@ -230,9 +230,10 @@ health, logged-out, Tenant A, Tenant B isolation and internal-route smokes all
 passed with zero `P7A-`/`P7H-` residue. The commit-to-version record lives in PR
 #36's conversation as required by `docs/DEPLOYMENT.md`.
 
-**Final engineering unit:** PR 7, branch `p7f-suites-b-c` — behavioral Suite B
-(authorization) and Suite C (hostile input/injection). Both are implemented and
-**green on the branch, not yet merged**:
+**P7 final engineering unit (merged via PR #38):** branch
+`p7f-suites-b-c` — behavioral Suite B
+(authorization) and Suite C (hostile input/injection). Both were implemented,
+green and integrated into `main`:
 
 - `npm run suite:b` — 64/64. Its evidence is reported in **three layers that
   are never summed**, because conflating them is how a page-level GET gets

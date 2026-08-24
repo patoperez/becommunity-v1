@@ -191,8 +191,8 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
 - P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`: Suites B and C,
-  the canonical live chain and their review fixes are green; PR #38 is the
-  separate delivery unit. Do not reopen P7 correction loops during P8.
+  the canonical live chain and their review fixes are green; PR #38 merged the
+  separate delivery unit into `main`. Do not reopen P7 correction loops during P8.
   Deferred edge, production-environment,
   backup/DR and operational controls return as a bounded go-live hardening pass
   after the product is functionally and visually complete.
