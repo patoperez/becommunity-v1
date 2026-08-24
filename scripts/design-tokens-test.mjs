@@ -549,7 +549,7 @@ assert.match(studyCard, /scroll-mt-20/,
 assert.match(previewRoute, /profile\?\.role !== "internal"/, "internal-only guard intact");
 assert.match(previewRoute, /candidate\.status === "published" \|\| candidate\.id === study\.id/,
   "the publication boundary on the preview history is intact");
-ok("sticky, linked to /admin/studies, dismissible, no duplicate action, guards intact");
+ok("sticky, dismissible, and a persistent /admin/studies escape path outside it; guards intact");
 
 console.log("\n[16] Frozen adversarial-harness mechanisms are intact");
 const card = await readCode("src/app/dashboard/StudyCard.tsx");
