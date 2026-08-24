@@ -849,6 +849,13 @@ console.log("\n[9] Outer action-route coverage (POST method and path):");
   assert.deepEqual([...covered].sort(), [...MUTATING_OPERATIONS].sort(), "every mutation maps to exactly one route");
   ok(`${MUTATING_OPERATIONS.length} mutations map onto ${ACTION_ROUTE_CLASSES.length} protected POST path classes`);
 
+  // The PUBLIC-path control is a route probe too, but it is deliberately NOT an
+  // action route: no mutation names it, so it never inflates the roster.
+  assert.ok(OPERATIONS["route.postHealth"]?.outerRouteProbe, "the public-path control must be a route probe");
+  assert.equal(OPERATIONS["route.postHealth"].path, "/api/health");
+  assert.ok(!ACTION_ROUTE_CLASSES.includes("route.postHealth"), "the public control is not an action route");
+  ok("the public-path control exists as its own probe and is not counted as an action route");
+
   // Each route class has a roster row in every outer-route group.
   for (const group of ["B9", "B10", "B11"]) {
     assert.equal(

@@ -234,7 +234,7 @@ export const SUITE_B_CHECKS = Object.freeze([
   // page-level GET result can be counted as covering them.
   ...routeRosterFor("B9", "the outer action route denies an unauthenticated caller on its own POST"),
   ...routeRosterFor("B10", "the outer action route and a real client caller, on its own POST"),
-  ...routeRosterFor("B11", "an authorized identity is answered differently, and a bare POST is a 405 that proves nothing"),
+  ...routeRosterFor("B11", "an authorized identity is answered differently, and the same POST to a public path is not a denial"),
   { id: "B3.1", group: "B3", title: "forged role headers do not upgrade a client on an internal page" },
   { id: "B3.2", group: "B3", title: "the middleware-bypass header class does not admit an anonymous caller" },
   { id: "B3.3", group: "B3", title: "forged tenant/user headers do not cross a tenant on the report route" },
@@ -478,9 +478,9 @@ async function probeDenial(harness, group, actorId, opName, fx, { endSession = f
  * field, no mutation payload — the body is empty, which is why this can never
  * invoke the Server Action behind the route.
  */
-async function observeRoute(harness, actorId, routeName, { bareMethod = false } = {}) {
+async function observeRoute(harness, actorId, routeName) {
   const op = OPERATIONS[routeName];
-  const result = await harness.run(actorId, op, bareMethod ? { bareMethod: true } : {});
+  const result = await harness.run(actorId, op, {});
   return {
     result,
     observation: {
@@ -546,22 +546,21 @@ async function checkOuterRoute(harness, group, actorId, routeName, { expectStatu
  * worthless without both:
  *   1. an AUTHORIZED identity is answered differently on the same POST path,
  *      so the denial above is not simply "this route refuses everyone";
- *   2. a bare POST carrying no content type is answered 405 identically to
- *      everyone, BEFORE the middleware runs — the shape a careless probe would
- *      have mistaken for an authorization denial.
+ *   2. the IDENTICAL request to a PUBLIC path is not answered with an
+ *      authorization denial at all — `/api/health` exports only GET, so it
+ *      answers 405 with no redirect. Without this, "every POST gets a redirect"
+ *      would look exactly like an authorization boundary.
  */
 async function checkRouteDiscriminator(harness, routeName) {
   const id = `B11/${routeName.replace(/^route\.post/, "").replace(/^Admin/, "").toLowerCase()}`;
   const path = OPERATIONS[routeName].path;
   let denied;
   let authorized;
-  let bareAnon;
-  let bareInternal;
+  let publicPath;
   try {
     denied = await observeRoute(harness, "anonymous", routeName);
     authorized = await observeRoute(harness, "internal", routeName);
-    bareAnon = await observeRoute(harness, "anonymous", routeName, { bareMethod: true });
-    bareInternal = await observeRoute(harness, "internal", routeName, { bareMethod: true });
+    publicPath = await observeRoute(harness, "anonymous", "route.postHealth");
   } catch (error) {
     return fail(id, `a discriminator probe could not be dispatched: ${error.code ?? error.message}`);
   }
@@ -578,18 +577,22 @@ async function checkRouteDiscriminator(harness, routeName) {
         `(HTTP ${authorizedStatus}) — this route refuses everyone, so the denial proves nothing`,
     );
   }
-  if (bareAnon.observation.status !== 405 || bareInternal.observation.status !== 405) {
+  // The public-path control: the identical request, to a path that is public by
+  // design, must NOT be answered with an authorization denial.
+  if (outerRouteDenialIsProven({ ...publicPath.observation, expectedPath: publicPath.observation.path }).proven) {
     return fail(
       id,
-      `a bare POST with no content type was answered ${bareAnon.observation.status}/${bareInternal.observation.status}, ` +
-        "expected 405 from method routing for both — the negative control no longer holds",
+      `the identical POST to the public /api/health was answered as a denial ` +
+        `(HTTP ${publicPath.observation.status} -> ${publicPath.observation.redirectPath}) — a redirect on every ` +
+        "POST would look exactly like an authorization boundary and prove nothing",
     );
   }
   return pass(
     id,
     `POST ${path}: anonymous ${deniedStatus}${denied.observation.redirectPath ? ` -> ${denied.observation.redirectPath}` : ""} ` +
-      `vs authorized ${authorizedStatus}; and a bare POST is 405 for both, so a method rejection can never be ` +
-      "mistaken for an authorization denial",
+      `vs authorized ${authorizedStatus}; and the identical POST to the public /api/health is ` +
+      `HTTP ${publicPath.observation.status} with no authorization redirect, so the denial is specific to the ` +
+      "protected path rather than a blanket answer",
   );
 }
 

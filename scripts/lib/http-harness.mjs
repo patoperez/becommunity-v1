@@ -194,10 +194,13 @@ const action = (name, extra) => ({ name, mutating: true, ...extra });
  * method and path: one ordinary form-shaped POST, no action identifier, no
  * private field, no mutation payload.
  *
- * The `content-type` matters and is declared rather than implicit: a POST with
- * no content type is answered 405 by the framework's own method routing,
- * BEFORE the middleware runs, so it proves nothing about authorization. That
- * is exactly why the suite keeps a bare-POST negative control.
+ * The `content-type` is declared rather than implicit so that every probe sends
+ * the same, ordinary, form-shaped request and nothing is left to `fetch` to
+ * infer. The suite pairs these probes with a PUBLIC-path control
+ * (`route.postHealth`): the same request to a public route handler that exports
+ * only GET is answered 405 with no redirect, which is what shows the
+ * protected-path denial is specific to protected paths rather than a blanket
+ * answer to any POST.
  */
 const routeProbe = (name, path) => ({
   name,
@@ -263,6 +266,11 @@ export const OPERATIONS = Object.freeze({
   "route.postAdminStudies": routeProbe("route.postAdminStudies", "/admin/studies"),
   "route.postAdminQualitative": routeProbe("route.postAdminQualitative", "/admin/qualitative"),
   "route.postAdminUpload": routeProbe("route.postAdminUpload", "/admin/upload"),
+  // The PUBLIC-path control. `/api/health` is public by design and its route
+  // handler exports only GET, so the identical form-shaped POST is answered 405
+  // with no redirect. It is not an action route and no mutation names it: it
+  // exists so a protected-path denial can be shown to be specific.
+  "route.postHealth": routeProbe("route.postHealth", "/api/health"),
 
   // --- session lifecycle ---------------------------------------------------
   "auth.login": action("auth.login", {
@@ -961,23 +969,15 @@ export async function createHarness(options) {
    * The body an outer action-route probe carries: ALWAYS empty, and a content
    * type only when the probe is meant to reach the authorization boundary.
    *
-   * `bareMethod` sends NEITHER — no body and therefore no content type at all.
-   * That is the negative control: the framework answers such a POST 405 by
-   * method routing alone, before the middleware runs, so it can never be
-   * mistaken for an authorization denial. It matters that no body is sent:
-   * `fetch` derives a `text/plain` content type from any string body, and a
-   * POST that carries one does reach the authorization boundary.
-   *
    * Nothing here may ever carry a mutation payload or an action identifier —
-   * the body is the empty string and there is no code path that makes it
-   * anything else.
+   * the body is the empty string, the content type is the declared one, and
+   * there is no code path that makes either anything else.
    */
   function outerRouteBody(op, params = {}) {
     if (!op.outerRouteProbe) return { sendBody: false, contentType: null };
     if (params.body !== undefined) {
       throw new Error(`outer route probe "${op.name}" must never carry a body`);
     }
-    if (params.bareMethod) return { sendBody: false, contentType: null };
     return { sendBody: true, contentType: op.contentType };
   }
 
