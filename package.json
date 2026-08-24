@@ -41,7 +41,7 @@
     "test:rls-coverage": "node --env-file=.env.local scripts/rls-coverage-test.mjs",
     "test:pivot": "tsx scripts/pivot-test.mjs",
     "test:suite-a-selftest": "node scripts/suite-a-selftest.mjs",
-    "test:suite-bc-selftest": "node scripts/suite-bc-selftest.mjs",
+    "test:suite-bc-selftest": "tsx scripts/suite-bc-selftest.mjs",
     "suite:a": "node --env-file=.env.local scripts/suite-a-isolation.mjs",
     "suite:b": "node --env-file=.env.local scripts/suite-b-authorization.mjs",
     "suite:c": "node --env-file=.env.local scripts/suite-c-input.mjs",

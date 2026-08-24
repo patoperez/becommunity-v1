@@ -50,12 +50,19 @@ import {
   inspectHttpResponse,
   selfTestInspector,
   INSPECTION_KINDS,
+  countMarkerInPdfText,
+  extractDisplayedStrings,
 } from "./lib/response-inspect.mjs";
 import {
   SUITE_B_CHECKS,
   MUTATING_OPERATIONS,
   ACTION_GATE_WITHHELD,
   actionGateIsObservable,
+  ACTION_ROUTE_CLASSES,
+  operationsOnRoute,
+  outerRouteDenialIsProven,
+  selfTestOuterRoute,
+  OUTER_ROUTE_CASES,
   DENIED_PATHS_ONLY,
   isDenial,
   outcomeSatisfies,
@@ -63,6 +70,7 @@ import {
   OUTCOME_CASES,
   createReporter,
 } from "./suite-b-authorization.mjs";
+import { MAX_UPLOAD_BYTES, exceedsUploadLimit, UPLOAD_TOO_LARGE_MESSAGE } from "../src/lib/validation/schemas.ts";
 import {
   SUITE_C_CHECKS,
   INJECTION_STRINGS,
@@ -91,6 +99,10 @@ const FORBIDDEN_IN_SUITE = [
 const INSPECTOR_FILE = "scripts/lib/response-inspect.mjs";
 /* </detector-vocabulary> */
 
+/** Line splitting and comment detection, declared once. */
+const NEWLINES = new RegExp(String.raw`\r?\n`);
+const COMMENT_LINE = new RegExp(String.raw`^\s*(\*|//|/\*)`);
+
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
 
@@ -114,7 +126,11 @@ console.log("\n[1] Must-execute rosters, generated from the frozen catalogue:");
   ok(`B1 and B2 each carry one required check per mutation plus the report route (${SUITE_B_CHECKS.length} total)`);
 
   const groups = new Set(SUITE_B_CHECKS.map((check) => check.group));
-  assert.deepEqual([...groups].sort(), ["B1", "B2", "B3", "B4", "B5", "B6", "B7"]);
+  assert.deepEqual(
+    [...groups].sort(),
+    ["B1", "B10", "B11", "B2", "B3", "B4", "B5", "B6", "B7", "B9"],
+    "B9/B10/B11 are the outer action-route layer and must be present as their own groups",
+  );
   const cGroups = new Set(SUITE_C_CHECKS.map((check) => check.group));
   assert.deepEqual([...cGroups].sort(), ["C1", "C2", "C3", "C4", "C5"]);
   ok("every Suite B and Suite C group is represented; none is optional");
@@ -187,20 +203,19 @@ console.log("\n[2] Outcome classification:");
   assert.deepEqual(selfTestRefusalClassifier(), []);
   ok(`the Suite C injection, XSS, leak and refusal classifiers all hold (${REFUSAL_CASES.length} refusal cases)`);
 
-  // Suite C carries exactly ONE deliberate leniency: an over-limit upload that
-  // the product refuses without rendering any message. Its reach is pinned here
-  // so it can never widen into "an unclassified answer is fine".
-  assert.equal(uploadRefusalIsAcceptable("unclassified", false).acceptable, false, "silence is never acceptable by default");
-  assert.equal(uploadRefusalIsAcceptable("unclassified", true).acceptable, true, "and only where a check opts in");
-  assert.equal(uploadRefusalIsAcceptable("unclassified", true).rendered, false, "an opted-in silence is never reported as rendered");
-  for (const category of ["success", "page_crash", "network_failure", "not_found", "denied_wrong_role"]) {
+  // Suite C carries NO leniency: an upload refusal must be one the product
+  // rendered. Every other outcome, `unclassified` included, is red — there is
+  // no argument by which any of them becomes acceptable.
+  for (const category of ["unclassified", "success", "page_crash", "network_failure", "not_found", "denied_wrong_role"]) {
     assert.equal(
-      uploadRefusalIsAcceptable(category, true).acceptable,
+      uploadRefusalIsAcceptable(category).acceptable,
       false,
-      `${category} must never be accepted as an upload refusal, opt-in or not`,
+      `${category} must never be accepted as an upload refusal`,
     );
   }
-  ok("the one upload leniency reaches exactly `unclassified` on an opted-in check, and nothing else");
+  assert.equal(uploadRefusalIsAcceptable("validation_rejected").acceptable, true);
+  assert.equal(uploadRefusalIsAcceptable("denied_action_result").acceptable, true);
+  ok("only a rendered rejection counts as an upload refusal; silence and every other outcome are red");
 
   assert.equal(injectionResponseIsSafe({ status: 500, leakClasses: [], secretClasses: [] }).safe, false);
   assert.equal(
@@ -809,6 +824,201 @@ console.log("\n[8] Reversal — each protection, removed, makes its own check fa
   const permissiveHeaders = new Set([...FORGEABLE_HEADERS, "cookie"]);
   assert.ok(permissiveHeaders.has("cookie"), "the weakened list would allow it");
   ok("adding `cookie` to the forgeable list would allow impersonation; the real list excludes it");
+}
+
+// --- [9] Blocker 1: the outer action route, on its own method and path -------
+
+console.log("\n[9] Outer action-route coverage (POST method and path):");
+{
+  assert.deepEqual(selfTestOuterRoute(), [], "the outer-route classifier's fixed cases must all hold");
+  ok(`${OUTER_ROUTE_CASES.length} outer-route cases hold`);
+
+  // Every catalogued mutation names the route it dispatches to, and every route
+  // is a real catalogue entry that POSTs to a real path. Derived, never listed.
+  for (const name of MUTATING_OPERATIONS) {
+    const route = OPERATIONS[name].actionRoute;
+    assert.ok(route, `${name} must name the outer action route it dispatches to`);
+    const probe = OPERATIONS[route];
+    assert.ok(probe?.outerRouteProbe, `${route} must be an outer route probe`);
+    assert.equal(probe.method, "POST", "an action route is reached by POST, not GET");
+    assert.equal(probe.mechanism, "http", "an outer route probe is ordinary HTTP");
+    assert.equal(probe.mutating, false, "an outer route probe carries no mutation");
+    assert.ok(probe.path.startsWith("/"), "an outer route probe names a real path");
+  }
+  const covered = ACTION_ROUTE_CLASSES.flatMap((route) => operationsOnRoute(route));
+  assert.deepEqual([...covered].sort(), [...MUTATING_OPERATIONS].sort(), "every mutation maps to exactly one route");
+  ok(`${MUTATING_OPERATIONS.length} mutations map onto ${ACTION_ROUTE_CLASSES.length} protected POST path classes`);
+
+  // Each route class has a roster row in every outer-route group.
+  for (const group of ["B9", "B10", "B11"]) {
+    assert.equal(
+      SUITE_B_CHECKS.filter((c) => c.group === group).length,
+      ACTION_ROUTE_CLASSES.length,
+      `${group} must carry one row per protected POST path class`,
+    );
+  }
+  ok("B9, B10 and B11 each carry one required row per path class, generated from the catalogue");
+
+  // REVERSAL: a GET can never satisfy the POST-route requirement.
+  const asGet = { method: "GET", path: "/admin/clients", expectedPath: "/admin/clients", status: 307, redirectPath: "/login" };
+  assert.equal(outerRouteDenialIsProven(asGet).proven, false, "a GET must not satisfy the action route's POST");
+  assert.equal(outerRouteDenialIsProven({ ...asGet, method: "POST" }).proven, true, "the same answer on POST does");
+  ok("REVERSAL: the identical denial answered on GET fails the POST-route proof, and on POST passes it");
+
+  // REVERSAL: a 405 is the framework's method routing, not authorization.
+  assert.equal(
+    outerRouteDenialIsProven({ method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 405 }).proven,
+    false,
+    "405 is a method rejection before authorization and can never be a denial",
+  );
+  // REVERSAL: an allow, a wrong path, a server error and an odd redirect target.
+  for (const [why, input] of [
+    ["an allow", { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 200 }],
+    ["a wrong path", { method: "POST", path: "/dashboard", expectedPath: "/admin/clients", status: 307, redirectPath: "/login" }],
+    ["a server error", { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 502 }],
+    ["an unrelated redirect", { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 307, redirectPath: "/elsewhere" }],
+  ]) {
+    assert.equal(outerRouteDenialIsProven(input).proven, false, `${why} must fail the outer-route proof`);
+  }
+  ok("REVERSAL: an allow, a wrong path, a 5xx and an unrelated redirect target all fail the outer-route proof");
+
+  // The reporting split must stay honest: the observable INNER action layer is
+  // strictly smaller than the catalogue, and the suite must not conflate them.
+  const inner = MUTATING_OPERATIONS.filter((name) => actionGateIsObservable(OPERATIONS[name]));
+  assert.ok(inner.length < MUTATING_OPERATIONS.length, "the inner-action layer is smaller than the catalogue");
+  const suiteSource = readFileSync("scripts/suite-b-authorization.mjs", "utf8");
+  assert.match(suiteSource, /layer 1 - catalogue completeness/, "the run must report layer 1 explicitly");
+  assert.match(suiteSource, /layer 2 - outer action route/, "the run must report layer 2 explicitly");
+  assert.match(suiteSource, /layer 3 - observable INNER Server-Action denial/, "the run must report layer 3 explicitly");
+  assert.match(suiteSource, /does NOT claim they were invoked/, "the run must say plainly what it does not claim");
+  ok(`the three evidence layers are reported separately; the inner layer is ${inner.length}/${MUTATING_OPERATIONS.length}, never summed with the rest`);
+}
+
+// --- [10] Blocker 2: the upload boundary ------------------------------------
+
+console.log("\n[10] Upload size boundary:");
+{
+  // The shared predicate, at and around the boundary.
+  assert.equal(exceedsUploadLimit(MAX_UPLOAD_BYTES - 1), false, "under the limit is accepted");
+  assert.equal(exceedsUploadLimit(MAX_UPLOAD_BYTES), false, "EXACTLY at the limit is accepted");
+  assert.equal(exceedsUploadLimit(MAX_UPLOAD_BYTES + 1), true, "one byte over the limit is refused");
+  assert.equal(exceedsUploadLimit(0), false, "an empty file is not an over-limit file");
+  ok(`the shared size predicate is strict: <=${MAX_UPLOAD_BYTES} accepted, +1 refused`);
+
+  // REVERSAL: a `>=` rule would refuse a file exactly at the stated limit.
+  const wrong = (size) => size >= MAX_UPLOAD_BYTES;
+  assert.equal(wrong(MAX_UPLOAD_BYTES), true, "the weakened rule would refuse an exactly-at-limit file");
+  assert.equal(exceedsUploadLimit(MAX_UPLOAD_BYTES), false, "the real rule accepts it");
+  ok("REVERSAL: a `>=` boundary would refuse a file exactly at the stated limit; the real rule accepts it");
+
+  // The client boundary uses the SHARED rule and message, and the server still
+  // applies its own check — defense in depth, not a replacement.
+  const form = readFileSync("src/app/admin/upload/UploadForm.tsx", "utf8");
+  assert.match(form, /exceedsUploadLimit\(/, "the upload form must use the shared predicate");
+  assert.match(form, /UPLOAD_TOO_LARGE_MESSAGE/, "and the shared message, not a parallel one");
+  assert.ok(UPLOAD_TOO_LARGE_MESSAGE.length > 10, "the shared message must be real operator-facing text");
+  assert.ok(!/10 \* 1024 \* 1024|10485760/.test(form), "the form must not restate the limit itself");
+  const action = readFileSync("src/app/admin/upload/actions.ts", "utf8");
+  assert.match(action, /file\.size > MAX_UPLOAD_BYTES/, "the server-side size check must remain in place");
+  ok("the client refuses on selection with the shared rule and message; the server check remains untouched");
+
+  // The leniency is GONE, not narrowed: `unclassified` is red everywhere.
+  assert.deepEqual(selfTestRefusalClassifier(), []);
+  assert.equal(uploadRefusalIsAcceptable("unclassified").acceptable, false, "silence can never be a refusal");
+  assert.equal(uploadRefusalIsAcceptable.length, 1, "the refusal predicate must take no leniency argument");
+  const suiteC = readFileSync("scripts/suite-c-input.mjs", "utf8");
+  // Gone from the CODE. The word survives in one comment that records the
+  // removal, which is documentation and must not be mistaken for the thing.
+  const lenientCode = suiteC
+    .split(NEWLINES)
+    .filter((line) => line.includes("silentRefusal") && !COMMENT_LINE.test(line));
+  assert.deepEqual(lenientCode, [], "the silent-refusal opt-in must be gone from the suite's code");
+  assert.match(suiteC, /unclassified answer\(s\)/, "C4.3 must still count unclassified answers");
+  ok(`REVERSAL: the ${REFUSAL_CASES.length} refusal cases hold and no opt-in can make silence acceptable`);
+
+  // C2.3 must prove zero dispatch, and C2.4 must prove the boundary is not a wall.
+  assert.ok(SUITE_C_CHECKS.some((c) => c.id === "C2.3" && /before dispatch/.test(c.title)));
+  assert.ok(SUITE_C_CHECKS.some((c) => c.id === "C2.4" && /still accepted/.test(c.title)));
+  assert.match(suiteC, /result\.dispatched !== false/, "C2.3 must require that nothing was dispatched");
+  assert.match(suiteC, /result\.controlEnabled !== false/, "and that the analyze control was unavailable");
+  assert.match(suiteC, /result\.dispatched !== true/, "C2.4 must require that an ordinary source DID dispatch");
+  ok("C2.3 requires zero dispatch with the control disabled; C2.4 requires an ordinary source still dispatches");
+}
+
+// --- [11] Blocker 3: the PDF positive control -------------------------------
+
+console.log("\n[11] PDF displayed-text marker extraction:");
+{
+  const MARKER = "p7cxSELFTEST01";
+  // A minimal, uncompressed PDF whose page content shows the marker as a
+  // literal string. Built here rather than committed as a binary fixture.
+  const content = `BT /F1 12 Tf 72 700 Td (quote ${MARKER} inert) Tj ET`;
+  const body = [
+    "%PDF-1.7",
+    "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+    "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+    "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj",
+    `4 0 obj << /Length ${content.length} >>`,
+    "stream",
+    content,
+    "endstream endobj",
+    "trailer << /Root 1 0 R >>",
+    "%%EOF",
+  ].join("\n");
+  const present = countMarkerInPdfText(Buffer.from(body, "latin1"), MARKER);
+  assert.equal(present.wellFormed, true, "a well-formed PDF must be recognized");
+  assert.equal(present.count, 1, "the marker must be counted once in displayed text");
+  ok(`a marker shown by a Tj operator is counted in displayed text (${present.count})`);
+
+  // NEGATIVE: the same document without the marker.
+  const absentContent = "BT /F1 12 Tf 72 700 Td (an ordinary quote) Tj ET";
+  const absentBody = body.replace(content, absentContent).replace(`/Length ${content.length}`, `/Length ${absentContent.length}`);
+  const absent = countMarkerInPdfText(Buffer.from(absentBody, "latin1"), MARKER);
+  assert.equal(absent.count, 0, "a document without the marker must count zero");
+  ok("a document that never received the payload counts zero, so C1.3 cannot pass on it");
+
+  // REVERSAL: a marker present in the bytes but NOT in displayed text must not
+  // count, and must be reported as exactly that.
+  const outsideBody = body.replace(content, absentContent)
+    .replace(`/Length ${content.length}`, `/Length ${absentContent.length}`)
+    .replace("trailer <<", `trailer << /Producer (${MARKER})`);
+  const outside = countMarkerInPdfText(Buffer.from(outsideBody, "latin1"), MARKER);
+  assert.equal(outside.count, 0, "a byte occurrence outside displayed text must never be counted");
+  assert.equal(outside.rawOnlyOccurrence, true, "and it must be reported as a raw-only occurrence");
+  ok("REVERSAL: a marker hidden in metadata counts zero and is flagged as raw-only, never as a pass");
+
+  // FAIL CLOSED: malformed, truncated and empty inputs.
+  for (const [why, buffer] of [
+    ["not a PDF", Buffer.from("just some text with p7cxSELFTEST01 in it")],
+    ["a truncated PDF", Buffer.from(body.slice(0, 120), "latin1")],
+    ["an empty buffer", Buffer.alloc(0)],
+  ]) {
+    const result = countMarkerInPdfText(buffer, MARKER);
+    assert.equal(result.count, 0, `${why} must count zero`);
+    assert.equal(result.wellFormed, false, `${why} must not be reported as well formed`);
+  }
+  ok("malformed, truncated and empty inputs all fail closed rather than passing");
+
+  // The extractor reads ONLY text-showing operands.
+  assert.deepEqual(extractDisplayedStrings("BT (shown) Tj ET /NotShown"), ["shown"]);
+  assert.deepEqual(extractDisplayedStrings("<48656c6c6f> Tj"), ["Hello"]);
+  assert.deepEqual(extractDisplayedStrings("/Name (never) Do"), [], "a non-text operator shows nothing");
+  ok("only the operands of text-showing operators are extracted; other operators contribute nothing");
+
+  // The result surface carries no text at all.
+  for (const value of Object.values(present)) {
+    assert.ok(typeof value === "number" || typeof value === "boolean", "the result must be counts and flags only");
+  }
+  const inspector = readFileSync(INSPECTOR_FILE, "utf8");
+  assert.ok(!/console\./.test(inspector), "the inspector still prints nothing");
+  ok("the marker result is counts and booleans only; the marker and surrounding text never cross the boundary");
+
+  // C1.3 must REQUIRE the positive control.
+  const suiteC = readFileSync("scripts/suite-c-input.mjs", "utf8");
+  assert.match(suiteC, /displayed\.count > 0/, "C1.3 must require the marker in displayed text");
+  assert.match(suiteC, /displayed\?\.wellFormed/, "and must fail closed on an unwalkable PDF");
+  assert.ok(!/observation, not a requirement/.test(suiteC), "the marker must no longer be merely observational");
+  ok("C1.3 fails unless the approved hostile quote is positively observed in the PDF's displayed text");
 }
 
 console.log(`\nSuites B and C offline self-test: ${passed} checks passed.`);
