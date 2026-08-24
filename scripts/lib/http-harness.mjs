@@ -185,6 +185,34 @@ const page = (name, path, extra = {}) => ({
 const action = (name, extra) => ({ name, mutating: true, ...extra });
 
 /**
+ * An OUTER ACTION-ROUTE probe (PR 7 review pass).
+ *
+ * Every Server Action in this application is dispatched by POSTing to the page
+ * that renders it. Driving the action itself from outside would require the
+ * hashed `Next-Action` identifier or a hand-built RSC body, both forbidden —
+ * so the reachable, honest thing to test is the OUTER boundary on that exact
+ * method and path: one ordinary form-shaped POST, no action identifier, no
+ * private field, no mutation payload.
+ *
+ * The `content-type` matters and is declared rather than implicit: a POST with
+ * no content type is answered 405 by the framework's own method routing,
+ * BEFORE the middleware runs, so it proves nothing about authorization. That
+ * is exactly why the suite keeps a bare-POST negative control.
+ */
+const routeProbe = (name, path) => ({
+  name,
+  urlClass: path,
+  path,
+  method: "POST",
+  mechanism: "http",
+  mutating: false,
+  outerRouteProbe: true,
+  /** Declared, so `httpRun` never improvises a body or a content type. */
+  contentType: "application/x-www-form-urlencoded",
+  fromAdminPath: path.startsWith("/admin"),
+});
+
+/**
  * Outcome contracts, expressed once. Every admin Server Action in this app ends
  * in `redirect(...)`, and each family redirects to a fixed path carrying either
  * `?ok=` or `?error=` (`clients/actions.ts:27`, `studies/actions.ts:28`,
@@ -229,6 +257,13 @@ export const OPERATIONS = Object.freeze({
     urlClass: "/admin/qualitative?study=:studyId",
   }),
 
+  // --- outer action-route probes: the POST method and path every Server
+  // --- Action on that page is dispatched to (see `routeProbe`) ------------
+  "route.postAdminClients": routeProbe("route.postAdminClients", "/admin/clients"),
+  "route.postAdminStudies": routeProbe("route.postAdminStudies", "/admin/studies"),
+  "route.postAdminQualitative": routeProbe("route.postAdminQualitative", "/admin/qualitative"),
+  "route.postAdminUpload": routeProbe("route.postAdminUpload", "/admin/upload"),
+
   // --- session lifecycle ---------------------------------------------------
   "auth.login": action("auth.login", {
     urlClass: "/login",
@@ -262,6 +297,7 @@ export const OPERATIONS = Object.freeze({
 
   // --- internal-only admin mutations --------------------------------------
   "clients.createTenant": action("clients.createTenant", {
+    actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients",
     mechanism: "form",
     degradationVerifiedAt: "2026-08-23 discovery run (design §2.2 step 2)",
@@ -276,11 +312,13 @@ export const OPERATIONS = Object.freeze({
     outcome: adminOutcome("/admin/clients"),
   }),
   "clients.renameTenant": action("clients.renameTenant", {
+    actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Guardar", fields: ["name"], identifyBy: "tenant_id",
     targetParams: ["tenant_id"], creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.updateTenantBrand": action("clients.updateTenantBrand", {
+    actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     // Verified against `clients/page.tsx:92`: the accessible name is
     // "Guardar identidad". The PR-5 catalogue recorded "Guardar marca", which
@@ -291,6 +329,7 @@ export const OPERATIONS = Object.freeze({
     deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.inviteClientUser": action("clients.inviteClientUser", {
+    actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Enviar invitación", fields: ["tenant_id", "email", "full_name", "data_scope"],
     // AM2: the positive path creates an Auth identity and sends a message. The
@@ -298,22 +337,26 @@ export const OPERATIONS = Object.freeze({
     deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.updateClientUser": action("clients.updateClientUser", {
+    actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Guardar usuario", fields: ["full_name", "data_scope"], identifyBy: "user_id",
     // The run owns no client user, so this operation may only ever be denied.
     deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.deleteClientUser": action("clients.deleteClientUser", {
+    actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Eliminar cuenta cliente", fields: ["confirmation_email"], identifyBy: "user_id",
     deniedPathsOnly: true, destructive: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "qualitative.generateSuggestions": action("qualitative.generateSuggestions", {
+    actionRoute: "route.postAdminQualitative",
     urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative?study=:studyId",
     submitLabel: "Generar sugerencias pendientes", fields: [],
     targetParams: ["studyId"], creates: [], outcome: adminOutcome("/admin/qualitative"),
   }),
   "qualitative.reviewObservations": action("qualitative.reviewObservations", {
+    actionRoute: "route.postAdminQualitative",
     urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative?study=:studyId",
     submitLabel: "Aceptar sugerencias", fields: ["theme", "stage_key"],
     // The page renders only the SELECTED study's observations, so checking its
@@ -322,6 +365,7 @@ export const OPERATIONS = Object.freeze({
     targetParams: ["studyId"], creates: [], outcome: adminOutcome("/admin/qualitative"),
   }),
   "studies.createBlank": action("studies.createBlank", {
+    actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies",
     mechanism: "browser",
     page: "/admin/studies",
@@ -338,22 +382,26 @@ export const OPERATIONS = Object.freeze({
     },
   }),
   "studies.createFromTemplate": action("studies.createFromTemplate", {
+    actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Usar plantilla", fields: ["tenant_id", "name", "period"], identifyBy: "template_id",
     scopeParams: ["tenant_id"], targetParams: ["template_id"], creates: ["study"],
     outcome: adminOutcome("/admin/studies"),
   }),
   "studies.saveAsTemplate": action("studies.saveAsTemplate", {
+    actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Guardar como plantilla", fields: ["study_id", "template_id", "name", "description"],
     targetParams: ["study_id"], creates: ["studyTemplate"], outcome: adminOutcome("/admin/studies"),
   }),
   "studies.updateTemplateMetadata": action("studies.updateTemplateMetadata", {
+    actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Guardar nueva versión", fields: ["name", "description"], identifyBy: "template_id",
     targetParams: ["template_id"], creates: [], outcome: adminOutcome("/admin/studies"),
   }),
   "studies.deleteTemplate": action("studies.deleteTemplate", {
+    actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Eliminar plantilla", fields: [], identifyBy: "template_id",
     // The form carries a `required` confirmation checkbox; a real user ticks it.
@@ -362,6 +410,7 @@ export const OPERATIONS = Object.freeze({
     outcome: adminOutcome("/admin/studies"),
   }),
   "studies.updateConfiguration": action("studies.updateConfiguration", {
+    actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Guardar configuración", fields: ["name", "period", "status"], identifyBy: "study_id",
     targetParams: ["study_id"], creates: [], outcome: adminOutcome("/admin/studies"),
@@ -369,19 +418,23 @@ export const OPERATIONS = Object.freeze({
 
   // --- imperative, client-invoked: browser only (§1.7) --------------------
   "upload.analyze": action("upload.analyze", {
+    actionRoute: "route.postAdminUpload",
     urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
     imperative: true, scopeParams: ["tenant_id"], creates: [],
   }),
   "upload.preview": action("upload.preview", {
+    actionRoute: "route.postAdminUpload",
     urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
     imperative: true, scopeParams: ["tenant_id"], creates: [],
   }),
   "upload.confirm": action("upload.confirm", {
+    actionRoute: "route.postAdminUpload",
     urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
     imperative: true, scopeParams: ["tenant_id"], targetParams: ["study_id"],
     creates: ["importBatch"],
   }),
   "upload.rollback": action("upload.rollback", {
+    actionRoute: "route.postAdminUpload",
     urlClass: "/admin/upload", mechanism: "browser", page: "/admin/upload",
     // The control targets the LATEST COMMITTED batch, which the page derives
     // itself and never renders as an id. Ownership therefore cannot be proven
@@ -654,6 +707,8 @@ export async function createHarness(options) {
     // credential-bearing header propagates as the caller error it is instead of
     // being swallowed and recorded as a transport failure.
     const headers = forgedHeadersFor(op, params);
+    const probeBody = outerRouteBody(op, params);
+    if (probeBody.contentType) headers["content-type"] = probeBody.contentType;
     const started = now();
     let response = null;
     let transportError = false;
@@ -665,6 +720,7 @@ export async function createHarness(options) {
       response = await fetch(new URL(path, origin), {
         method: op.method ?? "GET",
         headers,
+        ...(probeBody.send ? { body: "" } : {}),
         redirect: "manual",
         signal: cancelSignal ? AbortSignal.any([deadline, cancelSignal]) : deadline,
       });
@@ -783,6 +839,11 @@ export async function createHarness(options) {
       // fixed tokens and counts only — never rendered text, never product
       // data — and it stays off the sanitized ledger.
       if (observation.note) record.note = observation.note;
+      // Whether the driver actually invoked the Server Action. A suite that
+      // asserts "nothing was dispatched" must be able to read that from the
+      // record rather than infer it from a timing.
+      if (observation.dispatched !== undefined) record.dispatched = observation.dispatched;
+      if (observation.controlEnabled !== undefined) record.controlEnabled = observation.controlEnabled;
       return record;
     }
 
@@ -894,6 +955,26 @@ export async function createHarness(options) {
       out[lower] = String(value);
     }
     return out;
+  }
+
+  /**
+   * The body an outer action-route probe carries: ALWAYS empty, and a content
+   * type only when the probe is meant to reach the authorization boundary.
+   *
+   * `bareMethod` deliberately omits the content type. That is the negative
+   * control: the framework answers such a POST 405 by method routing alone,
+   * before the middleware runs, so it can never be mistaken for an
+   * authorization denial. Nothing here may ever carry a mutation payload or an
+   * action identifier — the body is the empty string and there is no code path
+   * that makes it anything else.
+   */
+  function outerRouteBody(op, params = {}) {
+    if (!op.outerRouteProbe) return { send: false, contentType: null };
+    if (params.body !== undefined) {
+      throw new Error(`outer route probe "${op.name}" must never carry a body`);
+    }
+    if (params.bareMethod) return { send: true, contentType: null };
+    return { send: true, contentType: op.contentType };
   }
 
   function fillPath(template, params = {}) {

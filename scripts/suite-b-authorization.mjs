@@ -31,6 +31,19 @@
 // roster entry is RED. Completeness is therefore structural rather than a
 // promise, and no operation can be silently skipped or inferred from source.
 //
+// THREE EVIDENCE LAYERS, REPORTED SEPARATELY AND NEVER SUMMED
+//   layer 1  catalogue completeness — one required row per catalogued mutation,
+//            generated from the frozen catalogue, so nothing can be forgotten;
+//   layer 2  the OUTER ACTION ROUTE — one ordinary form-shaped POST to the exact
+//            method and path each Server Action is dispatched to, carrying no
+//            action identifier, no private field and no body;
+//   layer 3  observable INNER Server-Action denial — only where the application
+//            actually produces one.
+// This suite never claims that all 18 inner Server Actions were invoked. They
+// cannot be, without the hashed action identifier or a hand-built RSC body that
+// the design forbids, and pretending otherwise is the failure this split exists
+// to prevent.
+//
 // TWO STRENGTHS OF DENIAL, BOTH REAL, NEVER CONFLATED
 //   `page_gate`   the caller never reached the surface at all: the middleware
 //                 or the page's own role check answered first. Recorded with
@@ -102,6 +115,72 @@ export const ACTION_GATE_WITHHELD = Object.freeze({
 });
 
 /**
+ * The distinct protected POST path classes, derived from the catalogue rather
+ * than listed by hand: every mutating operation names the outer route its
+ * Server Action is dispatched to, so a new mutation on a new page brings a new
+ * path class with it and cannot be forgotten.
+ */
+export const ACTION_ROUTE_CLASSES = Object.freeze(
+  [...new Set(Object.values(OPERATIONS).filter((op) => op.mutating).map((op) => op.actionRoute))].sort(),
+);
+
+/** Which catalogued mutations dispatch to a given outer route. */
+export function operationsOnRoute(routeName) {
+  return Object.values(OPERATIONS)
+    .filter((op) => op.mutating && op.actionRoute === routeName)
+    .map((op) => op.name);
+}
+
+/**
+ * Whether an outer action-route observation PROVES an authorization denial on
+ * that route's own method and path.
+ *
+ * Written as a pure function so the reversal tests can show what it refuses:
+ * a GET cannot stand in for the POST route, a different path cannot stand in
+ * for the catalogued one, a 2xx allow is not a denial, and a 405 is the
+ * framework's own method routing answering BEFORE the middleware — which is
+ * exactly the shape a careless probe would have mistaken for a denial.
+ */
+export function outerRouteDenialIsProven(observation) {
+  const o = observation ?? {};
+  if (o.method !== "POST") return { proven: false, why: `method ${o.method ?? "(none)"} is not the action route's POST` };
+  if (!o.path || o.path !== o.expectedPath) {
+    return { proven: false, why: `path ${o.path ?? "(none)"} is not the catalogued ${o.expectedPath ?? "(none)"}` };
+  }
+  const status = o.status;
+  if (typeof status !== "number") return { proven: false, why: "no status" };
+  if (status === 405) return { proven: false, why: "405: the framework rejected the method before authorization ran" };
+  if (status >= 500) return { proven: false, why: `server error ${status}` };
+  if (status === 401 || status === 403) return { proven: true, why: `denied with ${status}` };
+  if (status >= 300 && status < 400) {
+    if (o.redirectPath === "/login") return { proven: true, why: "redirected to /login (unauthenticated)" };
+    if (o.redirectPath === "/dashboard") return { proven: true, why: "redirected to /dashboard (wrong role)" };
+    return { proven: false, why: `redirected to ${o.redirectPath ?? "(unknown)"}, which is not a denial target` };
+  }
+  if (status >= 200 && status < 300) return { proven: false, why: `the route allowed the request (${status})` };
+  return { proven: false, why: `unexpected status ${status}` };
+}
+
+export const OUTER_ROUTE_CASES = Object.freeze([
+  { what: "a POST redirected to /login", input: { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 307, redirectPath: "/login" }, proven: true },
+  { what: "a POST redirected to /dashboard", input: { method: "POST", path: "/admin/studies", expectedPath: "/admin/studies", status: 307, redirectPath: "/dashboard" }, proven: true },
+  { what: "a POST answered 401", input: { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 401 }, proven: true },
+  { what: "a GET, however it was answered", input: { method: "GET", path: "/admin/clients", expectedPath: "/admin/clients", status: 307, redirectPath: "/login" }, proven: false },
+  { what: "a POST to a different path", input: { method: "POST", path: "/dashboard", expectedPath: "/admin/clients", status: 307, redirectPath: "/login" }, proven: false },
+  { what: "a 405 method rejection", input: { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 405 }, proven: false },
+  { what: "a 200 allow", input: { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 200 }, proven: false },
+  { what: "a 500 framework error", input: { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 500 }, proven: false },
+  { what: "a redirect somewhere else", input: { method: "POST", path: "/admin/clients", expectedPath: "/admin/clients", status: 307, redirectPath: "/somewhere" }, proven: false },
+]);
+
+export function selfTestOuterRoute() {
+  return OUTER_ROUTE_CASES.flatMap((testCase) => {
+    const got = outerRouteDenialIsProven(testCase.input).proven;
+    return got === testCase.proven ? [] : [`${testCase.what}: expected ${testCase.proven}, got ${got}`];
+  });
+}
+
+/**
  * WHICH GATE ANSWERS, AND WHY THAT IS THE HONEST THING TO ASSERT
  *
  * This application denies an unauthenticated caller in the MIDDLEWARE
@@ -137,9 +216,25 @@ function rosterFor(prefix, title) {
   }));
 }
 
+const routeSlug = (routeName) => routeName.replace(/^route\.post/, "").replace(/^Admin/, "").toLowerCase();
+
+function routeRosterFor(prefix, title) {
+  return ACTION_ROUTE_CLASSES.map((routeName) => ({
+    id: `${prefix}/${routeSlug(routeName)}`,
+    group: prefix,
+    title: `${title}: POST ${OPERATIONS[routeName].path}`,
+  }));
+}
+
 export const SUITE_B_CHECKS = Object.freeze([
   ...rosterFor("B1", "an unauthenticated caller is rejected before any side effect"),
   ...rosterFor("B2", "a real client caller is rejected before any side effect"),
+  // The outer action-route layer: the exact POST method and path each Server
+  // Action is dispatched to. These are separate rows precisely so that no
+  // page-level GET result can be counted as covering them.
+  ...routeRosterFor("B9", "the outer action route denies an unauthenticated caller on its own POST"),
+  ...routeRosterFor("B10", "the outer action route and a real client caller, on its own POST"),
+  ...routeRosterFor("B11", "an authorized identity is answered differently, and a bare POST is a 405 that proves nothing"),
   { id: "B3.1", group: "B3", title: "forged role headers do not upgrade a client on an internal page" },
   { id: "B3.2", group: "B3", title: "the middleware-bypass header class does not admit an anonymous caller" },
   { id: "B3.3", group: "B3", title: "forged tenant/user headers do not cross a tenant on the report route" },
@@ -278,6 +373,8 @@ const pass = (id, message) => reporter.pass(id, message);
 const fail = (id, message) => reporter.fail(id, message);
 
 let ORIGIN = "http://localhost:3000";
+/** Path classes whose wrong-role denial is not expressible in an HTTP status. */
+const outerRouteLimitations = [];
 let SUPABASE_URL = "";
 let PUBLISHABLE_KEY = "";
 let TENANT_A = "";
@@ -372,6 +469,127 @@ async function probeDenial(harness, group, actorId, opName, fx, { endSession = f
     id,
     `${actorId} denied at the ${gate}: ${result.errorCategory}` +
       `${result.redirectTo ? ` -> ${result.redirectTo}` : ""} (HTTP ${result.httpStatus ?? "-"})`,
+  );
+}
+
+/**
+ * Issues ONE ordinary form-shaped POST to an outer action route and returns the
+ * observation the pure classifier consumes. No action identifier, no private
+ * field, no mutation payload — the body is empty, which is why this can never
+ * invoke the Server Action behind the route.
+ */
+async function observeRoute(harness, actorId, routeName, { bareMethod = false } = {}) {
+  const op = OPERATIONS[routeName];
+  const result = await harness.run(actorId, op, bareMethod ? { bareMethod: true } : {});
+  return {
+    result,
+    observation: {
+      method: op.method,
+      path: op.path,
+      expectedPath: op.path,
+      status: result.httpStatus,
+      redirectPath: result.redirectTo,
+    },
+  };
+}
+
+/**
+ * B9/B10 — the outer action route, on its own POST method and path.
+ *
+ * `expectStatusDenial: false` records the one path class where the product
+ * answers a wrong-role caller with HTTP 200 and a rendered denial page rather
+ * than a status (design §1.8 AM4). No status-level claim is made there: the
+ * row says so in its own title and its own message, and the denial for that
+ * path is proven at the browser layer instead.
+ */
+async function checkOuterRoute(harness, group, actorId, routeName, { expectStatusDenial = true } = {}) {
+  const id = `${group}/${routeName.replace(/^route\.post/, "").replace(/^Admin/, "").toLowerCase()}`;
+  const covered = operationsOnRoute(routeName);
+  let observed;
+  try {
+    observed = await observeRoute(harness, actorId, routeName);
+  } catch (error) {
+    return fail(id, `the outer route probe could not be dispatched: ${error.code ?? error.message}`);
+  }
+  const verdict = outerRouteDenialIsProven(observed.observation);
+
+  if (!expectStatusDenial) {
+    // The honest weaker statement, and it is stated as weaker: the request
+    // reached the application on the catalogued method and path, was neither a
+    // framework method rejection nor a server error — and the role denial
+    // itself is NOT expressed in the status here.
+    const status = observed.observation.status;
+    if (status === 405 || typeof status !== "number" || status >= 500) {
+      return fail(id, `the outer route answered ${status ?? "(none)"} — the probe never reached the application`);
+    }
+    outerRouteLimitations.push(routeName);
+    return pass(
+      id,
+      `POST ${observed.observation.path} reached the application (HTTP ${status}) but expresses its wrong-role ` +
+        `denial in the rendered document, not the status — NO status-level authorization claim is made for this ` +
+        `path class; the denial for its ${covered.length} operation(s) is proven at the browser layer (B2)`,
+    );
+  }
+
+  if (!verdict.proven) {
+    return fail(id, `POST ${observed.observation.path} as ${actorId}: ${verdict.why}`);
+  }
+  return pass(
+    id,
+    `POST ${observed.observation.path} as ${actorId}: ${verdict.why} (HTTP ${observed.observation.status}) — ` +
+      `covers the outer boundary of ${covered.length} catalogued mutation(s)`,
+  );
+}
+
+/**
+ * B11 — the discriminator. Two things are proven together, and the check is
+ * worthless without both:
+ *   1. an AUTHORIZED identity is answered differently on the same POST path,
+ *      so the denial above is not simply "this route refuses everyone";
+ *   2. a bare POST carrying no content type is answered 405 identically to
+ *      everyone, BEFORE the middleware runs — the shape a careless probe would
+ *      have mistaken for an authorization denial.
+ */
+async function checkRouteDiscriminator(harness, routeName) {
+  const id = `B11/${routeName.replace(/^route\.post/, "").replace(/^Admin/, "").toLowerCase()}`;
+  const path = OPERATIONS[routeName].path;
+  let denied;
+  let authorized;
+  let bareAnon;
+  let bareInternal;
+  try {
+    denied = await observeRoute(harness, "anonymous", routeName);
+    authorized = await observeRoute(harness, "internal", routeName);
+    bareAnon = await observeRoute(harness, "anonymous", routeName, { bareMethod: true });
+    bareInternal = await observeRoute(harness, "internal", routeName, { bareMethod: true });
+  } catch (error) {
+    return fail(id, `a discriminator probe could not be dispatched: ${error.code ?? error.message}`);
+  }
+
+  const deniedStatus = denied.observation.status;
+  const authorizedStatus = authorized.observation.status;
+  if (!outerRouteDenialIsProven(denied.observation).proven) {
+    return fail(id, `the denied control on POST ${path} was not a denial (HTTP ${deniedStatus})`);
+  }
+  if (deniedStatus === authorizedStatus && denied.observation.redirectPath === authorized.observation.redirectPath) {
+    return fail(
+      id,
+      `POST ${path} answered an authorized identity exactly as it answered an anonymous one ` +
+        `(HTTP ${authorizedStatus}) — this route refuses everyone, so the denial proves nothing`,
+    );
+  }
+  if (bareAnon.observation.status !== 405 || bareInternal.observation.status !== 405) {
+    return fail(
+      id,
+      `a bare POST with no content type was answered ${bareAnon.observation.status}/${bareInternal.observation.status}, ` +
+        "expected 405 from method routing for both — the negative control no longer holds",
+    );
+  }
+  return pass(
+    id,
+    `POST ${path}: anonymous ${deniedStatus}${denied.observation.redirectPath ? ` -> ${denied.observation.redirectPath}` : ""} ` +
+      `vs authorized ${authorizedStatus}; and a bare POST is 405 for both, so a method rejection can never be ` +
+      "mistaken for an authorization denial",
   );
 }
 
@@ -798,6 +1016,28 @@ async function livePhase(signal, fixtures, prefix, tempDir) {
   }
   await probeReportDenial(harness, "B2", "tenantB");
 
+  // --- B9 / B10 / B11: the OUTER ACTION ROUTE, on its own method and path ---
+  console.log("\n[B9] Every protected action route, as an unauthenticated caller (POST, not GET):");
+  note("one ordinary form-shaped POST per route: no action identifier, no private field, no body");
+  for (const routeName of ACTION_ROUTE_CLASSES) {
+    await checkOuterRoute(harness, "B9", "anonymous", routeName);
+  }
+
+  console.log("\n[B10] Every protected action route, as a real client caller:");
+  for (const routeName of ACTION_ROUTE_CLASSES) {
+    // `/admin/upload` answers a wrong-role caller with HTTP 200 and a rendered
+    // denial page rather than a status (AM4), so no status-level claim is made
+    // for it here and the row says so.
+    await checkOuterRoute(harness, "B10", "tenantA", routeName, {
+      expectStatusDenial: routeName !== "route.postAdminUpload",
+    });
+  }
+
+  console.log("\n[B11] Discriminators: an authorized identity differs, and a bare POST is a 405:");
+  for (const routeName of ACTION_ROUTE_CLASSES) {
+    await checkRouteDiscriminator(harness, routeName);
+  }
+
   // --- B3 -----------------------------------------------------------------
   await checkForgedRoleHeaders(harness);
   await checkMiddlewareBypassHeaders(harness);
@@ -940,6 +1180,35 @@ async function main() {
       rmSync(tempDir, { recursive: true, force: true });
     } catch {
       /* the OS reclaims the temp dir; never fail a run on this */
+    }
+  }
+
+  console.log("\n[evidence] What was proven, at which layer:");
+  {
+    const results = new Map(reporter.results().map((r) => [r.id, r.passed]));
+    const green = (prefix) => SUITE_B_CHECKS.filter((c) => c.group === prefix && results.get(c.id) === true).length;
+    const total = (prefix) => SUITE_B_CHECKS.filter((c) => c.group === prefix).length;
+    const inner = MUTATING_OPERATIONS.filter((name) => actionGateIsObservable(OPERATIONS[name]));
+    console.log(
+      `  layer 1 - catalogue completeness: ${total("B1")} B1 and ${total("B2")} B2 rows, one per catalogued ` +
+        "mutation plus the report route, generated from the frozen catalogue",
+    );
+    console.log(
+      `  layer 2 - outer action route (POST method + path): ${green("B9")}/${total("B9")} path classes deny an ` +
+        `unauthenticated caller by status; ${green("B10") - outerRouteLimitations.length}/${total("B10")} deny a ` +
+        `client by status, with ${outerRouteLimitations.length} recorded limitation(s); ` +
+        `${green("B11")}/${total("B11")} discriminators hold`,
+    );
+    console.log(
+      `  layer 3 - observable INNER Server-Action denial: ${inner.length}/${MUTATING_OPERATIONS.length} ` +
+        `(${inner.join(", ") || "none"}). The other inner guards are structurally present and externally ` +
+        "shadowed by the middleware; this suite does NOT claim they were invoked",
+    );
+    for (const routeName of outerRouteLimitations) {
+      console.log(
+        `  limitation - POST ${OPERATIONS[routeName].path}: a wrong-role caller is answered HTTP 200 with a ` +
+          "rendered denial page, so role denial is not expressible in the status; covered at the browser layer",
+      );
     }
   }
 
