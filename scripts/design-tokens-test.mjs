@@ -531,8 +531,17 @@ assert.doesNotMatch(notice, /localStorage|document\.cookie|sessionStorage|fetch\
 assert.match(notice, /flex-wrap/, "it wraps instead of overflowing on a narrow phone");
 const previewRoute = await readCode("src/app/admin/preview/[studyId]/page.tsx");
 assert.match(previewRoute, /banner=\{<PreviewNotice \/>\}/, "the preview uses it");
-assert.doesNotMatch(previewRoute, /utility=/,
-  "the duplicated header return action is gone");
+// Dismissing the notice must never strand the reviewer inside the client
+// surface. The escape path therefore lives OUTSIDE the dismissible notice as
+// well: the header utility slot, which no dismissal can remove. Asserting the
+// independent path rather than the absence of a duplicate is the regression
+// that actually matters — a briefly duplicated route is harmless, a trap is not.
+assert.match(previewRoute, /utility=\{[\s\S]*?STUDIES_LIST\.href[\s\S]*?\}/,
+  "the preview keeps a persistent return to Studies outside the dismissible notice");
+assert.match(previewRoute, /STUDIES_LIST\.label/,
+  "and it is labelled in Spanish from the shared parent definition");
+assert.doesNotMatch(previewRoute, /history\.back|router\.back/,
+  "the escape path is an explicit href, never browser history");
 assert.match(studyCard, /scroll-mt-20/,
   "anchor jumps clear the sticky notice instead of landing under it");
 // Editing this route must not have touched its authorization or its

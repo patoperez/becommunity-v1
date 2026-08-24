@@ -44,7 +44,10 @@ export function InsightsShell({
       {banner}
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-5 py-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+          {/* `flex-wrap` so a long utility label (the preview's return to
+              Studies) stacks under the address on a narrow phone instead of
+              pushing the header into horizontal overflow. */}
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-1">
             {logoUrl ? (
               <>
                 {/* Tenant Storage URLs are dynamic, so the static Next Image

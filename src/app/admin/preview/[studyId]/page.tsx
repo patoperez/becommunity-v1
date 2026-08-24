@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
@@ -13,6 +14,7 @@ import LongitudinalTrends from "@/app/dashboard/LongitudinalTrends";
 import StudyCard from "@/app/dashboard/StudyCard";
 import { InsightsShell } from "@/components/shell/InsightsShell";
 import { PreviewNotice } from "@/components/shell/PreviewNotice";
+import { STUDIES_LIST } from "@/components/shell/BackLink";
 
 export const metadata = { title: "Vista previa de cliente · Be Community" };
 
@@ -86,9 +88,20 @@ export default async function ClientPreviewPage({ params }: { params: Promise<{ 
     brand={brand}
     logoUrl={logoUrl}
     userEmail={user.email ?? ""}
-    // The sticky notice already carries the return to the study list, so the
-    // header no longer duplicates it.
     banner={<PreviewNotice />}
+    /*
+      The persistent escape path. The sticky notice carries the same link, but
+      the notice can be dismissed — and dismissing it must never strand a
+      reviewer inside the client surface with no way back to Studio. A briefly
+      duplicated route while the notice is open is the cheaper mistake, and it
+      needs no shared state to coordinate the two.
+    */
+    utility={<Link
+      href={STUDIES_LIST.href}
+      className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken"
+    >
+      {STUDIES_LIST.label}
+    </Link>}
   >
     {narrative ? <NarrativeHome view={narrative} brand={brand} audience="preview" /> : null}
     <LongitudinalTrends view={longitudinal} />
