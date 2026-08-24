@@ -20,7 +20,9 @@ The platform exists to solve four real pains, in priority order (all are Priorit
 ## 2. Data reality (why the architecture is what it is)
 
 This is **small data with rich structure**, not big data. Even the largest imaginable client (a university) produces studies of ~1,000–2,500 responses, because research uses representative sampling, not censuses. Volume is never the bottleneck. This is why:
-- All calculation is done fresh, in-memory (Arquero), with no pre-aggregation — enabling infinite slicing/dicing.
+- All calculation is done fresh, in-memory through the canonical Workers-safe
+  engine, with no pre-aggregation. Arquero is retained only as a dev/test parity
+  oracle because its runtime code generation is incompatible with workerd.
 - We never build "big data" machinery (pipelines, caches, materialized rollups). It would add complexity for a problem that doesn't exist.
 
 What IS complex: the *structure* (nested segmentation — level → grade → group, plus demographics), the *mix* of quantitative and qualitative data, and the *repeatability with variation* (a fixed core + per-client variable parts). The template system exists to capture exactly that "fixed core + variable slots" shape.
@@ -66,7 +68,7 @@ The number-one adversary is our own AI-generated code, not an external hacker. H
 
 Supabase Cloud (not self-hosted — self-hosting was considered and deferred; it's more work and less secure unless a contractual data-residency requirement appears, which would migrate the same Postgres without an app rewrite). Free tier through build/testing; Pro (~$25/mo) only when the first real client has live access, for leaked-password protection, session controls, and daily backups. Cloudflare free tier hosts and provides the security perimeter. Cost is ~$0 until a live client exists.
 
-## 7. Current phase (verified 2026-08-22)
+## 7. Current phase (verified 2026-08-24)
 
 P0-P6 of the V2 framework have been implemented. P6E synthetic acceptance was
 completed against the deployed Cloudflare Worker: CSV/XLSX ingestion, canonical
@@ -78,13 +80,25 @@ pagination. PR #28 fixed both without changing calculations or security
 boundaries; the real-phone and final two-page PDF checks passed, the change was
 merged and deployed, and P6 is now closed.
 
-P7 full hardening and go-live preparedness is the active phase. It begins with
-an evidence inventory and reviewed plan, then completes suites A-E,
-backup/restore proof, audit detection, incident response and the documented
-go-live controls in dependency order. Do not reprioritize toward retention UI,
-new employee roles, or another feature because of an incidental business
-question. V2.5 content follows afterward and uses only documented,
-authoritative business definitions; never invent formulas.
+P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`; PR #38 is its
+separate delivery unit so P8 does not obscure P7 provenance. Deferred controls
+that require a custom domain, final production environment, billing or full DR
+return as a bounded go-live pass after the product experience is complete; they
+are not silently treated as green.
+
+P8 product experience implementation is active in an isolated worktree that
+intentionally descended from that P7 head. Discovery and standalone visual
+comparison are finished. The
+approved direction is an Interactive Insight Experience: guided `Recorrido` and
+bounded `Explorar` for clients, a no-code Studio for internal staff, progressive
+disclosure, rich evidence-connected journeys and controlled Be Community /
+co-branded / white-label presentation. Work now proceeds in reviewable slices
+of the real product, not additional detached HTML prototypes. P8-A is complete
+and owner-accepted at `3659a38` (delivery PR #37). The next unit is P8.2 Studio
+guided workflows: remove technical entry from ordinary workflows, starting
+with the access-scope picker and mapping experience, while preserving every P7
+and calculation boundary. V2.5 content still follows authoritative documented
+business definitions; never invent formulas.
 
 ## 8. How we work with AI
 

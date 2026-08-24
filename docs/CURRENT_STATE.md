@@ -1,6 +1,6 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-23**.
+> Authoritative operational handoff. Last verified: **2026-08-24**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
@@ -21,6 +21,7 @@ The V2 construction order remains:
 6. P5 client portal and longitudinal memory
 7. P6 visual backoffice
 8. P7 full hardening, adversarial suites, backups and incident response
+9. P8 product experience transformation: Insights, Studio and controlled branding
 
 Do not change that priority because of an incidental feature question. In
 particular, retention UI and separate CEO/employee permission tiers are not the
@@ -117,7 +118,66 @@ PDF retained metric parity and the human reviewer confirmed the real-phone
 layout. The PR was squash-merged and the post-merge Worker health check returned
 200 with Supabase connected. **P6 is closed.**
 
-## Current task — plan and execute P7 hardening
+## Current task — P8 product experience implementation
+
+P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`. Remote `main`
+remains at `e67e4adc2542c0a2993c65f517bf7445eafb83bd`, so the completed P7
+branch is still an explicit merge dependency. The isolated P8 worktree
+intentionally descends from that P7 head. Do not reopen P7 correction loops
+during product construction; controls blocked on custom-domain, production
+Supabase, billing, full DR or real-client prerequisites return as a bounded
+go-live pass after the product is functionally and visually complete.
+
+P8 discovery and the A/B/C/synthesis comparison are complete. Those artifacts
+remain historical evidence, but standalone visual prototyping is closed. The
+approved direction is an **Interactive Insight Experience**:
+
+- each client scene follows question → visual evidence → consultant
+  interpretation → action;
+- `Recorrido` provides guided discovery and `Explorar` provides bounded free
+  exploration over the same evidence and calculations;
+- Studio is a distinct no-code operational experience for non-technical staff;
+- text is preserved through progressive disclosure rather than becoming a wall;
+- controlled Be Community, co-branded and white-label modes must preserve
+  semantic meaning, contrast and analytical honesty.
+
+**P8-A is implementation-complete and owner-accepted**, delivered on
+`p8a-product-experience-foundation` at `3659a38` through PR #37. It implements
+the semantic design/brand foundation, sign-in, Studio/Insights shells, client
+panorama and rich journey vertical slice, plus the owner-review corrections.
+P8-A introduces no migration, formula, RLS/grant, role, ingestion,
+authorization or external-system change. **The next implementation unit is
+P8.2: Studio guided workflows**, and it starts from updated `main` only after
+the accepted P7/P8-A delivery PRs are integrated.
+
+**Owner decisions recorded 2026-08-24, binding on every later unit:**
+
+- **Absence is not a client-facing finding (contract C11).** A published study
+  is a finished editorial product. Anything Be Community chose not to publish,
+  or has not finished reviewing, produces silence on the client side — no
+  placeholder, empty card, heading, reserved row, border or explanatory copy.
+  Statements that qualify a result the client *is* shown (small base, suppressed
+  segment, missing data behind a visible number) are preserved: those are
+  analytical honesty, not omissions. Internal Studio and the internal preview
+  own the omission warnings and must keep naming them, visibly marked as
+  internal.
+- **P8.2 additionally owns** the no-code access-scope picker that retires every
+  raw `data_scope`/JSON textarea, and a discoverable account lifecycle: suspend
+  versus permanently delete a client user, archive a client organisation as the
+  ordinary reversible action, and permanent organisation deletion only behind an
+  impact summary and exact-name confirmation.
+- **P8.4 additionally owns** controlled per-study presentation inheritance —
+  Be Community default → client identity → study override — covering identity,
+  palette, semantic colours, threshold values and labels, module visibility and
+  order, visualization variants, editorial copy and the journey's stage
+  definition, with templates preserving that configuration. It is bounded
+  no-code customisation: contrast, responsiveness, semantic meaning, analytical
+  honesty and accessible fallbacks stay enforced by the product.
+
+Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
+P8.2 and P8.4). None of them is implemented in P8-A.
+
+## P7 engineering record (historical; do not resume during P8)
 
 P7 is the final V2 hardening and go-live-preparedness phase, not a feature
 reprioritization. Its acceptance gate is: all adversarial suites A-E green and a
@@ -170,9 +230,10 @@ health, logged-out, Tenant A, Tenant B isolation and internal-route smokes all
 passed with zero `P7A-`/`P7H-` residue. The commit-to-version record lives in PR
 #36's conversation as required by `docs/DEPLOYMENT.md`.
 
-**Current unit:** PR 7, branch `p7f-suites-b-c` — behavioral Suite B
-(authorization) and Suite C (hostile input/injection). Both are implemented and
-**green on the branch, not yet merged**:
+**P7 final engineering unit (merged via PR #38):** branch
+`p7f-suites-b-c` — behavioral Suite B
+(authorization) and Suite C (hostile input/injection). Both were implemented,
+green and integrated into `main`:
 
 - `npm run suite:b` — 64/64. Its evidence is reported in **three layers that
   are never summed**, because conflating them is how a page-level GET gets
@@ -227,8 +288,8 @@ recorded rather than asserted past:
    `src/app/admin/upload/UploadForm.tsx` and `src/lib/validation/schemas.ts`,
    both admitted to the structural scope guard by name.
 
-Suite E is still not green. PR 8 and later P7 work must not begin until PR 7 is
-reviewed, merged and post-merge verified.
+Suite E and external go-live controls were not declared green. They remain
+deferred release-state evidence, not the active product-construction unit.
 
 ## Known constraints carried forward
 

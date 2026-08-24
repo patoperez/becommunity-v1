@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { StudioShell } from "@/components/shell/StudioShell";
+import { STUDIO_HOME, STUDIES_LIST } from "@/components/shell/BackLink";
+import { logout } from "@/app/dashboard/actions";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import UploadForm, {
@@ -30,17 +33,17 @@ export default async function UploadPage({
 
   if (profile?.role !== "internal") {
     return (
-      <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
-        <div className="max-w-md rounded-xl border border-red-200 bg-red-50 p-8 text-center dark:border-red-900 dark:bg-red-950">
-          <h1 className="text-lg font-semibold text-red-800 dark:text-red-200">Acceso denegado</h1>
-          <p className="mt-2 text-sm text-red-700 dark:text-red-300">
+      <main id="contenido" className="flex flex-1 items-center justify-center bg-surface-page px-4">
+        <div className="max-w-md rounded-xl border border-danger-line bg-danger-surface p-8 text-center">
+          <h1 className="text-lg font-semibold text-danger">Acceso denegado</h1>
+          <p className="mt-2 text-sm text-danger">
             Esta sección es solo para el equipo interno de Be Community.
           </p>
-          <Link href="/dashboard" className="mt-4 inline-block text-sm font-medium text-red-800 underline dark:text-red-200">
+          <Link href="/dashboard" className="mt-4 inline-block min-h-11 text-sm font-semibold text-danger underline underline-offset-4">
             Volver al portal
           </Link>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -99,30 +102,28 @@ export default async function UploadPage({
     committedAt: batch.committed_at,
   }));
 
-  return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
-      <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div>
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Cargar datos de estudio</h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Equipo interno · Be Community</p>
-        </div>
-        <Link
-          href="/dashboard"
-          className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          Volver
-        </Link>
-      </header>
+  // The parent is wherever a real study context came from. Arriving with a
+  // study or client already chosen means the operator came from the study list,
+  // so that is where "up" goes; otherwise the parent is the Studio home.
+  const cameFromAStudy = Boolean(query.study || query.tenant);
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
-        <UploadForm
-          tenants={tenants ?? []}
-          studies={studyOptions}
-          history={history}
-          initialTenantId={query.tenant}
-          initialStudyId={query.study}
-        />
-      </main>
-    </div>
+  return (
+    <StudioShell
+      userEmail={user.email ?? ""}
+      currentHref="/admin/upload"
+      back={cameFromAStudy ? STUDIES_LIST : STUDIO_HOME}
+      breadcrumb={["Studio", "Carga de datos"]}
+      title="Cargar datos de estudio"
+      lead="Trae un archivo, revisa cómo se va a leer y confírmalo. Nada se escribe hasta el último paso, y una carga confirmada se puede revertir."
+      utility={<form action={logout}><button type="submit" className="min-h-11 rounded-lg border border-paper/40 px-3 py-1.5 text-sm font-medium text-paper transition-colors duration-[var(--motion-state)] hover:bg-paper/10">Cerrar sesión</button></form>}
+    >
+      <UploadForm
+        tenants={tenants ?? []}
+        studies={studyOptions}
+        history={history}
+        initialTenantId={query.tenant}
+        initialStudyId={query.study}
+      />
+    </StudioShell>
   );
 }

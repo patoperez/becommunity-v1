@@ -12,6 +12,9 @@ import { logoPublicUrl } from "@/lib/branding/config";
 import NarrativeHome from "@/app/dashboard/NarrativeHome";
 import LongitudinalTrends from "@/app/dashboard/LongitudinalTrends";
 import StudyCard from "@/app/dashboard/StudyCard";
+import { InsightsShell } from "@/components/shell/InsightsShell";
+import { PreviewNotice } from "@/components/shell/PreviewNotice";
+import { STUDIES_LIST } from "@/components/shell/BackLink";
 
 export const metadata = { title: "Vista previa de cliente · Be Community" };
 
@@ -76,26 +79,33 @@ export default async function ClientPreviewPage({ params }: { params: Promise<{ 
   const displayName = brand.displayName ?? tenantName;
   const logoUrl = logoPublicUrl(brand.logoPath);
 
-  return <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-    <div className="border-b border-amber-300 bg-amber-100 px-6 py-2 text-center text-xs font-semibold text-amber-950">
-      Vista previa interna · el cliente no puede ver este estudio hasta que se publique
-    </div>
-    <header className="flex items-center justify-between border-b px-6 py-4 text-white" style={{ backgroundColor: brand.primaryColor, borderColor: brand.accentColor }}>
-      <div className="flex min-w-0 items-center gap-3">
-        {logoUrl ? <>
-          {/* Dynamic tenant Storage URLs cannot use a static Next Image remote allowlist. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logoUrl} alt={`Logotipo de ${displayName}`} className="h-11 w-11 shrink-0 rounded-lg bg-white object-contain p-1" />
-        </> : null}
-        <div className="min-w-0"><h1 className="truncate text-lg font-semibold">{displayName}</h1><p className="truncate text-xs text-white/75">{brand.tagline}</p></div>
-      </div>
-      <Link href="/admin/studies" className="rounded-lg border border-white/40 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/10">Volver al backoffice</Link>
-    </header>
-    <main className="mx-auto w-full max-w-4xl px-6 py-10">
-      {narrative ? <NarrativeHome view={narrative} brand={brand} /> : null}
-      <LongitudinalTrends view={longitudinal} />
-      <h2 className="mb-6 text-xl font-semibold text-zinc-900 dark:text-zinc-50">Vista del estudio</h2>
-      <StudyCard study={study} initialDashboard={dashboard} />
-    </main>
-  </div>;
+  // The preview renders the CLIENT experience, through the client shell, so what
+  // an internal reviewer sees is what the client will see — the audit called
+  // this the best-conceived screen in the product and the model for P8.
+  return <InsightsShell
+    brandName={displayName}
+    tagline={brand.tagline}
+    brand={brand}
+    logoUrl={logoUrl}
+    userEmail={user.email ?? ""}
+    banner={<PreviewNotice />}
+    /*
+      The persistent escape path. The sticky notice carries the same link, but
+      the notice can be dismissed — and dismissing it must never strand a
+      reviewer inside the client surface with no way back to Studio. A briefly
+      duplicated route while the notice is open is the cheaper mistake, and it
+      needs no shared state to coordinate the two.
+    */
+    utility={<Link
+      href={STUDIES_LIST.href}
+      className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken"
+    >
+      {STUDIES_LIST.label}
+    </Link>}
+  >
+    {narrative ? <NarrativeHome view={narrative} brand={brand} audience="preview" /> : null}
+    <LongitudinalTrends view={longitudinal} />
+    <h2 className="sr-only">Vista del estudio</h2>
+    <StudyCard study={study} initialDashboard={dashboard} audience="preview" />
+  </InsightsShell>;
 }

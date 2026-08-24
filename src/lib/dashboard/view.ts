@@ -11,7 +11,7 @@ import {
 } from "@/lib/calc/filters";
 import { sampleVisibility, type SampleVisibility } from "@/lib/calc/disclosure";
 import { formatNumber, formatScore } from "@/lib/calc/format";
-import { DECIMALS } from "@/lib/calc/metrics";
+import { DECIMALS, roundTo } from "@/lib/calc/metrics";
 import { buildAllowlist, type PivotAllowlist, type PivotResult } from "@/lib/calc/pivot";
 import type { JourneyStage } from "@/lib/calc/journey";
 import { parseDashboardConfig, type DashboardSections } from "@/lib/dashboard/config";
@@ -35,6 +35,8 @@ export type SafeQualitativeSummary = {
   hasSuppressedThemes: boolean;
 };
 
+export type StageUnit = "nps" | "percent" | "score";
+
 export type SafeJourneyStage = {
   id: string;
   label: string;
@@ -42,6 +44,20 @@ export type SafeJourneyStage = {
   description?: string;
   value: string | null;
   kindLabel: string;
+  /**
+   * The scale this stage's number lives on. Presentation-only: it lets the
+   * journey say "de -100 a 100" in words instead of printing the canonical
+   * metric key in a monospace box, and lets it compare only stages that share a
+   * scale. It does not change which metric is computed or how.
+   */
+  unit: StageUnit;
+  /**
+   * The SAME already-rounded number that `value` renders, exposed numerically
+   * so presentation can order and position stages without re-parsing a string.
+   * Rounded exactly once, by `journeyHeadline`, at the precision the unit
+   * declares (docs/CALCULATION_POLICY.md §4).
+   */
+  numeric: number | null;
   visibility: SampleVisibility;
   n: number | null;
   detail: { label: string; value: string }[];
@@ -130,11 +146,29 @@ export function sanitizeQualitativeSummary(summary: QualitativeSummary): SafeQua
   };
 }
 
-function journeyHeadline(value: ReturnType<typeof computeStageMetric>): string | null {
-  if (value.value == null) return null;
-  if (value.unit === "nps") return formatNumber(value.value, DECIMALS.nps);
-  if (value.unit === "percent") return `${formatNumber(value.value, DECIMALS.percent)}%`;
-  return formatNumber(value.value, DECIMALS.journeyHeadline);
+function stageDecimals(unit: StageUnit): number {
+  if (unit === "nps") return DECIMALS.nps;
+  if (unit === "percent") return DECIMALS.percent;
+  return DECIMALS.journeyHeadline;
+}
+
+/**
+ * Rounds ONCE, at the precision the unit declares, and returns both the display
+ * string and the number that string represents. `formatNumber` re-applies the
+ * canonical `roundTo` at the same precision, which is idempotent, so no value is
+ * rounded to a different result twice.
+ */
+function journeyHeadline(
+  value: ReturnType<typeof computeStageMetric>,
+): { text: string | null; numeric: number | null } {
+  if (value.value == null) return { text: null, numeric: null };
+  const decimals = stageDecimals(value.unit);
+  const numeric = roundTo(value.value, decimals);
+  const formatted = formatNumber(numeric, decimals);
+  return {
+    text: value.unit === "percent" ? `${formatted}%` : formatted,
+    numeric,
+  };
 }
 
 export function buildStudyDashboard(
@@ -205,13 +239,16 @@ export function buildStudyDashboard(
     const stageSummary = summarizeConfirmedQualitative(
       filteredQualitative.filter((row) => row.stage_key === stage.id),
     );
+    const headline = journeyHeadline(metric);
     return {
       id: stage.id,
       label: stage.label,
       metricKey: stage.metric,
       description: stage.description,
-      value: visibility === "suppressed" ? null : journeyHeadline(metric),
+      value: visibility === "suppressed" ? null : headline.text,
       kindLabel: metric.value == null ? "sin datos" : metric.kind === "nps" ? "NPS" : "Promedio",
+      unit: metric.unit,
+      numeric: visibility === "suppressed" ? null : headline.numeric,
       visibility,
       n: visibleCount(metric.n, visibility),
       detail: visibility === "suppressed" ? [] : metric.detail,

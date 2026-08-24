@@ -1,20 +1,40 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+/*
+ * The font pipeline, repaired (audit F1).
+ *
+ * The product previously downloaded two webfonts and then discarded them: a
+ * trailing `body { font-family: Arial }` in `globals.css` won over the loaded
+ * faces, so the shipped typeface was Arial.
+ *
+ * Both faces are Be Community's own voices, and both are SELF-HOSTED: Next
+ * downloads them at build time and serves them from the application's origin,
+ * so `font-src 'self'` is satisfied without relaxing the CSP and without a
+ * runtime request to any third party.
+ */
+const display = Bricolage_Grotesque({
+  variable: "--font-bricolage",
+  subsets: ["latin", "latin-ext"],
+  display: "swap",
+  fallback: ["Segoe UI", "system-ui", "sans-serif"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const text = Hanken_Grotesk({
+  variable: "--font-hanken",
+  subsets: ["latin", "latin-ext"],
+  display: "swap",
+  fallback: ["Segoe UI", "system-ui", "sans-serif"],
 });
 
 export const metadata: Metadata = {
-  title: "Be Community",
-  description: "Portal de estudios y dashboards por cliente",
+  title: {
+    default: "Be Community",
+    template: "%s · Be Community",
+  },
+  description:
+    "Resultados de tu comunidad: qué pasó, qué significa y qué mirar después.",
 };
 
 export default function RootLayout({
@@ -24,10 +44,20 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // The product is entirely in Spanish (audit F2). Screen readers were
+      // applying English phonemes to every word on every screen.
+      lang="es"
+      className={`${display.variable} ${text.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <a
+          href="#contenido"
+          className="sr-only rounded-md bg-ink px-4 py-2 text-sm font-semibold text-paper focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50"
+        >
+          Saltar al contenido
+        </a>
+        {children}
+      </body>
     </html>
   );
 }

@@ -18,8 +18,10 @@ data-connected journey maps for the firm's clients (schools).
 **It is NOT a CRM.** No sales pipelines. The product is data → insight → client-facing story.
 
 - The P0-P6 V2 framework is deployed to a **synthetic-data test/beta Worker**.
-  It is not yet a real-client go-live environment; P7 and the go-live controls
-  remain outstanding.
+  P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`, but that branch
+  is not yet merged into remote `main`; the P8 worktree intentionally descends
+  from it. This is not yet a real-client go-live environment, and deferred
+  go-live controls return only after the product experience is complete.
 - Full V2 architecture lives in `BeCommunity_V2_Technical_Architecture.docx` (reference only — consult, don't inline).
 - Project background and decisions live in `system_context.md`.
 
@@ -63,6 +65,14 @@ data-connected journey maps for the firm's clients (schools).
 - Render user-generated qualitative content only through React's escaped text
   nodes; never introduce `dangerouslySetInnerHTML`. Only human-confirmed themes
   and independently approved quotes may cross the client/publication boundary.
+- ⓘ **Absence is not a client-facing finding.** What Be Community chose not to
+  publish — or has not finished reviewing — renders as nothing on the client
+  side: no placeholder, empty card, heading, reserved row or copy explaining the
+  gap. This does **not** apply to caveats about a result the client *is* shown
+  (small base, suppressed segment, missing data behind a visible number) — those
+  are analytical honesty and must stay. Internal Studio and
+  `/admin/preview/[studyId]` own the omission warnings, visibly marked as
+  internal. Contract C11 in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md`.
 
 ### Calculation integrity
 - Composite metrics (NPS, CSAT, Top-2-Box) are **canonical functions defined once** (`src/lib/calc/metrics.ts`), unit-tested against known-good outputs (`scripts/calculation-test.mjs`). A wrong number does not throw — it misleads a client. This is a human-review zone.
@@ -165,6 +175,7 @@ P4 BI overhaul (cross-filter, pivot, journey map, qualitative human-in-the-loop)
 P5 Client portal + longitudinal memory
 P6 Visual backoffice
 P7 Full hardening pass + all adversarial suites + backups + incident playbook
+P8 Product experience transformation (real-product increments; Insights + Studio + theming)
 
 Each phase must pass its adversarial security suite before the next begins.
 The template **framework** ships in V2; the template **content** (real formulas,
@@ -179,23 +190,31 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   data. P6E completed with 108 automated checks and 0 failures.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
-- P7's evidence plan is approved. PRs 1-6 are merged: deployment identity,
-  supply-chain/CI, executable RLS coverage, the reviewed adversarial harness,
-  and Suite A are complete. Suite A is wired into `gates:live` and passed its
-  deployed post-merge isolation smoke with zero fixture residue.
-- The current unit is **P7 PR 7, `p7f-suites-b-c`**: behavioral authorization
-  Suite B (64/64) and hostile-input Suite C (13/13), both green on the branch
-  and **not yet merged**. `gates:live` is now
-  `test:qualitative-live -> suite:a -> suite:b -> suite:c`. Suite B reports its
-  evidence in three layers that are never summed — catalogue completeness, the
-  outer action route's own POST method and path, and the subset with an
-  observable inner Server-Action denial — and says plainly that it does not
-  claim all eighteen inner actions were invoked. PR 7 also carries one minimal
-  product correction (the upload size boundary in
-  `src/app/admin/upload/UploadForm.tsx` and `src/lib/validation/schemas.ts`), so
-  it is no longer test-only. Do not start Suite E, audit logging, anomaly
-  detection, portability, incident response or compliance work until PR 7 is
-  reviewed, merged and post-merge verified.
+- P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`: Suites B and C,
+  the canonical live chain and their review fixes are green; PR #38 merged the
+  separate delivery unit into `main`. Do not reopen P7 correction loops during P8.
+  Deferred edge, production-environment,
+  backup/DR and operational controls return as a bounded go-live hardening pass
+  after the product is functionally and visually complete.
+- P8 discovery and visual comparison are complete on
+  `docs/p8-experience-discovery`. The A/B/C and provisional synthesis artifacts
+  are historical design evidence, not an instruction to build more prototypes.
+- The approved direction is an **Interactive Insight Experience**: client work
+  combines a guided `Recorrido` with bounded `Explorar`, structured as
+  question → visual evidence → consultant interpretation → action. Studio is a
+  separate no-code operational experience for non-technical internal users.
+- **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
+  semantic foundation, sign-in, shells, client panorama and journey slice are
+  established. Do not reopen its visual-prototype loop.
+- **Current next unit: P8.2 Studio guided workflows.** Start from updated
+  `main` only after the accepted P7/P8-A delivery PRs are integrated. The first
+  owner-review slice is the no-code access-scope picker and visual mapping
+  experience; do not type raw JSON, internal identifiers or metric keys in an
+  ordinary Studio workflow.
+- Preserve P7 authorization/input gates, all calculation outputs, ingestion,
+  RLS, roles and publication boundaries. P8.2 changes presentation and guided
+  workflow first; migrations or authorization changes require a separate,
+  explicit design and review boundary.
 - Do not mutate real-production infrastructure, rotate credentials, create a
   real-data environment, or enable irreversible controls during synthetic P7
   work. Do not redirect the roadmap toward retention UI, new role tiers or an
