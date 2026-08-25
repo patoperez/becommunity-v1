@@ -59,6 +59,7 @@ import {
   ACTION_GATE_WITHHELD,
   actionGateIsObservable,
   ACTION_ROUTE_CLASSES,
+  routesForOperation,
   operationsOnRoute,
   outerRouteDenialIsProven,
   selfTestOuterRoute,
@@ -150,12 +151,27 @@ console.log("\n[1] Must-execute rosters, generated from the frozen catalogue:");
   ok(`${Object.keys(ACTION_GATE_WITHHELD).length} withheld action-level probes each name an operation and a reason`);
 
   // Denial-only operations are exactly the ones whose success cannot be undone.
+  // P8.2 added six: the account and client lifecycle, and publication. Their
+  // success would ban an Auth identity, destroy a client organisation with every
+  // row and Storage object under it, or change what a real client account can
+  // see — none of which this run can reverse.
   assert.deepEqual(
     [...DENIED_PATHS_ONLY].sort(),
-    ["clients.deleteClientUser", "clients.inviteClientUser", "clients.updateClientUser", "clients.updateTenantBrand"],
+    [
+      "clients.archiveTenant",
+      "clients.deleteClientUser",
+      "clients.deleteTenant",
+      "clients.inviteClientUser",
+      "clients.restoreClientUser",
+      "clients.restoreTenant",
+      "clients.suspendClientUser",
+      "clients.updateClientUser",
+      "clients.updateTenantBrand",
+      "studies.setPublication",
+    ],
     "the denial-only set must stay exactly the operations whose success this run cannot undo",
   );
-  ok("the denial-only set is exactly the four operations whose success creates an Auth identity, a message or a Storage object");
+  ok(`the denial-only set is exactly the ${DENIED_PATHS_ONLY.length} operations whose success creates an Auth identity, a message, a Storage object, an irreversible destruction or a change to what a client sees`);
 
   // The gate model. B1 asserts a denial at whichever gate genuinely answered;
   // the ACTION-level probe runs only where the application produces something
@@ -839,17 +855,34 @@ console.log("\n[9] Outer action-route coverage (POST method and path):");
   // Every catalogued mutation names the route it dispatches to, and every route
   // is a real catalogue entry that POSTs to a real path. Derived, never listed.
   for (const name of MUTATING_OPERATIONS) {
-    const route = OPERATIONS[name].actionRoute;
-    assert.ok(route, `${name} must name the outer action route it dispatches to`);
-    const probe = OPERATIONS[route];
-    assert.ok(probe?.outerRouteProbe, `${route} must be an outer route probe`);
-    assert.equal(probe.method, "POST", "an action route is reached by POST, not GET");
-    assert.equal(probe.mechanism, "http", "an outer route probe is ordinary HTTP");
-    assert.equal(probe.mutating, false, "an outer route probe carries no mutation");
-    assert.ok(probe.path.startsWith("/"), "an outer route probe names a real path");
+    const routes = routesForOperation(name);
+    assert.ok(routes.length >= 1, `${name} must name the outer action route it dispatches to`);
+    for (const route of routes) {
+      const probe = OPERATIONS[route];
+      assert.ok(probe?.outerRouteProbe, `${route} must be an outer route probe`);
+      assert.equal(probe.method, "POST", "an action route is reached by POST, not GET");
+      assert.equal(probe.mechanism, "http", "an outer route probe is ordinary HTTP");
+      assert.equal(probe.mutating, false, "an outer route probe carries no mutation");
+      assert.ok(probe.path.startsWith("/"), "an outer route probe names a real path");
+    }
   }
-  const covered = ACTION_ROUTE_CLASSES.flatMap((route) => operationsOnRoute(route));
-  assert.deepEqual([...covered].sort(), [...MUTATING_OPERATIONS].sort(), "every mutation maps to exactly one route");
+  // P8.2 made this one-to-MANY: a Server Action reachable at both its legacy
+  // `/admin/*` address and its Studio address genuinely travels on two
+  // protected POST paths. Completeness in BOTH directions is what the frozen
+  // catalogue guarantees, so both are asserted rather than the weaker
+  // "exactly one route" that could now hide a second path.
+  const covered = new Set(ACTION_ROUTE_CLASSES.flatMap((route) => operationsOnRoute(route)));
+  assert.deepEqual(
+    [...covered].sort(),
+    [...MUTATING_OPERATIONS].sort(),
+    "every mutation is covered by at least one catalogued route class",
+  );
+  for (const route of ACTION_ROUTE_CLASSES) {
+    assert.ok(
+      operationsOnRoute(route).length > 0,
+      `${route} must be named by at least one mutation, or it is not an action route`,
+    );
+  }
   ok(`${MUTATING_OPERATIONS.length} mutations map onto ${ACTION_ROUTE_CLASSES.length} protected POST path classes`);
 
   // The PUBLIC-path control is a route probe too, but it is deliberately NOT an

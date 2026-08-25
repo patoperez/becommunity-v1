@@ -253,8 +253,17 @@ for (const [name, source] of [["NarrativeHome", panorama], ["JourneyMap", journe
   assert.doesNotMatch(source, /no hay una lectura publicada para este momento/i,
     `${name} must not repeat a missing-interpretation placeholder`);
 }
-const previewPage = await readCode("src/app/admin/preview/[studyId]/page.tsx");
-assert.match(previewPage, /audience="preview"/, "the internal preview must request the readiness view");
+// P8.2 moved the preview's rendering into ONE shared component so its two
+// addresses cannot diverge. The readiness view is requested there, once.
+const previewView = await readCode("src/components/studio/ClientPreviewView.tsx");
+assert.match(previewView, /audience="preview"/, "the internal preview must request the readiness view");
+for (const route of [
+  "src/app/admin/preview/[studyId]/page.tsx",
+  "src/app/studio/e/[studyId]/vista-cliente/page.tsx",
+]) {
+  const source = await readCode(route);
+  assert.match(source, /<ClientPreviewView/, `${route} must render the shared preview`);
+}
 const dashboardPage = await readCode("src/app/dashboard/page.tsx");
 assert.doesNotMatch(dashboardPage, /audience="preview"/,
   "the client dashboard must never request the internal readiness view");
@@ -367,7 +376,9 @@ const backLink = await readCode("src/components/shell/BackLink.tsx");
 assert.doesNotMatch(backLink, /history\.back|router\.back/,
   "the parent must be an explicit href, never browser history");
 assert.match(backLink, /Volver a Studio/);
-assert.match(backLink, /Volver a Estudios y plantillas/);
+assert.match(backLink, /Volver a Estudios/);
+assert.match(backLink, /Volver a Clientes y accesos/, "the client list is an explicit parent too");
+assert.match(backLink, /studyParent/, "a surface inside a study has the study as its parent");
 for (const [file, expected] of [
   ["src/app/admin/studies/page.tsx", "STUDIO_HOME"],
   ["src/app/admin/qualitative/page.tsx", "STUDIO_HOME"],
@@ -384,6 +395,9 @@ for (const [file, expected] of [
 // The Studio home is the root: a back control there would point at itself.
 assert.doesNotMatch(clientDashboard, /back=\{STUDIO_HOME\}/, "the Studio home has no parent");
 const preview = await readCode("src/app/admin/preview/[studyId]/page.tsx");
+const studioPreview = await readCode("src/app/studio/e/[studyId]/vista-cliente/page.tsx");
+assert.match(studioPreview, /<PreviewNotice back=\{back\} \/>/,
+  "the Studio preview mounts the notice pointing at the study it belongs to");
 // The preview's return to the internal study list now lives in the sticky
 // notice, which is where the reviewer can always reach it. Section [15] asserts
 // that the notice actually carries the link; here we assert the preview mounts
@@ -397,9 +411,24 @@ const configurator = await readCode("src/app/admin/studies/StudyConfigurator.tsx
 assert.match(configurator, /studyStateLabel\(study\.status\)/,
   "the study chip must translate the enum, not print it");
 assert.doesNotMatch(configurator, />\{study\.status\}</, "the raw enum must not reach the screen");
-for (const value of ['value="draft"', 'value="published"', 'value="archived"']) {
-  assert.ok(configurator.includes(value), `the stored enum value ${value} is unchanged`);
+// PUBLICATION LEFT THE CONFIGURATION FORM (P8.2). The configurator can no
+// longer move a study between states: it carries the current one as a hidden
+// field and the Server Action refuses anything else. The stored enum is
+// unchanged and is asserted where it is now chosen — the publication surface,
+// which is reachable only through the client preview.
+assert.match(configurator, /name="status" value=\{study\.status\}/,
+  "the configurator carries the current state and cannot change it");
+const publishPage = await readCode("src/app/studio/e/[studyId]/publicar/page.tsx");
+for (const value of ['next_status: "draft"', 'next_status: "published"', 'next_status: "archived"']) {
+  assert.ok(publishPage.includes(value), `the stored enum value ${value} is unchanged`);
 }
+const studyActions = await readCode("src/app/admin/studies/actions.ts");
+assert.match(studyActions, /z\.enum\(\["draft", "published", "archived"\]\)/,
+  "the status schema still accepts exactly the three stored values");
+assert.match(studyActions, /status\.data !== current\.status/,
+  "the configuration action refuses to move the publication state");
+assert.match(studyActions, /formData\.get\("acknowledged"\) !== "on"/,
+  "publishing requires the acknowledgement the preview asks for");
 // Every submit label the adversarial harness signs actions with.
 for (const [source, labels] of [
   [studiesPage, ["Crear y cargar datos", "Usar plantilla", "Guardar como plantilla",
@@ -410,14 +439,25 @@ for (const [source, labels] of [
     assert.ok(source.includes(submitLabel), `the submit control "${submitLabel}" must keep its name`);
   }
 }
+// P8.2 split the qualitative review into a shared workspace rendered at both
+// its addresses. Every control name the adversarial harness signs actions
+// with is unchanged; the assertions follow the controls into the components
+// that now own them.
 const qualitative = await readCode("src/app/admin/qualitative/page.tsx");
-for (const pinned of ["Generar sugerencias pendientes", "Aceptar sugerencias",
-  "Reetiquetar / fusionar", "Rechazar", 'name="observation_id"', 'name="quote_id"',
-  'name="theme"', 'name="stage_key"', 'name="study"', "Publicar cita"]) {
-  assert.ok(qualitative.includes(pinned), `qualitative must keep "${pinned}"`);
+const qualitativeWorkspace = await readCode("src/components/studio/QualitativeWorkspaceView.tsx");
+const qualitativeReview = await readCode("src/components/studio/QualitativeReview.tsx");
+assert.ok(qualitative.includes('name="study"'), 'qualitative must keep "name="study""');
+for (const pinned of ["Generar sugerencias pendientes", "no tiene observaciones cualitativas"]) {
+  assert.ok(qualitativeWorkspace.includes(pinned), `qualitative must keep "${pinned}"`);
 }
-assert.match(qualitative, /no tiene observaciones cualitativas/,
-  "a study with zero observations gets a real empty state, not a naked table head");
+for (const pinned of ["Aceptar sugerencias", "Reetiquetar / fusionar", "Rechazar",
+  'name="observation_id"', 'name="quote_id"', 'name="theme"', 'name="stage_key"',
+  "Publicar cita"]) {
+  assert.ok(qualitativeReview.includes(pinned), `qualitative must keep "${pinned}"`);
+}
+// The 100-row silent truncation became visible paging with a real count.
+assert.doesNotMatch(qualitative, /limit\(100\)/, "the silent 100-row truncation is gone");
+assert.match(qualitativeWorkspace, /<Pager/, "the review list states how many rows exist");
 const clientsPage = await readCode("src/app/admin/clients/page.tsx");
 for (const pinned of ["Crear cliente", "Enviar invitación", "Guardar usuario",
   "Eliminar cuenta cliente", "Guardar identidad", 'name="confirmation_email"']) {
@@ -540,6 +580,9 @@ assert.doesNotMatch(notice, /localStorage|document\.cookie|sessionStorage|fetch\
 assert.match(notice, /flex-wrap/, "it wraps instead of overflowing on a narrow phone");
 const previewRoute = await readCode("src/app/admin/preview/[studyId]/page.tsx");
 assert.match(previewRoute, /banner=\{<PreviewNotice \/>\}/, "the preview uses it");
+// The rendering itself lives in the shared preview component, so the boundary
+// assertions below follow it there rather than being asserted twice.
+const sharedPreview = await readCode("src/components/studio/ClientPreviewView.tsx");
 // Dismissing the notice must never strand the reviewer inside the client
 // surface. The escape path therefore lives OUTSIDE the dismissible notice as
 // well: the header utility slot, which no dismissal can remove. Asserting the
@@ -556,7 +599,7 @@ assert.match(studyCard, /scroll-mt-20/,
 // Editing this route must not have touched its authorization or its
 // publication boundary.
 assert.match(previewRoute, /profile\?\.role !== "internal"/, "internal-only guard intact");
-assert.match(previewRoute, /candidate\.status === "published" \|\| candidate\.id === study\.id/,
+assert.match(sharedPreview, /candidate\.status === "published" \|\| candidate\.id === study\.id/,
   "the publication boundary on the preview history is intact");
 ok("sticky, dismissible, and a persistent /admin/studies escape path outside it; guards intact");
 
