@@ -235,6 +235,21 @@ console.log("\n[2] Outcome classification:");
     new RegExp(dashboardErrorTitle),
     "the harness must classify the public rejection title the dashboard actually renders",
   );
+  for (const forgedSelectDriver of [
+    PAGE.forgeSelectValueByAriaLabel("Filtrar por", "never-real"),
+    PAGE.forgeSelectValueByLabel("Filas", "never-real"),
+  ]) {
+    assert.doesNotMatch(
+      forgedSelectDriver,
+      /createElement|appendChild/,
+      "a forged select value must not mutate React's managed child tree",
+    );
+    assert.match(
+      forgedSelectDriver,
+      /const original = target\.value;[\s\S]*target\.value = [\s\S]*target\.value = original;/,
+      "a forged select value must temporarily rewrite and then restore an existing option",
+    );
+  }
   ok("the app's HTTP-200 wrong-role page is a role denial, and silence is unclassified, never success");
 
   assert.deepEqual(selfTestInjectionClassifier(), []);

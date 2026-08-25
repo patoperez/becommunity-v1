@@ -656,23 +656,25 @@ export const PAGE = {
     })()`,
 
   /**
-   * Inserts a value the server never offered into the product's own control and
-   * selects it — the visible-client-state tampering case. The framework still
-   * builds the request; only the value is hostile.
+   * Temporarily rewrites an existing option to a value the server never offered
+   * and selects it — the visible-client-state tampering case. Reusing an option
+   * preserves React's managed child tree while the synchronous change handler
+   * captures the hostile value and builds the request.
    */
   forgeSelectValueByAriaLabel: (prefix, value) => `
     (() => {
       const select = [...document.querySelectorAll('select')]
         .find((node) => (node.getAttribute('aria-label') || '').startsWith(${JSON.stringify(prefix)}));
       if (!select) return 'no-control';
-      const option = document.createElement('option');
-      option.value = ${JSON.stringify(value)};
-      option.textContent = 'forged';
-      select.appendChild(option);
+      const target = [...select.options].find((option) => option.value !== select.value);
+      if (!target) return 'no-alternative';
+      const original = target.value;
+      target.value = ${JSON.stringify(value)};
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(select, option.value);
+      setter.call(select, target.value);
       select.dispatchEvent(new Event('input', { bubbles: true }));
       select.dispatchEvent(new Event('change', { bubbles: true }));
+      target.value = original;
       return 'ok';
     })()`,
 
@@ -714,14 +716,15 @@ export const PAGE = {
         .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
       const select = label && label.querySelector('select');
       if (!select) return 'no-control';
-      const option = document.createElement('option');
-      option.value = ${JSON.stringify(value)};
-      option.textContent = 'forged';
-      select.appendChild(option);
+      const target = [...select.options].find((option) => option.value !== select.value);
+      if (!target) return 'no-alternative';
+      const original = target.value;
+      target.value = ${JSON.stringify(value)};
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(select, option.value);
+      setter.call(select, target.value);
       select.dispatchEvent(new Event('input', { bubbles: true }));
       select.dispatchEvent(new Event('change', { bubbles: true }));
+      target.value = original;
       return 'ok';
     })()`,
 
