@@ -835,8 +835,8 @@ const selectByValue = (labelPrefix, value) => `
     return 'ok';
   })()`;
 
-/** The upload screen's own "analysis is ready" signal (UploadForm.tsx:272). */
-const UPLOAD_READY = "() => /filas detectadas/.test(document.body.innerText)";
+/** The upload screen's own "analysis is ready" signal (UploadForm.tsx:223). */
+const UPLOAD_READY = "() => /filas en el archivo/.test(document.body.innerText)";
 /** The preview screen's own "preview is ready" signal (its confirm control). */
 const PREVIEW_READY =
   "() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim().startsWith('Confirmar importaci'))";
@@ -944,7 +944,7 @@ export const BROWSER_DRIVERS = Object.freeze({
         .waitForDom(`() => ${PAGE.actionOutcomeKind} !== 'none'`, params.settleTimeoutMs)
         .catch(() => false);
       const outcome = settled ? await context.evaluate(PAGE.actionOutcomeKind) : "none";
-      const enabled = await context.evaluate(PAGE.controlEnabled("Analizar"));
+      const enabled = await context.evaluate(PAGE.controlEnabled("Revisar archivo"));
       return {
         status: 200,
         domSignal: outcome,
@@ -954,7 +954,7 @@ export const BROWSER_DRIVERS = Object.freeze({
       };
     }
 
-    const clicked = await context.evaluate(PAGE.clickByName("Analizar"));
+    const clicked = await context.evaluate(PAGE.clickByName("Revisar archivo"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `analyze-${clicked}` };
     // `settleTimeoutMs` is a wider BOUND, never a retry: a large source is
     // megabytes of body that must be transferred and buffered before the action

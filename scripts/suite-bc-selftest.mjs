@@ -1001,6 +1001,17 @@ console.log("\n[10] Upload size boundary:");
   assert.match(action, /file\.size > MAX_UPLOAD_BYTES/, "the server-side size check must remain in place");
   ok("the client refuses on selection with the shared rule and message; the server check remains untouched");
 
+  // The live driver must follow the product's current, user-visible controls.
+  // These assertions make a future Studio copy change fail offline instead of
+  // turning every Suite C upload into an unexplained `unclassified` result.
+  const browserHarness = readFileSync("scripts/lib/harness-browser.mjs", "utf8");
+  assert.match(form, />\{pending \? "Revisando…" : "Revisar archivo"\}</, "the product exposes the review control");
+  assert.match(browserHarness, /clickByName\("Revisar archivo"\)/, "the live driver clicks that same control");
+  assert.match(form, /\{analysis\.sourceRows\} filas en el archivo/, "the product exposes a stable ready signal");
+  assert.match(browserHarness, /\/filas en el archivo\//, "the live driver settles on that same ready signal");
+  assert.doesNotMatch(browserHarness, /clickByName\("Analizar"\)|\/filas detectadas\//, "retired upload copy cannot drive Suite C");
+  ok("the upload driver and the product share the current control and ready-state wording");
+
   // The leniency is GONE, not narrowed: `unclassified` is red everywhere.
   assert.deepEqual(selfTestRefusalClassifier(), []);
   assert.equal(uploadRefusalIsAcceptable("unclassified").acceptable, false, "silence can never be a refusal");
