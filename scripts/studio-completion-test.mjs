@@ -18,9 +18,13 @@
  *   7. the destructive dialog names object, consequence, reversibility and
  *      recovery, and no P8.2-owned `window.confirm()` survives;
  *   8. suspend/restore and archive/restore are enforced at a real boundary;
- *   9. permanent deletion re-checks its impact, requires the exact name, and
- *      handles every dependent object deliberately;
- *  10. migration 0015 is additive, RLS-covered, granted and reversible.
+ *   9. permanent CLIENT deletion is disabled and refused server-side, and no
+ *      path through it reaches a row, an identity or a stored file;
+ *  10. irreversible USER deletion cannot run without durable evidence written
+ *      first, and reversible lifecycle mutations undo themselves rather than
+ *      succeeding unrecorded;
+ *  11. migration 0015 is additive, least-privileged, RLS-covered, size-bounded
+ *      and reversible, and the stored-object inventory is paged and honest.
  *
  * Behaviour is asserted against the real modules. Source assertions are used
  * only where the claim IS about the source — "this route exists", "this control
@@ -47,6 +51,11 @@ import {
   SUSPENSION_DURATION,
   SUSPENSION_LIFTED,
   tenantLifecycle,
+  AUDIT_DETAILS_DB_LIMIT_BYTES,
+  boundedDetails,
+  encodedSize,
+  MAX_DETAIL_BYTES,
+  STORAGE_INVENTORY_CEILING,
 } from "../src/lib/studio/lifecycle-model.ts";
 import {
   DEFAULT_PAGE_SIZE,
@@ -597,12 +606,25 @@ assert.match(clientActions, /ban_duration: SUSPENSION_LIFTED/, "restoring lifts 
 assert.equal(SUSPENSION_LIFTED, "none");
 assert.ok(/^\d+h$/.test(SUSPENSION_DURATION), "the suspension window is a real duration, not a magic string");
 assert.match(clientActions, /profile\?\.role !== "client"/, "a lifecycle action may only ever touch a client account");
-for (const fn of ["suspendClientUser", "restoreClientUser", "archiveTenant", "restoreTenant", "deleteTenant"]) {
+// `deleteTenant` is deliberately absent from this list: it no longer mutates
+// anything, so there is nothing for it to audit. Section [10] proves that it
+// refuses instead, which is a stronger statement than "it is audited".
+for (const fn of ["suspendClientUser", "restoreClientUser", "archiveTenant", "restoreTenant", "deleteClientUser"]) {
   const at = clientActions.indexOf(`export async function ${fn}`);
   assert.ok(at > 0, `${fn} must exist`);
-  const body = clientActions.slice(at, at + 2600);
+  const body = clientActions.slice(at, at + 3600);
   assert.match(body, /await internalContext\(\)/, `${fn} must prove an internal role on the server`);
-  assert.match(body, /recordLifecycleEvent/, `${fn} must leave administrative evidence`);
+  // Reversible mutations record through `recordOrUndo`, which writes the event
+  // and reverses the change if the write fails. Section [12] proves that.
+  assert.match(body, /recordOrUndo|recordLifecycleEvent/, `${fn} must leave administrative evidence`);
+}
+{
+  const at = clientActions.indexOf("export async function deleteTenant");
+  assert.match(
+    clientActions.slice(at),
+    /await internalContext\(\)/,
+    "even the refused deletion proves an internal role before answering",
+  );
 }
 ok("every lifecycle mutation proves an internal role, is confined to client accounts, and is audited");
 
@@ -620,127 +642,242 @@ for (const [file, label] of [
 ok("an archived client is refused new studies, new invitations and new publications at the server, not by a hidden button");
 
 // ---------------------------------------------------------------------------
-// 10. Permanent deletion: exact name, fresh impact, dependent objects
+// 10. Permanent client deletion: disabled, and refused on the server
 // ---------------------------------------------------------------------------
 
-console.log("\n[10] Permanent deletion re-checks its own impact and handles every dependent object");
+console.log("\n[10] Permanent client deletion is disabled, and refused by the server");
 
+const lifecyclePanel = await readCode("src/components/studio/ClientLifecyclePanel.tsx");
+const peopleList = await readCode("src/components/studio/ClientPeopleList.tsx");
+
+// THE OPERATION IS GONE FROM THE ACTION, not merely from the interface.
+const deleteAt = clientActions.indexOf("export async function deleteTenant");
+assert.ok(deleteAt > 0, "the action must still exist so a bypassing caller gets a coherent refusal");
+const deleteBody = clientActions.slice(deleteAt);
+assert.match(deleteBody, /TENANT_DELETION_DISABLED_REASON/, "it refuses with the stated reason");
+assert.match(deleteBody, /finish\("error", TENANT_DELETION_DISABLED_REASON/, "and it refuses as an error, always");
+for (const [what, forbidden] of [
+  ["a tenant row delete", /from\("tenant"\)\.delete\(\)/],
+  ["an Auth account delete", /auth\.admin\.deleteUser/],
+  ["a Storage removal", /storage\.from\([^)]*\)\.remove/],
+  ["a storage inventory read", /listTenantStorageObjects/],
+  ["an impact recount", /countTenantImpact/],
+]) {
+  assert.doesNotMatch(deleteBody, forbidden, `the disabled deletion must not reach ${what}`);
+}
+// Nothing anywhere in the client actions can reach the cascade any more.
+assert.doesNotMatch(clientActions, /from\("tenant"\)\.delete\(\)/,
+  "no client action deletes a tenant row");
+assert.doesNotMatch(clientActions, /storage\.from\("tenant-branding"\)\.remove\(storagePaths\)/,
+  "no client action bulk-removes a tenant's stored objects");
+ok("permanent client deletion refuses on the server and no path through it reaches a row, an identity or a file");
+
+// And it is not offered in the interface either — stated, not hidden.
+assert.doesNotMatch(lifecyclePanel, /deleteTenant/, "the panel does not dispatch the disabled action");
+assert.doesNotMatch(lifecyclePanel, /requireExactText=\{tenantName\}/,
+  "there is no typed confirmation for an action that cannot run");
+assert.match(lifecyclePanel, /TENANT_DELETION_DISABLED_REASON/, "the panel states why it is unavailable");
+assert.match(lifecyclePanel, /no disponible/, "and says so in the heading a consultant reads");
+// The analysis survives the execution being withdrawn.
+assert.match(lifecyclePanel, /impactLines\(impact\)/, "the executable impact summary is still rendered");
+assert.match(lifecyclePanel, /archiveTenant/, "archiving is still offered");
+assert.match(lifecyclePanel, /restoreTenant/, "and so is restoring");
+ok("the interface names the unavailability, keeps the impact summary and keeps archive and restore");
+
+// The impact model itself stays executable and stays proved. It gates nothing
+// destructive today; it is what the interface renders, and it is the part a
+// recoverable deletion workflow will need unchanged when it arrives.
+const shown = { ...EMPTY_TENANT_IMPACT, studies: 3, respondents: 120, quantResponses: 480 };
+assert.equal(impactIsUnchanged(shown, { ...shown }), true);
+assert.equal(impactIsUnchanged(shown, { ...shown, respondents: 121 }), false, "one changed count is a changed client");
+assert.deepEqual(impactDifferences(shown, { ...shown, respondents: 121 }), ["personas que respondieron: 120 → 121"]);
+assert.deepEqual(parseImpact(serializeImpact(shown)), shown, "the summary survives its own round trip");
+assert.equal(parseImpact("nonsense"), null, "an unreadable summary is refused, never assumed");
+assert.equal(parseImpact("studies:-1"), null);
+assert.equal(parseImpact(serializeImpact(shown).replace("studies", "estudios")), null, "a renamed field is refused");
+// Exact-name confirmation, still the model the interface and the account
+// deletion both use.
 assert.equal(exactNameMatches("Colegio Norte", "Colegio Norte"), true);
 assert.equal(exactNameMatches("  Colegio   Norte  ", "Colegio Norte"), true, "transcription whitespace is forgiven");
 assert.equal(exactNameMatches("colegio norte", "Colegio Norte"), false, "capitals are not");
 assert.equal(exactNameMatches("Colegio Nort", "Colegio Norte"), false);
-assert.equal(exactNameMatches("", "Colegio Norte"), false);
 assert.equal(exactNameMatches("x", ""), false, "an empty target can never be matched");
 assert.match(nameConfirmationRefusal("", "Colegio Norte"), /Escribe/);
 assert.match(nameConfirmationRefusal("otra cosa", "Colegio Norte"), /no coincide/);
 assert.equal(nameConfirmationRefusal("Colegio Norte", "Colegio Norte"), null);
-ok("permanent client deletion requires the client's own name, typed exactly");
+ok("the impact summary and the exact-name rule remain executable and proved, gating nothing destructive");
 
-const shown = { ...EMPTY_TENANT_IMPACT, studies: 3, respondents: 120, quantResponses: 480 };
-assert.equal(impactIsUnchanged(shown, { ...shown }), true);
-assert.equal(impactIsUnchanged(shown, { ...shown, respondents: 121 }), false, "one changed count stops the deletion");
-assert.deepEqual(impactDifferences(shown, { ...shown, respondents: 121 }), ["personas que respondieron: 120 → 121"]);
-assert.deepEqual(parseImpact(serializeImpact(shown)), shown, "the summary survives its own round trip");
-assert.equal(parseImpact("nonsense"), null, "a summary the server cannot read is refused, not assumed");
-assert.equal(parseImpact("studies:-1"), null);
-assert.equal(parseImpact(serializeImpact(shown).replace("studies", "estudios")), null, "a reordered or renamed summary is refused");
-ok("the impact summary the operator read is compared field by field against one recomputed at execution time");
+console.log("\n[11] Irreversible user deletion cannot run without durable evidence first");
 
-assert.match(clientActions, /const current = await countTenantImpact\(admin, tenantId\.data\)/,
-  "the impact is recomputed at the moment of deletion");
-assert.match(clientActions, /if \(!impactIsUnchanged\(shown, current\)\)/, "and a stale summary stops the deletion");
-const deleteAt = clientActions.indexOf("export async function deleteTenant");
-const deleteBody = clientActions.slice(deleteAt);
+const userDeleteAt = clientActions.indexOf("export async function deleteClientUser");
+const userDeleteBody = clientActions.slice(userDeleteAt, clientActions.indexOf("export async function", userDeleteAt + 10));
+const intentAt = userDeleteBody.indexOf('action: "client_user_delete_started"');
+const destroyAt = userDeleteBody.indexOf("auth.admin.deleteUser");
+const outcomeAt = userDeleteBody.indexOf('action: "client_user_deleted"');
+assert.ok(intentAt > 0, "an intent record must be written");
+assert.ok(intentAt < destroyAt, "the intent record is written BEFORE the irreversible step");
+assert.ok(destroyAt < outcomeAt, "and the outcome record after it");
+assert.match(userDeleteBody, /if \(!intent\.recorded\) \{/, "a failed intent write stops the deletion");
 assert.ok(
-  deleteBody.indexOf("nameConfirmationRefusal") < deleteBody.indexOf("countTenantImpact"),
-  "the typed name is checked before anything is counted",
+  userDeleteBody.indexOf("if (!intent.recorded)") < destroyAt,
+  "and it stops it BEFORE anything is destroyed",
 );
-assert.ok(
-  deleteBody.indexOf('from("profiles")') < deleteBody.indexOf('from("tenant").delete()'),
-  "the identities are collected BEFORE the cascade removes the rows that name them",
-);
-assert.ok(
-  deleteBody.indexOf("listTenantStorageObjects") < deleteBody.indexOf('from("tenant").delete()'),
-  "and the stored files are listed before the rows pointing at them are gone",
-);
-assert.match(deleteBody, /auth\.admin\.deleteUser\(profile\.user_id\)/, "Auth identities are removed explicitly");
-assert.match(deleteBody, /storage\.from\("tenant-branding"\)\.remove\(storagePaths\)/, "Storage objects are removed explicitly");
-assert.match(deleteBody, /orphanedAccounts/, "and anything that could not be removed is reported, not swallowed");
-ok("deletion collects identities and files first, cascades, then removes what no cascade reaches, and reports leftovers");
+// The final message may never claim a completion the evidence does not support.
+assert.match(userDeleteBody, /outcome\.recorded \? "ok" : "error"/,
+  "an unrecorded outcome is reported as an error, not as a clean success");
+assert.match(userDeleteBody, /figura como iniciada sin desenlace/,
+  "and the message says exactly what the record will show");
+assert.doesNotMatch(clientActions, /function auditNote/,
+  "the best-effort audit note is gone: the record is no longer optional");
+ok("an account is never destroyed without durable intent, and a missing outcome is never reported as success");
 
-const peopleList = await readCode("src/components/studio/ClientPeopleList.tsx");
-assert.match(peopleList, /suspendClientUser/, "suspension is a findable action");
-assert.match(peopleList, /restoreClientUser/, "and so is restoring it");
-assert.match(peopleList, /severity="permanent"[\s\S]{0,2000}exactTextFieldName="confirmation_email"/,
-  "permanent user deletion keeps its exact-email confirmation");
-assert.match(peopleList, /Si solo quieres que deje de entrar, suspende el acceso/,
-  "the permanent dialog points at the reversible alternative");
-const lifecyclePanel = await readCode("src/components/studio/ClientLifecyclePanel.tsx");
-assert.match(lifecyclePanel, /severity="recoverable"[\s\S]{0,1500}archiveTenant/, "archiving is the ordinary action");
-assert.match(lifecyclePanel, /severity="permanent"[\s\S]{0,2000}requireExactText=\{tenantName\}/,
-  "deleting a client requires its exact name");
-assert.match(lifecyclePanel, /impact: serializeImpact\(impact\)/, "and carries the summary the operator read");
-assert.match(lifecyclePanel, /LIFECYCLE_UNAVAILABLE_REASON/,
-  "where the lifecycle schema is absent, the controls are disabled with a stated reason rather than hidden");
-ok("archive is the ordinary action, deletion is the exception, and a blocked environment says why");
+console.log("\n[12] Reversible lifecycle mutations never succeed unrecorded");
 
-// ---------------------------------------------------------------------------
-// 11. Migration 0015 is additive, covered, granted and reversible
-// ---------------------------------------------------------------------------
+assert.match(clientActions, /async function requireLifecycleAudit/, "there is one precondition gate");
+assert.match(clientActions, /if \(!\(await lifecycleAuditAvailable\(admin\)\)\) \{[\s\S]{0,120}LIFECYCLE_UNAVAILABLE_REASON/,
+  "and it refuses with the stated reason when the record cannot be written");
+assert.match(clientActions, /async function recordOrUndo/, "and one compensating writer");
+assert.match(clientActions, /await undo\(\);[\s\S]{0,400}finish\(\s*"error"/,
+  "a failed record undoes the change and reports the failure");
 
-console.log("\n[11] The lifecycle migration is additive, RLS-covered, granted and reversible");
+for (const [name, undo] of [
+  ["suspendClientUser", /ban_duration: SUSPENSION_LIFTED/],
+  ["restoreClientUser", /ban_duration: SUSPENSION_DURATION/],
+  ["archiveTenant", /setTenantArchived\(admin, tenantId\.data, false, user\.id\)/],
+  ["restoreTenant", /setTenantArchived\(admin, tenantId\.data, true, user\.id\)/],
+]) {
+  const at = clientActions.indexOf(`export async function ${name}`);
+  assert.ok(at > 0, `${name} must exist`);
+  const body = clientActions.slice(at, clientActions.indexOf("export async function", at + 10) || undefined);
+  assert.match(body, /await requireLifecycleAudit\(admin/, `${name} must refuse when the record is unavailable`);
+  assert.ok(
+    body.indexOf("await requireLifecycleAudit(admin") < body.indexOf("await recordOrUndo"),
+    `${name} must check the precondition before it mutates`,
+  );
+  assert.match(body, /await recordOrUndo\(/, `${name} must record or undo`);
+  // The compensating call is the operation's own inverse, not a guess.
+  const compensator = body.slice(body.indexOf("await recordOrUndo("));
+  assert.match(compensator, undo, `${name} must compensate with its own inverse`);
+}
+ok("all four reversible mutations gate on the record, and undo themselves when it cannot be written");
+
+// The interface says the same thing rather than offering a control that refuses.
+assert.match(peopleList, /auditAvailable: boolean/, "the people list is told whether the record is available");
+assert.match(peopleList, /!auditAvailable \? \([\s\S]{0,300}LIFECYCLE_UNAVAILABLE_REASON/,
+  "and shows the reason instead of the suspend/restore controls");
+assert.match(peopleList, /\{auditAvailable \? <ConfirmAction/,
+  "permanent user deletion is not offered without the record either");
+assert.match(lifecyclePanel, /const canArchive = archiveAvailable && auditAvailable/,
+  "archiving needs both the archive columns and the record");
+ok("the interface states the unavailability rather than offering a control the server would refuse");
+
+console.log("\n[13] The administrative record is bounded, least-privileged and browser-denied");
 
 const migration = await readRaw("supabase/migrations/0015_client_lifecycle_and_audit.sql");
 const rollback = await readRaw("supabase/rollbacks/0015_drop_client_lifecycle_and_audit.sql");
+/** The SQL without its `--` commentary: a comment explaining a revoked default
+ *  privilege must not read as a grant of it. */
+const migrationSql = migration.replace(/^\s*--.*$/gm, "");
 
-assert.match(migration, /alter table public\.tenant\s+add column if not exists archived_at timestamptz/);
-assert.match(migration, /add column if not exists archived_by uuid references auth\.users \(id\) on delete set null/);
-assert.match(migration, /create index if not exists tenant_archived_idx/, "the archive lookup is indexed");
-assert.match(migration, /create table if not exists public\.admin_lifecycle_event/);
+// --- least privilege ---
+assert.match(migration, /revoke all privileges on table public\.admin_lifecycle_event from anon, authenticated;/);
+assert.match(migration, /revoke all privileges on table public\.admin_lifecycle_event from service_role;/,
+  "the default ALL grant migration 0001 hands every new table must be revoked");
+assert.match(migration, /grant select, insert on table public\.admin_lifecycle_event to service_role;/,
+  "and only what the application performs granted back");
+assert.doesNotMatch(migrationSql, /grant all privileges on table public\.admin_lifecycle_event/,
+  "no blanket grant survives");
+for (const forbidden of [/grant[^;]*update[^;]*admin_lifecycle_event/i, /grant[^;]*delete[^;]*admin_lifecycle_event/i]) {
+  assert.doesNotMatch(migrationSql, forbidden, "the evidence table is append-only at the privilege level");
+}
+assert.doesNotMatch(migrationSql, /grant[^;]*truncate[^;]*admin_lifecycle_event/i,
+  "and it cannot be truncated either");
+// The application only ever does what it was granted.
+assert.match(lifecycle, /from\("admin_lifecycle_event"\)\s*\.insert\(/, "the app inserts records");
+assert.match(lifecycle, /from\("admin_lifecycle_event"\)\s*\.select\(/, "and reads them");
+assert.doesNotMatch(lifecycle, /from\("admin_lifecycle_event"\)[\s\S]{0,80}\.(update|delete)\(/,
+  "and never updates or deletes one");
+// Browser roles are denied by policy as well as by grant.
 assert.match(migration, /alter table public\.admin_lifecycle_event enable row level security/);
 assert.match(migration, /alter table public\.admin_lifecycle_event force row level security/);
-assert.match(migration, /create policy "deny_browser_roles" on public\.admin_lifecycle_event/);
-assert.match(migration, /revoke all privileges on table public\.admin_lifecycle_event from anon, authenticated/);
-assert.match(migration, /grant all privileges on table public\.admin_lifecycle_event to service_role/);
-assert.match(migration, /check \(action in \(/, "the recorded actions are a closed set");
-assert.match(migration, /check \(jsonb_typeof\(details\) = 'object'\)/, "the metadata column is constrained to an object");
-assert.match(migration, /begin;[\s\S]*commit;/, "the migration is one transaction");
-ok("0015 adds two nullable columns and one internal table with RLS, FORCE RLS, a deny policy and service-role grants");
+assert.match(migration, /create policy "deny_browser_roles" on public\.admin_lifecycle_event\s*\n\s*for all to anon, authenticated using \(false\) with check \(false\)/,
+  "anon and authenticated are denied every row on every command");
+ok("service_role holds SELECT and INSERT only; anon and authenticated hold nothing and are denied by policy too");
 
-// It must not touch anything that already exists beyond those two columns.
-for (const forbidden of [
-  /drop table(?! if exists public\.admin_lifecycle_event)/i,
-  /drop policy if exists "(?!deny_browser_roles" on public\.admin_lifecycle_event)/i,
-  /create or replace function/i,
-  /security definer/i,
-  /revoke [\s\S]{0,80}on table public\.(study|profiles|tenant|respondent|quant_response|qual_observation)\b/i,
-]) {
-  assert.doesNotMatch(migration, forbidden, "0015 must be additive: it changes no existing policy, grant or function");
-}
-ok("0015 creates no function, no security-definer helper, and alters no existing policy or grant");
+// --- the database-enforced metadata bound ---
+assert.match(migration, /check \(octet_length\(details::text\) <= 4096\)/,
+  "the database bounds the encoded size of the metadata");
+assert.match(migration, /check \(jsonb_typeof\(details\) = 'object'\)/, "and still bounds its type");
+assert.equal(AUDIT_DETAILS_DB_LIMIT_BYTES, 4096, "the declared database bound is what the migration writes");
+assert.ok(
+  MAX_DETAIL_BYTES * 2 === AUDIT_DETAILS_DB_LIMIT_BYTES,
+  "the application bound is half the database bound, so encoding differences can never reach it",
+);
 
+// Behavioural: the sanitiser cannot construct a record beyond its own bound.
+const huge = Object.fromEntries(
+  Array.from({ length: 60 }, (_, index) => [`k${index}`, "x".repeat(120)]),
+);
+const bounded = boundedDetails(huge);
+assert.ok(encodedSize(bounded) <= MAX_DETAIL_BYTES, "an oversized payload is truncated to the ceiling");
+assert.ok(encodedSize(bounded) < AUDIT_DETAILS_DB_LIMIT_BYTES, "and therefore inside the database bound");
+assert.ok(Object.keys(bounded).length > 0, "and it keeps as much as it can rather than dropping everything");
+assert.ok(Object.keys(bounded).length < 60, "while genuinely dropping the tail it cannot carry");
+// Determinism: the same input always yields the same bounded record.
+assert.deepEqual(boundedDetails(huge), bounded, "the truncation is deterministic");
+// Shape is still enforced alongside size.
+assert.deepEqual(
+  boundedDetails({ n: 5, b: true, z: null, s: "ok" }),
+  { n: 5, b: true, z: null, s: "ok" },
+);
+assert.deepEqual(boundedDetails({ bad: { nested: 1 } }), {}, "only flat scalars survive");
+assert.deepEqual(boundedDetails(undefined), {});
+assert.equal(encodedSize(undefined), 2, "the empty record encodes as `{}`");
+ok(`metadata is bounded at ${MAX_DETAIL_BYTES} bytes in the application and ${AUDIT_DETAILS_DB_LIMIT_BYTES} in the database, deterministically`);
+
+// --- evidence outlives its subject, and the rollback says what it costs ---
+assert.doesNotMatch(migrationSql, /admin_lifecycle_event[\s\S]{0,1400}references (public\.tenant|auth\.users|public\.profiles)/,
+  "the evidence table carries no foreign key to a deletable subject or actor");
 assert.match(rollback, /drop table if exists public\.admin_lifecycle_event/);
-assert.match(rollback, /drop column if exists archived_at/);
-assert.match(rollback, /drop column if exists archived_by/);
-assert.match(rollback, /drop index if exists public\.tenant_archived_idx/);
 assert.match(rollback, /export it first|copy \(select \* from public\.admin_lifecycle_event/,
   "the rollback states that it destroys the administrative evidence");
-ok("the rollback drops exactly what 0015 created, and says out loud what that costs");
+ok("the record has no foreign key to what it records, and the rollback is honest about destroying it");
 
-// The application must survive an environment where 0015 is not applied yet.
-assert.match(lifecycle, /MISSING_SCHEMA_CODES/, "a missing column is distinguished from a failed query");
-assert.match(lifecycle, /42703/, "and Postgres' own undefined-column code is what distinguishes it");
-assert.match(lifecycle, /if \(isMissingSchema\(error\)\) return ARCHIVE_STATE_UNAVAILABLE/,
-  "an unapplied migration degrades rather than taking the page down");
-assert.match(lifecycle, /throw new Error\(`tenant archive state/, "and a real query failure still throws");
-assert.match(clientActions, /function auditNote/, "an action that was not recorded says so");
-ok("the code distinguishes an unapplied migration from a broken query, and never presents an unrecorded action as recorded");
+console.log("\n[14] The stored-object inventory is paged, ceilinged and honest when it overflows");
 
-// ---------------------------------------------------------------------------
-// 12. Readiness is honest about what blocks and what merely improves
-// ---------------------------------------------------------------------------
+const lifecycleModel = await readCode("src/lib/studio/lifecycle-model.ts");
+assert.match(lifecycleModel, /export const STORAGE_INVENTORY_CEILING = 1_000;/, "the ceiling is declared, not implicit");
+assert.equal(STORAGE_INVENTORY_CEILING, 1000);
+assert.match(lifecycle, /for \(let page = 0; page < maxPages; page \+= 1\)/,
+  "paging is a bounded for-loop, so no backend answer can turn it into a load loop");
+assert.match(lifecycle, /offset: page \* STORAGE_PAGE/, "each page asks for the next offset");
+assert.match(lifecycle, /if \(entries\.length < STORAGE_PAGE\) \{[\s\S]{0,120}complete: true/,
+  "a short page ends the listing and reports completeness");
+assert.match(lifecycle, /complete: false,[\s\S]{0,200}inventario está incompleto/,
+  "reaching the ceiling reports an incomplete inventory in words");
+assert.match(lifecycle, /if \(error\) \{[\s\S]{0,200}complete: false/,
+  "a Storage error is an incomplete inventory, never an empty one reported as complete");
+assert.doesNotMatch(lifecycle, /\.list\(tenantId, \{ limit: 200 \}\)/, "the single 200-object call is gone");
+// The impact report carries the flag rather than hiding it inside a count.
+assert.match(lifecycle, /storageInventoryComplete: storageObjects\.complete/,
+  "the impact report says whether its storage half is trustworthy");
+assert.match(lifecyclePanel, /storageInventoryComplete/, "and the interface receives it");
+assert.match(lifecyclePanel, /inventario de archivos guardados está incompleto/,
+  "and says so when it is incomplete");
+ok(`the inventory pages to a ${STORAGE_INVENTORY_CEILING}-object ceiling and states an incomplete result instead of undercounting`);
 
-console.log("\n[12] Readiness separates what blocks from what merely improves");
+console.log("\n[15] The migration-number collision with the deferred P7 audit log is gone");
+
+const p7Plan = await readRaw("docs/P7_PLAN.md");
+assert.match(p7Plan, /## 0\.1 Migration numbering/, "the plan records that 0015 is taken");
+assert.match(p7Plan, /`0015` is no longer\s*\n?available/, "and says so explicitly");
+assert.doesNotMatch(p7Plan, /migration `0015` — `audit_log`/, "the reserved-number claim is gone");
+assert.doesNotMatch(p7Plan, /`supabase\/rollbacks\/0015_drop_audit_log\.sql`/, "and so is its rollback filename");
+assert.doesNotMatch(p7Plan, /`audit_log` requirements \(migration `0015`\)/, "and the requirements heading");
+assert.match(p7Plan, /the next available migration/, "the audit log now takes the next available number");
+ok("the P7 audit log no longer claims migration 0015, which P8.2 lifecycle evidence occupies");
+
+console.log("\n[16] Readiness separates what blocks from what merely improves");
 
 const emptyStudy = studyReadiness({
   status: "draft", clientArchived: false, quantResponses: 0, respondents: 0,

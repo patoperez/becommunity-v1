@@ -213,17 +213,23 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   the qualitative review and the import history, publication reachable only
   through the client preview, one accessible destructive-action dialog in place
   of `window.confirm()`, and the account and client lifecycle. It is gated by
-  `npm run test:studio-completion` (44 checks) beside
-  `npm run test:studio-workflows` (22). **Two things remain open and must not be
-  presented as done:** migration `0015` is not applied to any environment, so
-  archiving and permanently deleting a client render disabled with a stated
-  reason; and the live adversarial chain has not run against this branch. P8.3
-  has not started. No ordinary Studio workflow may ask for raw JSON, an internal
+  `npm run test:studio-completion` (47 checks) beside
+  `npm run test:studio-workflows` (22). **Three things remain open and must not
+  be presented as done:** permanent CLIENT deletion is disabled and refused
+  server-side until a recoverable cross-system deletion workflow exists;
+  migration `0015` is not applied to any environment, so every lifecycle action
+  refuses with a stated reason; and the live adversarial chain has not run
+  against this branch. P8.3 has not started. No ordinary Studio workflow may ask for raw JSON, an internal
   identifier or a metric key.
 - **Every `/admin/**` address still answers.** Studio gained addresses; it
   renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
   frozen adversarial catalogue all depend on the old paths, and
   `src/lib/studio/routes.ts` records the pairing so a gate can assert it.
+- ⓘ **No lifecycle action succeeds unrecorded.** Suspend, restore, archive and
+  restore refuse when the administrative record is unavailable, and undo
+  themselves if the record cannot be written after the change. Permanent user
+  deletion writes durable intent and checks that write BEFORE deleting. Do not
+  reintroduce a best-effort "we could not record this" success path.
 - ⓘ **Publication has exactly one surface.** `/studio/e/[studyId]/publicar`,
   reached from the client preview, is the only path that moves a study between
   draft, published and archived. `updateStudyConfiguration` may only re-save the

@@ -104,12 +104,11 @@ lie a consultant would act on.
 new invitations and new publications — enforced on the server at the moment of
 the write, not by hiding a control on a page that may have been rendered before
 a colleague archived the client. It revokes nobody's existing access, and the
-interface says so rather than letting an operator assume otherwise. Permanent
-client deletion shows a counted impact summary, requires the client's own name
-typed exactly, recomputes the impact at execution time and stops if a single
-number moved, and handles every dependent object deliberately: identities and
-Storage files are collected before the cascade, removed explicitly after it, and
-anything that could not be removed is reported rather than swallowed.
+interface says so rather than letting an operator assume otherwise.
+
+**Permanent client deletion is DISABLED** — see the review-fix pass below. The
+impact summary it used to gate is still computed and still shown, because
+knowing what a client is made of is worth showing before archiving it.
 
 ---
 
@@ -190,7 +189,7 @@ Run in WSL 2 Ubuntu (Node 24.11.1, npm 10.9.2) on the exact final commit.
 | `npm run typecheck` | 0 |
 | `npm run lint` | 0 (0 errors; 53 pre-existing warnings in `scripts/`) |
 | `npm test` — 28 gates | 0 |
-| `npm run test:studio-completion` | 0 — **44 checks** |
+| `npm run test:studio-completion` | 0 — **47 checks** after the review-fix pass |
 | `npm run test:studio-workflows` | 0 — 22 checks (slice one, unchanged) |
 | `npm run build` | 0 |
 | `npm run cf:build` | 0 |
@@ -243,9 +242,13 @@ does — and its native-dialog handler no longer claims the product raises one.
 
 ## What is intentionally incomplete
 
-1. **Migration 0015 is not applied to any environment.** Until it is, archiving
-   and permanently deleting a client render as unavailable with the reason
-   stated, and administrative events are not recorded. Suspension is unaffected.
+1. **Migration 0015 is not applied to any environment.** Until it is, EVERY
+   lifecycle action refuses with the reason stated — archive, restore, suspend,
+   restore and permanent account deletion alike — because each of them promises
+   administrative evidence and there is nowhere to write it. See the review-fix
+   pass below.
+2. **Permanent client deletion is disabled outright**, independently of the
+   migration, and refused on the server.
 2. **The live adversarial chain has not run against this branch.** See above.
 3. **Template ownership is unchanged.** Decision D5 approved sharing templates
    across the internal team with the author shown; `study_template` is still
@@ -262,6 +265,104 @@ does — and its native-dialog handler no longer claims the product raises one.
 
 ---
 
+
+---
+
+## Review-fix pass — release-blocking integrity issues
+
+A bounded pass on the same branch, after the record above. It changed no route,
+no Studio workflow, no calculation, no ingestion contract and no isolation
+boundary. It closed five integrity issues.
+
+### 1. Permanent client deletion fails closed
+
+The previous implementation deleted the tenant row FIRST and then attempted the
+Auth accounts and the Storage objects, writing its administrative record last.
+That order can leave an Auth identity or a stored file behind after the cascade
+has destroyed everything pointing at them, and a failure in the audit write
+landed *after* the irreversible step. Counting failures afterwards is a report,
+not transactional safety.
+
+The operation is now **disabled**, using the fallback the task authorised:
+
+- `deleteTenant` refuses on the server, before reading anything about the
+  client, with `TENANT_DELETION_DISABLED_REASON` — so a caller that skips the
+  interface is refused identically. No path through it reaches a row delete, an
+  Auth call, a Storage call, the storage inventory or the impact recount, and
+  the gate asserts each of those absences.
+- The interface states the unavailability in internal-facing words instead of
+  hiding the control.
+- Archive and restore are untouched, and the executable impact summary and the
+  exact-name rule are retained, still proved, and gate nothing destructive.
+
+It returns when there is a recoverable, idempotent, resumable cross-system
+deletion workflow: durable intent, retryable per-system steps, and a terminal
+state that is either complete or explicitly stuck. That is real engineering and
+it was not this pass.
+
+### 2. Evidence before the irreversible step, and no false completion
+
+**Permanent user deletion** now writes `client_user_delete_started` and CHECKS
+the write before touching the account. If that record cannot be written —
+missing schema included — nothing is deleted. The account is then deleted, and
+`client_user_deleted` is written as the outcome. A started row with no matching
+deleted row means "attempted, outcome unknown", which is exactly that state; the
+success message never claims a completion the evidence does not support, and an
+unrecorded outcome is reported as an error.
+
+**Reversible mutations** (suspend, restore, archive, restore) now refuse
+outright when the administrative record is unavailable, rather than succeeding
+unrecorded while the product claims an audit trail. When it IS available they
+apply the change, write the record, and — if that write fails — **undo the
+change with its own inverse** and report that nothing happened. That
+compensation is available only because these operations are reversible; the
+irreversible path does not use it and does not pretend to.
+
+The best-effort `auditNote()` is gone. The record is no longer optional.
+
+### 3. Migration 0015, hardened without resuming P7
+
+- **Least privilege.** Migration 0001 grants every new public table ALL to
+  `service_role` and SELECT/INSERT/UPDATE/DELETE to `authenticated` by default.
+  Both are revoked, and only `select, insert` is granted back to `service_role`
+  — the table is append-only at the privilege level, not merely by convention,
+  which is the property that makes it evidence. `anon` and `authenticated` hold
+  nothing and are additionally denied every row by the RLS policy.
+- **A database-enforced size bound.** `check (octet_length(details::text) <=
+  4096)`, beside the existing object-type check. The application sanitiser holds
+  to **2048** — half — so it can never build a record the database would reject;
+  the two are measured on different encodings and the margin removes the
+  question. The sanitiser is behaviourally tested: it truncates deterministically
+  to its ceiling, keeps as much as it can, and still admits only flat scalars.
+- Unchanged: RLS + FORCE RLS, browser-role denial, no foreign keys to deletable
+  subjects or actors, and a rollback that says out loud that it destroys the
+  evidence.
+
+### 4. The storage inventory no longer undercounts
+
+`listTenantStorageObjects` asked for at most 200 objects in a single call and
+returned whatever came back. It now pages in a **bounded `for` loop** — never a
+`while` — to a declared ceiling of **1000 objects**, and returns
+`{ paths, complete, incompleteReason }`. A short page ends the listing; the
+ceiling or a Storage error returns an explicitly incomplete result. The impact
+report carries that flag, and the interface says the inventory is incomplete
+rather than showing a count that looks authoritative.
+
+### 5. The migration-number collision is gone
+
+`docs/P7_PLAN.md` reserved `0015` for the hardened `audit_log`. P8.2 legitimately
+took `0015` for client-lifecycle evidence, which is a different and much smaller
+thing. The plan now carries §0.1 recording the collision and directs the P7
+audit log to **the next available migration number**; the five stale `0015`
+references are corrected. Nothing else in P7 was revised, executed or resumed.
+
+### Focused gates for this pass
+
+`typecheck` 0 · `lint` 0 · `test:studio-completion` 0 (**47 checks**) ·
+`test:studio-workflows` 0 · `test:client-admin` 0 · `test:design-tokens` 0 ·
+`test:client-preview` 0 · `test:publication-boundary` 0 · `test:data-scope` 0 ·
+`test:suite-bc-selftest` 0. The final canonical chain is in the delivery report.
+
 ## Six questions for you
 
 1. **Is "¿Qué necesita mi atención?" the right first screen?** It currently
@@ -273,9 +374,10 @@ does — and its native-dialog handler no longer claims the product raises one.
 3. **Suspension is enforced at sign-in, so a suspended person is refused the
    next time they try.** Should an already-open session be cut immediately as
    well, or is "cannot get back in" the right strength?
-4. **Permanent client deletion keeps the team's templates** (they stop pointing
-   at that client's study) **and the administrative record of the deletion.**
-   Everything else goes. Is anything else worth keeping?
+4. **Permanent client deletion is now disabled** until there is a recoverable
+   cross-system workflow to execute it with. Is archiving enough for the
+   foreseeable future, or is destroying a client's data something you need
+   soon enough to justify building that workflow next?
 5. **Selection in the qualitative review is per page**, deliberately, so nothing
    you have not read can be confirmed. Does that match how you review, or do you
    want to carry a selection across pages?

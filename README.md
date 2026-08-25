@@ -90,10 +90,11 @@ Studio has its own addresses under `/studio/**` — every `/admin/**` address
 still answers — an actionable home, a study work surface with process steps,
 the journey-metric and theme pickers, visible paging, publication reachable only
 through the client preview, one accessible destructive-action dialog, and the
-account and client lifecycle. Two items remain open: migration `0015` is not
-applied to any environment (client archive and permanent deletion therefore
-render disabled with a stated reason), and the live adversarial chain has not
-run against that branch. P8.3 has not started.
+account and client lifecycle. Three items remain open: permanent client deletion is disabled and refused
+server-side until a recoverable cross-system deletion workflow exists; migration
+`0015` is not applied to any environment, so every lifecycle action refuses with
+a stated reason; and the live adversarial chain has not run against that branch.
+P8.3 has not started.
 
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read

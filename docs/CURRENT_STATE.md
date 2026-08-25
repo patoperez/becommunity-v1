@@ -233,28 +233,49 @@ What now exists in the real product:
   can never show "con acceso" for an identity Auth already refuses; "invitación
   pendiente" is a third real state. Archiving a client is the ordinary
   reversible action and is enforced server-side against new studies, new
-  invitations and new publications. Permanent client deletion shows counted
-  impact, requires the exact client name, recomputes the impact at execution
-  time and stops if a single number moved, collects identities and Storage
-  objects before the cascade, removes them explicitly after it, and reports
-  anything it could not remove.
+  invitations and new publications.
+- **Permanent client deletion is DISABLED and refused on the server.** It spans
+  Postgres rows, Auth identities and Storage objects with no shared transaction,
+  and the only order the code could run them in destroys the tenant row first —
+  which is exactly the order that can orphan an account or a file. No path
+  through the action reaches a row delete, an Auth call or a Storage call. The
+  executable impact summary and the exact-name rule are retained and still
+  proved; they gate nothing destructive. It returns when there is a recoverable,
+  idempotent, resumable cross-system deletion workflow.
+- **No lifecycle action succeeds unrecorded.** Permanent USER deletion writes
+  durable intent and checks the write BEFORE deleting, then records the outcome;
+  a missing outcome is reported as an error, never as a clean success. The
+  reversible mutations refuse when the record is unavailable, and undo
+  themselves with their own inverse if the record cannot be written after the
+  change.
 
 **Migration `0015_client_lifecycle_and_audit.sql` is additive and APPLIED
 NOWHERE.** It adds `tenant.archived_at` / `archived_by` with a partial index and
 one internal `admin_lifecycle_event` table with RLS, FORCE RLS, a
-deny-browser-roles policy and service-role-only grants; it creates no function,
-no security-definer helper and alters no existing policy or grant, and
-`supabase/rollbacks/0015_*.sql` reverses exactly it. Suspension is deliberately
+deny-browser-roles policy, a database-enforced 4096-byte bound on its metadata
+(the application sanitiser holds to half that), and **least-privilege grants**:
+the default ALL that migration 0001 hands every new table is revoked and only
+`select, insert` is granted back to `service_role`, so the evidence table is
+append-only at the privilege level. It creates no function, no security-definer
+helper and alters no existing policy or grant beyond its own table's defaults,
+and `supabase/rollbacks/0015_*.sql` reverses exactly it.
+
+**`docs/P7_PLAN.md` §0.1** records that `0015` is taken: the deferred P7
+`audit_log` takes the next available migration number instead. That is a
+numbering correction only; P7 is not resumed. Suspension is deliberately
 outside that schema. Until the migration is applied through its own reviewed
 deployment step, `src/lib/studio/lifecycle.ts` detects its absence, the client
 archive and permanent-delete controls render **disabled with the reason
 stated**, and any administrative action that succeeds unrecorded says so.
 
-**Two things are open and must not be reported as done:**
+**Three things are open and must not be reported as done:**
 
-1. `0015` is unapplied, so client archive and permanent deletion are
-   deliberately unavailable in every current environment.
-2. `npm run gates:live` has NOT run against this branch. Suite B's catalogue now
+1. `0015` is unapplied, so EVERY lifecycle action — archive, restore, suspend,
+   restore and permanent account deletion — refuses in every current
+   environment, because each promises evidence there is nowhere to write.
+2. Permanent CLIENT deletion is disabled outright, independently of the
+   migration.
+3. `npm run gates:live` has NOT run against this branch. Suite B's catalogue now
    names the Studio addresses and six new denial-only lifecycle mutations, and
    those depend on `0015`; a run today would measure an environment the code was
    not written for. It is deferred to the reviewed deployment step.
