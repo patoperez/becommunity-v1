@@ -17,10 +17,20 @@ import Link from "next/link";
 export type StudioParent = { href: string; label: string };
 
 /** The parents the internal routes actually have, in one place. */
-export const STUDIO_HOME: StudioParent = { href: "/dashboard", label: "Volver a Studio" };
+export const STUDIO_HOME: StudioParent = { href: "/studio", label: "Volver a Studio" };
 export const STUDIES_LIST: StudioParent = {
-  href: "/admin/studies",
-  label: "Volver a Estudios y plantillas",
+  href: "/studio/estudios",
+  label: "Volver a Estudios",
+};
+/** One study's own work surface, the parent of every surface inside it. */
+export const studyParent = (studyId: string, name: string): StudioParent => ({
+  href: `/studio/e/${studyId}`,
+  label: `Volver a ${name}`,
+});
+/** The client list, parent of one client's own page. */
+export const CLIENTS_LIST: StudioParent = {
+  href: "/studio/clientes",
+  label: "Volver a Clientes y accesos",
 };
 
 export function BackLink({ parent }: { parent: StudioParent }) {

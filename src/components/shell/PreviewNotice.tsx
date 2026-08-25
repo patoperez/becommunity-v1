@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { STUDIES_LIST } from "./BackLink";
+import { STUDIES_LIST, type StudioParent } from "./BackLink";
 
 /**
  * The internal-preview notice.
@@ -15,11 +15,16 @@ import { STUDIES_LIST } from "./BackLink";
  *
  * Dismissal is component state and nothing else — no cookie, no preference, no
  * database write. Closing it applies to this mounted preview only; navigating
- * back into a preview brings it back. That is deliberate for this pass: the
- * `/admin/preview/...` route and the Studio identity around it are sufficient
- * to keep the context internal after the reviewer has read the notice once.
+ * back into a preview brings it back. That is deliberate: the preview route and
+ * the Studio identity around it are sufficient to keep the context internal
+ * after the reviewer has read the notice once, and the shell carries the same
+ * return link outside this notice so dismissing it never strands anyone.
+ *
+ * `back` lets the preview name its real parent — the study's own work surface
+ * when it is opened from there, the study list when it is opened from the
+ * legacy address.
  */
-export function PreviewNotice() {
+export function PreviewNotice({ back = STUDIES_LIST }: { back?: StudioParent }) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
 
@@ -34,10 +39,10 @@ export function PreviewNotice() {
         </p>
         <div className="flex shrink-0 items-center gap-1">
           <Link
-            href={STUDIES_LIST.href}
+            href={back.href}
             className="inline-flex min-h-11 items-center rounded-lg px-2.5 text-sm font-semibold text-caution underline underline-offset-4"
           >
-            {STUDIES_LIST.label}
+            {back.label}
           </Link>
           <button
             type="button"

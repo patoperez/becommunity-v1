@@ -17,6 +17,9 @@ import { UPLOAD_TOO_LARGE_MESSAGE, exceedsUploadLimit } from "@/lib/validation/s
 import type { ImportMapping } from "@/lib/ingestion/mapping";
 import { MappingWorkbench } from "./MappingWorkbench";
 import { ImportPreview } from "./ImportPreview";
+import { ConfirmAction } from "@/components/studio/ConfirmAction";
+import { Pager } from "@/components/studio/Pager";
+import type { PageWindow } from "@/lib/studio/paging";
 
 export type TenantOption = { id: string; name: string };
 export type StudyOption = { id: string; tenantId: string; name: string; period: string | null };
@@ -65,12 +68,25 @@ export default function UploadForm({
   tenants,
   studies,
   history,
+  historyWindow,
+  historyParams,
+  latestCommittedId,
   initialTenantId,
   initialStudyId,
 }: {
   tenants: TenantOption[];
   studies: StudyOption[];
   history: ImportHistoryItem[];
+  /** The bounded page of the import history, counted server-side. */
+  historyWindow: PageWindow;
+  historyParams: Record<string, string | null | undefined>;
+  /**
+   * The newest committed batch across the whole history, resolved on the
+   * server. Deriving it from the visible page would offer a revert control on
+   * page two for a batch that is not the newest — the server refuses that, but
+   * the interface should never have proposed it.
+   */
+  latestCommittedId: string | null;
   initialTenantId?: string;
   initialStudyId?: string;
 }) {
@@ -99,7 +115,6 @@ export default function UploadForm({
     () => studies.filter((study) => study.tenantId === tenantId),
     [studies, tenantId],
   );
-  const latestCommittedId = history.find((item) => item.status === "committed")?.id ?? null;
   const samplesByHeader = useMemo(
     () =>
       Object.fromEntries(
@@ -175,13 +190,19 @@ export default function UploadForm({
     });
   }
 
-  function rollback(batchId: string) {
-    if (!window.confirm("¿Revertir la importación más reciente? Se eliminarán únicamente las filas de ese lote.")) return;
-    startTransition(async () => {
-      const result = await rollbackLatestImport(batchId);
-      setRollbackState(result);
-      if (result.status === "success") router.refresh();
-    });
+  /**
+   * Reverting an import is REVERSIBLE work presented as such.
+   *
+   * It used to be `window.confirm()`, which could not name the file, could not
+   * say how many rows would go, and looked exactly like a permanent deletion.
+   * The dialog now names the batch and states what survives, and the confirm
+   * control disables itself while the action is in flight so a second click
+   * cannot dispatch a second revert.
+   */
+  async function rollback(batchId: string) {
+    const result = await rollbackLatestImport(batchId);
+    setRollbackState(result);
+    if (result.status === "success") router.refresh();
   }
 
   const canConfirm = preview?.status === "ready" && confirmed && (
@@ -358,6 +379,15 @@ export default function UploadForm({
           <h2 className="mt-1 font-display text-lg font-semibold text-strong">Importaciones recientes</h2>
           <p className="mt-1 text-sm text-muted">Solo la última carga confirmada se puede deshacer.</p>
         </div>
+        <div className="mt-4">
+          <Pager
+            window={historyWindow}
+            basePath="/admin/upload"
+            params={historyParams}
+            noun={{ one: "carga", many: "cargas" }}
+            label="Paginación del historial de cargas"
+          />
+        </div>
         {rollbackState ? (
           <div className={`mt-4 rounded-lg p-3 text-sm ${rollbackState.status === "success" ? "border border-positive-line bg-positive-surface text-positive" : "border border-danger-line bg-danger-surface text-danger"}`}>{rollbackState.message}</div>
         ) : null}
@@ -373,7 +403,31 @@ export default function UploadForm({
                 <p className="mt-1 text-xs text-muted">{item.respondents} personas · {item.quant} resultados numéricos · {item.qual} comentarios</p>
               </div>
               {item.id === latestCommittedId ? (
-                <button type="button" onClick={() => rollback(item.id)} disabled={pending} className="min-h-11 rounded-lg border border-danger-line px-3 py-2 text-sm font-semibold text-danger transition-colors duration-[var(--motion-state)] hover:bg-danger-surface disabled:cursor-not-allowed disabled:opacity-50">Deshacer esta carga</button>
+                <ConfirmAction
+                  trigger="Deshacer esta carga"
+                  triggerClassName="inline-flex min-h-11 items-center justify-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong transition-colors duration-[var(--motion-state)] hover:bg-surface-sunken"
+                  title="Deshacer esta carga"
+                  objectName={`${item.fileName} · ${item.studyName}`}
+                  severity="reversible"
+                  consequence={
+                    <p>
+                      Se quitarán del estudio las {item.respondents} personas, los {item.quant} resultados
+                      numéricos y los {item.qual} comentarios que entraron con esta carga. No se toca
+                      nada que haya entrado con otra carga.
+                    </p>
+                  }
+                  recovery={
+                    <p>
+                      El archivo original sigue en tu computadora: puedes volver a cargarlo cuando quieras.
+                    </p>
+                  }
+                  confirmLabel="Sí, deshacer la carga"
+                  pendingLabel="Deshaciendo…"
+                  fields={{ batch_id: item.id }}
+                  action={async (formData: FormData) => {
+                    await rollback(String(formData.get("batch_id") ?? ""));
+                  }}
+                />
               ) : null}
             </div>
           ))}

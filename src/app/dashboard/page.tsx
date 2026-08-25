@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { LongRow } from "@/lib/calc/engine";
@@ -14,10 +13,9 @@ import NarrativeHome from "./NarrativeHome";
 import { parseDashboardConfig } from "@/lib/dashboard/config";
 import { logoPublicUrl, parseBrandConfig } from "@/lib/branding/config";
 import { InsightsShell } from "@/components/shell/InsightsShell";
-import { StudioShell, STUDIO_STOPS } from "@/components/shell/StudioShell";
+import { StudioShell } from "@/components/shell/StudioShell";
 import { StateBlock } from "@/components/States";
-import { Forward } from "@/components/Actions";
-import { studyStateLabel } from "@/lib/language/results";
+import { StudioHomeView } from "@/components/studio/StudioHomeView";
 import StudyComingSoon from "./StudyComingSoon";
 
 export const metadata = {
@@ -40,101 +38,6 @@ type Study = {
   journey_definition: unknown;
   created_at: string;
 };
-
-/**
- * What needs attention, derived only from what this page already loaded.
- *
- * The rule this obeys: state nothing the current model cannot prove. A study
- * with no rows genuinely has no data; a draft with data genuinely has not been
- * published; a touchpoint whose metric produced no value genuinely has no
- * result. Everything else a consultant might want here — who it is assigned to,
- * when it is due, whether someone approved it — does not exist in the schema,
- * and P8-A adds no migration, so it is not claimed.
- *
- * The colour groups the KIND of work. It is never a verdict on a number.
- */
-type AttentionItem = {
-  studyId: string;
-  studyName: string;
-  period: string | null;
-  kind: "sin-datos" | "sin-publicar" | "recorrido-incompleto";
-  headline: string;
-  actionLabel: string;
-  href: string;
-  accent: { fill: string; surface: string; line: string };
-};
-
-const ATTENTION_ACCENT = {
-  "sin-datos": {
-    fill: "var(--color-blue)",
-    surface: "var(--color-sky-surface)",
-    line: "var(--color-sky-line)",
-  },
-  "sin-publicar": {
-    fill: "var(--color-lavender)",
-    surface: "var(--color-lavender-surface)",
-    line: "var(--color-lavender-line)",
-  },
-  "recorrido-incompleto": {
-    fill: "var(--color-yellow)",
-    surface: "var(--color-yellow-surface)",
-    line: "var(--color-yellow-line)",
-  },
-} as const;
-
-function attentionItems(
-  studies: { study: Study; dashboard: StudyDashboardPayload }[],
-): AttentionItem[] {
-  const items: AttentionItem[] = [];
-
-  for (const { study, dashboard } of studies) {
-    const base = { studyId: study.id, studyName: study.name, period: study.period };
-
-    if (dashboard.view.emptyStudy) {
-      items.push({
-        ...base,
-        kind: "sin-datos",
-        headline: "Todavía no tiene datos cargados",
-        actionLabel: "Cargar datos",
-        href: "/admin/upload",
-        accent: ATTENTION_ACCENT["sin-datos"],
-      });
-      continue;
-    }
-
-    if (study.status === "draft") {
-      items.push({
-        ...base,
-        kind: "sin-publicar",
-        headline: "Tiene datos y sigue sin publicarse",
-        actionLabel: "Revisarlo como el cliente",
-        href: `/admin/preview/${study.id}`,
-        accent: ATTENTION_ACCENT["sin-publicar"],
-      });
-    }
-
-    const withoutResult = dashboard.view.journey.filter((stage) => stage.value == null).length;
-    if (withoutResult > 0) {
-      items.push({
-        ...base,
-        kind: "recorrido-incompleto",
-        headline:
-          withoutResult === 1
-            ? "Un momento del recorrido no tiene resultado"
-            : `${withoutResult} momentos del recorrido no tienen resultado`,
-        actionLabel: "Ver el recorrido",
-        href: `/admin/preview/${study.id}`,
-        accent: ATTENTION_ACCENT["recorrido-incompleto"],
-      });
-    }
-  }
-
-  // Missing data first, then unpublished work, then gaps inside a study that is
-  // otherwise ready. Cap the list: a home page that lists forty things is a
-  // backlog, not an answer to "what needs me now".
-  const rank = { "sin-datos": 0, "sin-publicar": 1, "recorrido-incompleto": 2 };
-  return items.sort((a, b) => rank[a.kind] - rank[b.kind]).slice(0, 6);
-}
 
 /** The sign-out control, identical in both shells. */
 function SignOut({ tone = "ink" }: { tone?: "ink" | "paper" }) {
@@ -192,6 +95,34 @@ export default async function DashboardPage() {
       .returns<Study[]>(),
   ]);
 
+  // ---------------------------------------------------------------------------
+  // Be Community Studio — the internal home.
+  //
+  // ROUTE COMPATIBILITY (P8.2). Studio's own address is `/studio`, and this
+  // route keeps answering for internal staff because bookmarks, the sign-in
+  // redirect and the frozen adversarial catalogue all point here. Both render
+  // `StudioHomeView`, so there is one implementation and the two addresses
+  // cannot drift apart.
+  //
+  // It returns BEFORE any study data is loaded. Internal staff need none of it
+  // here, and loading every study's complete authorized dataset in order to
+  // render a list of names was by far the most expensive thing this route did.
+  // ---------------------------------------------------------------------------
+  if (profile?.role === "internal") {
+    return (
+      <StudioShell
+        userEmail={user.email ?? ""}
+        currentHref="/dashboard"
+        breadcrumb={["Studio", "Inicio"]}
+        title="Tu espacio de trabajo"
+        lead="Desde aquí preparas, revisas y publicas los estudios de cada cliente. Nada llega a un cliente hasta que se publica."
+        utility={<SignOut tone="paper" />}
+      >
+        <StudioHomeView />
+      </StudioShell>
+    );
+  }
+
   // Load each study's rows once (server-side, RLS-scoped, so only this tenant's
   // data is ever read). From the same rows we derive the static metrics (§5.2)
   // and the pivot allowlist (§5.3) — a user can only ever cross fields that exist
@@ -228,7 +159,7 @@ export default async function DashboardPage() {
   const currentSections = loadedStudyData[0]
     ? parseDashboardConfig(loadedStudyData[0].study.dashboard_config).sections
     : null;
-  const longitudinal = profile?.role === "internal" || currentSections?.trends === false
+  const longitudinal = currentSections?.trends === false
     ? { periods: 0, series: [] }
     : buildLongitudinalView(loadedStudyData.map(({ study, rows }) => ({
         name: study.name,
@@ -237,185 +168,12 @@ export default async function DashboardPage() {
         rows,
       })));
   const studyData = loadedStudyData.map(({ study, dashboard }) => ({ study, dashboard }));
-  const narrative = profile?.role === "internal" || !studyData[0] || currentSections?.narrative === false
+  const narrative = !studyData[0] || currentSections?.narrative === false
     ? null
     : buildNarrativeHome(studyData[0].study, studyData[0].dashboard, longitudinal);
   const brand = parseBrandConfig(tenant?.brand_config);
   const brandName = brand.displayName ?? tenant?.name ?? "Be Community";
   const brandLogo = logoPublicUrl(brand.logoPath);
-
-  // ---------------------------------------------------------------------------
-  // Be Community Studio — the internal home.
-  //
-  // Internal staff previously landed on the CLIENT product with a grey "Panel
-  // interno" strip bolted on top, and then saw every tenant's studies in one
-  // undifferentiated list. They now get their own shell, their own orientation
-  // and their own primary task hierarchy.
-  //
-  // MIGRATION BOUNDARY: the four internal screens keep their `/admin/*`
-  // addresses and their current chrome. Moving them onto this shell and onto
-  // the `/studio/*` routes the information architecture defines is P8-B.
-  // ---------------------------------------------------------------------------
-  if (profile?.role === "internal") {
-    const attention = attentionItems(studyData);
-    return (
-      <StudioShell
-        userEmail={user.email ?? ""}
-        currentHref="/dashboard"
-        breadcrumb={["Studio", "Inicio"]}
-        title="Tu espacio de trabajo"
-        lead="Desde aquí preparas, revisas y publicas los estudios de cada cliente. Nada llega a un cliente hasta que se publica."
-        utility={<SignOut tone="paper" />}
-      >
-        {/*
-          What needs attention, first.
-          Every item is derived from state the page already loaded, and says
-          only what the current model can prove. No deadline, no assignee, no
-          approval state and no count that would need a query this page does not
-          make. When nothing qualifies, the section says so rather than
-          inventing work.
-        */}
-        <section aria-labelledby="studio-atencion">
-          <h2 id="studio-atencion" className="text-xl">
-            ¿Qué necesita atención?
-          </h2>
-          {attention.length === 0 ? (
-            <div className="mt-4">
-              <StateBlock title="Nada pendiente que el producto pueda detectar">
-                <p>
-                  Todos los estudios con datos están publicados y sus recorridos
-                  tienen resultado. Lo que siga depende de tu criterio, no de un
-                  aviso automático.
-                </p>
-              </StateBlock>
-            </div>
-          ) : (
-            <ul className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {attention.map((item) => (
-                <li key={`${item.studyId}-${item.kind}`}>
-                  <Link
-                    href={item.href}
-                    className="flex h-full min-w-0 items-start gap-3.5 rounded-xl border p-4 transition-colors duration-[var(--motion-state)] hover:shadow-raised"
-                    style={{ borderColor: item.accent.line, backgroundColor: item.accent.surface }}
-                  >
-                    {/* The dot groups the KIND of work. It is not a verdict on
-                        any number. */}
-                    <span
-                      aria-hidden="true"
-                      className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: item.accent.fill }}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-strong">
-                        {item.headline}
-                      </span>
-                      <span className="mt-0.5 block break-words text-sm text-muted">
-                        {item.studyName}
-                        {item.period ? ` · ${item.period}` : ""}
-                      </span>
-                      <span className="mt-1.5 inline-flex items-center gap-1.5 text-sm font-semibold text-evidence">
-                        {item.actionLabel} <Forward />
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section aria-labelledby="studio-tareas" className="mt-10">
-          <h2 id="studio-tareas" className="text-xl">
-            Ir a
-          </h2>
-          {/* The three things the consultant actually does to a study. Client
-              administration is a secondary path below, as the information
-              architecture puts it — it is not part of preparing a study. */}
-          <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {STUDIO_STOPS.filter((stop) => stop.href !== "/admin/clients" && stop.href !== "/dashboard").map((stop) => (
-              <li key={stop.href}>
-                <Link
-                  href={stop.href}
-                  className="flex h-full min-w-0 flex-col rounded-xl border border-line bg-surface p-5 transition-colors duration-[var(--motion-state)] hover:border-line-strong hover:bg-surface-sunken/50"
-                >
-                  <span className="flex items-center gap-2 font-display text-lg font-semibold text-strong">
-                    {stop.label}
-                    <Forward />
-                  </span>
-                  <span className="mt-1 text-sm text-muted">{stop.description}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-4 text-sm text-muted">
-            ¿Necesitas dar o quitar acceso a alguien?{" "}
-            <Link
-              href="/admin/clients"
-              className="font-semibold text-evidence underline-offset-4 hover:underline"
-            >
-              Ir a clientes y accesos
-            </Link>
-            .
-          </p>
-        </section>
-
-        <section aria-labelledby="studio-estudios" className="mt-10">
-          <h2 id="studio-estudios" className="text-xl">
-            Estudios recientes
-          </h2>
-          {studyData.length === 0 ? (
-            <div className="mt-4">
-              <StateBlock title="Todavía no hay ningún estudio">
-                <p>
-                  Crea el primero desde <strong>Estudios y plantillas</strong>, o
-                  empieza trayendo un archivo de datos.
-                </p>
-              </StateBlock>
-            </div>
-          ) : (
-            <ul className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
-              {studyData.slice(0, 8).map(({ study, dashboard }) => (
-                <li
-                  key={study.id}
-                  className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5"
-                >
-                  <div className="min-w-0">
-                    <p className="break-words font-medium text-strong">{study.name}</p>
-                    <p className="text-sm text-muted">
-                      {study.period ?? "Sin periodo"} ·{" "}
-                      {dashboard.view.emptyStudy
-                        ? "sin datos cargados"
-                        : "con datos cargados"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="rounded-full border border-line bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-muted">
-                      {studyStateLabel(study.status)}
-                    </span>
-                    <Link
-                      href={`/admin/preview/${study.id}`}
-                      className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
-                    >
-                      Ver como el cliente <Forward />
-                    </Link>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          {studyData.length > 8 ? (
-            <p className="mt-3 text-sm text-muted">
-              Se muestran los 8 más recientes.{" "}
-              <Link href="/admin/studies" className="font-semibold text-evidence underline-offset-4 hover:underline">
-                Ver todos los estudios
-              </Link>
-              .
-            </p>
-          ) : null}
-        </section>
-      </StudioShell>
-    );
-  }
 
   // ---------------------------------------------------------------------------
   // Be Community Insights — the client home.

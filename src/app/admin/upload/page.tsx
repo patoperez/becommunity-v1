@@ -10,13 +10,21 @@ import UploadForm, {
   type StudyOption,
   type TenantOption,
 } from "./UploadForm";
+import { parsePageRequest, resolvePage } from "@/lib/studio/paging";
+import { z } from "zod";
+
+/** A scope parameter is a real id or it is nothing; it is never passed through. */
+const scopeId = (raw: unknown): string | null => {
+  const parsed = z.string().uuid().safeParse(raw);
+  return parsed.success ? parsed.data : null;
+};
 
 export const metadata = { title: "Cargar datos · Be Community" };
 
 export default async function UploadPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tenant?: string; study?: string }>;
+  searchParams: Promise<{ tenant?: string; study?: string; p?: string; por?: string }>;
 }) {
   // Server-side authorization (§6.4) — not just hiding the link in the UI.
   const supabase = await createClient();
@@ -50,7 +58,22 @@ export default async function UploadPage({
   // Internal users have no tenant, so the tenant list is fetched with the admin
   // client (server-only, §6.3) after the role check above.
   const admin = createAdminClient();
-  const [{ data: tenants }, { data: studies }, { data: batches }] = await Promise.all([
+  const query = await searchParams;
+
+  // THE HISTORY IS COUNTED, SCOPED AND PAGED.
+  //
+  // It used to be a global `.limit(30)` with nothing on screen saying so, which
+  // made "these are all the imports" and "these are the newest thirty of two
+  // hundred" look identical. It is now bounded paging over a real count, and it
+  // narrows to the study or client the operator arrived with — the scope is
+  // applied as an `.eq()` on the query itself, never inferred client-side.
+  const scopeStudy = scopeId(query.study);
+  const scopeTenant = scopeId(query.tenant);
+  /** The one column the history is narrowed by, decided once. */
+  const scopeColumn = scopeStudy ? "study_id" : scopeTenant ? "tenant_id" : null;
+  const scopeValue = scopeStudy ?? scopeTenant;
+
+  const [{ data: tenants }, { data: studies }, { count: historyTotal }, { data: newest }] = await Promise.all([
     admin
       .from("tenant")
       .select("id, name")
@@ -61,26 +84,39 @@ export default async function UploadPage({
       .select("id, tenant_id, name, period")
       .order("created_at", { ascending: false })
       .returns<{ id: string; tenant_id: string; name: string; period: string | null }[]>(),
+    (() => {
+      const builder = admin.from("import_batch").select("id", { count: "exact", head: true });
+      return scopeColumn && scopeValue ? builder.eq(scopeColumn, scopeValue) : builder;
+    })(),
     admin
       .from("import_batch")
-      .select("id, tenant_id, study_id, file_name, status, expected_respondents, expected_quant, expected_qual, created_at, committed_at")
-      .order("created_at", { ascending: false })
-      .limit(30)
-      .returns<{
-        id: string;
-        tenant_id: string;
-        study_id: string;
-        file_name: string;
-        status: ImportHistoryItem["status"];
-        expected_respondents: number;
-        expected_quant: number;
-        expected_qual: number;
-        created_at: string;
-        committed_at: string | null;
-      }[]>(),
+      .select("id")
+      .eq("status", "committed")
+      .order("committed_at", { ascending: false })
+      .limit(1)
+      .returns<{ id: string }[]>(),
   ]);
 
-  const query = await searchParams;
+  const historyWindow = resolvePage(parsePageRequest(query), historyTotal ?? 0);
+  const historyQuery = admin
+    .from("import_batch")
+    .select("id, tenant_id, study_id, file_name, status, expected_respondents, expected_quant, expected_qual, created_at, committed_at");
+  const { data: batches } = await (scopeColumn && scopeValue ? historyQuery.eq(scopeColumn, scopeValue) : historyQuery)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(historyWindow.from, historyWindow.to)
+    .returns<{
+      id: string;
+      tenant_id: string;
+      study_id: string;
+      file_name: string;
+      status: ImportHistoryItem["status"];
+      expected_respondents: number;
+      expected_quant: number;
+      expected_qual: number;
+      created_at: string;
+      committed_at: string | null;
+    }[]>();
   const tenantNames = new Map((tenants ?? []).map((tenant) => [tenant.id, tenant.name]));
   const studyNames = new Map((studies ?? []).map((study) => [study.id, study.name]));
   const studyOptions: StudyOption[] = (studies ?? []).map((study) => ({
@@ -121,6 +157,9 @@ export default async function UploadPage({
         tenants={tenants ?? []}
         studies={studyOptions}
         history={history}
+        historyWindow={historyWindow}
+        historyParams={{ tenant: scopeTenant, study: scopeStudy, por: query.por ?? null }}
+        latestCommittedId={newest?.[0]?.id ?? null}
         initialTenantId={query.tenant}
         initialStudyId={query.study}
       />

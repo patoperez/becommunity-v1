@@ -10,11 +10,11 @@ import { BackLink, type StudioParent } from "./BackLink";
  * moving between clients all day must never be confused about whose data is on
  * screen; that is a safety property, not a stylistic preference.
  *
- * MIGRATION BOUNDARY (P8-A): every internal screen now wears this shell, but
- * they keep their existing `/admin/*` addresses, their forms, their Server
- * Actions and their query semantics. The stops below are therefore labelled in
- * product language while pointing at the real routes. Moving them onto the
- * `/studio/*` addresses the information architecture defines is P8-B.
+ * ROUTE COMPATIBILITY (P8.2): the stops now point at the `/studio/*` addresses
+ * the information architecture defines. Every `/admin/*` address still answers
+ * — bookmarks, emailed links and the frozen adversarial catalogue depend on
+ * them — so each stop also declares the legacy paths it should light up on.
+ * Nothing was renamed away; addresses were added.
  *
  * NAVIGATION. Each page declares an explicit PARENT (`back`), never
  * `history.back()`. Deep links, reloads and emailed URLs are the normal way
@@ -27,35 +27,38 @@ export type StudioStop = {
   href: string;
   label: string;
   description: string;
+  /**
+   * The legacy addresses this stop also represents. A consultant who arrived
+   * from a two-year-old bookmark still sees where she is.
+   */
+  matches?: string[];
   /** True for the destination the reader is currently in. */
   current?: boolean;
 };
 
 export const STUDIO_STOPS: StudioStop[] = [
   {
-    href: "/dashboard",
+    href: "/studio",
     label: "Inicio",
-    description: "Lo que hay en marcha y por dónde seguir.",
+    description: "Lo que necesita tu atención y por dónde seguir.",
+    matches: ["/dashboard"],
   },
   {
-    href: "/admin/studies",
-    label: "Estudios y plantillas",
-    description: "Crear, configurar y publicar el trabajo de cada cliente.",
+    href: "/studio/estudios",
+    label: "Estudios",
+    description: "Crear, preparar y publicar el trabajo de cada cliente.",
+    matches: ["/admin/studies", "/admin/upload", "/admin/qualitative"],
   },
   {
-    href: "/admin/upload",
-    label: "Carga de datos",
-    description: "Traer un archivo nuevo y revisarlo antes de guardarlo.",
-  },
-  {
-    href: "/admin/qualitative",
-    label: "Lo que dijeron las personas",
-    description: "Confirmar temas y aprobar citas antes de publicarlas.",
-  },
-  {
-    href: "/admin/clients",
+    href: "/studio/clientes",
     label: "Clientes y accesos",
     description: "Quién es cliente, quién entra y qué puede ver cada persona.",
+    matches: ["/admin/clients"],
+  },
+  {
+    href: "/studio/plantillas",
+    label: "Plantillas",
+    description: "Configuraciones que ya funcionaron, listas para reutilizar.",
   },
 ];
 
@@ -107,7 +110,10 @@ export function StudioShell({
         <nav aria-label="Secciones de Studio" className="border-t border-paper/15">
           <ul className="mx-auto flex w-full max-w-6xl gap-1 overflow-x-auto px-3 sm:px-4">
             {STUDIO_STOPS.map((stop) => {
-              const current = stop.current ?? stop.href === currentHref;
+              const current =
+                stop.current
+                ?? (stop.href === currentHref
+                  || (currentHref !== undefined && (stop.matches ?? []).includes(currentHref)));
               return (
                 <li key={stop.href} className="shrink-0">
                   <Link
