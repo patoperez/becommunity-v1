@@ -420,8 +420,17 @@ assert.match(qualitative, /no tiene observaciones cualitativas/,
   "a study with zero observations gets a real empty state, not a naked table head");
 const clientsPage = await readCode("src/app/admin/clients/page.tsx");
 for (const pinned of ["Crear cliente", "Enviar invitación", "Guardar usuario",
-  "Eliminar cuenta cliente", "Guardar identidad", 'name="confirmation_email"', 'name="data_scope"']) {
+  "Eliminar cuenta cliente", "Guardar identidad", 'name="confirmation_email"']) {
   assert.ok(clientsPage.includes(pinned), `clients must keep "${pinned}"`);
+}
+// P8.2 moved the access scope from a raw textarea on this page into the no-code
+// picker the page renders. The stored FIELD is unchanged and still carried on
+// every submission — it simply lives one component away, so the assertion
+// follows it rather than being dropped.
+assert.ok(clientsPage.includes("AccessScopeFields"), "the clients page must render the access picker");
+const accessPicker = await readCode("src/components/studio/AccessScopeFields.tsx");
+for (const pinned of ['name="data_scope"', 'name="tenant_id"']) {
+  assert.ok(accessPicker.includes(pinned), `the access picker must keep "${pinned}"`);
 }
 ok("statuses translated, stored enums untouched, every pinned action name intact");
 

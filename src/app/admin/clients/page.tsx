@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -7,6 +6,9 @@ import { logoPublicUrl, parseBrandConfig } from "@/lib/branding/config";
 import { StudioShell } from "@/components/shell/StudioShell";
 import { STUDIO_HOME } from "@/components/shell/BackLink";
 import { logout } from "@/app/dashboard/actions";
+import { AccessScopeFields } from "@/components/studio/AccessScopeFields";
+import { loadTenantScopeInventories } from "@/lib/studies/scope-inventory";
+import { parseDataScope, type DataScope } from "@/lib/studies/scope";
 
 export const metadata = { title: "Clientes y usuarios · Be Community" };
 
@@ -18,6 +20,19 @@ const input =
   "min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-strong";
 const button =
   "min-h-11 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-paper hover:bg-[#183b5c]";
+
+/**
+ * A stored scope this page cannot read is reported, never rounded off to full
+ * access behind the reader's back: the row renders a caution and the picker
+ * starts from a deliberate choice the operator has to make and save.
+ */
+function readStoredScope(value: unknown): { scope: DataScope; readable: boolean } {
+  try {
+    return { scope: parseDataScope(value), readable: true };
+  } catch {
+    return { scope: {}, readable: false };
+  }
+}
 
 async function listAllUsers(admin: ReturnType<typeof createAdminClient>) {
   const users = [];
@@ -49,6 +64,14 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
   const profileList = profiles ?? [];
   const tenantById = new Map(tenantList.map((tenant) => [tenant.id, tenant]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
+  // Aggregate vocabulary for the access picker: characteristic names, their
+  // values and how many people carry each combination. No respondent row, no
+  // answer and no quote crosses into the browser.
+  const scopeInventories = await loadTenantScopeInventories(
+    admin,
+    tenantList.map((tenant) => tenant.id),
+  );
+  const tenantChoices = tenantList.map((tenant) => ({ id: tenant.id, name: tenant.name }));
 
   return <StudioShell
     userEmail={user.email ?? ""}
@@ -70,11 +93,20 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
           <button className={`${button} mt-3`}>Crear cliente</button>
         </form>
         <form action={inviteClientUser} className="rounded-xl border border-line bg-surface p-6">
-          <h2 className="text-lg font-semibold text-strong">Invitar usuario cliente</h2><p className="mt-1 text-sm text-muted">Recibirá un correo para establecer su acceso.</p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2"><select className={input} name="tenant_id" required><option value="">Selecciona cliente</option>{tenantList.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><input className={input} name="email" type="email" required placeholder="persona@cliente.com" /><input className={`${input} sm:col-span-2`} name="full_name" maxLength={120} placeholder="Nombre (opcional)" /></div>
-          <label className="mt-3 block text-xs font-medium text-muted">Alcance JSON <span className="font-normal text-muted">· vacío = todo el cliente</span></label>
-          <textarea className={`${input} mt-1 font-mono text-xs`} name="data_scope" rows={3} defaultValue="{}" placeholder={'{"area":["Direccion"]}'} />
-          <button className={`${button} mt-3`}>Enviar invitación</button>
+          <h2 className="text-lg font-semibold text-strong">Invitar usuario cliente</h2><p className="mt-1 mb-4 text-sm text-muted">Recibirá un correo para establecer su acceso.</p>
+          <AccessScopeFields
+            idPrefix="invitar"
+            tenants={tenantChoices}
+            inventories={scopeInventories}
+            tenantPlaceholder="Selecciona cliente"
+            submitLabel="Enviar invitación"
+            submitClassName={`${button} mt-4 disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <label className="text-sm font-medium text-strong">Correo<input className={`${input} mt-1 font-normal`} name="email" type="email" required placeholder="persona@cliente.com" /></label>
+              <label className="text-sm font-medium text-strong">Nombre <span className="font-normal text-muted">(opcional)</span><input className={`${input} mt-1 font-normal`} name="full_name" maxLength={120} placeholder="Nombre de la persona" /></label>
+            </div>
+          </AccessScopeFields>
         </form>
       </section>
 
@@ -106,11 +138,26 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
       <section><h2 className="text-xl font-semibold text-strong">Usuarios cliente</h2><div className="mt-4 space-y-3">{profileList.length ? profileList.map(profile => {
         const account = accountById.get(profile.user_id);
         const address = account?.email ?? "Cuenta sin correo";
-        const scope = JSON.stringify(profile.data_scope ?? {}, null, 2);
+        const stored = readStoredScope(profile.data_scope);
+        const restricted = Object.keys(stored.scope).length > 0;
         return <details key={profile.user_id} className="rounded-xl border border-line bg-surface p-5 open:shadow-raised">
-          <summary className="min-h-11 cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-medium text-strong">{profile.full_name || address}</p><p className="text-sm text-muted">{address} · {tenantById.get(profile.tenant_id ?? "")?.name ?? "Sin cliente"}</p></div><code className="rounded bg-surface-sunken px-2 py-1 text-xs text-muted">{scope === "{}" ? "acceso completo" : "alcance limitado"}</code></div></summary>
+          <summary className="min-h-11 cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-medium text-strong">{profile.full_name || address}</p><p className="text-sm text-muted">{address} · {tenantById.get(profile.tenant_id ?? "")?.name ?? "Sin cliente"}</p></div><span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${!stored.readable ? "border-danger-line bg-danger-surface text-danger" : restricted ? "border-caution-line bg-caution-surface text-caution" : "border-line bg-surface-sunken text-muted"}`}>{!stored.readable ? "Acceso por revisar" : restricted ? "Ve solo una parte" : "Ve todo el cliente"}</span></div></summary>
           <div className="mt-5 grid gap-5 border-t pt-5 lg:grid-cols-[1fr_280px]">
-            <form action={updateClientUser} className="grid gap-3 sm:grid-cols-2"><input type="hidden" name="user_id" value={profile.user_id} /><input className={input} name="full_name" defaultValue={profile.full_name ?? ""} maxLength={120} placeholder="Nombre" /><select className={input} name="tenant_id" defaultValue={profile.tenant_id ?? ""} required>{tenantList.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><div className="sm:col-span-2"><label className="text-xs font-medium text-muted">Alcance de datos</label><textarea className={`${input} mt-1 font-mono text-xs`} name="data_scope" rows={5} defaultValue={scope} /></div><button className={`${button} sm:w-fit`}>Guardar usuario</button></form>
+            <form action={updateClientUser} className="space-y-3">
+              <input type="hidden" name="user_id" value={profile.user_id} />
+              {stored.readable ? null : <p role="status" className="rounded-lg border border-danger-line bg-danger-surface px-3 py-2 text-sm text-danger">No se pudo leer el acceso guardado de esta persona. Elige de nuevo qué podrá ver y guarda.</p>}
+              <AccessScopeFields
+                idPrefix={`usuario-${profile.user_id}`}
+                tenants={tenantChoices}
+                inventories={scopeInventories}
+                initialTenantId={profile.tenant_id ?? ""}
+                initialScope={stored.scope}
+                submitLabel="Guardar usuario"
+                submitClassName={`${button} mt-4 sm:w-fit disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                <label className="mt-3 block text-sm font-medium text-strong">Nombre<input className={`${input} mt-1 font-normal`} name="full_name" defaultValue={profile.full_name ?? ""} maxLength={120} placeholder="Nombre de la persona" /></label>
+              </AccessScopeFields>
+            </form>
             <form action={deleteClientUser} className="rounded-lg border border-danger-line bg-danger-surface p-4"><input type="hidden" name="user_id" value={profile.user_id} /><h3 className="text-sm font-semibold text-danger">Eliminar acceso</h3><p className="mt-1 text-xs text-danger">Elimina la cuenta, no los estudios. Escribe el correo exacto.</p><input className={`${input} mt-3`} name="confirmation_email" type="email" required placeholder={address} autoComplete="off" /><button className="mt-3 min-h-11 text-sm font-semibold text-danger underline underline-offset-4">Eliminar cuenta cliente</button></form>
           </div>
         </details>;

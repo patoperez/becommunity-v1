@@ -114,7 +114,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (26 gates; PR 7 adds test:pivot and the Suite B/C self-test)
+npm test             # complete deterministic suite (27 gates; P8.2 adds test:studio-workflows)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -190,10 +190,9 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   data. P6E completed with 108 automated checks and 0 failures.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
-- P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`: Suites B and C,
-  the canonical live chain and their review fixes are green; PR #38 merged the
-  separate delivery unit into `main`. Do not reopen P7 correction loops during P8.
-  Deferred edge, production-environment,
+- P7 engineering is concluded and merged (PR #38), and `main` is
+  `fd986940accae5a87170e3de0cb4b2f52dc9d7a9`. Do not reopen P7 correction loops
+  during P8. Deferred edge, production-environment,
   backup/DR and operational controls return as a bounded go-live hardening pass
   after the product is functionally and visually complete.
 - P8 discovery and visual comparison are complete on
@@ -206,11 +205,17 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
   semantic foundation, sign-in, shells, client panorama and journey slice are
   established. Do not reopen its visual-prototype loop.
-- **Current next unit: P8.2 Studio guided workflows.** Start from updated
-  `main` only after the accepted P7/P8-A delivery PRs are integrated. The first
-  owner-review slice is the no-code access-scope picker and visual mapping
-  experience; do not type raw JSON, internal identifiers or metric keys in an
-  ordinary Studio workflow.
+- **Current unit: P8.2 Studio guided workflows.** Its first owner-review slice
+  is implemented on `p8b-studio-guided-workflows` and awaits owner testing: the
+  no-code access-scope picker (`src/components/studio/AccessScopeFields.tsx` over
+  the aggregate-only `src/lib/studies/scope-inventory.ts`) and the guided import
+  mapping plus readable preview (`MappingWorkbench.tsx`, `ImportPreview.tsx` over
+  `src/lib/ingestion/destinations.ts`). The stored `data_scope` shape,
+  `ImportMapping` and every ingestion contract are unchanged; `npm run
+  test:studio-workflows` proves it. The remaining P8.2 scope — the account
+  lifecycle, the destructive-action dialog and the `/studio` routes — is not
+  started. No ordinary Studio workflow may ask for raw JSON, an internal
+  identifier or a metric key.
 - Preserve P7 authorization/input gates, all calculation outputs, ingestion,
   RLS, roles and publication boundaries. P8.2 changes presentation and guided
   workflow first; migrations or authorization changes require a separate,
