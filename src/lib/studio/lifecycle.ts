@@ -2,7 +2,10 @@ import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
 import {
+  boundedDetails,
   EMPTY_TENANT_IMPACT,
+  STORAGE_INVENTORY_CEILING,
+  type LifecycleDetails,
   type TenantImpact,
 } from "./lifecycle-model";
 
@@ -34,7 +37,25 @@ import {
  */
 
 export const LIFECYCLE_UNAVAILABLE_REASON =
-  "El archivo y la eliminación de clientes todavía no están disponibles en este entorno: falta aplicar la migración 0015. Suspender y devolver el acceso de una persona sí funciona.";
+  "El registro administrativo no está disponible en este entorno: falta aplicar la migración 0015. Mientras tanto, ninguna acción del ciclo de vida se ejecuta, porque quedaría sin evidencia.";
+
+/**
+ * Permanent client deletion is DISABLED in the product.
+ *
+ * Not hidden, not "coming soon", not attempted-and-reported: refused, by the
+ * server, with the reason. It spans three systems that have no shared
+ * transaction — Postgres rows, Supabase Auth identities and Storage objects —
+ * and the only order this code could execute them in destroys the tenant row
+ * first, which is exactly the order that can leave an Auth account or a stored
+ * file behind with nothing left pointing at it. Counting the failures
+ * afterwards is a report, not a guarantee.
+ *
+ * It returns when there is a recoverable, idempotent, resumable cross-system
+ * deletion workflow to execute it with. Archiving — reversible, single-system —
+ * is the action that stays.
+ */
+export const TENANT_DELETION_DISABLED_REASON =
+  "La eliminación permanente de un cliente está desactivada. Borra datos en tres sistemas que no comparten una transacción, así que un fallo a la mitad dejaría cuentas o archivos sin dueño. Volverá cuando exista un proceso que se pueda reintentar sin duplicar ni perder nada. Mientras tanto, archiva el cliente: es reversible y no destruye nada.";
 
 /** PostgREST/Postgres answers for "that column or table is not there yet". */
 const MISSING_SCHEMA_CODES = new Set(["42703", "42P01", "PGRST204", "PGRST205"]);
@@ -132,9 +153,35 @@ export async function setTenantArchived(
 // Administrative audit
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether the administrative record can be written at all.
+ *
+ * Every lifecycle mutation is gated on this BEFORE it touches anything. The
+ * product promises that suspending, restoring, archiving and deleting leave
+ * evidence; without the table that promise cannot be kept, and a mutation that
+ * quietly succeeds unrecorded is worse than one that refuses and says why.
+ *
+ * It is a read probe, so it proves the table exists and is reachable — not that
+ * an insert will succeed. The irreversible path does not rely on it: that one
+ * writes a real record and refuses if the write fails.
+ */
+export async function lifecycleAuditAvailable(
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<boolean> {
+  const { error } = await admin
+    .from("admin_lifecycle_event")
+    .select("id", { count: "exact", head: true })
+    .limit(1);
+  if (!error) return true;
+  if (isMissingSchema(error)) return false;
+  throw new Error(`lifecycle audit probe: ${error.message}`);
+}
+
 export type LifecycleAction =
   | "client_user_suspended"
   | "client_user_restored"
+  /** Written BEFORE the irreversible delete, so intent is durable first. */
+  | "client_user_delete_started"
   | "client_user_deleted"
   | "tenant_archived"
   | "tenant_restored"
@@ -149,28 +196,8 @@ export type LifecycleEvent = {
   /** A short display label, never an email, an answer or a quote. */
   subjectLabel: string | null;
   /** Bounded counts and flags only. Anything else is dropped before writing. */
-  details?: Record<string, number | string | boolean | null>;
+  details?: LifecycleDetails;
 };
-
-const MAX_DETAIL_ENTRIES = 20;
-const MAX_DETAIL_STRING = 120;
-
-/**
- * Keep the record small and boring on purpose. Numbers and short flags survive;
- * anything long is truncated and anything unexpected is dropped, so no client
- * payload can be smuggled into administrative evidence by a future caller.
- */
-function boundedDetails(details: LifecycleEvent["details"]): Record<string, unknown> {
-  if (!details) return {};
-  const entries = Object.entries(details).slice(0, MAX_DETAIL_ENTRIES);
-  const safe: Record<string, unknown> = {};
-  for (const [key, value] of entries) {
-    if (typeof value === "number" && Number.isFinite(value)) safe[key] = value;
-    else if (typeof value === "boolean" || value === null) safe[key] = value;
-    else if (typeof value === "string") safe[key] = value.slice(0, MAX_DETAIL_STRING);
-  }
-  return safe;
-}
 
 /**
  * Record the administrative action.
@@ -261,10 +288,17 @@ async function countRows(
  * `brand_config`, because an orphaned upload is exactly the kind of leftover a
  * deletion has to name and then actually remove.
  */
+export type TenantImpactReport = {
+  impact: TenantImpact;
+  /** False when the storage inventory hit its ceiling or could not be read. */
+  storageInventoryComplete: boolean;
+  storageIncompleteReason: string | null;
+};
+
 export async function countTenantImpact(
   admin: ReturnType<typeof createAdminClient>,
   tenantId: string,
-): Promise<TenantImpact> {
+): Promise<TenantImpactReport> {
   const [
     clientUsers,
     studies,
@@ -294,9 +328,9 @@ export async function countTenantImpact(
     countRows(admin, "import_batch", "tenant_id", tenantId),
     countRows(admin, "import_mapping", "tenant_id", tenantId),
     countRows(admin, "recoding_table", "tenant_id", tenantId),
-    listTenantStorageObjects(admin, tenantId).then((paths) => paths.length),
+    listTenantStorageObjects(admin, tenantId),
   ]);
-  return {
+  const impact = {
     ...EMPTY_TENANT_IMPACT,
     clientUsers,
     studies,
@@ -307,24 +341,69 @@ export async function countTenantImpact(
     importBatches,
     importMappings,
     recodingTables,
-    storageObjects,
+    storageObjects: storageObjects.paths.length,
+  };
+  return {
+    impact,
+    storageInventoryComplete: storageObjects.complete,
+    storageIncompleteReason: storageObjects.incompleteReason,
   };
 }
+
+/** One page of the branding bucket. Storage caps a single list call anyway. */
+const STORAGE_PAGE = 100;
+
+export type TenantStorageInventory = {
+  paths: string[];
+  /**
+   * False when the ceiling was reached, or when the bucket could not be read.
+   * An incomplete inventory may never be used to justify a deletion.
+   */
+  complete: boolean;
+  /** Why it is incomplete, for the internal surface. Null when it is complete. */
+  incompleteReason: string | null;
+};
 
 /**
  * The branding objects that belong to one client, by their real paths.
  *
- * A deletion that skipped this would leave publicly readable logo files behind
- * with no row pointing at them — the orphan the impact summary promises not to
- * create.
+ * It used to ask for at most 200 in a single call and return whatever came
+ * back, so a client with more had its impact summary silently understated —
+ * and an understated summary is exactly what a deletion must never be allowed
+ * to rest on. It now pages to a stated ceiling and reports whether it finished.
  */
 export async function listTenantStorageObjects(
   admin: ReturnType<typeof createAdminClient>,
   tenantId: string,
-): Promise<string[]> {
-  const { data, error } = await admin.storage.from("tenant-branding").list(tenantId, { limit: 200 });
-  if (error) return [];
-  return (data ?? [])
-    .filter((entry) => entry.name && entry.id !== null)
-    .map((entry) => `${tenantId}/${entry.name}`);
+): Promise<TenantStorageInventory> {
+  const paths: string[] = [];
+  const maxPages = Math.ceil(STORAGE_INVENTORY_CEILING / STORAGE_PAGE);
+  for (let page = 0; page < maxPages; page += 1) {
+    const { data, error } = await admin.storage
+      .from("tenant-branding")
+      .list(tenantId, { limit: STORAGE_PAGE, offset: page * STORAGE_PAGE });
+    if (error) {
+      return {
+        paths,
+        complete: false,
+        incompleteReason: "No se pudo leer el almacenamiento del cliente.",
+      };
+    }
+    const entries = data ?? [];
+    for (const entry of entries) {
+      // A folder placeholder has a null id and is not an object to delete.
+      if (entry.name && entry.id !== null) paths.push(`${tenantId}/${entry.name}`);
+    }
+    // A short page is the end of the listing. The loop is bounded by `maxPages`
+    // regardless, so a Storage backend that kept returning full pages could
+    // never turn this into a load loop.
+    if (entries.length < STORAGE_PAGE) {
+      return { paths, complete: true, incompleteReason: null };
+    }
+  }
+  return {
+    paths,
+    complete: false,
+    incompleteReason: `Hay más de ${STORAGE_INVENTORY_CEILING} archivos guardados para este cliente; el inventario está incompleto.`,
+  };
 }

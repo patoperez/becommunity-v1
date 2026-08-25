@@ -8,18 +8,15 @@ import { createClient } from "@/lib/supabase/server";
 import { parseDataScope } from "@/lib/studies/scope";
 import { brandConfigSchema, parseBrandConfig } from "@/lib/branding/config";
 import {
-  countTenantImpact,
-  listTenantStorageObjects,
+  lifecycleAuditAvailable,
+  LIFECYCLE_UNAVAILABLE_REASON,
   recordLifecycleEvent,
   setTenantArchived,
   tenantRefusesNewWork,
+  TENANT_DELETION_DISABLED_REASON,
 } from "@/lib/studio/lifecycle";
 import {
   ARCHIVED_TENANT_REFUSAL,
-  impactDifferences,
-  impactIsUnchanged,
-  nameConfirmationRefusal,
-  parseImpact,
   SUSPENSION_DURATION,
   SUSPENSION_LIFTED,
 } from "@/lib/studio/lifecycle-model";
@@ -56,20 +53,6 @@ function finish(
   const base = safeReturnPath(options.returnTo, options.allowed ?? [], "/admin/clients");
   const separator = base.includes("?") ? "&" : "?";
   redirect(`${base}${separator}${kind}=${encodeURIComponent(message)}`);
-}
-
-/**
- * An administrative action that succeeded and was NOT recorded says so.
- *
- * Presenting an unrecorded suspension or deletion as if the evidence existed
- * would be the one lie this workflow cannot afford, so the absence travels with
- * the success message instead of being swallowed.
- */
-function auditNote(result: { recorded: boolean; unavailable: boolean }): string {
-  if (result.recorded) return "";
-  return result.unavailable
-    ? " (No quedó registrado en el historial administrativo: falta aplicar la migración 0015 en este entorno.)"
-    : " (No se pudo guardar el registro administrativo de esta acción.)";
 }
 
 /**
@@ -248,6 +231,21 @@ export async function updateClientUser(formData: FormData) {
  * to — and it cannot be undone. Nothing belonging to the CLIENT is touched:
  * studies, responses and comments were never that person's property.
  *
+ * EVIDENCE COMES FIRST, AND THAT IS THE WHOLE POINT.
+ *
+ * The record used to be written after the account was already gone, so a failed
+ * write left an irreversible act with nothing describing it. The order is now:
+ *
+ *   1. `client_user_delete_started` is written and the write is CHECKED. If it
+ *      fails — for any reason, missing schema included — nothing is deleted.
+ *      Durable intent exists before anything irreversible happens.
+ *   2. the account is deleted.
+ *   3. `client_user_deleted` is written as the outcome.
+ *
+ * A started row with no matching deleted row therefore means "this was
+ * attempted and the outcome is unknown", which is exactly what that state is.
+ * The success message never claims a completion that was not recorded.
+ *
  * The exact-email confirmation is unchanged and is still checked here, against
  * the account the server read, so a request that never rendered the dialog is
  * refused identically.
@@ -268,20 +266,50 @@ export async function deleteClientUser(formData: FormData) {
   }
   const returnTo = String(formData.get("return_to") ?? "");
   const allowed = clientReturnPaths(profile.tenant_id);
+  const subjectLabel = profile.full_name || "Cuenta cliente";
+
+  // (1) Durable intent, before anything irreversible. A failure here is fatal:
+  //     an account is never destroyed without a record saying it was going to
+  //     be.
+  const intent = await recordLifecycleEvent(admin, {
+    actorUserId: user.id,
+    action: "client_user_delete_started",
+    subjectKind: "client_user",
+    subjectId: userId.data,
+    tenantId: profile.tenant_id,
+    subjectLabel,
+  });
+  if (!intent.recorded) {
+    finish(
+      "error",
+      intent.unavailable
+        ? LIFECYCLE_UNAVAILABLE_REASON
+        : "No se pudo dejar constancia de esta eliminación, así que no se eliminó nada. Vuelve a intentarlo.",
+      { returnTo, allowed },
+    );
+  }
+
+  // (2) The irreversible step.
   const { error } = await admin.auth.admin.deleteUser(userId.data);
   if (error) finish("error", `No se pudo eliminar la cuenta: ${error.message}`, { returnTo, allowed });
-  const audit = await recordLifecycleEvent(admin, {
+
+  // (3) The outcome. If THIS fails the account is genuinely gone, and the
+  //     message says the completion was not recorded rather than reporting a
+  //     clean success the evidence does not support.
+  const outcome = await recordLifecycleEvent(admin, {
     actorUserId: user.id,
     action: "client_user_deleted",
     subjectKind: "client_user",
     subjectId: userId.data,
     tenantId: profile.tenant_id,
-    subjectLabel: profile.full_name || "Cuenta cliente",
+    subjectLabel,
   });
   revalidatePath("/admin/clients");
   finish(
-    "ok",
-    `Cuenta ${accountEmail} eliminada. Los estudios, las respuestas y los comentarios del cliente se conservaron.${auditNote(audit)}`,
+    outcome.recorded ? "ok" : "error",
+    outcome.recorded
+      ? `Cuenta ${accountEmail} eliminada. Los estudios, las respuestas y los comentarios del cliente se conservaron.`
+      : `La cuenta ${accountEmail} se eliminó, pero el cierre no quedó registrado. En el historial figura como iniciada sin desenlace; avísale al equipo técnico.`,
     { returnTo, allowed },
   );
 }
@@ -318,6 +346,59 @@ async function clientUserContext(
 }
 
 /**
+ * No lifecycle mutation runs without somewhere to record it.
+ *
+ * FAIL CLOSED, deliberately. The product tells a consultant that suspending,
+ * restoring and archiving leave administrative evidence. Where the record
+ * cannot be written, the honest answer is to refuse and say so — not to apply
+ * the change and quietly drop the evidence, which would leave the interface
+ * claiming an audit trail it does not have.
+ *
+ * This is a READ probe, so it proves the table is there and reachable. It is
+ * never the only thing an irreversible action relies on: that path writes a
+ * real record first and refuses if the write itself fails.
+ */
+async function requireLifecycleAudit(
+  admin: ReturnType<typeof createAdminClient>,
+  options: { returnTo?: string; allowed?: readonly string[] } = {},
+) {
+  if (!(await lifecycleAuditAvailable(admin))) {
+    finish("error", LIFECYCLE_UNAVAILABLE_REASON, options);
+  }
+}
+
+/**
+ * A REVERSIBLE lifecycle mutation that could not be recorded is undone.
+ *
+ * The mutation is applied, then the record is written. If that write fails the
+ * change is reversed with the operation's own inverse — un-suspend, un-archive,
+ * each a single idempotent call — and the operator is told nothing happened.
+ * The window in which an unrecorded change exists is one round trip, and it
+ * closes either way.
+ *
+ * This is the bounded compensating design that lets reversible actions proceed
+ * at all. It is available only BECAUSE they are reversible; the irreversible
+ * path cannot use it and does not.
+ */
+async function recordOrUndo(
+  admin: ReturnType<typeof createAdminClient>,
+  event: Parameters<typeof recordLifecycleEvent>[1],
+  undo: () => Promise<unknown>,
+  options: { returnTo?: string; allowed?: readonly string[] },
+) {
+  const audit = await recordLifecycleEvent(admin, event);
+  if (audit.recorded) return;
+  await undo();
+  finish(
+    "error",
+    audit.unavailable
+      ? LIFECYCLE_UNAVAILABLE_REASON
+      : "No se pudo guardar el registro administrativo, así que se deshizo el cambio y todo quedó como estaba.",
+    options,
+  );
+}
+
+/**
  * Suspend a person's access.
  *
  * Enforced where authentication happens, not by a product flag: Supabase Auth
@@ -332,26 +413,29 @@ export async function suspendClientUser(formData: FormData) {
   const subject = await clientUserContext(admin, userId.data);
   const returnTo = String(formData.get("return_to") ?? "");
   const allowed = clientReturnPaths(subject.tenantId);
+  await requireLifecycleAudit(admin, { returnTo, allowed });
 
   const { error } = await admin.auth.admin.updateUserById(userId.data, {
     ban_duration: SUSPENSION_DURATION,
   });
   if (error) finish("error", `No se pudo suspender el acceso: ${error.message}`, { returnTo, allowed });
 
-  const audit = await recordLifecycleEvent(admin, {
-    actorUserId: user.id,
-    action: "client_user_suspended",
-    subjectKind: "client_user",
-    subjectId: userId.data,
-    tenantId: subject.tenantId,
-    subjectLabel: subject.label,
-  });
-  revalidatePath("/admin/clients");
-  finish(
-    "ok",
-    `${subject.label} ya no puede entrar. Su cuenta y sus datos siguen aquí.${auditNote(audit)}`,
+  await recordOrUndo(
+    admin,
+    {
+      actorUserId: user.id,
+      action: "client_user_suspended",
+      subjectKind: "client_user",
+      subjectId: userId.data,
+      tenantId: subject.tenantId,
+      subjectLabel: subject.label,
+    },
+    () => admin.auth.admin.updateUserById(userId.data, { ban_duration: SUSPENSION_LIFTED }),
     { returnTo, allowed },
   );
+
+  revalidatePath("/admin/clients");
+  finish("ok", `${subject.label} ya no puede entrar. Su cuenta y sus datos siguen aquí.`, { returnTo, allowed });
 }
 
 /** Give the access back. The mirror of suspension, and just as ordinary. */
@@ -362,26 +446,33 @@ export async function restoreClientUser(formData: FormData) {
   const subject = await clientUserContext(admin, userId.data);
   const returnTo = String(formData.get("return_to") ?? "");
   const allowed = clientReturnPaths(subject.tenantId);
+  await requireLifecycleAudit(admin, { returnTo, allowed });
 
   const { error } = await admin.auth.admin.updateUserById(userId.data, {
     ban_duration: SUSPENSION_LIFTED,
   });
   if (error) finish("error", `No se pudo devolver el acceso: ${error.message}`, { returnTo, allowed });
 
-  const audit = await recordLifecycleEvent(admin, {
-    actorUserId: user.id,
-    action: "client_user_restored",
-    subjectKind: "client_user",
-    subjectId: userId.data,
-    tenantId: subject.tenantId,
-    subjectLabel: subject.label,
-  });
+  await recordOrUndo(
+    admin,
+    {
+      actorUserId: user.id,
+      action: "client_user_restored",
+      subjectKind: "client_user",
+      subjectId: userId.data,
+      tenantId: subject.tenantId,
+      subjectLabel: subject.label,
+    },
+    () => admin.auth.admin.updateUserById(userId.data, { ban_duration: SUSPENSION_DURATION }),
+    { returnTo, allowed },
+  );
+
   revalidatePath("/admin/clients");
-  finish("ok", `${subject.label} puede volver a entrar.${auditNote(audit)}`, { returnTo, allowed });
+  finish("ok", `${subject.label} puede volver a entrar.`, { returnTo, allowed });
 }
 
 // ---------------------------------------------------------------------------
-// Client organisation lifecycle — archive, restore, delete
+// Client organisation lifecycle — archive, restore, and the deletion that is not
 // ---------------------------------------------------------------------------
 
 async function tenantContext(admin: ReturnType<typeof createAdminClient>, tenantId: string) {
@@ -406,23 +497,30 @@ export async function archiveTenant(formData: FormData) {
   const tenant = await tenantContext(admin, tenantId.data);
   const returnTo = String(formData.get("return_to") ?? "");
   const allowed = clientReturnPaths(tenantId.data);
+  await requireLifecycleAudit(admin, { returnTo, allowed });
 
   const result = await setTenantArchived(admin, tenantId.data, true, user.id);
   if (!result.ok) finish("error", result.message, { returnTo, allowed });
 
-  const audit = await recordLifecycleEvent(admin, {
-    actorUserId: user.id,
-    action: "tenant_archived",
-    subjectKind: "tenant",
-    subjectId: tenantId.data,
-    tenantId: tenantId.data,
-    subjectLabel: tenant.name,
-  });
+  await recordOrUndo(
+    admin,
+    {
+      actorUserId: user.id,
+      action: "tenant_archived",
+      subjectKind: "tenant",
+      subjectId: tenantId.data,
+      tenantId: tenantId.data,
+      subjectLabel: tenant.name,
+    },
+    () => setTenantArchived(admin, tenantId.data, false, user.id),
+    { returnTo, allowed },
+  );
+
   revalidatePath("/admin/clients");
   revalidatePath("/admin/studies");
   finish(
     "ok",
-    `“${tenant.name}” quedó archivado: no admite estudios, invitaciones ni publicaciones nuevas. Quien ya tenía acceso lo conserva.${auditNote(audit)}`,
+    `“${tenant.name}” quedó archivado: no admite estudios, invitaciones ni publicaciones nuevas. Quien ya tenía acceso lo conserva.`,
     { returnTo, allowed },
   );
 }
@@ -435,124 +533,66 @@ export async function restoreTenant(formData: FormData) {
   const tenant = await tenantContext(admin, tenantId.data);
   const returnTo = String(formData.get("return_to") ?? "");
   const allowed = clientReturnPaths(tenantId.data);
+  await requireLifecycleAudit(admin, { returnTo, allowed });
 
   const result = await setTenantArchived(admin, tenantId.data, false, user.id);
   if (!result.ok) finish("error", result.message, { returnTo, allowed });
 
-  const audit = await recordLifecycleEvent(admin, {
-    actorUserId: user.id,
-    action: "tenant_restored",
-    subjectKind: "tenant",
-    subjectId: tenantId.data,
-    tenantId: tenantId.data,
-    subjectLabel: tenant.name,
-  });
+  await recordOrUndo(
+    admin,
+    {
+      actorUserId: user.id,
+      action: "tenant_restored",
+      subjectKind: "tenant",
+      subjectId: tenantId.data,
+      tenantId: tenantId.data,
+      subjectLabel: tenant.name,
+    },
+    () => setTenantArchived(admin, tenantId.data, true, user.id),
+    { returnTo, allowed },
+  );
+
   revalidatePath("/admin/clients");
   revalidatePath("/admin/studies");
-  finish("ok", `“${tenant.name}” volvió a estar activo.${auditNote(audit)}`, { returnTo, allowed });
+  finish("ok", `“${tenant.name}” volvió a estar activo.`, { returnTo, allowed });
 }
 
 /**
- * Permanently delete a client organisation. The exceptional action.
+ * Permanently delete a client organisation — REFUSED, on the server, always.
  *
- * FOUR THINGS GUARD IT, AND NONE OF THEM IS THE DIALOG:
+ * This is not a stub and not a "coming soon". It is the deliberate, stated
+ * outcome of a design review, and it is enforced here rather than by hiding a
+ * control, so a caller that never rendered the page is refused identically.
  *
- *  1. the caller is internal, proved on the server;
- *  2. the typed name must match the client's own name exactly — checked here,
- *     with the same comparison the interface used, so a request that never
- *     rendered the dialog is refused identically;
- *  3. the impact summary the operator READ is compared against a summary
- *     recomputed at this instant, and any difference stops the deletion. A
- *     colleague importing a file while the dialog was open would otherwise mean
- *     destroying more than the summary named;
- *  4. every dependent object is handled deliberately and in an order that
- *     cannot orphan one: identities are collected first, the row cascade runs,
- *     then the Auth accounts and the stored files that no cascade would have
- *     reached.
+ * WHY. Deleting a client spans three systems with no shared transaction:
+ * Postgres rows, Supabase Auth identities and Storage objects. The previous
+ * implementation deleted the tenant row first and then attempted the other two,
+ * which is precisely the order that can leave an Auth account or a stored file
+ * behind after the cascade has already destroyed everything that pointed at
+ * them — and it wrote its administrative record last, so a failure there landed
+ * after the irreversible step. Counting failures afterwards is a report, not
+ * transactional safety, and a report is not what an irreversible operation
+ * needs.
  *
- * What is kept is kept on purpose: the administrative record of this deletion,
- * and the team's saved templates, whose `created_from` reference is set null by
- * the schema rather than taking the template with it.
+ * WHAT STAYS. Archiving, which is reversible and single-system. The impact
+ * summary, which is executable and correct and which the client page still
+ * renders. The exact-name confirmation, which the interface still asks for.
+ * Nothing about the analysis was wrong; only the execution was unsafe.
+ *
+ * WHAT WOULD LIFT IT. A recoverable, idempotent, resumable cross-system
+ * deletion workflow: durable intent, per-system steps that can be retried
+ * without duplicating or losing work, and a terminal state that is either
+ * complete or explicitly stuck. That is a real piece of engineering and it is
+ * not this pass.
  */
 export async function deleteTenant(formData: FormData) {
-  const { user, admin } = await internalContext();
+  const { admin } = await internalContext();
   const tenantId = uuid.safeParse(formData.get("tenant_id"));
-  if (!tenantId.success) finish("error", "Cliente inválido.");
-  const tenant = await tenantContext(admin, tenantId.data);
   const returnTo = String(formData.get("return_to") ?? "");
-  const allowed = clientReturnPaths(null);
-
-  const refusal = nameConfirmationRefusal(String(formData.get("confirmation_name") ?? ""), tenant.name);
-  if (refusal) finish("error", refusal, { returnTo, allowed });
-
-  const shown = parseImpact(String(formData.get("impact") ?? ""));
-  if (!shown) {
-    finish("error", "No se pudo leer el resumen que confirmaste. Vuelve a abrirlo y revísalo.", { returnTo, allowed });
-  }
-  const current = await countTenantImpact(admin, tenantId.data);
-  if (!impactIsUnchanged(shown, current)) {
-    finish(
-      "error",
-      `El cliente cambió mientras confirmabas, así que no se eliminó nada. Cambió: ${impactDifferences(shown, current).join("; ")}. Vuelve a revisar el resumen.`,
-      { returnTo, allowed },
-    );
-  }
-
-  // Collected BEFORE the cascade, because the cascade takes the profile rows
-  // that name these identities with it.
-  const { data: profiles, error: profileError } = await admin.from("profiles")
-    .select("user_id").eq("tenant_id", tenantId.data).returns<{ user_id: string }[]>();
-  if (profileError) finish("error", `No se pudo leer quién tiene acceso: ${profileError.message}`, { returnTo, allowed });
-  const storagePaths = await listTenantStorageObjects(admin, tenantId.data);
-
-  const { error: deleteError } = await admin.from("tenant").delete().eq("id", tenantId.data);
-  if (deleteError) finish("error", `No se pudo eliminar el cliente: ${deleteError.message}`, { returnTo, allowed });
-
-  // Neither of these is reached by a database cascade, so both are done here,
-  // explicitly, and any failure is reported rather than assumed away.
-  let orphanedAccounts = 0;
-  for (const profile of profiles ?? []) {
-    const { error } = await admin.auth.admin.deleteUser(profile.user_id);
-    if (error) orphanedAccounts += 1;
-  }
-  let orphanedFiles = 0;
-  if (storagePaths.length > 0) {
-    const { error } = await admin.storage.from("tenant-branding").remove(storagePaths);
-    if (error) orphanedFiles = storagePaths.length;
-  }
-
-  const audit = await recordLifecycleEvent(admin, {
-    actorUserId: user.id,
-    action: "tenant_deleted",
-    subjectKind: "tenant",
-    subjectId: tenantId.data,
-    tenantId: tenantId.data,
-    subjectLabel: tenant.name,
-    details: {
-      clientUsers: current.clientUsers,
-      studies: current.studies,
-      respondents: current.respondents,
-      quantResponses: current.quantResponses,
-      qualObservations: current.qualObservations,
-      importBatches: current.importBatches,
-      storageObjects: current.storageObjects,
-      orphanedAccounts,
-      orphanedFiles,
-    },
-  });
-
-  revalidatePath("/admin/clients");
-  revalidatePath("/admin/studies");
-  revalidatePath("/dashboard");
-  const leftovers = [
-    orphanedAccounts > 0 ? `${orphanedAccounts} cuenta(s) de acceso no se pudieron borrar` : null,
-    orphanedFiles > 0 ? `${orphanedFiles} archivo(s) guardados no se pudieron borrar` : null,
-  ].filter(Boolean);
-  finish(
-    leftovers.length > 0 ? "error" : "ok",
-    leftovers.length > 0
-      ? `Se eliminó “${tenant.name}” y sus datos, pero ${leftovers.join(" y ")}. Avísale al equipo técnico.${auditNote(audit)}`
-      : `Se eliminó “${tenant.name}” y todo lo que dependía de él.${auditNote(audit)}`,
-    { returnTo, allowed },
-  );
+  const allowed = clientReturnPaths(tenantId.success ? tenantId.data : null);
+  // Refused BEFORE anything is read about the client and long before anything
+  // could be destroyed. There is no path through this function that reaches a
+  // delete, an Auth call or a Storage call.
+  void admin;
+  finish("error", TENANT_DELETION_DISABLED_REASON, { returnTo, allowed });
 }

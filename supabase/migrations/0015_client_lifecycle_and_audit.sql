@@ -2,8 +2,10 @@
 -- 0015 — Client organisation lifecycle + administrative lifecycle audit (P8.2)
 -- =============================================================================
 -- HUMAN-REVIEW ZONE: this migration is additive only. It creates no function,
--- changes no existing policy, revokes no existing grant and rewrites no
--- existing row. Two nullable columns and one new internal table.
+-- changes no existing policy and rewrites no existing row: two nullable columns
+-- and one new internal table. The only privileges it revokes are the DEFAULT
+-- ones migration 0001 would otherwise hand its own new table, and it revokes
+-- them so it can grant back strictly less (see the grant block below).
 --
 -- WHY THESE TWO THINGS AND NOTHING ELSE
 --
@@ -66,9 +68,19 @@ create table if not exists public.admin_lifecycle_event (
   action        text not null check (action in (
                   'client_user_suspended',
                   'client_user_restored',
+                  -- Written BEFORE the irreversible account deletion, so the
+                  -- intent is durable before anything is destroyed. A row with
+                  -- `client_user_delete_started` and no matching
+                  -- `client_user_deleted` means the outcome is unknown, which is
+                  -- the honest thing for that state to look like.
+                  'client_user_delete_started',
                   'client_user_deleted',
                   'tenant_archived',
                   'tenant_restored',
+                  -- Reserved. Permanent client deletion is DISABLED in the
+                  -- application and no code path writes this value today; the
+                  -- vocabulary is kept so a future, recoverable cross-system
+                  -- deletion workflow does not have to migrate the constraint.
                   'tenant_deleted'
                 )),
   subject_kind  text not null check (subject_kind in ('client_user', 'tenant')),
@@ -76,7 +88,16 @@ create table if not exists public.admin_lifecycle_event (
   subject_id    uuid not null,
   tenant_id     uuid,
   subject_label text check (subject_label is null or char_length(subject_label) <= 200),
-  details       jsonb not null default '{}'::jsonb check (jsonb_typeof(details) = 'object')
+  -- Bounded three ways: it must be an object, it must be small, and the
+  -- application sanitiser (`boundedDetails`) keeps to HALF this ceiling so it
+  -- can never build a record the database would reject. The two bounds are
+  -- measured on slightly different encodings — canonical `jsonb::text` here,
+  -- `JSON.stringify` there — and the margin removes that question entirely.
+  -- `jsonb_out` and `textin` are both immutable, so the cast is legal in a
+  -- CHECK constraint.
+  details       jsonb not null default '{}'::jsonb
+                  check (jsonb_typeof(details) = 'object')
+                  check (octet_length(details::text) <= 4096)
 );
 
 create index if not exists admin_lifecycle_event_occurred_idx
@@ -96,7 +117,17 @@ drop policy if exists "deny_browser_roles" on public.admin_lifecycle_event;
 create policy "deny_browser_roles" on public.admin_lifecycle_event
   for all to anon, authenticated using (false) with check (false);
 
+-- LEAST PRIVILEGE, EXPLICITLY.
+--
+-- Migration 0001 set default privileges that grant every new public table ALL
+-- to `service_role` and SELECT/INSERT/UPDATE/DELETE to `authenticated`. Both
+-- are revoked here and only what the application actually performs is granted
+-- back: it INSERTs administrative records and SELECTs them for one client's
+-- history. It never updates or deletes one, so the table is append-only at the
+-- privilege level and not merely by convention — which is the only property
+-- that makes it evidence.
 revoke all privileges on table public.admin_lifecycle_event from anon, authenticated;
-grant all privileges on table public.admin_lifecycle_event to service_role;
+revoke all privileges on table public.admin_lifecycle_event from service_role;
+grant select, insert on table public.admin_lifecycle_event to service_role;
 
 commit;

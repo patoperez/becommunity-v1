@@ -17,6 +17,7 @@ import {
   type ClientUserAccess,
 } from "@/lib/studio/lifecycle-model";
 import { studioClient } from "@/lib/studio/routes";
+import { LIFECYCLE_UNAVAILABLE_REASON } from "@/lib/studio/lifecycle";
 
 /**
  * The people who can open this client's portal (P8.2).
@@ -31,6 +32,11 @@ import { studioClient } from "@/lib/studio/routes";
  * "Invitación pendiente" is a real third state. Showing an invited person as
  * "con acceso" would tell a consultant somebody can already open the portal
  * when they cannot.
+ *
+ * EVERY ACTION HERE IS GATED ON THE ADMINISTRATIVE RECORD. Suspending,
+ * restoring and deleting all promise evidence; where that record cannot be
+ * written the controls are replaced by the reason, and the Server Actions
+ * refuse independently, so a caller that skips this page gets the same answer.
  */
 
 const input =
@@ -59,11 +65,14 @@ export function ClientPeopleList({
   tenantName,
   people,
   inventories,
+  auditAvailable,
 }: {
   tenantId: string;
   tenantName: string;
   people: ClientPerson[];
   inventories: Record<string, TenantScopeInventory>;
+  /** False when the administrative record cannot be written. */
+  auditAvailable: boolean;
 }) {
   const returnTo = studioClient(tenantId);
   const tenants = [{ id: tenantId, name: tenantName }];
@@ -141,7 +150,14 @@ export function ClientPeopleList({
               </form>
 
               <div className="flex flex-wrap gap-3 border-t border-line pt-5">
-                {person.access === "suspended" ? (
+                {!auditAvailable ? (
+                  <p
+                    role="status"
+                    className="rounded-lg border border-caution-line bg-caution-surface px-3 py-2.5 text-sm text-caution"
+                  >
+                    {LIFECYCLE_UNAVAILABLE_REASON}
+                  </p>
+                ) : person.access === "suspended" ? (
                   <ConfirmAction
                     trigger="Devolver el acceso"
                     title="Devolver el acceso"
@@ -182,7 +198,7 @@ export function ClientPeopleList({
                   />
                 )}
 
-                <ConfirmAction
+                {auditAvailable ? <ConfirmAction
                   trigger="Eliminar la cuenta para siempre"
                   title="Eliminar la cuenta para siempre"
                   objectName={`${person.name || person.email} · ${person.email}`}
@@ -217,7 +233,7 @@ export function ClientPeopleList({
                   pendingLabel="Eliminando…"
                   action={deleteClientUser}
                   fields={{ user_id: person.userId, return_to: returnTo }}
-                />
+                /> : null}
               </div>
             </div>
           </details>

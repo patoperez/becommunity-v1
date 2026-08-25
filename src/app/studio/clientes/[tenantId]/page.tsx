@@ -19,6 +19,7 @@ import { parseDataScope, type DataScope } from "@/lib/studies/scope";
 import { loadTenantScopeInventories } from "@/lib/studies/scope-inventory";
 import {
   countTenantImpact,
+  lifecycleAuditAvailable,
   loadTenantArchiveState,
   loadTenantLifecycleHistory,
 } from "@/lib/studio/lifecycle";
@@ -39,6 +40,7 @@ const button =
 const LIFECYCLE_ACTION_LABEL: Record<string, string> = {
   client_user_suspended: "Se suspendió el acceso de una persona",
   client_user_restored: "Se devolvió el acceso a una persona",
+  client_user_delete_started: "Se inició la eliminación de una cuenta",
   client_user_deleted: "Se eliminó una cuenta de acceso",
   tenant_archived: "Se archivó el cliente",
   tenant_restored: "Se reactivó el cliente",
@@ -81,10 +83,11 @@ export default async function StudioClientPage({
 
   const query = await searchParams;
 
-  const [archiveState, impact, history, inventories, { count: peopleTotal }, { data: studies }] =
+  const [archiveState, impactReport, auditAvailable, history, inventories, { count: peopleTotal }, { data: studies }] =
     await Promise.all([
       loadTenantArchiveState(admin, [tenantId]),
       countTenantImpact(admin, tenantId),
+      lifecycleAuditAvailable(admin),
       loadTenantLifecycleHistory(admin, tenantId),
       loadTenantScopeInventories(admin, [tenantId]),
       admin.from("profiles").select("user_id", { count: "exact", head: true })
@@ -126,6 +129,7 @@ export default async function StudioClientPage({
     }),
   );
 
+  const impact = impactReport.impact;
   const archived = Boolean(archiveState.archivedAt[tenantId]);
   const brand = parseBrandConfig(tenant.brand_config);
   const logoUrl = logoPublicUrl(brand.logoPath);
@@ -333,6 +337,7 @@ export default async function StudioClientPage({
             tenantName={tenant.name}
             people={people}
             inventories={inventories}
+            auditAvailable={auditAvailable}
           />
           <Pager
             window={view}
@@ -347,8 +352,11 @@ export default async function StudioClientPage({
           tenantId={tenantId}
           tenantName={tenant.name}
           archived={archived}
-          available={archiveState.available}
+          archiveAvailable={archiveState.available}
+          auditAvailable={auditAvailable}
           impact={impact}
+          storageInventoryComplete={impactReport.storageInventoryComplete}
+          storageIncompleteReason={impactReport.storageIncompleteReason}
         />
 
         {history.available && history.records.length > 0 ? (

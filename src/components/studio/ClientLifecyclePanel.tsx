@@ -1,50 +1,60 @@
 import { ConfirmAction } from "@/components/studio/ConfirmAction";
-import { archiveTenant, deleteTenant, restoreTenant } from "@/app/admin/clients/actions";
+import { archiveTenant, restoreTenant } from "@/app/admin/clients/actions";
 import {
   impactLines,
-  serializeImpact,
   TENANT_DELETION_RETAINED,
   TENANT_LIFECYCLE_MEANING,
   type TenantImpact,
 } from "@/lib/studio/lifecycle-model";
-import { LIFECYCLE_UNAVAILABLE_REASON } from "@/lib/studio/lifecycle";
+import {
+  LIFECYCLE_UNAVAILABLE_REASON,
+  TENANT_DELETION_DISABLED_REASON,
+} from "@/lib/studio/lifecycle";
 import { studioClient } from "@/lib/studio/routes";
 
 /**
  * What can happen to a client organisation, said plainly (P8.2).
  *
- * TWO ACTIONS, DELIBERATELY UNEQUAL.
- *
- * ARCHIVE is the ordinary one. It is reversible, it destroys nothing, it stops
- * new work, and it is presented as ordinary — because dressing every
+ * ARCHIVE is the ordinary action. It is reversible, it destroys nothing, it
+ * stops new work, and it is presented as ordinary — because dressing every
  * administrative action in red is how the genuinely irreversible one stops
  * being noticed.
  *
- * PERMANENT DELETION is the exception. It shows a counted impact summary before
- * anything happens, requires the client's own name typed exactly, and is
- * re-checked on the server against a summary recomputed at that instant, so the
- * numbers the operator agreed to cannot have gone stale while the dialog was
- * open.
+ * PERMANENT DELETION IS DISABLED, AND SAYS SO. It is not hidden and not
+ * pretended: the impact summary is still computed and still shown, because
+ * knowing what a client is made of is useful on its own, and the panel states
+ * in internal-facing words why the destructive action is unavailable. The
+ * Server Action refuses it as well, so nothing changes for a caller that skips
+ * this page.
  *
- * When migration 0015 is not applied to the environment, both are DISABLED with
- * the reason stated rather than being hidden or, worse, offered and then
- * failing halfway.
+ * When the administrative record is unavailable, ARCHIVE is disabled too. Every
+ * lifecycle action promises evidence; without somewhere to write it the honest
+ * answer is to refuse rather than to act unrecorded.
  */
 export function ClientLifecyclePanel({
   tenantId,
   tenantName,
   archived,
-  available,
+  archiveAvailable,
+  auditAvailable,
   impact,
+  storageInventoryComplete,
+  storageIncompleteReason,
 }: {
   tenantId: string;
   tenantName: string;
   archived: boolean;
   /** False when the lifecycle schema is not present in this environment. */
-  available: boolean;
+  archiveAvailable: boolean;
+  /** False when the administrative record cannot be written. */
+  auditAvailable: boolean;
   impact: TenantImpact;
+  /** False when the stored-object inventory hit its ceiling or failed. */
+  storageInventoryComplete: boolean;
+  storageIncompleteReason: string | null;
 }) {
   const returnTo = studioClient(tenantId);
+  const canArchive = archiveAvailable && auditAvailable;
 
   return (
     <section
@@ -58,7 +68,7 @@ export function ClientLifecyclePanel({
         {archived ? TENANT_LIFECYCLE_MEANING.archived : TENANT_LIFECYCLE_MEANING.active}
       </p>
 
-      {!available ? (
+      {!canArchive ? (
         <p
           role="status"
           className="mt-4 rounded-lg border border-caution-line bg-caution-surface px-3 py-2.5 text-sm text-caution"
@@ -106,56 +116,59 @@ export function ClientLifecyclePanel({
               fields={{ tenant_id: tenantId, return_to: returnTo }}
             />
           )}
-
-          <ConfirmAction
-            trigger="Eliminar el cliente para siempre"
-            title="Eliminar el cliente para siempre"
-            objectName={tenantName}
-            severity="permanent"
-            consequence={
-              <>
-                <p>Se destruirá todo lo que aparece abajo. No hay copia y no hay deshacer.</p>
-                <ul className="mt-2 space-y-1">
-                  {impactLines(impact).map((line) => (
-                    <li key={line.label} className="flex justify-between gap-4">
-                      <span>{line.label}</span>
-                      <span className="tabular font-semibold">{line.count}</span>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            }
-            recovery={
-              <>
-                <p>Nada de eso se puede recuperar. Lo único que se conserva es:</p>
-                <ul className="mt-1 list-disc space-y-1 pl-5">
-                  {TENANT_DELETION_RETAINED.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              </>
-            }
-            requireExactText={tenantName}
-            requireExactHint={`Escribe “${tenantName}” para confirmar`}
-            confirmLabel="Eliminar para siempre"
-            pendingLabel="Eliminando…"
-            action={deleteTenant}
-            fields={{
-              tenant_id: tenantId,
-              return_to: returnTo,
-              // The summary the operator actually read, travelling with the
-              // confirmation. The server recomputes it and refuses the deletion
-              // if a single number moved while the dialog was open.
-              impact: serializeImpact(impact),
-            }}
-          >
-            <p className="text-xs">
-              Antes de eliminar, comprueba que el resumen coincide con lo que esperabas. Si alguien
-              del equipo carga datos mientras confirmas, la eliminación se detiene y te lo dice.
-            </p>
-          </ConfirmAction>
         </div>
       )}
+
+      {/*
+        The impact summary survives the disabling of the deletion it used to
+        gate. What a client is made of is worth knowing before archiving it, and
+        keeping the computation live is what will make re-enabling deletion a
+        change to the execution rather than a rebuild of the analysis.
+      */}
+      <section aria-labelledby="impacto" className="mt-6 border-t border-line pt-5">
+        <h3 id="impacto" className="text-sm font-semibold text-strong">
+          De qué está hecho este cliente
+        </h3>
+        <ul className="mt-2 max-w-md space-y-1 text-sm text-body">
+          {impactLines(impact).map((line) => (
+            <li key={line.label} className="flex justify-between gap-4">
+              <span>{line.label}</span>
+              <span className="tabular font-semibold">{line.count}</span>
+            </li>
+          ))}
+        </ul>
+        {!storageInventoryComplete ? (
+          <p
+            role="status"
+            className="mt-3 rounded-lg border border-caution-line bg-caution-surface px-3 py-2.5 text-sm text-caution"
+          >
+            El inventario de archivos guardados está incompleto, así que el conteo de arriba puede
+            quedarse corto.{storageIncompleteReason ? ` ${storageIncompleteReason}` : ""}
+          </p>
+        ) : null}
+      </section>
+
+      <section
+        aria-labelledby="eliminacion"
+        className="mt-5 rounded-xl border border-line bg-surface-sunken p-4"
+      >
+        <h3 id="eliminacion" className="text-sm font-semibold text-strong">
+          Eliminar el cliente para siempre · no disponible
+        </h3>
+        <p className="mt-1.5 max-w-prose text-sm text-body">{TENANT_DELETION_DISABLED_REASON}</p>
+        <p className="mt-2 max-w-prose text-xs text-muted">
+          Si aun así hace falta destruir los datos de un cliente, escríbele al equipo técnico: hoy
+          se hace con una revisión explícita y no desde esta pantalla.
+        </p>
+        <div className="mt-3 max-w-prose text-xs text-muted">
+          <p>Cuando vuelva a estar disponible, esto es lo que se conservará:</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {TENANT_DELETION_RETAINED.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      </section>
     </section>
   );
 }

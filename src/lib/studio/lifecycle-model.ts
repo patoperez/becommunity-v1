@@ -20,8 +20,12 @@
  * revocation, and the interface says so rather than implying that a client's
  * people were locked out. Locking a person out is suspension, above.
  *
- * Permanent deletion exists for both, is never the default, and never shares a
- * control with the reversible action.
+ * Permanent deletion of a PERSON exists, is never the default, and never shares
+ * a control with the reversible action. Permanent deletion of a CLIENT is
+ * disabled in the product: it spans three systems with no shared transaction,
+ * and the server refuses it (`TENANT_DELETION_DISABLED_REASON`). The impact
+ * model below is kept live for the summary the interface still shows and for
+ * the recoverable workflow that will re-enable it.
  */
 
 /** How long a suspension lasts. Long enough to be indefinite; still a window. */
@@ -107,8 +111,15 @@ export const ARCHIVED_TENANT_REFUSAL =
   "Este cliente está archivado. Reactívalo antes de crear estudios, invitar personas o publicar.";
 
 // ---------------------------------------------------------------------------
-// Permanent deletion — the impact summary, and why it has to be recomputed
+// The impact summary
 // ---------------------------------------------------------------------------
+//
+// WHAT THIS IS NOW FOR. Permanent client deletion is DISABLED in the product
+// (`TENANT_DELETION_DISABLED_REASON`), so none of this gates a destructive act
+// today. It is kept, live and executable, for two reasons: knowing what a
+// client is made of is worth showing before archiving it, and the freshness
+// rule below is the part a recoverable deletion workflow will need unchanged
+// when it arrives. Nothing here claims that a deletion is safe.
 
 /**
  * What permanently deleting a client would destroy, counted.
@@ -167,11 +178,14 @@ export function parseImpact(serialized: string): TenantImpact | null {
 /**
  * Whether the summary the operator READ still describes the client as it is NOW.
  *
- * The preview is rendered when the page loads and confirmed some time later. In
- * between, a colleague can import a file, publish a study or invite somebody —
- * so the confirmation dialog would be describing a client that no longer
- * exists. The server recomputes the counts at execution time and refuses to
- * proceed when they moved, rather than destroying more than the summary named.
+ * A summary is rendered when the page loads and read some time later. In
+ * between, a colleague can import a file, publish a study or invite somebody,
+ * so the figures on screen can already be stale. This is the comparison a
+ * future deletion workflow must run at execution time before acting on a
+ * summary somebody agreed to. It is not, on its own, transactional safety:
+ * comparing counts says nothing about whether the deletion that follows can
+ * complete across three systems, which is exactly why that deletion is
+ * currently disabled.
  */
 export function impactIsUnchanged(shown: TenantImpact, current: TenantImpact): boolean {
   return IMPACT_KEYS.every((key) => shown[key] === current[key]);
@@ -208,7 +222,12 @@ export function impactLines(impact: TenantImpact): ImpactLine[] {
   return IMPACT_KEYS.map((key) => ({ label: IMPACT_LABEL[key], count: impact[key] }));
 }
 
-/** What permanent client deletion deliberately KEEPS, said out loud. */
+/**
+ * What permanent client deletion would deliberately KEEP, said out loud.
+ *
+ * Presented by the interface as "when this returns", because the deletion
+ * itself is disabled.
+ */
 export const TENANT_DELETION_RETAINED = [
   "El registro administrativo de esta eliminación: quién la hizo, cuándo y qué cantidades destruyó.",
   "Las plantillas guardadas por el equipo. Dejan de apuntar a un estudio de este cliente y siguen sirviendo para otros.",
@@ -251,3 +270,75 @@ export function nameConfirmationRefusal(typed: string, name: string): string | n
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// The bounds the administrative record is held to
+// ---------------------------------------------------------------------------
+//
+// These live here, in the PURE module, because they are rules rather than
+// plumbing: the database enforces one of them, the application enforces the
+// other, and a gate has to be able to prove both without a server, a browser or
+// a database.
+
+const MAX_DETAIL_ENTRIES = 20;
+const MAX_DETAIL_STRING = 120;
+
+/**
+ * The application's own encoded-size ceiling for `details`.
+ *
+ * The database enforces its own bound in migration 0015
+ * (`AUDIT_DETAILS_DB_LIMIT_BYTES`). This one is deliberately STRICTER, by a
+ * factor of two, so the application can never construct a record the database
+ * would then reject: the two bounds are measured on slightly different
+ * encodings — `JSON.stringify` here, canonical `jsonb::text` there — and a
+ * margin removes the question entirely.
+ */
+export const MAX_DETAIL_BYTES = 2048;
+
+/** The bound migration 0015 declares. Kept here so a gate can compare them. */
+export const AUDIT_DETAILS_DB_LIMIT_BYTES = 4096;
+
+/**
+ * Keep the record small and boring on purpose. Numbers and short flags survive;
+ * anything long is truncated and anything unexpected is dropped, so no client
+ * payload can be smuggled into administrative evidence by a future caller.
+ */
+export function boundedDetails(details: LifecycleDetails | undefined): Record<string, unknown> {
+  if (!details) return {};
+  const entries = Object.entries(details).slice(0, MAX_DETAIL_ENTRIES);
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of entries) {
+    let next: unknown;
+    if (typeof value === "number" && Number.isFinite(value)) next = value;
+    else if (typeof value === "boolean" || value === null) next = value;
+    else if (typeof value === "string") next = value.slice(0, MAX_DETAIL_STRING);
+    else continue;
+    // Entries are added one at a time and the encoded size is re-measured, so
+    // the result is deterministic and can never exceed the ceiling. Dropping
+    // the tail is the right failure: administrative metadata is diagnostic, and
+    // losing the last count is better than losing the whole record.
+    const candidate = { ...safe, [key]: next };
+    if (encodedSize(candidate) > MAX_DETAIL_BYTES) break;
+    safe[key] = next;
+  }
+  return safe;
+}
+
+/** The encoded size the bound is measured against. */
+export function encodedSize(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value ?? {})).length;
+}
+
+
+/**
+ * The hard ceiling on how many stored objects one inventory will enumerate.
+ *
+ * Ten pages of a hundred, then it stops and SAYS it stopped. A branding bucket
+ * holding more than this for one client is already anomalous, and the answer to
+ * an anomaly is a stated incomplete result — never an unbounded loop, and never
+ * a count that looks authoritative because the paging quietly ended.
+ */
+export const STORAGE_INVENTORY_CEILING = 1_000;
+
+/** The bounded metadata an administrative record may carry. */
+export type LifecycleDetails = Record<string, number | string | boolean | null>;
