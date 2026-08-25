@@ -262,7 +262,39 @@ and `supabase/rollbacks/0015_*.sql` reverses exactly it.
 
 **`docs/P7_PLAN.md` §0.1** records that `0015` is taken: the deferred P7
 `audit_log` takes the next available migration number instead. That is a
-numbering correction only; P7 is not resumed. Suspension is deliberately
+numbering correction only; P7 is not resumed.
+
+### Tracked schema versus removed drift — migration `0016`
+
+The synthetic project carried RLS policies, and a `private` schema of helper
+functions behind them, that existed in **no tracked migration**: the Fase 0
+proposal for SECURITY DEFINER helpers that `system_context.md` and
+`docs/P7_PLAN.md` both record as **never adopted**. It reached the database
+anyway. One of those helpers, `private.can_access_tenant()`, queries
+`public.consultant_assignments` — a table in no migration — so every policy
+calling it RAISED instead of filtering, and **no authenticated role, client or
+internal, could read `public.tenant` at all**.
+
+`0016_remove_untracked_private_policy_experiment.sql` removes exactly that
+experiment: seven policies (`profiles_admin_write`, `profiles_select_self`,
+`tenant_admin_write`, `tenant_select`, `respondent_select`, `quant_select`,
+`qual_select`), the four `private` helpers, the `authenticated` usage grant on
+that schema, and the schema itself — the last only after proving it empty and
+unreferenced by any policy, routine or view. Every statement is guarded, so the
+migration is a no-op on a database built solely from tracked migrations.
+
+It preserves `profiles_select_own`, `tenant_isolation_select`,
+`published_study_select`, every `deny_browser_roles` policy, every RLS and FORCE
+RLS flag, every grant and revocation from `0000`-`0015`, and every row.
+Dropping the rogue SELECT policies **restores** the direct-browser denial on
+`respondent`, `quant_response` and `qual_observation`: those tables are left
+with no permissive policy, which is the tracked design.
+
+**`confirmed_qual_observation` is not a defect and is not changed.** Migration
+`0008` granted `authenticated` SELECT on the view; migration
+`0009_client_publication_boundary.sql` deliberately superseded that, revoking
+`anon`/`authenticated` and granting only `service_role`. The application loads
+confirmed qualitative content server-side on purpose. That boundary stays. Suspension is deliberately
 outside that schema. Until the migration is applied through its own reviewed
 deployment step, `src/lib/studio/lifecycle.ts` detects its absence, the client
 archive and permanent-delete controls render **disabled with the reason

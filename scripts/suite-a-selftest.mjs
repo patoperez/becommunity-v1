@@ -352,4 +352,62 @@ console.log("\n[7] Canonical gate wiring:");
   ok("gates:offline stays credentials-free; CI runs only gates:offline and receives no live credential");
 }
 
+// --- [N] A2.2 drives the filter by its frozen aria-label, not visible text ---
+//
+// A2.2 is the check that proves the profile data scope is re-derived ON THE
+// SERVER for every data request, by driving the study's own filter control and
+// requiring the returned view to stay scope-limited. It once located that
+// control with `changeSelectByLabel`, which searches VISIBLE <label> text — and
+// P8 humanised that text ("genero" -> "Genero"), so the driver returned
+// `no-control` and a passing product reported as a failing gate.
+//
+// The control's `aria-label` is the frozen contract: `StudyCard.tsx` builds it
+// from the raw dimension key. This pins the driver to it, so the regression
+// cannot come back quietly.
+{
+  console.log("\n[A2.2 driver] the scope probe uses the frozen aria-label mechanism:");
+  const suite = readFileSync("scripts/suite-a-isolation.mjs", "utf8");
+  const browser = readFileSync("scripts/lib/harness-browser.mjs", "utf8");
+  const card = readFileSync("src/app/dashboard/StudyCard.tsx", "utf8");
+
+  assert.match(
+    suite,
+    /PAGE\.changeSelectByAriaLabel\(\s*`Filtrar por \$\{ORTHOGONAL_DIMENSION\}`/,
+    "A2.2 must drive the filter through changeSelectByAriaLabel with the frozen prefix",
+  );
+  // The CALL SITE specifically: the explanatory comment above it names the
+  // retired helper on purpose, so counting the bare identifier would match the
+  // very sentence that records why it was retired.
+  assert.equal(
+    suite.split("PAGE.changeSelectByLabel(").length - 1, 0,
+    "A2.2 must not fall back to the visible-label helper, which P8's humanised copy defeats",
+  );
+  assert.match(browser, /changeSelectByAriaLabel: \(prefix\) =>/, "the aria-label helper must exist");
+  assert.match(
+    browser,
+    /getAttribute\('aria-label'\) \|\| ''\)\.startsWith/,
+    "and it must match on the aria-label, by prefix",
+  );
+
+  // The product side of the contract: the aria-label is built from the RAW key,
+  // which is why the frozen prefix works and why humanising the visible label
+  // is not a product defect.
+  assert.match(
+    card,
+    /aria-label=\{`Filtrar por \$\{label\(option\.key\)\}`\}/,
+    "StudyCard must keep the raw-key aria-label the suite depends on",
+  );
+  assert.match(card, /function label\(value: string\) \{ return value\.replace\(\/_\/g, " "\); \}/,
+    "and `label` must stay the raw-key transform, not the humanised one");
+  assert.match(card, /\{characteristicLabel\(option\.key\)\}/,
+    "while the VISIBLE label stays humanised for the reader");
+
+  // The check itself must still be a real probe, not a softened one.
+  assert.match(suite, /if \(driven !== "ok"\) return fail\("A2\.2"/,
+    "an undrivable control must still fail A2.2, never be skipped");
+  assert.match(suite, /after\.includesProbe \|\| after\.optionCount !== scoped\.view\.optionCount/,
+    "A2.2 must still require the scoped shape to hold after the real data action");
+  ok("A2.2 drives the frozen aria-label, still fails closed, and the product contract it relies on is pinned");
+}
+
 console.log(`\nSuite A offline self-test: ${passed} checks passed.`);
