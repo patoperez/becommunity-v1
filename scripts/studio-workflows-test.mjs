@@ -31,7 +31,6 @@ import {
   reconcileScope,
   scopeSummarySentence,
   serializeScope,
-  toDataScope,
 } from "../src/lib/studies/scope-picker.ts";
 import {
   DESTINATION_CHOICES,
@@ -197,7 +196,7 @@ assert.doesNotMatch(inventoryLoader, /quant_response|qual_observation|quote/,
   "no answer or quote may be read by the access picker's inventory");
 const clientsPage = await readCode("src/app/admin/clients/page.tsx");
 const roleGate = clientsPage.indexOf('ownProfile?.role !== "internal"');
-const inventoryCall = clientsPage.indexOf("loadTenantScopeInventories");
+const inventoryCall = clientsPage.indexOf("await loadTenantScopeInventories(");
 assert.ok(roleGate >= 0 && inventoryCall > roleGate,
   "the inventory must be read only after the internal-role check");
 ok("aggregate vocabulary only, and only for an internal session");
@@ -396,10 +395,12 @@ for (const retired of ["Clave de segmento", "Clave de métrica", "ID de tabla"])
 }
 assert.doesNotMatch(workbench, /value=\{target\.key\}|value=\{target\.metricKey\}|value=\{target\.theme\}/,
   "no free-text input may be bound directly to a stored key");
-assert.doesNotMatch(workbench, /value=\{table\.id\}/,
-  "the recoding table identifier is generated, never typed");
-assert.match(workbench, /recodingTableLabel\(table\.id\)/,
-  "a recoding table is chosen and named by its readable name");
+// The identifier survives only as a `<option>`'s stored value — what the
+// operator reads and picks is the table's name.
+assert.match(workbench, /<option key=\{table\.id\} value=\{table\.id\}>\s*\{recodingTableLabel\(table\.id\)\}/,
+  "a recoding table is chosen by its readable name, never by its identifier");
+assert.match(workbench, /value=\{tableNames\[tableIndex\] \?\? recodingTableLabel\(table\.id\)\}/,
+  "the recoding table's editable field is its name; the identifier is derived from it");
 ok("every stored key and table identifier is generated, never transcribed");
 
 // ---------------------------------------------------------------------------
