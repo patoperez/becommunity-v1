@@ -94,11 +94,15 @@ bounded `Explorar` for clients, a no-code Studio for internal staff, progressive
 disclosure, rich evidence-connected journeys and controlled Be Community /
 co-branded / white-label presentation. Work now proceeds in reviewable slices
 of the real product, not additional detached HTML prototypes. P8-A is complete
-and owner-accepted at `3659a38` (delivery PR #37). The next unit is P8.2 Studio
-guided workflows: remove technical entry from ordinary workflows, starting
-with the access-scope picker and mapping experience, while preserving every P7
-and calculation boundary. V2.5 content still follows authoritative documented
-business definitions; never invent formulas.
+and owner-accepted at `3659a38` (delivery PR #37). P8.2's first owner-review
+slice — the no-code access-scope picker and guided mapping/readable import
+preview — is owner-accepted and merged at `b1abfef` (delivery PR #39), with its
+storage, authorization and ingestion contracts unchanged. The current unit is
+the remaining P8.2 Studio scope: operational home/routes and study work surface,
+picker completion, paging, preview-before-publication, safe destructive actions
+and the reviewed user/client lifecycle. P8.3 has not started. Every P7 and
+calculation boundary remains in force. V2.5 content still follows authoritative
+documented business definitions; never invent formulas.
 
 ## 8. How we work with AI
 

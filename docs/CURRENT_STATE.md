@@ -121,10 +121,11 @@ layout. The PR was squash-merged and the post-merge Worker health check returned
 
 ## Current task — P8 product experience implementation
 
-P7 engineering is concluded and merged: PR #38 integrated Suites B and C, and
-PR #37 integrated the owner-accepted P8-A foundation, so remote `main` is now
-`fd986940accae5a87170e3de0cb4b2f52dc9d7a9` and P8 work branches from it
-directly. Do not reopen P7 correction loops
+P7 engineering is concluded and merged: PR #38 integrated Suites B and C, PR
+#37 integrated the owner-accepted P8-A foundation, and PR #39 integrated the
+owner-accepted first P8.2 Studio slice. Remote `main` is now
+`b1abfefecfc7b3534cc883e47ba95767fa43caea`; subsequent P8 work branches from
+it directly. Do not reopen P7 correction loops
 during product construction; controls blocked on custom-domain, production
 Supabase, billing, full DR or real-client prerequisites return as a bounded
 go-live pass after the product is functionally and visually complete.
@@ -149,9 +150,9 @@ panorama and rich journey vertical slice, plus the owner-review corrections.
 P8-A introduces no migration, formula, RLS/grant, role, ingestion,
 authorization or external-system change.
 
-**P8.2 first owner-review slice — implemented on `p8b-studio-guided-workflows`,
-awaiting owner testing.** Two guided Studio workflows now exist in the real
-product, and no further P8.2 scope was started:
+**P8.2 first owner-review slice — owner-accepted and squash-merged through PR
+#39 at `b1abfef`.** Two guided Studio workflows now exist in the real product,
+and no further P8.2 scope was started:
 
 - **Access scope without JSON.** `/admin/clients` replaces both raw `data_scope`
   textareas — on invitation and on editing — with one accessible no-code picker
@@ -183,6 +184,16 @@ The slice adds `npm run test:studio-workflows` (gate 27 of `npm test`). It
 introduces no migration, dependency, lockfile change, role, formula, RLS/grant,
 authorization or external-system change.
 
+**Current unit: remaining P8.2 Studio guided workflows.** Still pending are the
+`/studio` home and client/study routes, study work surface and process tabs,
+picker completion for journey/theme work, visible qualitative/import-history
+paging, preview-before-publication flow, destructive-action dialog and the
+reviewed account/client lifecycle (suspend versus delete; archive versus
+permanent organisation deletion with impact summary, exact-name confirmation,
+dependent-object handling and audit evidence). This lifecycle likely needs a
+separate migration/review boundary; do not improvise it inside presentation
+work. P8.3 has not started.
+
 **Owner decisions recorded 2026-08-24, binding on every later unit:**
 
 - **Absence is not a client-facing finding (contract C11).** A published study
@@ -208,7 +219,8 @@ authorization or external-system change.
   honesty and accessible fallbacks stay enforced by the product.
 
 Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
-P8.2 and P8.4). None of them is implemented in P8-A.
+P8.2 and P8.4). Only the first P8.2 owner-review slice described above is
+implemented; the remaining P8.2 and all P8.3-P8.5 work remain pending.
 
 ## P7 engineering record (historical; do not resume during P8)
 
