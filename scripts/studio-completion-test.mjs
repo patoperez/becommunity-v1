@@ -31,7 +31,7 @@
  * no longer exists".
  */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 
 import {
   attentionForStudy,
@@ -144,6 +144,13 @@ assert.ok(
   "the privileged client is created only after the role check",
 );
 ok("the shared gate uses getUser, reads the role from the database, and redirects rather than rendering a denial");
+
+await assert.rejects(
+  access(new URL("../src/app/studio/loading.tsx", import.meta.url)),
+  (error) => error?.code === "ENOENT",
+  "Studio must not regain a top-level loading boundary that commits HTTP 200 before wrong-role redirects",
+);
+ok("Studio has no top-level loading boundary, so wrong-role redirects remain expressible in the HTTP status");
 
 // The legacy addresses are not merely still in the tree — they are recorded as
 // aliases, and the routes that serve them still exist.
