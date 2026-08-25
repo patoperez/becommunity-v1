@@ -224,6 +224,17 @@ console.log("\n[2] Outcome classification:");
   );
   assert.equal(classify({ status: 200, domSignal: "none" }), "unclassified");
   assert.equal(classify({ status: 500 }), "page_crash");
+  const dashboardErrorTitle = "No pudimos recalcular con esa selección";
+  assert.match(
+    readFileSync("src/app/dashboard/StudyCard.tsx", "utf8"),
+    new RegExp(dashboardErrorTitle),
+    "the dashboard must keep a stable public title for a rejected filter refresh",
+  );
+  assert.match(
+    PAGE.actionOutcomeKind,
+    new RegExp(dashboardErrorTitle),
+    "the harness must classify the public rejection title the dashboard actually renders",
+  );
   ok("the app's HTTP-200 wrong-role page is a role denial, and silence is unclassified, never success");
 
   assert.deepEqual(selfTestInjectionClassifier(), []);
