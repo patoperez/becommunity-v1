@@ -1021,7 +1021,7 @@ console.log("\n[10] Upload size boundary:");
   assert.match(browserHarness, /\/Se revirti\[oó\]\//, "the rollback driver settles on the action's current success message");
   assert.doesNotMatch(
     browserHarness,
-    /clickByName\("Analizar"\)|\/filas detectadas\/|Generar vista previa|Confirmo que|Confirmar importación|\/revertid\/i,
+    /clickByName\("Analizar"\)|\/filas detectadas\/|Generar vista previa|Confirmo que|Confirmar importación|\/revertid\/i/,
     "retired upload copy cannot drive Suite C",
   );
   ok("the upload driver and the product share the complete guided-workflow wording");
