@@ -27,11 +27,17 @@ function finish(kind: "ok" | "error", message: string): never {
   redirect(`/admin/clients?${kind}=${encodeURIComponent(message)}`);
 }
 
+/**
+ * The access choice arrives serialized from the Studio picker, and is parsed by
+ * exactly the same fail-closed parser the enforcement boundary uses. A request
+ * that bypasses the picker and posts something else is rejected here, so the
+ * no-code interface is convenience and this remains the check.
+ */
 function readScope(value: FormDataEntryValue | null) {
   try {
     return parseDataScope(JSON.parse(String(value ?? "{}").trim() || "{}"));
   } catch {
-    finish("error", "El alcance debe ser un objeto JSON válido con listas de valores.");
+    finish("error", "No se pudo guardar el acceso. Vuelve a elegir qué podrá ver esta persona.");
   }
 }
 
@@ -177,7 +183,7 @@ export async function updateClientUser(formData: FormData) {
   if (error || !data) finish("error", "No se pudo actualizar el usuario cliente.");
   revalidatePath("/admin/clients");
   revalidatePath("/dashboard");
-  finish("ok", "Usuario y alcance actualizados.");
+  finish("ok", "Usuario y acceso actualizados.");
 }
 
 export async function deleteClientUser(formData: FormData) {

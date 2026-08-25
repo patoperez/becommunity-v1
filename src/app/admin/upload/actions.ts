@@ -23,6 +23,18 @@ export type ColumnSample = {
   samples: string[];
 };
 
+/**
+ * Destinations this client's data already uses, so the mapping step can OFFER
+ * them instead of asking anyone to retype one from memory (P8.2, contract C1).
+ * Names only — no value, no respondent, no quote. Reusing an existing
+ * destination is also what keeps two periods of one study comparable.
+ */
+export type KnownDestinations = {
+  segments: string[];
+  metrics: string[];
+  themes: string[];
+};
+
 export type AnalyzeResult =
   | { status: "error"; message: string }
   | {
@@ -35,6 +47,7 @@ export type AnalyzeResult =
       mappingId: string | null;
       mappingVersion: number | null;
       mappingSource: "saved" | "template" | "suggested";
+      knownDestinations: KnownDestinations;
       notice?: string;
     };
 
@@ -164,6 +177,46 @@ function suggestedMapping(file: ParsedFile, fileName: string): ImportMapping {
   };
 }
 
+/** Only names the mapping schema could actually store are ever offered. */
+const STORABLE_KEY = /^[a-z][a-z0-9_]{0,63}$/;
+const MAX_DESTINATIONS = 200;
+
+function collect(values: Iterable<unknown>): string[] {
+  const keys = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const key = value.trim();
+    if (STORABLE_KEY.test(key)) keys.add(key);
+    if (keys.size >= MAX_DESTINATIONS) break;
+  }
+  return [...keys].sort((a, b) => a.localeCompare(b, "es-MX"));
+}
+
+async function loadKnownDestinations(
+  admin: AdminClient,
+  tenantId: string,
+): Promise<KnownDestinations> {
+  const [{ data: respondents }, { data: metrics }, { data: themes }] = await Promise.all([
+    admin.from("respondent").select("segments").eq("tenant_id", tenantId).limit(2_000)
+      .returns<{ segments: unknown }[]>(),
+    admin.from("quant_response").select("metric_key").eq("tenant_id", tenantId).limit(5_000)
+      .returns<{ metric_key: string }[]>(),
+    admin.from("qual_observation").select("theme").eq("tenant_id", tenantId).limit(5_000)
+      .returns<{ theme: string | null }[]>(),
+  ]);
+  const segmentKeys: string[] = [];
+  for (const row of respondents ?? []) {
+    if (row.segments && typeof row.segments === "object" && !Array.isArray(row.segments)) {
+      segmentKeys.push(...Object.keys(row.segments as Record<string, unknown>));
+    }
+  }
+  return {
+    segments: collect(segmentKeys),
+    metrics: collect((metrics ?? []).map((row) => row.metric_key)),
+    themes: collect((themes ?? []).map((row) => row.theme)),
+  };
+}
+
 function columnSamples(file: ParsedFile): ColumnSample[] {
   return file.headers.map((header) => {
     const values = new Set<string>();
@@ -235,6 +288,7 @@ export async function analyzeImportFile(formData: FormData): Promise<AnalyzeResu
   const mapping = parsedSaved?.success
     ? parsedSaved.data
     : templateMapping ?? suggestedMapping(upload.parsed, upload.file.name);
+  const knownDestinations = await loadKnownDestinations(auth.admin, tenant.tenant.id);
 
   return {
     status: "ready",
@@ -246,8 +300,9 @@ export async function analyzeImportFile(formData: FormData): Promise<AnalyzeResu
     mappingId: parsedSaved?.success ? saved?.id ?? null : null,
     mappingVersion: parsedSaved?.success ? saved?.version ?? null : null,
     mappingSource: parsedSaved?.success ? "saved" : templateMapping ? "template" : "suggested",
+    knownDestinations,
     notice: saved && !parsedSaved?.success
-      ? "El mapeo guardado no pasó la validación actual; se generó una propuesta nueva."
+      ? "La lectura guardada ya no se puede aplicar tal cual, así que se preparó una propuesta nueva. Revísala con cuidado."
       : templateMapping ? "Se reconoció la estructura guardada en la plantilla del estudio." : undefined,
   };
 }

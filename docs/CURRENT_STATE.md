@@ -30,9 +30,10 @@ must use documented authoritative definitions rather than invented rules.
 
 ## Verified source and deployment baseline
 
-- Current `main`: `e67e4adc2542c0a2993c65f517bf7445eafb83bd`
-  (`test(security): complete Suite A — tenant isolation, data scope and least
-  privilege (#36)`). Always verify `origin/main` before beginning new work.
+- Current `main`: `fd986940accae5a87170e3de0cb4b2f52dc9d7a9`
+  (`feat(p8): establish the Be Community product experience foundation (#37)`),
+  which also carries the merged P7 Suites B/C delivery (#38). Always verify
+  `origin/main` before beginning new work.
 - **Milestone deployment baseline — P6 closure:** Worker version
   `0454021a-e307-430b-bb36-27612b5faa0c` (100% traffic at the time of the P6
   closure check). Version IDs are **not permanent identifiers**; confirm the
@@ -120,10 +121,10 @@ layout. The PR was squash-merged and the post-merge Worker health check returned
 
 ## Current task — P8 product experience implementation
 
-P7 engineering is concluded on `p7f-suites-b-c` at `b8fcfc4`. Remote `main`
-remains at `e67e4adc2542c0a2993c65f517bf7445eafb83bd`, so the completed P7
-branch is still an explicit merge dependency. The isolated P8 worktree
-intentionally descends from that P7 head. Do not reopen P7 correction loops
+P7 engineering is concluded and merged: PR #38 integrated Suites B and C, and
+PR #37 integrated the owner-accepted P8-A foundation, so remote `main` is now
+`fd986940accae5a87170e3de0cb4b2f52dc9d7a9` and P8 work branches from it
+directly. Do not reopen P7 correction loops
 during product construction; controls blocked on custom-domain, production
 Supabase, billing, full DR or real-client prerequisites return as a bounded
 go-live pass after the product is functionally and visually complete.
@@ -146,9 +147,41 @@ approved direction is an **Interactive Insight Experience**:
 the semantic design/brand foundation, sign-in, Studio/Insights shells, client
 panorama and rich journey vertical slice, plus the owner-review corrections.
 P8-A introduces no migration, formula, RLS/grant, role, ingestion,
-authorization or external-system change. **The next implementation unit is
-P8.2: Studio guided workflows**, and it starts from updated `main` only after
-the accepted P7/P8-A delivery PRs are integrated.
+authorization or external-system change.
+
+**P8.2 first owner-review slice — implemented on `p8b-studio-guided-workflows`,
+awaiting owner testing.** Two guided Studio workflows now exist in the real
+product, and no further P8.2 scope was started:
+
+- **Access scope without JSON.** `/admin/clients` replaces both raw `data_scope`
+  textareas — on invitation and on editing — with one accessible no-code picker
+  (`src/components/studio/AccessScopeFields.tsx`). It offers a first choice
+  between *Todo el cliente* and *Solo una parte*; the characteristics and values
+  come from the selected client's own respondent data through the aggregate-only
+  server-side reader `src/lib/studies/scope-inventory.ts` (characteristic names,
+  distinct values and per-combination people counts — never a respondent row, an
+  answer or a quote); it states effective access as a sentence, shows a bounded
+  "today" count that is explicitly not a promise, refuses an empty restriction
+  instead of widening it to full access, preserves and marks a stored value the
+  current data no longer offers, and resets visibly when the client changes. The
+  stored contract is unchanged: one hidden `data_scope` field carrying the same
+  `Record<string, string[]>`, parsed by the same `parseDataScope` and enforced by
+  the same `applyDataScope`.
+- **Guided import mapping and readable preview.** `/admin/upload` replaces the
+  `min-w-[900px]` mapping table and its five `JSON.stringify` dumps with a
+  reflowing card list (`MappingWorkbench.tsx`) and a readable preview
+  (`ImportPreview.tsx`). Destinations are chosen from what the client already
+  uses — supplied by the analyze step's new additive `knownDestinations` field —
+  or created by naming them, with the stable key derived in
+  `src/lib/ingestion/destinations.ts` and collisions refused by name rather than
+  silently resolved. No canonical segment key, metric key, theme key or recoding
+  identifier is typed anywhere. `ImportMapping`, `importMappingSchema`, the
+  source signature, the adapters, the counts, the validation errors, the explicit
+  confirmation, the atomic commit and the rollback are unchanged.
+
+The slice adds `npm run test:studio-workflows` (gate 27 of `npm test`). It
+introduces no migration, dependency, lockfile change, role, formula, RLS/grant,
+authorization or external-system change.
 
 **Owner decisions recorded 2026-08-24, binding on every later unit:**
 
