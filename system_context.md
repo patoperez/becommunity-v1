@@ -97,10 +97,21 @@ of the real product, not additional detached HTML prototypes. P8-A is complete
 and owner-accepted at `3659a38` (delivery PR #37). P8.2's first owner-review
 slice — the no-code access-scope picker and guided mapping/readable import
 preview — is owner-accepted and merged at `b1abfef` (delivery PR #39), with its
-storage, authorization and ingestion contracts unchanged. The current unit is
-the remaining P8.2 Studio scope: operational home/routes and study work surface,
-picker completion, paging, preview-before-publication, safe destructive actions
-and the reviewed user/client lifecycle. P8.3 has not started. Every P7 and
+storage, authorization and ingestion contracts unchanged.
+
+The remaining P8.2 scope is now implemented and awaiting owner review: Studio's
+own `/studio/**` addresses beside every preserved `/admin/**` one, the
+actionable home, the study work surface, the journey-metric and theme pickers,
+visible paging, publication reachable only through the client preview, one
+accessible destructive-action dialog, and the account and client lifecycle. That
+lifecycle needed its own reviewed boundary, and got the smallest one that could
+carry it: migration `0015` adds two nullable columns and one internal audit
+table and changes no existing policy, grant or function. Suspending a person is
+deliberately NOT in that schema — it is enforced at the authentication boundary
+and read back from the account, so the product cannot show "con acceso" for an
+identity Auth is already refusing. `0015` is applied nowhere yet, and the code
+degrades honestly rather than failing where it is absent. The live adversarial
+chain has not run against that branch. P8.3 has not started. Every P7 and
 calculation boundary remains in force. V2.5 content still follows authoritative
 documented business definitions; never invent formulas.
 

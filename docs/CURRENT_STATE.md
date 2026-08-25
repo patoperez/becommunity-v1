@@ -182,17 +182,91 @@ and no further P8.2 scope was started:
 
 The slice adds `npm run test:studio-workflows` (gate 27 of `npm test`). It
 introduces no migration, dependency, lockfile change, role, formula, RLS/grant,
-authorization or external-system change.
+authorization or external-system change. The completion unit below adds
+`npm run test:studio-completion` (gate 28, 44 checks) and one additive
+migration; it adds no dependency, no lockfile change, no role, no formula and no
+external-system change.
 
-**Current unit: remaining P8.2 Studio guided workflows.** Still pending are the
-`/studio` home and client/study routes, study work surface and process tabs,
-picker completion for journey/theme work, visible qualitative/import-history
-paging, preview-before-publication flow, destructive-action dialog and the
-reviewed account/client lifecycle (suspend versus delete; archive versus
-permanent organisation deletion with impact summary, exact-name confirmation,
-dependent-object handling and audit evidence). This lifecycle likely needs a
-separate migration/review boundary; do not improvise it inside presentation
-work. P8.3 has not started.
+**P8.2 completion — implemented on `claude/p8c-studio-workflows-completion-9bab28`
+from `ff87b84`, awaiting owner review.** The record is
+`.design/be-community-v2/implementation-reviews/p8-2-completion/REVIEW.md`.
+
+What now exists in the real product:
+
+- **Eleven `/studio/**` routes**, and every `/admin/**` address still answers.
+  Studio gained addresses and renamed none away, because bookmarks, emailed
+  links and the frozen adversarial catalogue all depend on the old paths.
+  `/dashboard` and `/studio` render the SAME internal home, so the two cannot
+  drift. `src/lib/studio/routes.ts` records the pairing.
+- **An actionable home.** "¿Qué necesita mi atención?" is built only from state
+  the schema can prove: an import left staged or failed, a study with no
+  answers, comments nobody reviewed, a moment of the recorrido pointing at a
+  result the study does not produce, and a draft carrying data. It is bounded
+  and says how many items it left out. No deadline, no assignee, no approval.
+- **A study work surface** at `/studio/e/[studyId]` with process steps (datos ·
+  resultados y recorrido · lo que dijeron · vista del cliente · publicación),
+  each showing where that step stands, and a readiness panel that separates
+  what BLOCKS from what merely IMPROVES.
+- **The picker contract completed.** The journey's canonical metric key became a
+  choice over the results the study genuinely produced, with a consequence
+  preview; a stage identifier is generated once and then frozen, because
+  `qual_observation.confirmed_stage_key` points at it. The qualitative theme box
+  became a selection over existing themes plus a deliberate "create new" path
+  that refuses a colliding name instead of silently making a third theme. A
+  stored value the data no longer offers is preserved and marked, never dropped
+  or repointed.
+- **Visible paging.** The qualitative review's `.limit(100)` and the import
+  history's global `.limit(30)` are gone; both are counted, filtered and paged,
+  page/size/filter parameters are validated server-side against fixed ranges,
+  and every read is scoped with an explicit `.eq()`. Bulk qualitative actions
+  are page-scoped and say so.
+- **Publication has exactly one surface**, `/studio/e/[studyId]/publicar`,
+  reached from the client preview. `updateStudyConfiguration` may only re-save
+  the state that already holds; `setStudyPublication` independently refuses a
+  publication with no acknowledgement, an empty study or an archived client.
+- **No `window.confirm()` anywhere.** One accessible dialog names the object,
+  the consequence, the reversibility and the recovery path, with honest
+  severity: a revert is an ordinary control, and only a permanent action reads
+  as danger or requires typing.
+- **The account and client lifecycle.** Suspending a person is separate from
+  deleting them and is enforced at the authentication boundary, so the product
+  can never show "con acceso" for an identity Auth already refuses; "invitación
+  pendiente" is a third real state. Archiving a client is the ordinary
+  reversible action and is enforced server-side against new studies, new
+  invitations and new publications. Permanent client deletion shows counted
+  impact, requires the exact client name, recomputes the impact at execution
+  time and stops if a single number moved, collects identities and Storage
+  objects before the cascade, removes them explicitly after it, and reports
+  anything it could not remove.
+
+**Migration `0015_client_lifecycle_and_audit.sql` is additive and APPLIED
+NOWHERE.** It adds `tenant.archived_at` / `archived_by` with a partial index and
+one internal `admin_lifecycle_event` table with RLS, FORCE RLS, a
+deny-browser-roles policy and service-role-only grants; it creates no function,
+no security-definer helper and alters no existing policy or grant, and
+`supabase/rollbacks/0015_*.sql` reverses exactly it. Suspension is deliberately
+outside that schema. Until the migration is applied through its own reviewed
+deployment step, `src/lib/studio/lifecycle.ts` detects its absence, the client
+archive and permanent-delete controls render **disabled with the reason
+stated**, and any administrative action that succeeds unrecorded says so.
+
+**Two things are open and must not be reported as done:**
+
+1. `0015` is unapplied, so client archive and permanent deletion are
+   deliberately unavailable in every current environment.
+2. `npm run gates:live` has NOT run against this branch. Suite B's catalogue now
+   names the Studio addresses and six new denial-only lifecycle mutations, and
+   those depend on `0015`; a run today would measure an environment the code was
+   not written for. It is deferred to the reviewed deployment step.
+
+`npm run test:responsive-live` fails at 258 px on the CLIENT dashboard. It was
+reproduced identically at the baseline `ff87b84`, so it is inherited rather than
+introduced; 258 px is below the 320 px floor the design brief states and the
+offenders are client-surface captions. It belongs to P8.3/P8.5.
+
+Also unchanged and still open: template ownership (decision D5 approved sharing
+across the internal team with the author shown; `study_template` is still
+filtered `.eq("created_by", user.id)`). P8.3 has not started.
 
 **Owner decisions recorded 2026-08-24, binding on every later unit:**
 
@@ -219,8 +293,8 @@ work. P8.3 has not started.
   honesty and accessible fallbacks stay enforced by the product.
 
 Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
-P8.2 and P8.4). Only the first P8.2 owner-review slice described above is
-implemented; the remaining P8.2 and all P8.3-P8.5 work remain pending.
+P8.2 and P8.4). Both P8.2 units are now implemented; all P8.3-P8.5 work remains
+pending.
 
 ## P7 engineering record (historical; do not resume during P8)
 

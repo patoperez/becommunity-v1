@@ -83,10 +83,19 @@ P0-P6 are implemented, technically accepted and human-accepted with synthetic
 data. P7 engineering is complete at `b8fcfc4` (delivery PR #38). P8-A is
 implementation-complete and owner-accepted at `3659a38` (delivery PR #37).
 P8.2's first owner-review slice — no-code access scope and guided import
-mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39). The
-current unit is the remaining P8.2 Studio workflow and account-lifecycle scope;
-P8.3 has not started. Standalone visual prototyping is closed: implement
-reviewable vertical slices in the real product and correct them through human
-testing. Read
+mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39).
+
+**P8.2 is now implementation-complete and awaiting owner review.** Be Community
+Studio has its own addresses under `/studio/**` — every `/admin/**` address
+still answers — an actionable home, a study work surface with process steps,
+the journey-metric and theme pickers, visible paging, publication reachable only
+through the client preview, one accessible destructive-action dialog, and the
+account and client lifecycle. Two items remain open: migration `0015` is not
+applied to any environment (client archive and permanent deletion therefore
+render disabled with a stated reason), and the live adversarial chain has not
+run against that branch. P8.3 has not started.
+
+Standalone visual prototyping is closed: implement reviewable vertical slices in
+the real product and correct them through human testing. Read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or handing off
 work; historical audit/phase documents are not authoritative.

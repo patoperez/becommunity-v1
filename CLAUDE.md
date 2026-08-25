@@ -114,7 +114,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (27 gates; P8.2 adds test:studio-workflows)
+npm test             # complete deterministic suite (28 gates; P8.2 adds test:studio-workflows and test:studio-completion)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -205,21 +205,30 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
   semantic foundation, sign-in, shells, client panorama and journey slice are
   established. Do not reopen its visual-prototype loop.
-- **Current unit: remaining P8.2 Studio guided workflows.** Its first
-  owner-review slice was accepted and squash-merged through PR #39 at
-  `b1abfef`: the
-  no-code access-scope picker (`src/components/studio/AccessScopeFields.tsx` over
-  the aggregate-only `src/lib/studies/scope-inventory.ts`) and the guided import
-  mapping plus readable preview (`MappingWorkbench.tsx`, `ImportPreview.tsx` over
-  `src/lib/ingestion/destinations.ts`). The stored `data_scope` shape,
-  `ImportMapping` and every ingestion contract are unchanged; `npm run
-  test:studio-workflows` proves it. The remaining P8.2 scope is not started:
-  `/studio` home and routes, study work surface, the picker in journey/theme
-  work, paging, preview-before-publication, destructive-action dialog and the
-  reviewed account/client lifecycle (suspend vs delete, archive vs permanent
-  deletion with impact summary and exact-name confirmation). P8.3 has not
-  started. No ordinary Studio workflow may ask for raw JSON, an internal
+- **P8.2 is implementation-complete and awaiting owner review.** Slice one
+  (owner-accepted, PR #39, `b1abfef`) delivered the no-code access-scope picker
+  and the guided import mapping and readable preview. The completion unit adds
+  the eleven `/studio/**` routes, the actionable home, the study work surface
+  and its process steps, the journey-metric and theme pickers, visible paging on
+  the qualitative review and the import history, publication reachable only
+  through the client preview, one accessible destructive-action dialog in place
+  of `window.confirm()`, and the account and client lifecycle. It is gated by
+  `npm run test:studio-completion` (44 checks) beside
+  `npm run test:studio-workflows` (22). **Two things remain open and must not be
+  presented as done:** migration `0015` is not applied to any environment, so
+  archiving and permanently deleting a client render disabled with a stated
+  reason; and the live adversarial chain has not run against this branch. P8.3
+  has not started. No ordinary Studio workflow may ask for raw JSON, an internal
   identifier or a metric key.
+- **Every `/admin/**` address still answers.** Studio gained addresses; it
+  renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
+  frozen adversarial catalogue all depend on the old paths, and
+  `src/lib/studio/routes.ts` records the pairing so a gate can assert it.
+- ⓘ **Publication has exactly one surface.** `/studio/e/[studyId]/publicar`,
+  reached from the client preview, is the only path that moves a study between
+  draft, published and archived. `updateStudyConfiguration` may only re-save the
+  state that already holds, and `setStudyPublication` independently refuses a
+  publication with no acknowledgement, an empty study or an archived client.
 - Preserve P7 authorization/input gates, all calculation outputs, ingestion,
   RLS, roles and publication boundaries. P8 changes presentation and guided
   workflow first; migrations or authorization changes require a separate,
