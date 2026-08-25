@@ -123,7 +123,7 @@ export function classify(observation) {
   if (status === 401) return "denied_unauthenticated";
   if (status >= 300 && status < 400) {
     if (o.redirectTo === "/login") return "denied_unauthenticated";
-    if (o.redirectTo === "/dashboard") return o.fromAdminPath ? "denied_wrong_role" : "success";
+    if (o.redirectTo === "/dashboard") return o.fromInternalPath ? "denied_wrong_role" : "success";
     return "unclassified";
   }
   if (status === 404) return "not_found";
@@ -148,7 +148,8 @@ export function classify(observation) {
 export const CLASSIFIER_CASES = [
   { what: "302 to /login", input: { status: 302, redirectTo: "/login" }, expect: "denied_unauthenticated" },
   { what: "401 from a route handler", input: { status: 401 }, expect: "denied_unauthenticated" },
-  { what: "302 to /dashboard from /admin", input: { status: 307, redirectTo: "/dashboard", fromAdminPath: true }, expect: "denied_wrong_role" },
+  { what: "302 to /dashboard from an internal route", input: { status: 307, redirectTo: "/dashboard", fromInternalPath: true }, expect: "denied_wrong_role" },
+  { what: "302 to /dashboard after login", input: { status: 307, redirectTo: "/dashboard", fromInternalPath: false }, expect: "success" },
   { what: "404 not found", input: { status: 404 }, expect: "not_found" },
   { what: "405 method not allowed", input: { status: 405 }, expect: "method_not_allowed" },
   { what: "400 in the report route's error shape", input: { status: 400 }, expect: "validation_rejected" },
@@ -186,7 +187,7 @@ const page = (name, path, extra = {}) => ({
   method: "GET",
   mechanism: "http",
   mutating: false,
-  fromAdminPath: path.startsWith("/admin"),
+  fromInternalPath: path.startsWith("/admin") || path.startsWith("/studio"),
   ...extra,
 });
 
@@ -220,7 +221,7 @@ const routeProbe = (name, path) => ({
   outerRouteProbe: true,
   /** Declared, so `httpRun` never improvises a body or a content type. */
   contentType: "application/x-www-form-urlencoded",
-  fromAdminPath: path.startsWith("/admin"),
+  fromInternalPath: path.startsWith("/admin") || path.startsWith("/studio"),
 });
 
 /**
@@ -851,7 +852,7 @@ export async function createHarness(options) {
     const observation = {
       status: response?.status ?? null,
       redirectTo: redirectPath(response?.headers.get("location"), origin),
-      fromAdminPath: Boolean(op.fromAdminPath),
+      fromInternalPath: Boolean(op.fromInternalPath),
       successSignal,
       transportError,
     };
@@ -871,7 +872,8 @@ export async function createHarness(options) {
    * The three denial shapes this application actually produces are all covered,
    * and none of them is inferred from a missing control:
    *   - a redirect to `/login`               -> denied_unauthenticated
-   *   - a redirect to `/dashboard` from /admin -> denied_wrong_role
+   *   - a redirect to `/dashboard` from an internal `/admin` or `/studio`
+   *     surface -> denied_wrong_role
    *   - HTTP 200 carrying the app's own "Acceso denegado" panel, which is how
    *     `/admin/upload` answers a `client` (AM4) -> denied_wrong_role
    *
@@ -895,7 +897,11 @@ export async function createHarness(options) {
       return { status: 302, redirectTo: "/login" };
     }
     if (landed === "/dashboard" && requested !== "/dashboard") {
-      return { status: 302, redirectTo: "/dashboard", fromAdminPath: requested.startsWith("/admin") };
+      return {
+        status: 302,
+        redirectTo: "/dashboard",
+        fromInternalPath: requested.startsWith("/admin") || requested.startsWith("/studio"),
+      };
     }
     if (await context.evaluate(PAGE.deniedPanel)) {
       // The product rendered its own denial page with HTTP 200. Reporting this
@@ -1171,7 +1177,7 @@ export async function createHarness(options) {
         status: inspection.status,
         transportError: inspection.transportError,
         successSignal: inspection.shapeMatchesExpectation,
-        fromAdminPath: Boolean(op.fromAdminPath),
+        fromInternalPath: Boolean(op.fromInternalPath),
       },
       now() - started,
     );

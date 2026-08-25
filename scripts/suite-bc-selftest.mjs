@@ -212,6 +212,16 @@ console.log("\n[2] Outcome classification:");
   // an action result, which is what makes `/admin/upload` (AM4) reportable.
   assert.equal(classify({ status: 200, domSignal: "denied_role" }), "denied_wrong_role");
   assert.equal(classify({ status: 200, domSignal: "denial" }), "denied_action_result");
+  assert.equal(
+    classify({ status: 307, redirectTo: "/dashboard", fromInternalPath: true }),
+    "denied_wrong_role",
+    "an internal Studio or admin route redirecting a wrong role to the dashboard is a denial",
+  );
+  assert.equal(
+    classify({ status: 307, redirectTo: "/dashboard", fromInternalPath: false }),
+    "success",
+    "the same dashboard redirect from login remains a successful login",
+  );
   assert.equal(classify({ status: 200, domSignal: "none" }), "unclassified");
   assert.equal(classify({ status: 500 }), "page_crash");
   ok("the app's HTTP-200 wrong-role page is a role denial, and silence is unclassified, never success");

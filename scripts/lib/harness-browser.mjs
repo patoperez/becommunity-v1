@@ -918,6 +918,7 @@ export const BROWSER_DRIVERS = Object.freeze({
           const refused = ${PAGE.actionOutcomeKind} !== 'none';
           return refused || (v !== '' && v !== window.__harnessDashboardBefore && !/Actualizando/.test(v));
         }`,
+        params.settleTimeoutMs,
       )
       .catch(() => false);
     if (!settled) return { status: 200, domSignal: "none" };

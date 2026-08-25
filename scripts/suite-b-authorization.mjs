@@ -766,6 +766,10 @@ async function checkForgedFilterValue(harness, fx) {
   }
   const forged = await harness.run("tenantA", OPERATIONS["dashboard.refresh"], {
     forgedValue: `${fx.prefix}-never-a-real-segment`,
+    // The live development server can need slightly more than the harness's
+    // generic 20 s DOM bound to compile and settle this second dashboard
+    // action. Keep the accommodation local to this adversarial control.
+    settleTimeoutMs: 30_000,
   });
   if (forged.errorCategory === "success") {
     return fail("B3.5", "a value the server never offered was accepted by the dashboard data action");
