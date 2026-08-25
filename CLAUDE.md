@@ -205,19 +205,23 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
   semantic foundation, sign-in, shells, client panorama and journey slice are
   established. Do not reopen its visual-prototype loop.
-- **Current unit: P8.2 Studio guided workflows.** Its first owner-review slice
-  is implemented on `p8b-studio-guided-workflows` and awaits owner testing: the
+- **Current unit: remaining P8.2 Studio guided workflows.** Its first
+  owner-review slice was accepted and squash-merged through PR #39 at
+  `b1abfef`: the
   no-code access-scope picker (`src/components/studio/AccessScopeFields.tsx` over
   the aggregate-only `src/lib/studies/scope-inventory.ts`) and the guided import
   mapping plus readable preview (`MappingWorkbench.tsx`, `ImportPreview.tsx` over
   `src/lib/ingestion/destinations.ts`). The stored `data_scope` shape,
   `ImportMapping` and every ingestion contract are unchanged; `npm run
-  test:studio-workflows` proves it. The remaining P8.2 scope — the account
-  lifecycle, the destructive-action dialog and the `/studio` routes — is not
+  test:studio-workflows` proves it. The remaining P8.2 scope is not started:
+  `/studio` home and routes, study work surface, the picker in journey/theme
+  work, paging, preview-before-publication, destructive-action dialog and the
+  reviewed account/client lifecycle (suspend vs delete, archive vs permanent
+  deletion with impact summary and exact-name confirmation). P8.3 has not
   started. No ordinary Studio workflow may ask for raw JSON, an internal
   identifier or a metric key.
 - Preserve P7 authorization/input gates, all calculation outputs, ingestion,
-  RLS, roles and publication boundaries. P8.2 changes presentation and guided
+  RLS, roles and publication boundaries. P8 changes presentation and guided
   workflow first; migrations or authorization changes require a separate,
   explicit design and review boundary.
 - Do not mutate real-production infrastructure, rotate credentials, create a

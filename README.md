@@ -81,9 +81,12 @@ free-tier anti-pause): [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 P0-P6 are implemented, technically accepted and human-accepted with synthetic
 data. P7 engineering is complete at `b8fcfc4` (delivery PR #38). P8-A is
-implementation-complete and owner-accepted at `3659a38` (delivery PR #37); the
-next unit is P8.2 Studio guided workflows. Standalone visual prototyping is
-closed: implement reviewable vertical slices in the real product and correct
-them through human testing. Read
+implementation-complete and owner-accepted at `3659a38` (delivery PR #37).
+P8.2's first owner-review slice — no-code access scope and guided import
+mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39). The
+current unit is the remaining P8.2 Studio workflow and account-lifecycle scope;
+P8.3 has not started. Standalone visual prototyping is closed: implement
+reviewable vertical slices in the real product and correct them through human
+testing. Read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or handing off
 work; historical audit/phase documents are not authoritative.
