@@ -1005,7 +1005,7 @@ console.log("\n[10] Upload size boundary:");
   // These assertions make a future Studio copy change fail offline instead of
   // turning every Suite C upload into an unexplained `unclassified` result.
   const browserHarness = readFileSync("scripts/lib/harness-browser.mjs", "utf8");
-  assert.match(form, />\{pending \? "Revisando…" : "Revisar archivo"\}</, "the product exposes the review control");
+  assert.match(form, /\{pending \? "Revisando…" : "Revisar archivo"\}/, "the product exposes the review control");
   assert.match(browserHarness, /clickByName\("Revisar archivo"\)/, "the live driver clicks that same control");
   assert.match(form, /\{analysis\.sourceRows\} filas en el archivo/, "the product exposes a stable ready signal");
   assert.match(browserHarness, /\/filas en el archivo\//, "the live driver settles on that same ready signal");
