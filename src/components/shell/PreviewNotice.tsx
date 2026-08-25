@@ -37,12 +37,18 @@ export function PreviewNotice({ back = STUDIES_LIST }: { back?: StudioParent }) 
         <p className="min-w-0 text-sm font-semibold text-caution">
           Vista previa interna · el cliente no ve este estudio hasta publicarlo
         </p>
-        <div className="flex shrink-0 items-center gap-1">
+        {/*
+          NOT `shrink-0`. The parent's label carries the study's own name, and a
+          study can be called anything: pinning this cluster's width made a long
+          name push the document past a 360 px viewport. It shrinks, and the
+          label truncates, so the close control always stays on screen.
+        */}
+        <div className="flex min-w-0 items-center gap-1">
           <Link
             href={back.href}
-            className="inline-flex min-h-11 items-center rounded-lg px-2.5 text-sm font-semibold text-caution underline underline-offset-4"
+            className="inline-flex min-h-11 min-w-0 items-center rounded-lg px-2.5 text-sm font-semibold text-caution underline underline-offset-4"
           >
-            {back.label}
+            <span className="truncate">{back.label}</span>
           </Link>
           <button
             type="button"

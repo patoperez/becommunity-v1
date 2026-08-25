@@ -59,8 +59,15 @@ const SEVERITY_CONFIRM: Record<ConfirmSeverity, string> = {
 const CANCEL_CLASS =
   "inline-flex min-h-11 items-center justify-center rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken";
 
+/**
+ * `type="hidden"` is excluded deliberately. Every dialog carries its Server
+ * Action's fields as hidden inputs, and those match `input:not([disabled])` —
+ * so the "first focusable" was a hidden input, `focus()` on it did nothing, and
+ * focus silently never entered the dialog at all. Measured in the running
+ * product, not reasoned about.
+ */
 const FOCUSABLE =
-  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 /**
  * The confirm control. It is a real submit button so the dialog works with the

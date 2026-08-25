@@ -233,11 +233,13 @@ export async function launchBrowser() {
     await cdp.send("Network.enable", {}, sessionId);
     if (!javaScript) await cdp.send("Emulation.setScriptExecutionDisabled", { value: true }, sessionId);
 
-    // The import-rollback control asks for confirmation through `window.confirm`
-    // (UploadForm.tsx:208). A headless page blocks on that dialog until it is
-    // answered, so the context answers it the way the user who clicked the
-    // control would. Nothing else is automated: the dialog is the browser's own
-    // event, and accepting it neither adds authority nor changes a request.
+    // P8.2 retired the product's last `window.confirm`: the import revert now
+    // asks through an in-page dialog. This handler stays as a defensive catch
+    // so a native dialog raised by anything else cannot block a headless page
+    // forever, and `dialogsAccepted` stays readable — a run that reports any
+    // accepted dialog is reporting something the product should no longer do.
+    // Nothing else is automated: the dialog is the browser's own event, and
+    // accepting it neither adds authority nor changes a request.
     let dialogsAccepted = 0;
     cdp.on((message) => {
       if (message.sessionId !== sessionId || message.method !== "Page.javascriptDialogOpening") return;
@@ -1007,11 +1009,20 @@ export const BROWSER_DRIVERS = Object.freeze({
 
   /**
    * `rollbackLatestImport` — takes a bare string, so no form can express it.
-   * Its control asks `window.confirm` first; the context answers that dialog
-   * exactly as the user who clicked it would (see `dialogsAccepted`).
+   *
+   * P8.2 replaced its `window.confirm` with an in-page dialog, so the driver
+   * now does what the operator does: open the dialog, then confirm inside it.
+   * Two deliberate clicks, exactly as the product asks for them — the driver
+   * gains no shortcut and no authority from the change.
    */
   "upload.rollback": async ({ context, PAGE }) => {
-    const clicked = await context.evaluate(PAGE.clickByName("Revertir último lote"));
+    const opened = await context.evaluate(PAGE.clickByName("Deshacer esta carga"));
+    if (opened !== "ok") return { status: 200, domSignal: "none", note: `rollback-open-${opened}` };
+    const ready = await context
+      .waitForDom(`() => ${PAGE.controlEnabled("Sí, deshacer la carga")}`, 5000)
+      .catch(() => false);
+    if (!ready) return { status: 200, domSignal: "none", note: "rollback-dialog-absent" };
+    const clicked = await context.evaluate(PAGE.clickByName("Sí, deshacer la carga"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `rollback-${clicked}` };
     return settleImperative(context, PAGE, ROLLBACK_DONE);
   },

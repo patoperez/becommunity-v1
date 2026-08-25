@@ -504,6 +504,10 @@ for (const [what, pattern] of [
   ["escape to cancel", /event\.key === "Escape"/],
   ["a focus trap", /event\.key !== "Tab"/],
   ["focus entering the dialog", /\(first \?\? panel\)\?\.focus\(\)/],
+  // Every dialog carries its action's fields as hidden inputs. If those counted
+  // as focusable, the "first focusable" would be one of them, `focus()` would do
+  // nothing, and focus would never enter the dialog.
+  ["hidden fields excluded from the focus order", /input:not\(\[disabled\]\):not\(\[type="hidden"\]\)/],
   ["focus returning to the trigger", /triggerNode\?\.focus\(\)/],
   ["a cancel control", />\s*Cancelar\s*</],
   ["a pending state", /useFormStatus\(\)/],
@@ -547,6 +551,15 @@ assert.match(uploadForm, /rollbackLatestImport\(/, "and it still calls the uncha
 assert.match(uploadForm, /latestCommittedId: string \| null/,
   "the revert control is offered only for the globally newest committed batch, resolved on the server");
 ok("the import revert kept its contract and stopped looking like a deletion");
+
+// The adversarial harness must describe the product as it is. Its rollback
+// driver now opens the dialog and confirms inside it, exactly as an operator
+// does, and its native-dialog handler no longer claims the product raises one.
+const harnessBrowser = await readCode("scripts/lib/harness-browser.mjs");
+assert.match(harnessBrowser, /clickByName\("Deshacer esta carga"\)/, "the driver opens the product's own dialog");
+assert.match(harnessBrowser, /clickByName\("Sí, deshacer la carga"\)/, "and confirms inside it, with a second deliberate click");
+assert.doesNotMatch(harnessBrowser, /clickByName\("Revertir último lote"\)/, "the retired control name is gone from the driver");
+ok("the adversarial harness drives the real dialog rather than a control the product no longer has");
 
 // ---------------------------------------------------------------------------
 // 9. Suspension and archiving are enforced, reversible and visible
