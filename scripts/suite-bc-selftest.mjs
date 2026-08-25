@@ -1009,8 +1009,22 @@ console.log("\n[10] Upload size boundary:");
   assert.match(browserHarness, /clickByName\("Revisar archivo"\)/, "the live driver clicks that same control");
   assert.match(form, /\{analysis\.sourceRows\} filas en el archivo/, "the product exposes a stable ready signal");
   assert.match(browserHarness, /\/filas en el archivo\//, "the live driver settles on that same ready signal");
-  assert.doesNotMatch(browserHarness, /clickByName\("Analizar"\)|\/filas detectadas\//, "retired upload copy cannot drive Suite C");
-  ok("the upload driver and the product share the current control and ready-state wording");
+  for (const wording of [
+    "Ver cómo quedará",
+    "Revisé cómo se leyó",
+    "Confirmar y guardar",
+    "Sí, deshacer la carga",
+  ]) {
+    assert.ok(form.includes(wording), `the product exposes the upload step: ${wording}`);
+    assert.ok(browserHarness.includes(wording), `the live driver follows the upload step: ${wording}`);
+  }
+  assert.match(browserHarness, /\/Se revirti\[oó\]\//, "the rollback driver settles on the action's current success message");
+  assert.doesNotMatch(
+    browserHarness,
+    /clickByName\("Analizar"\)|\/filas detectadas\/|Generar vista previa|Confirmo que|Confirmar importación|\/revertid\/i,
+    "retired upload copy cannot drive Suite C",
+  );
+  ok("the upload driver and the product share the complete guided-workflow wording");
 
   // The leniency is GONE, not narrowed: `unclassified` is red everywhere.
   assert.deepEqual(selfTestRefusalClassifier(), []);

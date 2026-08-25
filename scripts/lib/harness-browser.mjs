@@ -839,11 +839,11 @@ const selectByValue = (labelPrefix, value) => `
 const UPLOAD_READY = "() => /filas en el archivo/.test(document.body.innerText)";
 /** The preview screen's own "preview is ready" signal (its confirm control). */
 const PREVIEW_READY =
-  "() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim().startsWith('Confirmar importaci'))";
+  "() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim().startsWith('Confirmar y guardar'))";
 /** The confirm stage's own success signal (UploadForm renders the batch id). */
 const CONFIRM_DONE = "() => /importaci[oó]n\\s+(confirmada|completada)|filas importadas|lote\\s+creado/i.test(document.body.innerText)";
 /** The rollback control's own settled signal. */
-const ROLLBACK_DONE = "() => /revertid/i.test(document.body.innerText)";
+const ROLLBACK_DONE = "() => /Se revirti[oó]/i.test(document.body.innerText)";
 
 /**
  * The `upload.*` stages share one sequence, so each driver assumes the previous
@@ -965,7 +965,7 @@ export const BROWSER_DRIVERS = Object.freeze({
 
   /** `previewImportFile` — the staged validation pass; it writes nothing. */
   "upload.preview": async ({ context, PAGE }) => {
-    const clicked = await context.evaluate(PAGE.clickByName("Generar vista previa"));
+    const clicked = await context.evaluate(PAGE.clickByName("Ver cómo quedará"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `preview-${clicked}` };
     return settleImperative(context, PAGE, PREVIEW_READY);
   },
@@ -983,15 +983,15 @@ export const BROWSER_DRIVERS = Object.freeze({
     // label text. Ticking every checkbox on the page also toggles the mapping
     // controls, and those call `updateMapping`, which clears the preview and
     // unmounts the confirm step — the control then legitimately disappears.
-    const boxes = await context.evaluate(PAGE.checkByLabelTextPrefix("Confirmo que"));
+    const boxes = await context.evaluate(PAGE.checkByLabelTextPrefix("Revisé cómo se leyó"));
     if (boxes !== "ok") return { status: 200, domSignal: "none", note: `confirm-checkbox-${boxes}` };
     // Let React settle before reading the submit control: `canConfirm` is
     // derived at render time, so reading it in the same turn would observe the
     // state as it was before the change.
     const enabled = await context
-      .waitForDom(`() => ${PAGE.controlEnabled("Confirmar importación")}`, 5000)
+      .waitForDom(`() => ${PAGE.controlEnabled("Confirmar y guardar")}`, 5000)
       .catch(() => false);
-    const clicked = enabled ? await context.evaluate(PAGE.clickByName("Confirmar importación")) : "disabled";
+    const clicked = enabled ? await context.evaluate(PAGE.clickByName("Confirmar y guardar")) : "disabled";
     if (clicked !== "ok") {
       // The note carries control-state tokens, counts and booleans only —
       // never a rendered message and never product data.
@@ -1003,7 +1003,7 @@ export const BROWSER_DRIVERS = Object.freeze({
             'checked=' + boxes.filter((b) => b.checked).length + '/' + boxes.length,
             'selects=' + selects.length,
             'selectsWithValue=' + selects.filter((s) => s.value !== '').length,
-            'confirmStepPresent=' + /Revisa y confirma/.test(document.body.innerText),
+            'confirmStepPresent=' + /Revisa cómo quedará y confirma/.test(document.body.innerText),
           ].join(' ');
         })()`);
       return { status: 200, domSignal: "none", note: `confirm-${clicked} ${state}` };
