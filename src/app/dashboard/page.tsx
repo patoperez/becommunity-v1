@@ -204,11 +204,7 @@ export default async function DashboardPage() {
       ) : (
         <>
           {narrative ? (
-            <NarrativeHome
-              view={narrative}
-              brand={brand}
-              studyDestination={insightsStudyHref(narrative.currentStudy.id)}
-            />
+            <NarrativeHome view={narrative} brand={brand} studyDestination={insightsStudyHref(narrative.currentStudy.id)} />
           ) : (
             /* The panorama is switched off for this study. Say so — the page
                used to open on a bare heading with no explanation (C5). */
