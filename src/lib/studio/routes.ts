@@ -28,6 +28,7 @@ export const studioStudy = (studyId: string) => `/studio/e/${studyId}`;
 export const studioStudyData = (studyId: string) => `/studio/e/${studyId}/datos`;
 export const studioStudyIndicators = (studyId: string) => `/studio/e/${studyId}/indicadores`;
 export const studioStudyQualitative = (studyId: string) => `/studio/e/${studyId}/cualitativo`;
+export const studioStudyInterpretation = (studyId: string) => `/studio/e/${studyId}/interpretacion`;
 export const studioStudyPreview = (studyId: string) => `/studio/e/${studyId}/vista-cliente`;
 export const studioStudyPublish = (studyId: string) => `/studio/e/${studyId}/publicar`;
 
@@ -58,6 +59,10 @@ export function safeReturnPath(
 /** Every Studio address that may host the qualitative review of one study. */
 export function qualitativeReturnPaths(studyId: string): string[] {
   return [studioStudyQualitative(studyId)];
+}
+
+export function interpretationReturnPaths(studyId: string): string[] {
+  return [studioStudyInterpretation(studyId)];
 }
 
 /** Every Studio address that may host the configuration of one study. */

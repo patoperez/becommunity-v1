@@ -354,7 +354,7 @@ function StageDetail({
           {hasVoices ? (
             <>
               <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-voice">
-                Lo que dijeron las personas aquí
+                Puntos de fricción y voces en este momento
               </h6>
               <QualitativeInsights summary={stage.qualitative} compact audience={audience} />
             </>
@@ -372,8 +372,7 @@ function StageDetail({
       {audience === "preview" ? (
         <p className="border-t border-caution-line bg-caution-surface px-5 py-2.5 text-xs text-caution">
           <span className="font-semibold">Sólo para el equipo:</span> este momento
-          {hasVoices ? "" : " no tiene comentarios aprobados y"} todavía no puede
-          llevar una lectura del consultor publicada.
+          {hasVoices ? " ya tiene hasta tres temas confirmados para contextualizarlo." : " no tiene comentarios aprobados; el cliente no ve este bloque."}
         </p>
       ) : null}
     </div>

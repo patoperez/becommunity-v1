@@ -4,6 +4,7 @@ import type { SafeQualitativeSummary } from "@/lib/dashboard/view";
 import type { Audience } from "@/lib/dashboard/audience";
 import { RankedBars } from "@/components/evidence/ScaleMark";
 import { humanize } from "@/lib/language/results";
+import { QualitativeCloud } from "@/components/evidence/QualitativeCloud";
 
 /**
  * What people said — themes and quotes.
@@ -85,6 +86,7 @@ export default function QualitativeInsights({
       {themes.length > 0 ? (
         <div className={compact ? "" : "mt-4"}>
           <RankedBars items={themes} max={max} />
+          {compact ? null : <QualitativeCloud items={themes.map(({ label, count }) => ({ label, count }))} />}
           {themes.some((theme) => theme.caution) ? (
             <p className="mt-2.5 text-xs text-caution">
               <span aria-hidden="true">◐ </span>

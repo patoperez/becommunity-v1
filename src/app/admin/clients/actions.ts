@@ -21,6 +21,7 @@ import {
   SUSPENSION_LIFTED,
 } from "@/lib/studio/lifecycle-model";
 import { clientReturnPaths, safeReturnPath } from "@/lib/studio/routes";
+import { loadStudyMetricOptions } from "@/lib/studio/metric-inventory";
 
 const uuid = z.string().uuid();
 const tenantName = z.string().trim().min(2).max(160);
@@ -148,6 +149,34 @@ export async function updateTenantBrand(formData: FormData) {
     primaryColor: values.data.primaryColor,
     accentColor: values.data.accentColor,
     logoPath: nextLogoPath,
+    presentationDefaults: previous.presentationDefaults,
+  };
+  const thresholdMetric = String(formData.get("default_threshold_metric") ?? "").trim();
+  const minRaw = String(formData.get("default_threshold_minimum") ?? "").trim();
+  const maxRaw = String(formData.get("default_threshold_maximum") ?? "").trim();
+  const minimum = minRaw ? Number(minRaw) : null;
+  const maximum = maxRaw ? Number(maxRaw) : null;
+  if ((minimum != null && !Number.isFinite(minimum)) || (maximum != null && !Number.isFinite(maximum)) || (minimum != null && maximum != null && minimum > maximum)) {
+    if (uploadedPath) await admin.storage.from("tenant-branding").remove([uploadedPath]);
+    finish("error", "El rango ideal predeterminado no es válido.");
+  }
+  if (thresholdMetric) {
+    const { data: tenantStudies } = await admin.from("study").select("id").eq("tenant_id", tenantId.data).returns<{ id: string }[]>();
+    const options = await loadStudyMetricOptions(admin, (tenantStudies ?? []).map((study) => study.id));
+    if (!Object.values(options).flat().some((option) => option.key === thresholdMetric)) {
+      if (uploadedPath) await admin.storage.from("tenant-branding").remove([uploadedPath]);
+      finish("error", "El resultado elegido como rango predeterminado ya no existe para este cliente.");
+    }
+  }
+  nextBrand.presentationDefaults = {
+    coverLabel: String(formData.get("default_cover_label") ?? "").trim().slice(0, 80) || null,
+    coverNote: String(formData.get("default_cover_note") ?? "").trim().slice(0, 240) || null,
+    threshold: thresholdMetric && (minimum != null || maximum != null) ? {
+      metric: thresholdMetric,
+      minimum,
+      maximum,
+      label: String(formData.get("default_threshold_label") ?? "Fuera del rango ideal").trim().slice(0, 160) || "Fuera del rango ideal",
+    } : null,
   };
   const { data, error } = await admin.from("tenant").update({ brand_config: nextBrand })
     .eq("id", tenantId.data).select("id").maybeSingle();

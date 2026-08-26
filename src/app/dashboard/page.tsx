@@ -19,6 +19,8 @@ import { StudioHomeView } from "@/components/studio/StudioHomeView";
 import StudyComingSoon from "./StudyComingSoon";
 import { StudyLibrary } from "@/components/insights/StudyLibrary";
 import { insightsStudyHref } from "@/lib/insights/filters";
+import type { InterpretationContent } from "@/lib/interpretation/schema";
+import type { StudyPresentation } from "@/lib/dashboard/config";
 
 export const metadata = {
   title: "Inicio",
@@ -133,15 +135,19 @@ export default async function DashboardPage() {
     study: Study;
     dashboard: StudyDashboardPayload;
     rows: LongRow[];
+    publishedInterpretation: InterpretationContent | null;
+    presentation: StudyPresentation;
   }[] = studies
     ? await Promise.all(
         studies.map(async (study) => {
           const authorized = await loadAuthorizedStudyData(supabase, study.id);
           if (!authorized) throw new Error("Study authorization changed during dashboard load");
-          const { rows, qualitative } = authorized;
+          const { rows, qualitative, publishedInterpretation, presentation } = authorized;
           return {
             study,
             rows,
+            publishedInterpretation,
+            presentation,
             // This is the serialization boundary: raw rows stay in this Server
             // Component. The browser receives only sanitized aggregate DTOs.
             dashboard: buildStudyDashboard(
@@ -169,7 +175,7 @@ export default async function DashboardPage() {
         createdAt: study.created_at,
         rows,
       })));
-  const studyData = loadedStudyData.map(({ study, dashboard }) => ({ study, dashboard }));
+  const studyData = loadedStudyData.map(({ study, dashboard, publishedInterpretation, presentation }) => ({ study, dashboard, publishedInterpretation, presentation }));
   const narrative = !studyData[0] || currentSections?.narrative === false
     ? null
     : buildNarrativeHome(studyData[0].study, studyData[0].dashboard, longitudinal);
@@ -204,7 +210,7 @@ export default async function DashboardPage() {
       ) : (
         <>
           {narrative ? (
-            <NarrativeHome view={narrative} brand={brand} studyDestination={insightsStudyHref(narrative.currentStudy.id)} />
+            <NarrativeHome view={narrative} brand={{ ...brand, primaryColor: studyData[0]?.presentation.primaryColor ?? brand.primaryColor, accentColor: studyData[0]?.presentation.accentColor ?? brand.accentColor }} presentation={studyData[0]?.presentation} interpretation={studyData[0]?.publishedInterpretation ?? null} studyDestination={insightsStudyHref(narrative.currentStudy.id)} />
           ) : (
             /* The panorama is switched off for this study. Say so — the page
                used to open on a bare heading with no explanation (C5). */

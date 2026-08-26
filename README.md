@@ -105,6 +105,19 @@ bounded grammar used by the PDF. Comparisons, longitudinal reading, sample
 context, recovery states and the PDF vocabulary are one client-facing story.
 Calculations, ingestion, RLS, roles and publication boundaries are unchanged.
 
+**P8.4 is implementation-complete on
+`p8e-qualitative-interpretation-customization` and awaiting owner review.**
+Studio now has a structured consultant-reading workflow with private draft,
+visible review state and a separately published client snapshot. The client
+story and PDF show only that snapshot. Qualitative results add an optional,
+downloadable word cloud while retaining the counted list as the reference; the
+journey keeps the most useful friction points close to each moment. Client and
+study presentation settings inherit predictably, support one focused threshold
+alert, and travel with team-shared templates. Migrations `0017` and `0018` are
+applied to the synthetic project only. `npm run test:p8-qualitative` is the
+30th deterministic gate; `npm run test:p8-qualitative-live` verifies the full
+interpretation lifecycle with disposable data.
+
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or handing off

@@ -1,7 +1,8 @@
 # P8 — Product Experience Transformation
 
 > **Authoritative P8 plan and experience contract.** Status: **P8.1/P8-A and
-> P8.2 and P8.3 are implemented in the real product; P8.4-P8.5 are pending.** Discovery
+> P8.2, P8.3 and the bounded P8.4 implementation are in the real product;
+> P8.5 is pending.** Discovery
 > and standalone visual comparison are closed. Implementation records live in
 > `.design/be-community-v2/implementation-reviews/`.
 >
@@ -304,6 +305,19 @@ block the foundational work.
 to the real product and stop for CEO testing before generalising it. It is the
 deliverable she sells and must be corrected against her actual workflow.
 
+**Status: bounded implementation delivered; awaiting owner review.** Migration
+`0017` stores the private draft, explicit review state, immutable-at-publication
+client snapshot and transition-only event trail. Migration `0018` closes the
+approved shared-template rule while retaining author attribution. Insights and
+the PDF read only the published snapshot; later draft edits leave it untouched.
+The qualitative view adds an optional SVG word cloud with image export while
+the counted list remains canonical. Client defaults and study overrides cover
+identity/palette, cover copy, section visibility, journey configuration and one
+focused threshold rule, and templates preserve the resulting configuration.
+Both migrations are applied to the synthetic project only. Deterministic and
+disposable live gates cover the new boundary; no formula or ingestion contract
+changed.
+
 **Accepted customisation scope, owner decision 2026-08-24 — not started in
 P8-A.** Presentation is configurable per study through a three-level
 inheritance: **Be Community default → client identity → study override**. A
@@ -361,7 +375,7 @@ every workstream, not once at the end.
 | C2 progressive disclosure | Design review against the IA disclosure tables | P8.2, P8.3 |
 | C3 plain language | Deterministic string gate over user-facing copy | P8.5, then every PR |
 | C4 sample context | One component, one string table; `n=` absent client-side | P8.3 — **met** on screen, longitudinal views, comparison suppression and PDF |
-| C5 significance | Finding block cannot render without the slot | P8.3 — **structural slot met**; authoring/approval remains P8.4 and an empty slot renders silence |
+| C5 significance | Finding block cannot render without the slot | P8.4 — **met**: structured authoring/review/publication exists, only the published snapshot reaches clients/PDF, and an empty slot renders silence |
 | C6 reversibility | Mutation classification table; no `window.confirm` | P8.2 — **met**: `test:studio-completion` asserts no `window.confirm`/`alert`/`prompt` on any Studio surface, that every dialog carries object, consequence, severity and recovery, and that only the permanent severity reads as danger or requires typing |
 | C7 accessibility | P8.5 matrix incl. adversarial brand colours | P8.5 |
 | C8 responsive | Extended responsive matrix at six widths | P8.5 |

@@ -26,6 +26,7 @@ import {
 import { clientUserAccess, TENANT_LIFECYCLE_LABEL } from "@/lib/studio/lifecycle-model";
 import { parsePageRequest, resolvePage } from "@/lib/studio/paging";
 import { studioClient, studioStudy } from "@/lib/studio/routes";
+import { loadStudyMetricOptions } from "@/lib/studio/metric-inventory";
 
 export const metadata = { title: "Cliente · Be Community" };
 
@@ -134,6 +135,9 @@ export default async function StudioClientPage({
   const brand = parseBrandConfig(tenant.brand_config);
   const logoUrl = logoPublicUrl(brand.logoPath);
   const returnTo = studioClient(tenantId);
+  const metricsByStudy = await loadStudyMetricOptions(admin, (studies ?? []).map((study) => study.id));
+  const tenantMetricOptions = [...new Map(Object.values(metricsByStudy).flat().map((option) => [option.key, option])).values()]
+    .sort((a, b) => a.name.localeCompare(b.name, "es-MX"));
 
   return (
     <StudioShell
@@ -247,6 +251,18 @@ export default async function StudioClientPage({
                   <input className="mt-1 h-10 w-full rounded border" name="accent_color" type="color" defaultValue={brand.accentColor} />
                 </label>
               </div>
+              <details className="rounded-lg border border-line bg-surface-page p-3">
+                <summary className="cursor-pointer text-sm font-semibold text-strong">Presentación predeterminada de sus estudios</summary>
+                <p className="mt-2 text-xs text-muted">Cada estudio puede reemplazar estos valores. Si no lo hace, hereda esta configuración.</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-medium">Etiqueta de portada<input className={`${input} mt-1 font-normal`} name="default_cover_label" maxLength={80} defaultValue={brand.presentationDefaults.coverLabel ?? ""} placeholder="Panorama del estudio" /></label>
+                  <label className="text-xs font-medium">Nota breve<input className={`${input} mt-1 font-normal`} name="default_cover_note" maxLength={240} defaultValue={brand.presentationDefaults.coverNote ?? ""} /></label>
+                  <label className="text-xs font-medium">Resultado con rango ideal<select className={`${input} mt-1 font-normal`} name="default_threshold_metric" defaultValue={brand.presentationDefaults.threshold?.metric ?? ""}><option value="">Sin alerta predeterminada</option>{tenantMetricOptions.map((option) => <option key={option.key} value={option.key}>{option.name}</option>)}</select></label>
+                  <label className="text-xs font-medium">Texto de la alerta<input className={`${input} mt-1 font-normal`} name="default_threshold_label" maxLength={160} defaultValue={brand.presentationDefaults.threshold?.label ?? "Fuera del rango ideal"} /></label>
+                  <label className="text-xs font-medium">Mínimo ideal<input className={`${input} mt-1 font-normal`} type="number" step="any" name="default_threshold_minimum" defaultValue={brand.presentationDefaults.threshold?.minimum ?? ""} /></label>
+                  <label className="text-xs font-medium">Máximo ideal<input className={`${input} mt-1 font-normal`} type="number" step="any" name="default_threshold_maximum" defaultValue={brand.presentationDefaults.threshold?.maximum ?? ""} /></label>
+                </div>
+              </details>
               <button className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-strong hover:bg-surface-sunken">
                 Guardar identidad
               </button>

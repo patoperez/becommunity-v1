@@ -7,6 +7,7 @@ import { loadTenantArchiveState } from "./lifecycle";
 import { loadStudyMetricOptions } from "./metric-inventory";
 import { studyReadiness, type StudyReadiness } from "./readiness";
 import type { JourneyMetricOption } from "./journey-picker";
+import { parseBrandConfig, type BrandConfig } from "@/lib/branding/config";
 
 /**
  * One study, as Studio's work surface needs it (P8.2).
@@ -25,6 +26,7 @@ export type StudioStudy = {
   tenantId: string;
   clientName: string;
   clientArchived: boolean;
+  clientBrand: BrandConfig;
   name: string;
   period: string | null;
   status: string;
@@ -98,7 +100,7 @@ export async function loadStudioStudy(
     archiveState,
     metricOptionsByStudy,
   ] = await Promise.all([
-    admin.from("tenant").select("name").eq("id", study.tenant_id).maybeSingle<{ name: string }>(),
+    admin.from("tenant").select("name, brand_config").eq("id", study.tenant_id).maybeSingle<{ name: string; brand_config: unknown }>(),
     headCount(admin, "respondent", [["study_id", study.id]]),
     headCount(admin, "quant_response", [["study_id", study.id]]),
     headCount(admin, "qual_observation", [["study_id", study.id], ["review_status", "confirmed"]]),
@@ -124,6 +126,7 @@ export async function loadStudioStudy(
       tenantId: study.tenant_id,
       clientName: tenant?.name ?? "Cliente eliminado",
       clientArchived,
+      clientBrand: parseBrandConfig(tenant?.brand_config),
       name: study.name,
       period: study.period,
       status: study.status,

@@ -43,7 +43,7 @@ export default async function InsightsStudyPage({
 
   const selected = await loadAuthorizedStudyData(supabase, studyId);
   if (!selected) notFound();
-  const { study, tenantName, brand, rows, qualitative } = selected;
+  const { study, tenantName, brand, presentation, rows, qualitative, publishedInterpretation } = selected;
   const { sections } = parseDashboardConfig(study.dashboard_config);
   const parsed = parseInsightsFilters(await searchParams);
   const options = buildSegmentFilterOptions([...rows, ...qualitative]);
@@ -130,7 +130,7 @@ export default async function InsightsStudyPage({
         </div>
       ) : null}
       {narrative ? (
-        <NarrativeHome view={narrative} brand={brand} studyDestination={`#study-${study.id}`} />
+        <NarrativeHome view={narrative} brand={brand} presentation={presentation} interpretation={publishedInterpretation} studyDestination={`#study-${study.id}`} />
       ) : null}
       <LongitudinalTrends view={longitudinal} />
       <h1 className="sr-only">{study.name}</h1>

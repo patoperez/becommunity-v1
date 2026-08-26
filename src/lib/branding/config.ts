@@ -10,6 +10,16 @@ const brandSchema = z.object({
   primaryColor: hexColor.optional(),
   accentColor: hexColor.optional(),
   logoPath: logoPath.nullable().optional(),
+  presentationDefaults: z.object({
+    coverLabel: z.string().trim().max(80).nullable().optional(),
+    coverNote: z.string().trim().max(240).nullable().optional(),
+    threshold: z.object({
+      metric: z.string().trim().min(1).max(160),
+      minimum: z.number().finite().nullable(),
+      maximum: z.number().finite().nullable(),
+      label: z.string().trim().min(1).max(160),
+    }).nullable().optional(),
+  }).optional(),
 });
 
 export type BrandConfig = {
@@ -19,6 +29,11 @@ export type BrandConfig = {
   primaryColor: string;
   accentColor: string;
   logoPath: string | null;
+  presentationDefaults: {
+    coverLabel: string | null;
+    coverNote: string | null;
+    threshold: { metric: string; minimum: number | null; maximum: number | null; label: string } | null;
+  };
 };
 
 export const DEFAULT_BRAND: BrandConfig = {
@@ -28,11 +43,20 @@ export const DEFAULT_BRAND: BrandConfig = {
   primaryColor: "#0c4a6e",
   accentColor: "#0e7490",
   logoPath: null,
+  presentationDefaults: { coverLabel: null, coverNote: null, threshold: null },
 };
 
 export function parseBrandConfig(value: unknown): BrandConfig {
   const parsed = brandSchema.safeParse(value);
-  return parsed.success ? { ...DEFAULT_BRAND, ...parsed.data, version: 1 } : { ...DEFAULT_BRAND };
+  return parsed.success ? {
+    ...DEFAULT_BRAND,
+    ...parsed.data,
+    presentationDefaults: {
+      ...DEFAULT_BRAND.presentationDefaults,
+      ...parsed.data.presentationDefaults,
+    },
+    version: 1,
+  } : { ...DEFAULT_BRAND, presentationDefaults: { ...DEFAULT_BRAND.presentationDefaults } };
 }
 
 export function brandConfigSchema() {

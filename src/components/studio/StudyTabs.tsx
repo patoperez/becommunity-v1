@@ -4,6 +4,7 @@ import {
   studioStudy,
   studioStudyData,
   studioStudyIndicators,
+  studioStudyInterpretation,
   studioStudyPreview,
   studioStudyPublish,
   studioStudyQualitative,
@@ -24,6 +25,7 @@ export type StudyTabId =
   | "datos"
   | "indicadores"
   | "cualitativo"
+  | "interpretacion"
   | "vista-cliente"
   | "publicar";
 
@@ -74,6 +76,13 @@ export function studySteps(workspace: StudioStudyWorkspace): Step[] {
           : counts.confirmedObservations > 0
             ? "done"
             : "quiet",
+    },
+    {
+      id: "interpretacion",
+      label: "Lectura del equipo",
+      href: studioStudyInterpretation(study.id),
+      state: "redactar y revisar",
+      tone: "quiet",
     },
     {
       id: "vista-cliente",

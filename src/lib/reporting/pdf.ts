@@ -21,6 +21,7 @@ import {
 import type { SegmentFilters } from "@/lib/calc/filters";
 import { DEFAULT_BRAND, hexToRgb, type BrandConfig } from "@/lib/branding/config";
 import { sampleCopy } from "@/lib/language/sample";
+import type { InterpretationContent } from "@/lib/interpretation/schema";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -102,6 +103,7 @@ export type StudyPdfInput = {
   filters: SegmentFilters;
   sections?: DashboardSections;
   generatedAt?: Date;
+  interpretation?: InterpretationContent | null;
 };
 
 function safeText(value: string): string {
@@ -618,6 +620,19 @@ export async function buildStudyReport(
     }
   }
 
+  if (input.interpretation) {
+    writer.section("5. Lectura del equipo");
+    writer.subheading("Que paso");
+    writer.text(input.interpretation.whatHappened, { size: 10 });
+    writer.subheading("Por que importa");
+    writer.text(input.interpretation.whyItMatters, { size: 10 });
+    writer.subheading("Que conviene mirar despues");
+    writer.text(input.interpretation.whatNext, { size: 10 });
+    if (input.interpretation.evidence.length > 0) {
+      writer.text(`Evidencia: ${input.interpretation.evidence.map((item) => item.label).join(" - ")}`, { size: 8.5, color: MUTED });
+    }
+  }
+
   }
 
   // The closing section reads as one statement, so it is placed as one block:
@@ -628,7 +643,9 @@ export async function buildStudyReport(
     writer.text("Los indicadores usan las mismas funciones canonicas del dashboard. Los valores se redondean una sola vez en la frontera de presentacion; el PDF no recalcula con formulas alternativas.", { size: 9.5 });
     writer.text(`${sampleCopy("no-data", 0).methodology} ${sampleCopy("suppressed", null).methodology} ${sampleCopy("caution", 5).methodology} ${sampleCopy("standard", 30).methodology} La regla se vuelve a aplicar despues de los filtros.`, { size: 9.5 });
     writer.text("Los hallazgos cualitativos proceden exclusivamente de decisiones humanas confirmadas. Solo se incluyen citas aprobadas de manera independiente; el texto crudo y las sugerencias automaticas no forman parte del informe.", { size: 9.5 });
-    writer.text("Documento informativo. La interpretacion final y las recomendaciones de negocio requieren criterio profesional y el contexto del estudio.", { size: 9.5, color: MUTED });
+    writer.text(input.interpretation
+      ? "La lectura del equipo es una interpretacion profesional publicada por Be Community; los resultados y su contexto metodologico permanecen visibles por separado."
+      : "Documento informativo. La interpretacion final y las recomendaciones de negocio requieren criterio profesional y el contexto del estudio.", { size: 9.5, color: MUTED });
   });
 
   writer.finalize();

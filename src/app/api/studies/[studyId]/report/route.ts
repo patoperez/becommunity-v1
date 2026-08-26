@@ -32,7 +32,7 @@ export async function GET(
   if (!z.string().uuid().safeParse(studyId).success) return new Response("Estudio no encontrado", { status: 404 });
   const authorized = await loadAuthorizedStudyData(supabase, studyId);
   if (!authorized) return new Response("Estudio no encontrado", { status: 404 });
-  const { study, rows, qualitative, tenantName, brand } = authorized;
+  const { study, rows, qualitative, tenantName, brand, publishedInterpretation } = authorized;
   const { sections } = parseDashboardConfig(study.dashboard_config);
   if (!sections.report) return new Response("Informe no disponible", { status: 404 });
   const parsedFilters = parseReportFilters(request.nextUrl.searchParams);
@@ -53,6 +53,7 @@ export async function GET(
     qualitative: filteredQualitative,
     filters,
     sections,
+    interpretation: publishedInterpretation,
   });
   const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   return new Response(body, {

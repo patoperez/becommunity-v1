@@ -7,10 +7,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { collectStudyTemplatePayload } from "@/lib/templates/collect";
 import { EMPTY_TEMPLATE_PAYLOAD, templatePayloadSchema, templatePreview } from "@/lib/templates/schema";
-import { dashboardConfigFromSections, dashboardSectionKeys, type DashboardSections } from "@/lib/dashboard/config";
+import { dashboardConfigFromSections, dashboardSectionKeys, parseDashboardConfig, type DashboardSections, type StudyPresentation } from "@/lib/dashboard/config";
 import { journeyDefinitionSchema } from "@/lib/calc/journey";
 import { tenantRefusesNewWork } from "@/lib/studio/lifecycle";
 import { ARCHIVED_TENANT_REFUSAL } from "@/lib/studio/lifecycle-model";
+import { loadStudyMetricOptions } from "@/lib/studio/metric-inventory";
 import {
   safeReturnPath,
   studyConfigurationReturnPaths,
@@ -140,7 +141,7 @@ export async function updateTemplateMetadata(formData: FormData) {
   const name = templateNameSchema.safeParse(formData.get("name"));
   if (!templateId.success || !name.success) finish("error", "Plantilla inválida.");
   const { data: template } = await admin.from("study_template")
-    .select("payload, created_from").eq("id", templateId.data).eq("created_by", user.id)
+    .select("payload, created_from").eq("id", templateId.data)
     .maybeSingle<{ payload: unknown; created_from: string | null }>();
   const payload = templatePayloadSchema.safeParse(template?.payload);
   if (!template || !payload.success) finish("error", "La plantilla no existe o está dañada.");
@@ -159,10 +160,10 @@ export async function updateTemplateMetadata(formData: FormData) {
 }
 
 export async function deleteTemplate(formData: FormData) {
-  const { user, admin } = await internalContext();
+  const { admin } = await internalContext();
   const templateId = uuid.safeParse(formData.get("template_id"));
   if (!templateId.success) finish("error", "Plantilla inválida.");
-  const { error } = await admin.from("study_template").delete().eq("id", templateId.data).eq("created_by", user.id);
+  const { error } = await admin.from("study_template").delete().eq("id", templateId.data);
   if (error) finish("error", `No se pudo eliminar: ${error.message}`, templateReturn(formData));
   revalidatePath("/admin/studies");
   finish("ok", "Plantilla eliminada. Los estudios existentes conservan su copia.", templateReturn(formData));
@@ -201,6 +202,39 @@ export async function updateStudyConfiguration(formData: FormData) {
     formData.get(`section_${key}`) === "on",
   ])) as DashboardSections;
 
+  const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+  const ownPalette = formData.get("use_study_palette") === "on";
+  const primaryRaw = ownPalette ? String(formData.get("presentation_primary") ?? "").trim() : "";
+  const accentRaw = ownPalette ? String(formData.get("presentation_accent") ?? "").trim() : "";
+  if ((primaryRaw && !color.safeParse(primaryRaw).success) || (accentRaw && !color.safeParse(accentRaw).success)) {
+    finish("error", "Revisa los colores del estudio.", { returnTo, allowed });
+  }
+  const metricRaw = String(formData.get("threshold_metric") ?? "").trim();
+  const minimumRaw = String(formData.get("threshold_minimum") ?? "").trim();
+  const maximumRaw = String(formData.get("threshold_maximum") ?? "").trim();
+  const minimum = minimumRaw ? Number(minimumRaw) : null;
+  const maximum = maximumRaw ? Number(maximumRaw) : null;
+  if ((minimum != null && !Number.isFinite(minimum)) || (maximum != null && !Number.isFinite(maximum)) || (minimum != null && maximum != null && minimum > maximum)) {
+    finish("error", "El rango ideal no es válido.", { returnTo, allowed });
+  }
+  const availableMetrics = await loadStudyMetricOptions(admin, [studyId.data]);
+  if (metricRaw && !(availableMetrics[studyId.data] ?? []).some((option) => option.key === metricRaw)) {
+    finish("error", "El resultado elegido para la alerta ya no existe en este estudio.", { returnTo, allowed });
+  }
+  const threshold = metricRaw && (minimum != null || maximum != null) ? {
+    metric: metricRaw,
+    minimum,
+    maximum,
+    label: String(formData.get("threshold_label") ?? "Fuera del rango ideal").trim().slice(0, 160) || "Fuera del rango ideal",
+  } : null;
+  let presentation: StudyPresentation = {
+    primaryColor: primaryRaw ? primaryRaw.toLowerCase() : null,
+    accentColor: accentRaw ? accentRaw.toLowerCase() : null,
+    coverLabel: String(formData.get("cover_label") ?? "").trim().slice(0, 80) || null,
+    coverNote: String(formData.get("cover_note") ?? "").trim().slice(0, 240) || null,
+    threshold,
+  };
+
   // PUBLICATION IS NOT CONFIGURATION.
   //
   // This action used to accept any status, so "publicado · visible al cliente"
@@ -210,8 +244,11 @@ export async function updateStudyConfiguration(formData: FormData) {
   // the state that already holds. Moving it happens in `setStudyPublication`,
   // whose only surface is reached through the client preview.
   const { data: current, error: currentError } = await admin.from("study")
-    .select("status").eq("id", studyId.data).maybeSingle<{ status: string }>();
+    .select("status, dashboard_config").eq("id", studyId.data).maybeSingle<{ status: string; dashboard_config: unknown }>();
   if (currentError || !current) finish("error", "El estudio ya no existe.", { returnTo, allowed });
+  if (formData.get("presentation_controls") !== "on") {
+    presentation = parseDashboardConfig(current.dashboard_config).presentation;
+  }
   if (status.data !== current.status) {
     finish(
       "error",
@@ -225,7 +262,7 @@ export async function updateStudyConfiguration(formData: FormData) {
     name: name.data,
     period,
     status: current.status,
-    dashboard_config: dashboardConfigFromSections(sections),
+    dashboard_config: dashboardConfigFromSections(sections, presentation),
     journey_definition: journey.data,
   }).eq("id", studyId.data).select("id").maybeSingle();
   if (error || !data) {

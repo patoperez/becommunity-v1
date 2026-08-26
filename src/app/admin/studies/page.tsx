@@ -31,7 +31,7 @@ type Tenant = { id: string; name: string };
 type Study = { id: string; tenant_id: string; name: string; period: string | null; status: string; dashboard_config: unknown; journey_definition: unknown };
 type Template = {
   id: string; name: string; description: string; version: number; preview: Record<string, number>;
-  updated_at: string;
+  updated_at: string; created_by: string;
 };
 
 const input =
@@ -64,8 +64,8 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
   const [{ data: tenants }, { data: studies }, { data: templates }, query] = await Promise.all([
     admin.from("tenant").select("id, name").order("name").returns<Tenant[]>(),
     admin.from("study").select("id, tenant_id, name, period, status, dashboard_config, journey_definition").order("created_at", { ascending: false }).returns<Study[]>(),
-    admin.from("study_template").select("id, name, description, version, preview, updated_at")
-      .eq("created_by", user.id).order("updated_at", { ascending: false }).returns<Template[]>(),
+    admin.from("study_template").select("id, name, description, version, preview, updated_at, created_by")
+      .order("updated_at", { ascending: false }).returns<Template[]>(),
     searchParams,
   ]);
   const tenantList = tenants ?? [];

@@ -31,9 +31,8 @@ const button =
  * of internal objects. Nothing here asks for an identifier: a template is
  * chosen, a client is chosen, and the study is named in ordinary words.
  *
- * Template ownership is unchanged and still per-author: `/studio/plantillas`
- * shows the templates you saved. Sharing them across the team is a query and
- * permission change recorded as decision D5 and is not part of this unit.
+ * Templates are shared by the internal team; the original author remains
+ * visible as attribution, never as a permission boundary.
  */
 export default async function StudioTemplatesPage({ searchParams }: { searchParams: Search }) {
   const { user, admin } = await requireInternal();
@@ -43,8 +42,7 @@ export default async function StudioTemplatesPage({ searchParams }: { searchPara
     admin.from("tenant").select("id, name").order("name").returns<{ id: string; name: string }[]>(),
     admin
       .from("study_template")
-      .select("id, name, description, version, preview, updated_at")
-      .eq("created_by", user.id)
+      .select("id, name, description, version, preview, updated_at, created_by")
       .order("updated_at", { ascending: false })
       .returns<{
         id: string;
@@ -53,6 +51,7 @@ export default async function StudioTemplatesPage({ searchParams }: { searchPara
         version: number;
         preview: Record<string, number>;
         updated_at: string;
+        created_by: string;
       }[]>(),
     admin
       .from("study")
@@ -63,6 +62,8 @@ export default async function StudioTemplatesPage({ searchParams }: { searchPara
   ]);
   const tenantList = tenants ?? [];
   const templateList = templates ?? [];
+  const { data: authors } = await admin.from("profiles").select("user_id, full_name").eq("role", "internal").returns<{ user_id: string; full_name: string | null }[]>();
+  const authorNames = new Map((authors ?? []).map((author) => [author.user_id, author.full_name || "Integrante del equipo"]));
   const archiveState = await loadTenantArchiveState(admin, tenantList.map((tenant) => tenant.id));
   const openTenants = tenantList.filter((tenant) => !archiveState.archivedAt[tenant.id]);
 
@@ -91,7 +92,7 @@ export default async function StudioTemplatesPage({ searchParams }: { searchPara
 
         <section aria-labelledby="biblioteca">
           <h2 id="biblioteca" className="text-xl">
-            Tus plantillas
+            Plantillas del equipo
           </h2>
           {templateList.length === 0 ? (
             <div className="mt-3">
@@ -110,8 +111,9 @@ export default async function StudioTemplatesPage({ searchParams }: { searchPara
                     {template.name}
                   </h3>
                   <p className="mt-1 text-sm text-muted">
-                    {template.description || "Sin descripción"}
+                      {template.description || "Sin descripción"}
                   </p>
+                  <p className="mt-1 text-xs text-muted">Creada por {authorNames.get(template.created_by) ?? "Integrante del equipo"}</p>
                   <p className="mt-2 text-sm text-body">
                     Trae {template.preview.metrics ?? 0} resultado
                     {(template.preview.metrics ?? 0) === 1 ? "" : "s"}, {template.preview.dimensions ?? 0}{" "}

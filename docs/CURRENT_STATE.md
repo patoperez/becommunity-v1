@@ -325,9 +325,10 @@ offenders are client-surface captions. P8.3 removes the technical captions from
 its rebuilt longitudinal surface; the inherited 258 px stress case remains a
 P8.5 final-responsive concern below the documented 320 px floor.
 
-Also unchanged and still open: template ownership (decision D5 approved sharing
-across the internal team with the author shown; `study_template` is still
-filtered `.eq("created_by", user.id)`).
+Template ownership is now closed: the library is shared across the internal
+team, the original author remains visible, and migration `0018` makes creation,
+updates and instantiation match that product rule without changing the single
+internal role model.
 
 **P8.3 Insights data story — implementation-complete on
 `p8d-insights-data-story`, awaiting owner review.** The real product now has
@@ -346,13 +347,31 @@ and text, never colour alone. The canonical sample string table now also owns
 the PDF's privacy and small-base wording. Loading, not-found, route error,
 invalid-filter and comparison-error states are named and recoverable.
 
-The finding DTO includes a nullable human-authored interpretation slot. It is
-deliberately empty and silent client-side until P8.4 supplies its authoring,
-approval, storage and publication workflow; no business interpretation was
-invented. No formula, canonical row, ingestion adapter, role, RLS/grant,
-migration or publication boundary changed. `npm run test:insights-story` is gate
-29 of `npm test`. No screenshots were produced, by owner request; review is in
+The finding DTO includes a nullable human-authored interpretation slot. P8.4
+now supplies it from a separately published snapshot; an absent snapshot is
+still silent and no business interpretation is invented. No formula, canonical
+row, ingestion adapter, role or study-publication boundary changed.
+`npm run test:insights-story` remains gate 29 of `npm test`. No screenshots were
+produced, by owner request; review is in
 `.design/be-community-v2/implementation-reviews/p8-3-insights-story/REVIEW.md`.
+
+**P8.4 qualitative, interpretation and customisation — implementation-complete
+on `p8e-qualitative-interpretation-customization`, awaiting owner review.** The
+real product adds `/studio/e/[studyId]/interpretacion` with bounded structured
+copy and evidence selection, explicit draft/review/approval state and a
+published snapshot that is independent from later edits. Only that snapshot
+can reach Insights or the PDF. The qualitative view adds a React/SVG word cloud
+and image download without replacing the counted list; the journey keeps a
+small set of confirmed friction themes next to each moment.
+
+Presentation now resolves Be Community defaults → client identity/defaults →
+study override. The ordinary interface exposes palette, cover copy, visible
+modules, journey setup and one focused metric threshold without JSON, internal
+keys or arbitrary CSS; templates preserve the study configuration and are
+shared with author attribution. Migrations `0017` and `0018` are applied only
+to the synthetic project. The deterministic gate is
+`npm run test:p8-qualitative` (gate 30); the disposable live lifecycle also
+passed and left zero interpretation-event residue.
 
 **Owner decisions recorded 2026-08-24, binding on every later unit:**
 
@@ -379,8 +398,8 @@ migration or publication boundary changed. `npm run test:insights-story` is gate
   honesty and accessible fallbacks stay enforced by the product.
 
 Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
-P8.2 and P8.4). Both P8.2 units and P8.3 are now implemented; P8.4-P8.5 remain
-pending.
+P8.2 and P8.4). P8.2, P8.3 and the bounded P8.4 implementation are now complete
+and awaiting owner review; P8.5 remains pending.
 
 ## P7 engineering record (historical; do not resume during P8)
 

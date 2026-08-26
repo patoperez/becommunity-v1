@@ -55,6 +55,7 @@ export default async function StudioStudyIndicatorsPage({
   if (!workspace) notFound();
   const query = await searchParams;
   const { study, metricOptions } = workspace;
+  const presentation = (await import("@/lib/dashboard/config")).parseDashboardConfig(study.dashboardConfig).presentation;
   const historical = historicalStageMetrics(study.stages, metricOptions);
 
   return (
@@ -117,6 +118,7 @@ export default async function StudioStudyIndicatorsPage({
             Server Action refuses any attempt to. */}
         <input type="hidden" name="status" value={study.status} />
         <input type="hidden" name="return_to" value={studioStudyIndicators(study.id)} />
+        <input type="hidden" name="presentation_controls" value="on" />
 
         <JourneyStagesFields
           initialStages={study.stages}
@@ -136,6 +138,24 @@ export default async function StudioStudyIndicatorsPage({
                 <input className={`${input} mt-1 font-normal`} name="period" maxLength={100} defaultValue={study.period ?? ""} placeholder="Ola 2 · 2026" />
               </label>
             </div>
+          </section>
+
+          <section className="rounded-xl border border-evidence-line bg-evidence-surface p-4">
+            <h2 className="text-base font-semibold text-strong">Presentación de este estudio</h2>
+            <p className="mt-1 max-w-prose text-xs text-muted">Déjalo vacío para usar la identidad del cliente. Al guardar este estudio como plantilla, estas decisiones también se conservan.</p>
+            <label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium text-strong"><input type="checkbox" name="use_study_palette" defaultChecked={Boolean(presentation.primaryColor || presentation.accentColor)} />Usar colores propios en este estudio</label>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-medium text-strong">Color principal propio <span className="font-normal text-muted">(opcional)</span><input className={`${input} mt-1 h-11 p-1`} type="color" name="presentation_primary" defaultValue={presentation.primaryColor ?? study.clientBrand.primaryColor} /></label>
+              <label className="text-sm font-medium text-strong">Color de acento propio <span className="font-normal text-muted">(opcional)</span><input className={`${input} mt-1 h-11 p-1`} type="color" name="presentation_accent" defaultValue={presentation.accentColor ?? study.clientBrand.accentColor} /></label>
+              <label className="text-sm font-medium text-strong">Etiqueta de portada <span className="font-normal text-muted">(opcional)</span><input className={`${input} mt-1 font-normal`} name="cover_label" maxLength={80} defaultValue={presentation.coverLabel ?? ""} placeholder="Panorama del estudio" /></label>
+              <label className="text-sm font-medium text-strong">Nota breve de portada <span className="font-normal text-muted">(opcional)</span><input className={`${input} mt-1 font-normal`} name="cover_note" maxLength={240} defaultValue={presentation.coverNote ?? ""} placeholder="Una frase propia para presentar este estudio" /></label>
+            </div>
+            <fieldset className="mt-5"><legend className="text-sm font-semibold text-strong">Una alerta útil, sólo si un resultado sale del rango ideal</legend><p className="mt-1 text-xs text-muted">No pinta todo como semáforo. Si el resultado está dentro del rango, no aparece ninguna alerta.</p><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-sm font-medium text-strong">Resultado<select className={`${input} mt-1 font-normal`} name="threshold_metric" defaultValue={presentation.threshold?.metric ?? ""}><option value="">Sin alerta</option>{metricOptions.map((option) => <option key={option.key} value={option.key}>{option.name}</option>)}</select></label>
+              <label className="text-sm font-medium text-strong">Mínimo ideal<input className={`${input} mt-1 font-normal`} type="number" step="any" name="threshold_minimum" defaultValue={presentation.threshold?.minimum ?? ""} /></label>
+              <label className="text-sm font-medium text-strong">Máximo ideal<input className={`${input} mt-1 font-normal`} type="number" step="any" name="threshold_maximum" defaultValue={presentation.threshold?.maximum ?? ""} /></label>
+              <label className="text-sm font-medium text-strong">Cómo nombrarlo<input className={`${input} mt-1 font-normal`} name="threshold_label" maxLength={160} defaultValue={presentation.threshold?.label ?? "Fuera del rango ideal"} /></label>
+            </div></fieldset>
           </section>
 
           <section>
