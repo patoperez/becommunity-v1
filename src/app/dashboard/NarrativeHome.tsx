@@ -36,12 +36,16 @@ export default function NarrativeHome({
   view,
   brand,
   audience = "client",
+  studyDestination,
 }: {
   view: NarrativeHomeView;
   brand: BrandConfig;
   audience?: Audience;
+  /** Detail route for clients; internal preview keeps the same-page anchor. */
+  studyDestination?: string;
 }) {
   const studyAnchor = `study-${view.currentStudy.id}`;
+  const studyHref = studyDestination ?? `#${studyAnchor}`;
   const reportHref = `/api/studies/${encodeURIComponent(view.currentStudy.id)}/report`;
   const findings: PanoramaFinding[] = [];
 
@@ -81,6 +85,7 @@ export default function NarrativeHome({
       context: metric.movement === "unavailable" || !metric.delta
         ? null
         : movementLabel(metric.movement, metric.delta),
+      interpretation: null,
       sample: null,
       method: { summary: "Cómo se calcula", body: [language.method] },
       quote: null,
@@ -108,6 +113,7 @@ export default function NarrativeHome({
         : `El más bajo de los ${spot.comparedWith} momentos que se miden en la misma escala. ` +
           `La barra lo sitúa entre ellos, no contra un máximo.`,
       context: null,
+      interpretation: null,
       sample: { visibility: spot.visibility, count: spot.n },
       method: {
         summary: "Qué significa “el más bajo”",
@@ -142,6 +148,7 @@ export default function NarrativeHome({
             : ".")
         : null,
       context: "Los comentarios no se convierten en porcentaje: se leen.",
+      interpretation: null,
       sample: null,
       method: {
         summary: "Cómo se eligen los temas",
@@ -206,7 +213,7 @@ export default function NarrativeHome({
           {/* Two actions, once, at the top — not repeated on every finding. */}
           <div className="mt-6 flex flex-wrap gap-2.5">
             <a
-              href={`#${studyAnchor}`}
+              href={studyHref}
               className="inline-flex min-h-11 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold"
               style={{
                 backgroundColor: "var(--study-accent-on)",
@@ -253,7 +260,7 @@ export default function NarrativeHome({
       ) : null}
 
       {findings.length > 0 ? (
-        <PanoramaFindings findings={findings} studyAnchor={studyAnchor} />
+        <PanoramaFindings findings={findings} studyDestination={studyHref} />
       ) : (
         <p className="mt-6 rounded-xl border border-dashed border-line-strong bg-surface px-5 py-6 text-sm text-muted">
           Este estudio todavía no tiene resultados publicables. En cuanto el

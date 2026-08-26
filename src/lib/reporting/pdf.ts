@@ -20,6 +20,7 @@ import {
 } from "@/lib/qualitative/published";
 import type { SegmentFilters } from "@/lib/calc/filters";
 import { DEFAULT_BRAND, hexToRgb, type BrandConfig } from "@/lib/branding/config";
+import { sampleCopy } from "@/lib/language/sample";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -359,7 +360,7 @@ class ReportWriter {
       font: this.bold,
       color: MUTED,
     });
-    this.page.drawText(safeText(suppressed ? "Muestra insuficiente" : value), {
+    this.page.drawText(safeText(suppressed ? sampleCopy("suppressed", null).headline : value), {
       x: MARGIN + 10,
       y: this.y - CARD_VALUE_BASELINE,
       size: suppressed ? 10 : 13,
@@ -486,12 +487,12 @@ export async function buildStudyReport(
   if (sections.metrics) {
   writer.section("1. Resumen ejecutivo");
   if (units === 0) {
-    writer.callout("No hay respuestas para esta seleccion.", true);
+    writer.callout(sampleCopy("no-data", 0).headline, true);
   } else if (selectionSuppressed) {
-    writer.callout("Muestra insuficiente. El informe no revela resultados de una seleccion con menos de cinco unidades de respuesta.", true);
+    writer.callout(sampleCopy("suppressed", null).headline, true);
   } else {
     if (selectionVisibility === "caution") {
-      writer.callout(`Base pequena (n=${units}). Interprete los resultados con cautela.`, true);
+      writer.callout(`${sampleCopy("caution", units).headline}. ${sampleCopy("caution", units).detail}`, true);
     }
     writer.metric("Unidades de respuesta", String(units), "Base cuantitativa y cualitativa distinta");
     if (metrics.nps) {
@@ -499,7 +500,7 @@ export async function buildStudyReport(
       writer.metric(
         "NPS",
         String(metrics.nps.nps),
-        `${metrics.nps.promoters} promotores - ${metrics.nps.passives} pasivos - ${metrics.nps.detractors} detractores - n=${metrics.nps.total}`,
+        `${metrics.nps.promoters} promotores - ${metrics.nps.passives} pasivos - ${metrics.nps.detractors} detractores. ${sampleCopy(sampleVisibility(metrics.nps.total), metrics.nps.total).headline}`,
         hidden,
       );
     }
@@ -516,7 +517,7 @@ export async function buildStudyReport(
       writer.metric(
         humanize(average.metric_key),
         formatScore(average.average),
-        `Promedio - n=${average.n}`,
+        `Promedio. ${sampleCopy(sampleVisibility(average.n), average.n).headline}`,
         sampleVisibility(average.n) === "suppressed",
       );
     }
@@ -550,7 +551,7 @@ export async function buildStudyReport(
       writer.metric(
         humanize(stage.metric),
         result.value == null ? "Sin datos" : formatScore(result.value),
-        result.detail.length ? `${result.detail.map((item) => `${item.label}: ${item.value}`).join(" - ")} - n=${result.n}` : `n=${result.n}`,
+        `${result.detail.length ? `${result.detail.map((item) => `${item.label}: ${item.value}`).join(" - ")}. ` : ""}${sampleCopy(visibility, visibility === "suppressed" ? null : result.n).headline}`,
         visibility === "suppressed",
       );
       const stageQualitative = input.qualitative.filter((row) => row.stage_key === stage.id);
@@ -582,7 +583,7 @@ export async function buildStudyReport(
         writer.metric(
           row.segment,
           formatScore(row.average),
-          `Promedio - n=${row.n}`,
+          `Promedio. ${sampleCopy(sampleVisibility(row.n), row.n).headline}`,
           sampleVisibility(row.n) === "suppressed",
         );
       }
@@ -605,11 +606,11 @@ export async function buildStudyReport(
       writer.metric(
         humanize(theme.theme),
         `${theme.count} menciones`,
-        `Base distinta n=${theme.n}${theme.visibility === "caution" ? " - base pequena" : ""}`,
+        sampleCopy(theme.visibility, theme.n).headline,
       );
     }
     if (summary.themes.some((theme) => theme.visibility === "suppressed")) {
-      writer.callout("Existen temas con muestra insuficiente; su identidad y magnitud no se muestran.", true);
+      writer.callout(sampleCopy("suppressed", null).headline, true);
     }
     for (const quote of summary.quotes) {
       const theme = quote.themeVisibility === "suppressed" ? "" : ` - ${humanize(quote.theme)}`;
@@ -625,7 +626,7 @@ export async function buildStudyReport(
     writer.section("Metodologia y lectura");
     writer.text("Este informe fue generado en el servidor desde el modelo canonico del estudio y con la sesion autenticada del usuario. La seguridad por filas limita la consulta al cliente correspondiente.", { size: 9.5 });
     writer.text("Los indicadores usan las mismas funciones canonicas del dashboard. Los valores se redondean una sola vez en la frontera de presentacion; el PDF no recalcula con formulas alternativas.", { size: 9.5 });
-    writer.text("Control de divulgacion: n=0 se presenta como sin datos; n=1-4 se suprime; n=5-29 se muestra con advertencia de base pequena; n>=30 se muestra de forma estandar. La regla se vuelve a aplicar despues de los filtros.", { size: 9.5 });
+    writer.text(`${sampleCopy("no-data", 0).methodology} ${sampleCopy("suppressed", null).methodology} ${sampleCopy("caution", 5).methodology} ${sampleCopy("standard", 30).methodology} La regla se vuelve a aplicar despues de los filtros.`, { size: 9.5 });
     writer.text("Los hallazgos cualitativos proceden exclusivamente de decisiones humanas confirmadas. Solo se incluyen citas aprobadas de manera independiente; el texto crudo y las sugerencias automaticas no forman parte del informe.", { size: 9.5 });
     writer.text("Documento informativo. La interpretacion final y las recomendaciones de negocio requieren criterio profesional y el contexto del estudio.", { size: 9.5, color: MUTED });
   });

@@ -18,6 +18,7 @@ import {
 } from "@/lib/language/results";
 import { sampleCopy } from "@/lib/language/sample";
 import type { Audience } from "@/lib/dashboard/audience";
+import { filterQuery } from "@/lib/insights/filters";
 
 type Study = { id: string; name: string; period: string | null; status: string };
 
@@ -69,14 +70,20 @@ function ResultCard({ metric }: { metric: SafeMetric }) {
 export default function StudyCard({
   study,
   initialDashboard,
+  initialFilters = {},
+  syncFiltersToUrl = false,
   audience = "client",
 }: {
   study: Study;
   initialDashboard: StudyDashboardPayload;
+  /** The validated selection loaded from the URL on a study route. */
+  initialFilters?: SegmentFilters;
+  /** Keep the study URL and its PDF link on one canonical filter source. */
+  syncFiltersToUrl?: boolean;
   /** Presentation only: the internal preview names readiness gaps, the client view never does. */
   audience?: Audience;
 }) {
-  const [filters, setFilters] = useState<SegmentFilters>({});
+  const [filters, setFilters] = useState<SegmentFilters>(initialFilters);
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -97,7 +104,13 @@ export default function StudyCard({
     startTransition(async () => {
       const response = await refreshStudyDashboard(study.id, next);
       if (current !== request.current) return;
-      if (response.ok) setDashboard(response.data);
+      if (response.ok) {
+        setDashboard(response.data);
+        if (syncFiltersToUrl) {
+          const query = filterQuery(next);
+          window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname);
+        }
+      }
       else setError(response.error);
     });
   }

@@ -17,6 +17,8 @@ import { StudioShell } from "@/components/shell/StudioShell";
 import { StateBlock } from "@/components/States";
 import { StudioHomeView } from "@/components/studio/StudioHomeView";
 import StudyComingSoon from "./StudyComingSoon";
+import { StudyLibrary } from "@/components/insights/StudyLibrary";
+import { insightsStudyHref } from "@/lib/insights/filters";
 
 export const metadata = {
   title: "Inicio",
@@ -202,7 +204,11 @@ export default async function DashboardPage() {
       ) : (
         <>
           {narrative ? (
-            <NarrativeHome view={narrative} brand={brand} />
+            <NarrativeHome
+              view={narrative}
+              brand={brand}
+              studyDestination={insightsStudyHref(narrative.currentStudy.id)}
+            />
           ) : (
             /* The panorama is switched off for this study. Say so — the page
                used to open on a bare heading with no explanation (C5). */
@@ -217,16 +223,34 @@ export default async function DashboardPage() {
           )}
           <LongitudinalTrends view={longitudinal} />
 
-          <h2 className="sr-only">Tus estudios</h2>
-          <div className="grid grid-cols-1 gap-6">
-            {studyData.map(({ study, dashboard }) => (
+          {/* Keep the current study's real controls on the compatibility home:
+              the protected live suites drive this exact surface. Older studies
+              become concise doorways instead of repeated report-length cards. */}
+          {studyData[0] ? (
+            <div className="mt-10">
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.13em] text-evidence">Explorar</p>
+                  <h2 className="mt-1.5 text-2xl">Mira el estudio más reciente</h2>
+                </div>
+                <a
+                  href={insightsStudyHref(studyData[0].study.id)}
+                  className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken"
+                >
+                  Abrirlo en su propia vista
+                </a>
+              </div>
               <StudyCard
-                key={study.id}
-                study={study}
-                initialDashboard={dashboard}
+                study={studyData[0].study}
+                initialDashboard={studyData[0].dashboard}
               />
-            ))}
-          </div>
+            </div>
+          ) : null}
+
+          <StudyLibrary
+            studies={studyData}
+            currentId={studyData[0]?.study.id ?? null}
+          />
         </>
       )}
     </InsightsShell>

@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { StateBlock } from "@/components/States";
 import { AGG_KINDS, validatePivotIntent, type AggKind, type PivotAllowlist, type PivotIntent } from "@/lib/calc/pivot";
 import type { SegmentFilters } from "@/lib/calc/filters";
 import type { SafePivotResult } from "@/lib/dashboard/view";
 import { formatScore } from "@/lib/calc/format";
+import { sampleCopy } from "@/lib/language/sample";
 import { computeStudyPivot } from "./data-actions";
 
-const AGG_LABEL: Record<AggKind, string> = { avg: "Promedio", count: "Conteo", sum: "Suma", min: "Mínimo", max: "Máximo" };
+const AGG_LABEL: Record<AggKind, string> = { avg: "Promedio", count: "Cantidad", sum: "Suma", min: "El menor", max: "El mayor" };
 const NONE = "__none__";
-const fmt = formatScore;
-function labelize(value: string) { return value.replace(/_/g, " "); }
+const labelize = (value: string) => value.replace(/_/g, " ");
 
 export default function PivotExplorer({ studyId, filters, allowlist }: { studyId: string; filters: SegmentFilters; allowlist: PivotAllowlist }) {
   const [rowDim, setRowDim] = useState(allowlist.dimensions[0] ?? "");
@@ -19,6 +20,7 @@ export default function PivotExplorer({ studyId, filters, allowlist }: { studyId
   const [agg, setAgg] = useState<AggKind>("avg");
   const [result, setResult] = useState<SafePivotResult | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const [revision, setRevision] = useState(0);
   const [pending, startTransition] = useTransition();
   const request = useRef(0);
   const intent: PivotIntent = useMemo(() => ({ rows: rowDim ? [rowDim] : [], columns: colDim !== NONE && colDim ? [colDim] : [], values: [{ field: metric, agg }] }), [rowDim, colDim, metric, agg]);
@@ -33,26 +35,26 @@ export default function PivotExplorer({ studyId, filters, allowlist }: { studyId
       if (response.ok) { setResult(response.data); setErrors([]); }
       else { setResult(null); setErrors([response.error]); }
     });
-  }, [allowlist, filters, intent, studyId, validation]);
+  }, [filters, intent, revision, studyId, validation]);
 
-  const hasColumns = intent.columns.length > 0;
   const visibleResult = validation.ok ? result : null;
   const visibleErrors = validation.ok ? errors : validation.errors;
   const measure = visibleResult?.measures[0];
-  const barRows = visibleResult && !hasColumns && measure ? visibleResult.body.map((row) => ({ label: row.rowLabels[0] || "(sin dato)", value: row.cells[`|${measure.id}`] ?? null })).filter((row) => row.value != null) : [];
+  const hasColumns = intent.columns.length > 0;
+  const barRows = visibleResult && !hasColumns && measure ? visibleResult.body.map((row) => ({ label: row.rowLabels[0] || "Sin dato", value: row.cells[`|${measure.id}`] ?? null, hidden: row.suppressed[`|${measure.id}`] })).filter((row) => row.value != null && !row.hidden) : [];
   const maxBar = barRows.reduce((max, row) => Math.max(max, row.value ?? 0), 0) || 1;
-  const selectCls = "rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 
-  return <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-    <div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Explorador de cruces</h4><p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">El servidor recalcula resultados agregados; las filas de respuesta no llegan al navegador.</p></div>{pending ? <span className="text-xs text-violet-600">Calculando...</span> : null}</div>
-    <div className="mt-3 flex flex-wrap items-end gap-3">
-      <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">Filas<select value={rowDim} onChange={(event) => setRowDim(event.target.value)} className={selectCls}>{allowlist.dimensions.map((dimension) => <option key={dimension} value={dimension}>{labelize(dimension)}</option>)}</select></label>
-      <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">Columnas<select value={colDim} onChange={(event) => setColDim(event.target.value)} className={selectCls}><option value={NONE}>(ninguna)</option>{allowlist.dimensions.filter((dimension) => dimension !== rowDim).map((dimension) => <option key={dimension} value={dimension}>{labelize(dimension)}</option>)}</select></label>
-      <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">Métrica<select value={metric} onChange={(event) => setMetric(event.target.value)} className={selectCls}>{allowlist.metrics.map((item) => <option key={item} value={item}>{labelize(item)}</option>)}</select></label>
-      <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">Agregación<select value={agg} onChange={(event) => setAgg(event.target.value as AggKind)} className={selectCls}>{AGG_KINDS.map((item) => <option key={item} value={item}>{AGG_LABEL[item]}</option>)}</select></label>
+  return <section className="rounded-xl border border-line bg-surface p-4 sm:p-5" aria-labelledby="comparison-title">
+    <span className="sr-only">Explorador de cruces</span>
+    <div className="flex items-start justify-between gap-3"><div><h4 id="comparison-title" className="text-base font-semibold text-strong">Compara por...</h4><p className="mt-1 max-w-2xl text-sm text-muted">Elige cómo separar a las personas y qué resultado mirar. Siempre verás datos agrupados, nunca respuestas individuales.</p></div><span aria-live="polite" className="text-xs text-evidence">{pending ? "Preparando la comparación..." : ""}</span></div>
+    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <label className="flex flex-col gap-1 text-xs text-muted"><span className="sr-only">Filas</span><span>Primero separa por</span><select aria-label="Filas" value={rowDim} onChange={(event) => setRowDim(event.target.value)} className="min-h-11 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-strong">{allowlist.dimensions.map((dimension) => <option key={dimension} value={dimension}>{labelize(dimension)}</option>)}</select></label>
+      <label className="flex flex-col gap-1 text-xs text-muted"><span className="sr-only">Columnas</span><span>Y, si quieres, también por</span><select aria-label="Columnas" value={colDim} onChange={(event) => setColDim(event.target.value)} className="min-h-11 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-strong"><option value={NONE}>Sin segunda separación</option>{allowlist.dimensions.filter((dimension) => dimension !== rowDim).map((dimension) => <option key={dimension} value={dimension}>{labelize(dimension)}</option>)}</select></label>
+      <label className="flex flex-col gap-1 text-xs text-muted"><span className="sr-only">Métrica</span><span>Resultado que quieres mirar</span><select aria-label="Métrica" value={metric} onChange={(event) => setMetric(event.target.value)} className="min-h-11 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-strong">{allowlist.metrics.map((item) => <option key={item} value={item}>{labelize(item)}</option>)}</select></label>
+      <label className="flex flex-col gap-1 text-xs text-muted"><span className="sr-only">Agregación</span><span>Cómo resumirlo</span><select aria-label="Agregación" value={agg} onChange={(event) => setAgg(event.target.value as AggKind)} className="min-h-11 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-strong">{AGG_KINDS.map((item) => <option key={item} value={item}>{AGG_LABEL[item]}</option>)}</select></label>
     </div>
-    {visibleErrors.length ? <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{visibleErrors.map((error) => <p key={error}>{error}</p>)}</div> : null}
-    {visibleResult && measure ? <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800"><table className="w-full text-sm"><thead><tr className="bg-zinc-50 text-left text-xs text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"><th className="px-3 py-2 font-medium">{labelize(rowDim)}</th>{hasColumns ? visibleResult.colCombos.map((column) => <th key={column.key} className="px-3 py-2 text-right font-medium">{labelize(column.labels[0] || "(sin dato)")}</th>) : <th className="px-3 py-2 text-right font-medium">{measure.label}</th>}</tr></thead><tbody>{visibleResult.body.map((row, index) => <tr key={index} className="border-t border-zinc-100 dark:border-zinc-800"><td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{row.rowLabels[0] || "(sin dato)"}</td>{hasColumns ? visibleResult.colCombos.map((column) => { const key = `${column.key}|${measure.id}`; return <td key={key} className="px-3 py-2 text-right font-medium">{row.suppressed[key] ? "Muestra insuficiente" : fmt(row.cells[key] ?? null)}</td>; }) : <td className="px-3 py-2 text-right font-medium">{row.suppressed[`|${measure.id}`] ? "Muestra insuficiente" : fmt(row.cells[`|${measure.id}`] ?? null)}</td>}</tr>)}</tbody></table></div> : null}
-    {barRows.length && measure ? <div className="mt-4"><p className="mb-2 text-xs font-medium text-zinc-600">{measure.label}</p><div className="flex flex-col gap-1.5">{barRows.map((row) => <div key={row.label} className="flex items-center gap-2"><span className="w-24 shrink-0 truncate text-xs text-zinc-600">{row.label}</span><div className="h-5 flex-1 rounded bg-zinc-100"><div className="flex h-5 items-center justify-end rounded bg-zinc-900 px-2 text-[10px] font-medium text-white" style={{ width: `${Math.max(8, ((row.value ?? 0) / maxBar) * 100)}%` }}>{fmt(row.value)}</div></div></div>)}</div></div> : null}
-  </div>;
+    {visibleErrors.length ? <div className="mt-4"><StateBlock tone="danger" title="No pudimos preparar esta comparación" action={<button type="button" onClick={() => setRevision((value) => value + 1)} className="min-h-11 rounded-lg border border-danger-line bg-surface px-4 py-2 text-sm font-semibold text-danger">Intentar de nuevo</button>}><p>{visibleErrors.join(" ")}</p></StateBlock></div> : null}
+    {visibleResult && measure ? <div className="mt-5 overflow-x-auto rounded-lg border border-line"><table className="w-full text-sm"><thead><tr className="bg-surface-sunken text-left text-xs text-muted"><th className="px-3 py-2 font-medium">{labelize(rowDim)}</th>{hasColumns ? visibleResult.colCombos.map((column) => <th key={column.key} className="px-3 py-2 text-right font-medium">{labelize(column.labels[0] || "Sin dato")}</th>) : <th className="px-3 py-2 text-right font-medium">{measure.label}</th>}</tr></thead><tbody>{visibleResult.body.map((row, index) => <tr key={index} className="border-t border-line"><td className="px-3 py-2 text-muted">{row.rowLabels[0] || "Sin dato"}</td>{(hasColumns ? visibleResult.colCombos : [{ key: "" }]).map((column) => { const key = `${column.key}|${measure.id}`; return <td key={key} className="px-3 py-2 text-right font-medium text-strong">{row.suppressed[key] ? sampleCopy("suppressed", null).headline : formatScore(row.cells[key] ?? null)}</td>; })}</tr>)}</tbody></table></div> : null}
+    {barRows.length && measure ? <div className="mt-5" aria-label={`Comparación visual de ${measure.label}`}><p className="mb-2 text-xs font-medium text-muted">{measure.label}</p><div className="flex flex-col gap-2">{barRows.map((row) => <div key={row.label} className="grid grid-cols-[6rem_1fr] items-center gap-2"><span className="truncate text-xs text-muted">{row.label}</span><div className="h-7 rounded bg-surface-sunken"><div className="flex h-7 items-center justify-end rounded bg-evidence px-2 text-xs font-semibold text-white" style={{ width: `${Math.max(10, ((row.value ?? 0) / maxBar) * 100)}%` }}>{formatScore(row.value)}</div></div></div>)}</div></div> : null}
+  </section>;
 }
