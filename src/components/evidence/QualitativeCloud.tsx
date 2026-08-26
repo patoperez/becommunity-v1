@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 type Item = { label: string; count: number };
 
@@ -24,6 +24,10 @@ function cloudSvg(items: Item[]) {
 
 export function QualitativeCloud({ items }: { items: Item[] }) {
   const [open, setOpen] = useState(false);
+  const id = useId().replace(/:/g, "");
+  const panelId = `${id}-cloud`;
+  const titleId = `${id}-title`;
+  const descriptionId = `${id}-description`;
   const svg = useMemo(() => cloudSvg(items), [items]);
   const max = Math.max(1, ...items.map((item) => item.count));
   if (items.length === 0) return null;
@@ -32,11 +36,11 @@ export function QualitativeCloud({ items }: { items: Item[] }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div><h6 className="text-sm font-semibold text-strong">Nube de temas</h6><p className="text-xs text-muted">Una vista alterna; la lista con cantidades sigue siendo la referencia.</p></div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong">{open ? "Ocultar nube" : "Ver nube"}</button>
+          <button type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((value) => !value)} className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong">{open ? "Ocultar nube" : "Ver nube"}</button>
           {open ? <button type="button" onClick={() => { const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "nube-de-temas.svg"; link.click(); URL.revokeObjectURL(url); }} className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong">Descargar imagen</button> : null}
         </div>
       </div>
-      {open ? <div className="mt-4 overflow-hidden rounded-lg border border-line bg-white"><svg viewBox="0 0 1200 675" role="img" aria-labelledby="cloud-title cloud-desc" className="h-auto w-full"><title id="cloud-title">Nube de temas</title><desc id="cloud-desc">Vista visual de temas confirmados. El tamaño acompaña el número de menciones, que también aparece escrito.</desc><rect width="1200" height="675" rx="32" fill="#faf8f3"/>{items.slice(0, positions.length).map((item, index) => { const [x, y] = positions[index]; const size = 14 + Math.round((item.count / max) * 18); return <text key={item.label} x={`${x}%`} y={`${y}%`} textAnchor="middle" dominantBaseline="middle" fontFamily="Arial, sans-serif" fontSize={size} fontWeight={index < 3 ? 700 : 500} fill={index % 2 ? "#0e7490" : "#0c4a6e"}>{item.label} ({item.count})</text>; })}</svg></div> : null}
+      {open ? <div id={panelId} className="mt-4 overflow-hidden rounded-lg border border-line bg-white"><svg viewBox="0 0 1200 675" role="img" aria-labelledby={`${titleId} ${descriptionId}`} className="h-auto w-full"><title id={titleId}>Nube de temas</title><desc id={descriptionId}>Vista visual de temas confirmados. El tamaño acompaña el número de menciones, que también aparece escrito.</desc><rect width="1200" height="675" rx="32" fill="#faf8f3"/>{items.slice(0, positions.length).map((item, index) => { const [x, y] = positions[index]; const size = 14 + Math.round((item.count / max) * 18); return <text key={item.label} x={`${x}%`} y={`${y}%`} textAnchor="middle" dominantBaseline="middle" fontFamily="Arial, sans-serif" fontSize={size} fontWeight={index < 3 ? 700 : 500} fill={index % 2 ? "#0e7490" : "#0c4a6e"}>{item.label} ({item.count})</text>; })}</svg></div> : null}
       {open ? <ul className="sr-only">{items.map((item) => <li key={item.label}>{item.label}: {item.count} menciones</li>)}</ul> : null}
     </div>
   );

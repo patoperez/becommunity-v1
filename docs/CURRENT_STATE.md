@@ -318,12 +318,10 @@ lifecycle evidence rows intentionally remain.
 disabled outright, independently of migration availability, until a
 recoverable, idempotent and resumable cross-system workflow exists.
 
-`npm run test:responsive-live` fails at 258 px on the CLIENT dashboard. It was
-reproduced identically at the baseline `ff87b84`, so it is inherited rather than
-introduced; 258 px is below the 320 px floor the design brief states and the
-offenders are client-surface captions. P8.3 removes the technical captions from
-its rebuilt longitudinal surface; the inherited 258 px stress case remains a
-P8.5 final-responsive concern below the documented 320 px floor.
+The supported responsive floor is 320 px. P8.5 also keeps the inherited 258 px
+dashboard stress probe as a diagnostic and makes the previously clipped sample
+and metric captions wrap safely; 258 px is not promoted into the product
+contract.
 
 Template ownership is now closed: the library is shared across the internal
 team, the original author remains visible, and migration `0018` makes creation,
@@ -397,9 +395,15 @@ passed and left zero interpretation-event residue.
   no-code customisation: contrast, responsiveness, semantic meaning, analytical
   honesty and accessible fallbacks stay enforced by the product.
 
-Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
-P8.2 and P8.4). P8.2, P8.3 and the bounded P8.4 implementation are now complete
-and awaiting owner review; P8.5 remains pending.
+Details are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5). P8.2, P8.3
+and the bounded P8.4 implementation are complete and awaiting owner review.
+P8.5's automated acceptance is complete: the deterministic gate is gate 31,
+and the rendered authenticated matrix covers the client and Studio route set at
+320/360/390/768/1024/1280 px without screenshots. The only open P8.5 row is the
+owner's documented pass on a real phone; automation must not mark it complete.
+Studio intentionally has no top-level loading boundary: the internal-role guard
+must resolve before the framework can stream a successful response. Pending
+labels inside authorized tasks provide progress without weakening that rule.
 
 ## P7 engineering record (historical; do not resume during P8)
 

@@ -43,9 +43,9 @@ export default async function ClientPreviewPage({ params }: { params: Promise<{ 
       */
       utility={<Link
         href={STUDIES_LIST.href}
-        className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken"
+        className="inline-flex min-h-11 min-w-0 max-w-full items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken"
       >
-        {STUDIES_LIST.label}
+        <span className="truncate">{STUDIES_LIST.label}</span>
       </Link>}
       footer={<PublishEntry studyId={studyId} />}
     />

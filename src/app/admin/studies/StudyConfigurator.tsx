@@ -18,7 +18,7 @@ const sectionLabels: Record<DashboardSectionKey, string> = {
   qualitative: "Hallazgos cualitativos",
   metrics: "Indicadores y promedios",
   segments: "Cruces por segmento",
-  pivot: "Explorador pivote",
+  pivot: "Comparaciones libres",
   report: "Descarga de informe PDF",
 };
 

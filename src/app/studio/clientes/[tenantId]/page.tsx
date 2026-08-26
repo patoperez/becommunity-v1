@@ -252,7 +252,7 @@ export default async function StudioClientPage({
                 </label>
               </div>
               <details className="rounded-lg border border-line bg-surface-page p-3">
-                <summary className="cursor-pointer text-sm font-semibold text-strong">Presentación predeterminada de sus estudios</summary>
+                <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-strong">Presentación predeterminada de sus estudios</summary>
                 <p className="mt-2 text-xs text-muted">Cada estudio puede reemplazar estos valores. Si no lo hace, hereda esta configuración.</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="text-xs font-medium">Etiqueta de portada<input className={`${input} mt-1 font-normal`} name="default_cover_label" maxLength={80} defaultValue={brand.presentationDefaults.coverLabel ?? ""} placeholder="Panorama del estudio" /></label>

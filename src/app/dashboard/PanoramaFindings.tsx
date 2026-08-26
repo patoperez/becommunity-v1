@@ -204,7 +204,7 @@ export default function PanoramaFindings({
                 <>
                   <ScaleMark value={current.numeric} unit={current.unit} tone="accent" />
                   {current.scaleNote ? (
-                    <p className="mt-1.5 text-xs text-muted">{current.scaleNote}</p>
+                    <p className="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">{current.scaleNote}</p>
                   ) : null}
                 </>
               ) : current.peer && current.numeric != null ? (
@@ -216,7 +216,7 @@ export default function PanoramaFindings({
                     tone="accent"
                   />
                   {current.scaleNote ? (
-                    <p className="mt-1.5 text-xs text-muted">{current.scaleNote}</p>
+                    <p className="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">{current.scaleNote}</p>
                   ) : null}
                 </>
               ) : current.scaleNote ? (

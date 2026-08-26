@@ -1,8 +1,8 @@
 # P8 — Product Experience Transformation
 
 > **Authoritative P8 plan and experience contract.** Status: **P8.1/P8-A and
-> P8.2, P8.3 and the bounded P8.4 implementation are in the real product;
-> P8.5 is pending.** Discovery
+> P8.2, P8.3, the bounded P8.4 implementation and P8.5 automated acceptance
+> are in the real product; P8.5 awaits the owner's real-phone pass.** Discovery
 > and standalone visual comparison are closed. Implementation records live in
 > `.design/be-community-v2/implementation-reviews/`.
 >
@@ -353,6 +353,16 @@ closure record.
 **Why last:** it is acceptance, not polish. It must run against the finished
 surface.
 
+**Status: automated acceptance delivered; human phone pass pending.** The
+deterministic gate inventories all Studio/Insights routes and enforces named
+states, plain language, keyboard affordances, reduced motion and accessible
+word-cloud structure. The authenticated rendered gate visits client and
+internal surfaces at 320/360/390/768/1024/1280 px and rejects document overflow,
+clipped text, duplicate IDs, unnamed graphics, missing alternatives and control
+targets below 24 px. No screenshots are required. The final human row remains
+explicitly pending in `docs/P8_ACCEPTANCE_MATRIX.md` until the owner performs it
+on a physical phone.
+
 ### Dependency summary
 
 ```
@@ -373,13 +383,13 @@ every workstream, not once at the end.
 |---|---|---|
 | C1 no authored structure | Source review + a scan asserting no `JSON.stringify` reaches a user-visible surface | Each PR touching Studio — **met for all four picker uses** as of the P8.2 completion unit |
 | C2 progressive disclosure | Design review against the IA disclosure tables | P8.2, P8.3 |
-| C3 plain language | Deterministic string gate over user-facing copy | P8.5, then every PR |
+| C3 plain language | Deterministic string gate over user-facing copy | P8.5 — **met in automation**, then every PR |
 | C4 sample context | One component, one string table; `n=` absent client-side | P8.3 — **met** on screen, longitudinal views, comparison suppression and PDF |
 | C5 significance | Finding block cannot render without the slot | P8.4 — **met**: structured authoring/review/publication exists, only the published snapshot reaches clients/PDF, and an empty slot renders silence |
 | C6 reversibility | Mutation classification table; no `window.confirm` | P8.2 — **met**: `test:studio-completion` asserts no `window.confirm`/`alert`/`prompt` on any Studio surface, that every dialog carries object, consequence, severity and recovery, and that only the permanent severity reads as danger or requires typing |
-| C7 accessibility | P8.5 matrix incl. adversarial brand colours | P8.5 |
-| C8 responsive | Extended responsive matrix at six widths | P8.5 |
-| C9 states | Every surface enumerated; zero `null` returns | P8.5 |
+| C7 accessibility | Named-state, keyboard/focus, reduced-motion, semantic-graphic and adversarial brand-colour gates | P8.5 — **automated rows met; real-phone row pending** |
+| C8 responsive | Authenticated rendered matrix at 320/360/390/768/1024/1280 px | P8.5 — **met in automation** |
+| C9 states | Every Studio/Insights route enumerated; zero blank `null` pages; shared loading/error/not-found system | P8.5 — **met** |
 | **C10 invariants** | `typecheck`, `lint`, `test`, `build` in WSL/Linux CI, plus the live chain where the PR touches an authorized path | **Every PR** |
 | C11 absence | Deterministic assertions in `scripts/design-tokens-test.mjs`: the missing-comparison and missing-qualitative copy cannot reach client output, empty wrappers are not rendered, and internal readiness still reports the same omissions | Each PR touching a client surface |
 

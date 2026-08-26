@@ -221,7 +221,7 @@ export default function JourneyMap({
                 <span className="tabular font-display text-2xl font-semibold leading-tight text-strong">
                   {stage.value ?? "—"}
                 </span>
-                <span className="text-xs text-muted">
+                <span className="text-xs text-muted [overflow-wrap:anywhere]">
                   {stage.value == null
                     ? STATE_WORD[state]
                     : `${unitLabel(stage.unit)}${domainFor(stage.unit) ? ` · ${domainFor(stage.unit)?.label}` : ""}`}
@@ -289,7 +289,7 @@ function StageDetail({
             </p>
           </div>
           {stage.description ? (
-            <p className="mt-1.5 max-w-prose text-sm text-muted">{stage.description}</p>
+            <p className="mt-1.5 max-w-prose text-sm text-muted [overflow-wrap:anywhere]">{stage.description}</p>
           ) : null}
 
           {state === "absent" ? (

@@ -118,6 +118,16 @@ applied to the synthetic project only. `npm run test:p8-qualitative` is the
 30th deterministic gate; `npm run test:p8-qualitative-live` verifies the full
 interpretation lifecycle with disposable data.
 
+**P8.5 automated acceptance is implementation-complete on
+`p8f-responsive-accessibility-acceptance`; the owner's real-phone pass remains
+pending.** The 31st deterministic gate checks named loading/empty/error/
+not-found states, keyboard and focus contracts, reduced motion, plain language
+and accessible word-cloud semantics. A separate authenticated rendered gate
+visits the client and Studio route set at 320, 360, 390, 768, 1024 and 1280 px,
+without screenshots, and fails on page overflow, clipped text, duplicate IDs,
+unnamed graphics, missing image alternatives or undersized controls. The human
+checklist is in `.design/be-community-v2/implementation-reviews/p8-5-final-acceptance/REVIEW.md`.
+
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or handing off

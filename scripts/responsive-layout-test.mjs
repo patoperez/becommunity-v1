@@ -36,7 +36,10 @@ const CHROME_CANDIDATES = [
 
 const ROLES = [
   { name: "tenant A (data-rich)", email: "TEST_USER_A_EMAIL", password: "TEST_USER_A_PASSWORD", rich: true, required: true },
-  { name: "internal", email: "TEST_INTERNAL_EMAIL", password: "TEST_INTERNAL_PASSWORD", rich: true, required: false },
+  // Internal accounts redirect away from the client dashboard into Studio.
+  // Their real route matrix is covered by test:p8-acceptance-live; this legacy
+  // dashboard regression must not pretend the redirected page owns a client card.
+  { name: "internal", email: "TEST_INTERNAL_EMAIL", password: "TEST_INTERNAL_PASSWORD", rich: false, required: false },
   { name: "tenant B (empty)", email: "TEST_USER_B_EMAIL", password: "TEST_USER_B_PASSWORD", rich: false, required: false },
 ];
 

@@ -38,9 +38,9 @@ export default async function StudioClientPreviewPage({ params }: { params: Para
       utility={
         <Link
           href={back.href}
-          className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken"
+          className="inline-flex min-h-11 min-w-0 max-w-full items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken"
         >
-          {back.label}
+          <span className="truncate">{back.label}</span>
         </Link>
       }
       footer={

@@ -114,7 +114,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (30 gates; P8.4 adds test:p8-qualitative)
+npm test             # complete deterministic suite (31 gates; P8.5 adds test:p8-acceptance)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -239,6 +239,16 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   inherited; templates are team-shared with author attribution and preserve
   the configuration. Migrations `0017` and `0018` are applied to the synthetic
   project only. Never invent interpretation copy or expose draft content.
+- **P8.5 automated acceptance is implementation-complete on
+  `p8f-responsive-accessibility-acceptance`; owner phone review is pending.**
+  `test:p8-acceptance` covers the named state system, plain language, keyboard
+  affordances, unique word-cloud semantics and the declared six-width matrix.
+  `test:p8-acceptance-live` renders the authorized client and Studio route set
+  at 320/360/390/768/1024/1280 px without screenshots and rejects page-level
+  overflow, clipped text, duplicate IDs, unnamed graphics, missing alt text or
+  sub-24 px control targets. Never record the human phone row as passed until
+  the owner actually performs it. Studio deliberately has no top-level
+  `loading.tsx`: its role check must finish before any streamed HTTP 200 UI.
 - **Every `/admin/**` address still answers.** Studio gained addresses; it
   renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
   frozen adversarial catalogue all depend on the old paths, and
