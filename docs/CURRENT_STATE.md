@@ -187,8 +187,9 @@ authorization or external-system change. The completion unit below adds
 migration; it adds no dependency, no lockfile change, no role, no formula and no
 external-system change.
 
-**P8.2 completion — implemented on `claude/p8c-studio-workflows-completion-9bab28`
-from `ff87b84`, awaiting owner review.** The record is
+**P8.2 completion — implemented and synthetic-acceptance-complete on
+`claude/p8c-studio-workflows-completion-9bab28` from `ff87b84`, awaiting owner
+review.** The record is
 `.design/be-community-v2/implementation-reviews/p8-2-completion/REVIEW.md`.
 
 What now exists in the real product:
@@ -249,8 +250,8 @@ What now exists in the real product:
   themselves with their own inverse if the record cannot be written after the
   change.
 
-**Migration `0015_client_lifecycle_and_audit.sql` is additive and APPLIED
-NOWHERE.** It adds `tenant.archived_at` / `archived_by` with a partial index and
+**Migration `0015_client_lifecycle_and_audit.sql` is additive and APPLIED TO THE
+SYNTHETIC PROJECT ONLY.** It adds `tenant.archived_at` / `archived_by` with a partial index and
 one internal `admin_lifecycle_event` table with RLS, FORCE RLS, a
 deny-browser-roles policy, a database-enforced 4096-byte bound on its metadata
 (the application sanitiser holds to half that), and **least-privilege grants**:
@@ -294,23 +295,28 @@ with no permissive policy, which is the tracked design.
 `0008` granted `authenticated` SELECT on the view; migration
 `0009_client_publication_boundary.sql` deliberately superseded that, revoking
 `anon`/`authenticated` and granting only `service_role`. The application loads
-confirmed qualitative content server-side on purpose. That boundary stays. Suspension is deliberately
-outside that schema. Until the migration is applied through its own reviewed
-deployment step, `src/lib/studio/lifecycle.ts` detects its absence, the client
-archive and permanent-delete controls render **disabled with the reason
-stated**, and any administrative action that succeeds unrecorded says so.
+confirmed qualitative content server-side on purpose. That boundary stays.
+Suspension is deliberately outside that schema. Environments without `0015`
+still degrade honestly: `src/lib/studio/lifecycle.ts` detects its absence and
+the administrative actions refuse with a stated reason.
 
-**Three things are open and must not be reported as done:**
+**Synthetic acceptance completed 2026-08-25 at `543889a`.** Migration `0015`
+was applied to synthetic project `ontvqazsqiwisdddblif`; the canonical offline
+chain and the complete live chain passed. Exact-ledger browser acceptance then
+proved tenant archive/restore, denial of new work while archived, preservation
+of existing client access, user suspension/restore at the authentication
+boundary, and permanent deletion of one disposable user with durable intent and
+outcome evidence. Cleanup removed both disposable studies and the disposable
+tenant; the profile and Auth identity were already absent after the deletion
+flow. No matching database, Auth or Storage residue remained. The protected
+fixture stayed at 3 tenants, 3 studies, 4 profiles, 22 respondents, 82
+quantitative responses, 2 qualitative observations, 1 import batch and 4 Auth
+users (0 banned); P6E remained published at 20 / 80 / 0 / 1. Eight append-only
+lifecycle evidence rows intentionally remain.
 
-1. `0015` is unapplied, so EVERY lifecycle action — archive, restore, suspend,
-   restore and permanent account deletion — refuses in every current
-   environment, because each promises evidence there is nowhere to write.
-2. Permanent CLIENT deletion is disabled outright, independently of the
-   migration.
-3. `npm run gates:live` has NOT run against this branch. Suite B's catalogue now
-   names the Studio addresses and six new denial-only lifecycle mutations, and
-   those depend on `0015`; a run today would measure an environment the code was
-   not written for. It is deferred to the reviewed deployment step.
+**One lifecycle item remains unavailable:** permanent CLIENT deletion is
+disabled outright, independently of migration availability, until a
+recoverable, idempotent and resumable cross-system workflow exists.
 
 `npm run test:responsive-live` fails at 258 px on the CLIENT dashboard. It was
 reproduced identically at the baseline `ff87b84`, so it is inherited rather than

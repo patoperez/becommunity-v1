@@ -5,7 +5,8 @@
 > `ff87b8423a1da05ce5a1c24c7d392e7e888c6d06` (`origin/main`, the squash merge
 > of PR #40 after the accepted first P8.2 slice at PR #39).
 >
-> No prototype directory was created. No remote database, external system or
+> No prototype directory was created. The synthetic Supabase project was used
+> for the bounded acceptance recorded below; no production database or
 > deployment was touched. No pull request was opened and nothing was merged.
 
 ---
@@ -181,7 +182,8 @@ reached a form. It measures; it produces no screenshots.
 
 ## Gates
 
-Run in WSL 2 Ubuntu (Node 24.11.1, npm 10.9.2) on the exact final commit.
+Run in WSL 2 Ubuntu (Node 24.11.1, npm 10.9.2) on the exact accepted source
+commit `543889a`; the later evidence-only commit changes no product source.
 
 | Gate | Exit |
 |---|---|
@@ -189,22 +191,37 @@ Run in WSL 2 Ubuntu (Node 24.11.1, npm 10.9.2) on the exact final commit.
 | `npm run typecheck` | 0 |
 | `npm run lint` | 0 (0 errors; 53 pre-existing warnings in `scripts/`) |
 | `npm test` — 28 gates | 0 |
-| `npm run test:studio-completion` | 0 — **47 checks** after the review-fix pass |
+| `npm run test:studio-completion` | 0 — **48 checks** after the review-fix pass |
 | `npm run test:studio-workflows` | 0 — 22 checks (slice one, unchanged) |
 | `npm run build` | 0 |
 | `npm run cf:build` | 0 |
-| `npm run suite:d` | see the delivery report |
+| `npm run suite:d` | 0 — 19/19 green |
 
-### What was NOT run, and why
+### Live and human acceptance
 
-- **`npm run gates:live` (`test:qualitative-live`, `suite:a`, `suite:b`,
-  `suite:c`).** They drive the deployed synthetic environment, which does not
-  have migration 0015. Suite B's catalogue now names the Studio addresses and
-  the six lifecycle mutations, and those depend on that schema, so a run today
-  would measure an environment the code was not written for and would prove
-  nothing about the new paths. Applying the migration remotely is explicitly out
-  of scope for this branch. **The live chain is deferred to the reviewed
-  deployment step, and is not claimed green here.**
+- **`npm run gates:live` passed once at `543889a`:** qualitative live green;
+  Suite A 16/16; Suite B 94/94; Suite C 13/13.
+- Migration `0015` was applied to synthetic project `ontvqazsqiwisdddblif`
+  only. No production project or deployment was touched.
+- Exact-ledger lifecycle acceptance proved tenant archive/restore, server-side
+  refusal of new work while archived, preservation of existing client access,
+  user suspension/restore, and permanent deletion of one disposable user with
+  `client_user_delete_started` recorded before deletion and
+  `client_user_deleted` recorded afterward.
+- Cleanup removed every disposable database row, Auth identity and Storage
+  object. Prefix scans for `P8C-`, `P7H-`, `P7A-`, `P7B-` and `P7C-` were all
+  zero. Eight append-only lifecycle evidence rows intentionally remain.
+- Protected counts after cleanup were unchanged: 3 tenants, 3 studies, 4
+  profiles, 22 respondents, 82 quantitative responses, 2 qualitative
+  observations, 1 import batch, 4 Auth users and 0 banned users. P6E remained
+  published at 20 / 80 / 0 / 1.
+- Desktop and ~360 px lifecycle-dialog review passed with initial focus on
+  Cancelar and no horizontal overflow. Evidence:
+  [desktop](screenshots/p8c-lifecycle-desktop.png) ·
+  [360 px](screenshots/p8c-lifecycle-mobile-360.png).
+
+### What was NOT changed
+
 - **`npm run test:responsive-live` fails**, at 258 px, on the **client**
   dashboard: `tenant A @ 258px: text overflows its own box`. It was reproduced
   **identically at the baseline `ff87b84`** — same role, same width, same
@@ -242,25 +259,19 @@ does — and its native-dialog handler no longer claims the product raises one.
 
 ## What is intentionally incomplete
 
-1. **Migration 0015 is not applied to any environment.** Until it is, EVERY
-   lifecycle action refuses with the reason stated — archive, restore, suspend,
-   restore and permanent account deletion alike — because each of them promises
-   administrative evidence and there is nowhere to write it. See the review-fix
-   pass below.
-2. **Permanent client deletion is disabled outright**, independently of the
+1. **Permanent client deletion is disabled outright**, independently of the
    migration, and refused on the server.
-2. **The live adversarial chain has not run against this branch.** See above.
-3. **Template ownership is unchanged.** Decision D5 approved sharing templates
+2. **Template ownership is unchanged.** Decision D5 approved sharing templates
    across the internal team with the author shown; `study_template` is still
    filtered `.eq("created_by", user.id)` and the mutations are still scoped the
    same way. Making them visible without making them editable would create a
    state the interface cannot explain, so it is left whole for its own unit.
-4. **`/admin/qualitative` still opens on a study `<select>`.** It is the legacy
+3. **`/admin/qualitative` still opens on a study `<select>`.** It is the legacy
    address and keeps its `?study=` contract; the study-scoped experience is at
    `/studio/e/[studyId]/cualitativo`.
-5. **The interpretation surface (D2) and per-client thresholds (D4)** remain
+4. **The interpretation surface (D2) and per-client thresholds (D4)** remain
    P8.4, exactly as the plan puts them.
-6. **The comparison explorer's vocabulary is still untouched**, for the reason
+5. **The comparison explorer's vocabulary is still untouched**, for the reason
    P8-A recorded: the adversarial suites drive those exact control names.
 
 ---
@@ -358,7 +369,7 @@ references are corrected. Nothing else in P7 was revised, executed or resumed.
 
 ### Focused gates for this pass
 
-`typecheck` 0 · `lint` 0 · `test:studio-completion` 0 (**47 checks**) ·
+`typecheck` 0 · `lint` 0 · `test:studio-completion` 0 (**48 checks**) ·
 `test:studio-workflows` 0 · `test:client-admin` 0 · `test:design-tokens` 0 ·
 `test:client-preview` 0 · `test:publication-boundary` 0 · `test:data-scope` 0 ·
 `test:suite-bc-selftest` 0. The final canonical chain is in the delivery report.

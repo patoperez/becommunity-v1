@@ -85,16 +85,18 @@ implementation-complete and owner-accepted at `3659a38` (delivery PR #37).
 P8.2's first owner-review slice — no-code access scope and guided import
 mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39).
 
-**P8.2 is now implementation-complete and awaiting owner review.** Be Community
+**P8.2 is implementation- and synthetic-acceptance-complete and awaiting owner
+review.** Be Community
 Studio has its own addresses under `/studio/**` — every `/admin/**` address
 still answers — an actionable home, a study work surface with process steps,
 the journey-metric and theme pickers, visible paging, publication reachable only
 through the client preview, one accessible destructive-action dialog, and the
-account and client lifecycle. Three items remain open: permanent client deletion is disabled and refused
-server-side until a recoverable cross-system deletion workflow exists; migration
-`0015` is not applied to any environment, so every lifecycle action refuses with
-a stated reason; and the live adversarial chain has not run against that branch.
-P8.3 has not started.
+account and client lifecycle. Migration `0015` is applied to the synthetic
+project only; the complete offline and live chains and the lifecycle acceptance
+passed at `543889a`, and all disposable acceptance data was removed with the
+protected fixture unchanged. Permanent client deletion remains deliberately
+disabled and refused server-side until a recoverable cross-system deletion
+workflow exists. P8.3 has not started.
 
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read

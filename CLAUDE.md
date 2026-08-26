@@ -205,7 +205,8 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
   semantic foundation, sign-in, shells, client panorama and journey slice are
   established. Do not reopen its visual-prototype loop.
-- **P8.2 is implementation-complete and awaiting owner review.** Slice one
+- **P8.2 is implementation- and synthetic-acceptance-complete and awaiting
+  owner review.** Slice one
   (owner-accepted, PR #39, `b1abfef`) delivered the no-code access-scope picker
   and the guided import mapping and readable preview. The completion unit adds
   the eleven `/studio/**` routes, the actionable home, the study work surface
@@ -213,13 +214,15 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   the qualitative review and the import history, publication reachable only
   through the client preview, one accessible destructive-action dialog in place
   of `window.confirm()`, and the account and client lifecycle. It is gated by
-  `npm run test:studio-completion` (47 checks) beside
-  `npm run test:studio-workflows` (22). **Three things remain open and must not
-  be presented as done:** permanent CLIENT deletion is disabled and refused
-  server-side until a recoverable cross-system deletion workflow exists;
-  migration `0015` is not applied to any environment, so every lifecycle action
-  refuses with a stated reason; and the live adversarial chain has not run
-  against this branch. P8.3 has not started. No ordinary Studio workflow may ask for raw JSON, an internal
+  `npm run test:studio-completion` (48 checks) beside
+  `npm run test:studio-workflows` (22). Migration `0015` is applied to the
+  synthetic project only. On 2026-08-25 the canonical offline chain, the live
+  adversarial chain and the exact-ledger lifecycle acceptance passed at
+  `543889a`; cleanup left no disposable rows, Auth identities or Storage
+  objects, and the protected fixture remained unchanged. **One lifecycle item
+  remains deliberately unavailable:** permanent CLIENT deletion is disabled
+  and refused server-side until a recoverable cross-system deletion workflow
+  exists. P8.3 has not started. No ordinary Studio workflow may ask for raw JSON, an internal
   identifier or a metric key.
 - **Every `/admin/**` address still answers.** Studio gained addresses; it
   renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
