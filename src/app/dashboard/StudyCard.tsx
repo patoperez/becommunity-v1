@@ -91,9 +91,7 @@ export default function StudyCard({
   const view = dashboard.view;
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const reportHref = useMemo(() => {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(filters)) if (value) params.set(`f.${key}`, value);
-    const query = params.toString();
+    const query = filterQuery(filters);
     return `/api/studies/${encodeURIComponent(study.id)}/report${query ? `?${query}` : ""}`;
   }, [filters, study.id]);
 
