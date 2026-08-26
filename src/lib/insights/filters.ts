@@ -33,4 +33,3 @@ export function insightsStudyHref(studyId: string, filters: SegmentFilters = {})
   const path = `/insights/e/${encodeURIComponent(studyId)}`;
   return query ? `${path}?${query}` : path;
 }
-
