@@ -115,7 +115,15 @@ only. At `543889a` the canonical offline chain, the complete live adversarial
 chain and exact-ledger lifecycle acceptance passed; all disposable acceptance
 objects were removed and the protected fixture remained unchanged. Permanent
 client deletion remains intentionally disabled until a recoverable cross-system
-workflow exists. P8.3 has not started. Every P7 and
+workflow exists.
+
+P8.3 is implementation-complete on `p8d-insights-data-story` and awaiting owner
+review. It adds the authorized per-study Insights route, compact study library,
+URL/report filter parity, guided comparison over the unchanged pivot allowlist,
+adaptive longitudinal list/chart plus table, canonical sample language on screen
+and in the PDF, and explicit loading/error/invalid-filter states. It changes no
+formula, ingestion contract, role, RLS policy, migration or publication boundary.
+Every P7 and
 calculation boundary remains in force. V2.5 content still follows authoritative
 documented business definitions; never invent formulas.
 

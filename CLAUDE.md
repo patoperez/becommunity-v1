@@ -114,7 +114,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (28 gates; P8.2 adds test:studio-workflows and test:studio-completion)
+npm test             # complete deterministic suite (29 gates; P8.3 adds test:insights-story)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -222,8 +222,16 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   objects, and the protected fixture remained unchanged. **One lifecycle item
   remains deliberately unavailable:** permanent CLIENT deletion is disabled
   and refused server-side until a recoverable cross-system deletion workflow
-  exists. P8.3 has not started. No ordinary Studio workflow may ask for raw JSON, an internal
+  exists. No ordinary Studio workflow may ask for raw JSON, an internal
   identifier or a metric key.
+- **P8.3 is implementation-complete on `p8d-insights-data-story` and awaiting
+  owner review.** `/insights/e/[studyId]` is the authorized client study route;
+  the dashboard remains its compatibility home. URL and PDF filters share the
+  exact `f.*` parser, the free comparison keeps the existing server allowlist,
+  fewer than four periods use a list while longer histories use a chart, and
+  every history has a table alternative. The finding contract reserves a
+  human-authored interpretation slot but renders silence until P8.4 supplies
+  its storage/publishing workflow. Do not invent interpretations.
 - **Every `/admin/**` address still answers.** Studio gained addresses; it
   renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
   frozen adversarial catalogue all depend on the old paths, and

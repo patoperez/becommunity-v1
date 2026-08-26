@@ -96,7 +96,14 @@ project only; the complete offline and live chains and the lifecycle acceptance
 passed at `543889a`, and all disposable acceptance data was removed with the
 protected fixture unchanged. Permanent client deletion remains deliberately
 disabled and refused server-side until a recoverable cross-system deletion
-workflow exists. P8.3 has not started.
+workflow exists.
+
+**P8.3 is implementation-complete on `p8d-insights-data-story` and awaiting
+owner review.** `/insights` now has a compact study library and an authorized
+route per study; filter state is shareable in the URL and drives the same
+bounded grammar used by the PDF. Comparisons, longitudinal reading, sample
+context, recovery states and the PDF vocabulary are one client-facing story.
+Calculations, ingestion, RLS, roles and publication boundaries are unchanged.
 
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read

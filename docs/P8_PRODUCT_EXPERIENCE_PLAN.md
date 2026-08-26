@@ -1,7 +1,7 @@
 # P8 — Product Experience Transformation
 
 > **Authoritative P8 plan and experience contract.** Status: **P8.1/P8-A and
-> P8.2 are implemented in the real product; P8.3-P8.5 are pending.** Discovery
+> P8.2 and P8.3 are implemented in the real product; P8.4-P8.5 are pending.** Discovery
 > and standalone visual comparison are closed. Implementation records live in
 > `.design/be-community-v2/implementation-reviews/`.
 >
@@ -276,6 +276,8 @@ controls render disabled with the reason stated, which is the honest blocked
 state rather than a hidden one.
 
 ### P8.3 — Insights data story
+**Status:** implementation-complete on `p8d-insights-data-story`; awaiting owner
+review. The focused deterministic gate is `npm run test:insights-story`.
 **Depends on:** P8.1. Reads best after P8.2 exists, but does not require it.
 **Delivers:** `/insights` and the study routes; the finding block; the indicator
 card with method disclosure; the **sample-context component** and its single
@@ -358,8 +360,8 @@ every workstream, not once at the end.
 | C1 no authored structure | Source review + a scan asserting no `JSON.stringify` reaches a user-visible surface | Each PR touching Studio — **met for all four picker uses** as of the P8.2 completion unit |
 | C2 progressive disclosure | Design review against the IA disclosure tables | P8.2, P8.3 |
 | C3 plain language | Deterministic string gate over user-facing copy | P8.5, then every PR |
-| C4 sample context | One component, one string table; `n=` absent client-side | P8.3 |
-| C5 significance | Finding block cannot render without the slot | P8.3 |
+| C4 sample context | One component, one string table; `n=` absent client-side | P8.3 — **met** on screen, longitudinal views, comparison suppression and PDF |
+| C5 significance | Finding block cannot render without the slot | P8.3 — **structural slot met**; authoring/approval remains P8.4 and an empty slot renders silence |
 | C6 reversibility | Mutation classification table; no `window.confirm` | P8.2 — **met**: `test:studio-completion` asserts no `window.confirm`/`alert`/`prompt` on any Studio surface, that every dialog carries object, consequence, severity and recovery, and that only the permanent severity reads as danger or requires typing |
 | C7 accessibility | P8.5 matrix incl. adversarial brand colours | P8.5 |
 | C8 responsive | Extended responsive matrix at six widths | P8.5 |

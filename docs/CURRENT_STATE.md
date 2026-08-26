@@ -321,11 +321,38 @@ recoverable, idempotent and resumable cross-system workflow exists.
 `npm run test:responsive-live` fails at 258 px on the CLIENT dashboard. It was
 reproduced identically at the baseline `ff87b84`, so it is inherited rather than
 introduced; 258 px is below the 320 px floor the design brief states and the
-offenders are client-surface captions. It belongs to P8.3/P8.5.
+offenders are client-surface captions. P8.3 removes the technical captions from
+its rebuilt longitudinal surface; the inherited 258 px stress case remains a
+P8.5 final-responsive concern below the documented 320 px floor.
 
 Also unchanged and still open: template ownership (decision D5 approved sharing
 across the internal team with the author shown; `study_template` is still
-filtered `.eq("created_by", user.id)`). P8.3 has not started.
+filtered `.eq("created_by", user.id)`).
+
+**P8.3 Insights data story — implementation-complete on
+`p8d-insights-data-story`, awaiting owner review.** The real product now has
+`/insights` and an authorized `/insights/e/[studyId]` route. The home keeps the
+latest panorama plus a compact study library instead of stacking complete
+studies. A study link carries the same bounded `f.*` selection grammar as the
+authenticated PDF; invalid or disallowed selections fail closed and reopen the
+unfiltered study with an explicit explanation.
+
+The client story uses the P8-A panorama/finding and journey components, a
+plain-language `Compara por...` surface over the unchanged pivot Server Action
+and allowlist, and an adaptive longitudinal view: list for fewer than four
+periods, chart thereafter, and an expandable table alternative throughout.
+Chart points are keyboard reachable and missing results are encoded by shape
+and text, never colour alone. The canonical sample string table now also owns
+the PDF's privacy and small-base wording. Loading, not-found, route error,
+invalid-filter and comparison-error states are named and recoverable.
+
+The finding DTO includes a nullable human-authored interpretation slot. It is
+deliberately empty and silent client-side until P8.4 supplies its authoring,
+approval, storage and publication workflow; no business interpretation was
+invented. No formula, canonical row, ingestion adapter, role, RLS/grant,
+migration or publication boundary changed. `npm run test:insights-story` is gate
+29 of `npm test`. No screenshots were produced, by owner request; review is in
+`.design/be-community-v2/implementation-reviews/p8-3-insights-story/REVIEW.md`.
 
 **Owner decisions recorded 2026-08-24, binding on every later unit:**
 
