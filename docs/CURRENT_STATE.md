@@ -379,7 +379,7 @@ migration or publication boundary changed. `npm run test:insights-story` is gate
   honesty and accessible fallbacks stay enforced by the product.
 
 Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
-P8.2 and P8.4). Both P8.2 units are now implemented; all P8.3-P8.5 work remains
+P8.2 and P8.4). Both P8.2 units and P8.3 are now implemented; P8.4-P8.5 remain
 pending.
 
 ## P7 engineering record (historical; do not resume during P8)
