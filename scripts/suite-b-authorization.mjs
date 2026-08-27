@@ -121,14 +121,40 @@ export const ACTION_GATE_WITHHELD = Object.freeze({
  * path class with it and cannot be forgotten.
  */
 export const ACTION_ROUTE_CLASSES = Object.freeze(
-  [...new Set(Object.values(OPERATIONS).filter((op) => op.mutating).map((op) => op.actionRoute))].sort(),
+  [
+    ...new Set(
+      Object.values(OPERATIONS)
+        .filter((op) => op.mutating)
+        .flatMap((op) => [op.actionRoute, ...(op.alsoDispatchedTo ?? [])]),
+    ),
+  ].sort(),
 );
 
-/** Which catalogued mutations dispatch to a given outer route. */
+/**
+ * Which catalogued mutations dispatch to a given outer route.
+ *
+ * P8.2 made this one-to-MANY. Every `/admin/*` address kept answering while the
+ * same Server Action became reachable from its Studio address as well, and a
+ * Server Action is dispatched by POSTing to the page that renders it — so one
+ * mutation now genuinely travels on two protected POST paths. Recording only
+ * the first would leave the second unproven, which is the opposite of what this
+ * catalogue is for.
+ */
 export function operationsOnRoute(routeName) {
   return Object.values(OPERATIONS)
-    .filter((op) => op.mutating && op.actionRoute === routeName)
+    .filter(
+      (op) =>
+        op.mutating
+        && (op.actionRoute === routeName || (op.alsoDispatchedTo ?? []).includes(routeName)),
+    )
     .map((op) => op.name);
+}
+
+/** Every protected POST path class one mutation is dispatched to. */
+export function routesForOperation(name) {
+  const op = OPERATIONS[name];
+  if (!op?.mutating) return [];
+  return [...new Set([op.actionRoute, ...(op.alsoDispatchedTo ?? [])])];
 }
 
 /**
@@ -412,6 +438,25 @@ function probeParams(op, fx) {
       return { user_id: SAFE_NONEXISTENT_ID, full_name: `${fx.prefix} probe`, data_scope: "{}" };
     case "clients.deleteClientUser":
       return { user_id: SAFE_NONEXISTENT_ID, confirmation_email: `${fx.prefix.toLowerCase()}@example.invalid` };
+    // P8.2 lifecycle. Every one of these is denial-only, so the ids below are
+    // only ever used to BUILD the path the denial is observed on; none of them
+    // names a real object, and none of these operations is ever driven to
+    // success.
+    case "clients.suspendClientUser":
+    case "clients.restoreClientUser":
+      return { tenantId: fx.tenantId, user_id: SAFE_NONEXISTENT_ID };
+    case "clients.archiveTenant":
+    case "clients.restoreTenant":
+      return { tenantId: fx.tenantId, tenant_id: SAFE_NONEXISTENT_ID };
+    case "clients.deleteTenant":
+      return {
+        tenantId: fx.tenantId,
+        tenant_id: SAFE_NONEXISTENT_ID,
+        confirmation_name: `${fx.prefix} nunca existió`,
+        impact: "",
+      };
+    case "studies.setPublication":
+      return { studyId: fx.studyId, study_id: SAFE_NONEXISTENT_ID };
     case "qualitative.generateSuggestions":
     case "qualitative.reviewObservations":
       return { studyId: fx.studyId, theme: `${fx.prefix.toLowerCase()}probe`, stage_key: "" };
@@ -748,7 +793,14 @@ async function checkClientCannotReachInternalPages(harness, fx) {
   // `client` with HTTP 200 and its own rendered denial page (design §1.8 AM4),
   // which plain HTTP cannot tell apart from a successful render. It is covered
   // below through the browser mechanism, which reads the product's own panel.
-  const pages = ["page.adminClients", "page.adminStudies", "page.adminQualitative"];
+  // Every internal-only PAGE class, legacy and Studio. The Studio routes all
+  // answer a wrong-role caller with a redirect — deliberately, so the denial is
+  // expressible in a status — which is why they can join this list while
+  // `/admin/upload` cannot.
+  const pages = [
+    "page.adminClients", "page.adminStudies", "page.adminQualitative",
+    "page.studioHome", "page.studioClients", "page.studioStudies", "page.studioTemplates",
+  ];
   const observed = [];
   for (const name of pages) {
     const result = await harness.run("tenantA", OPERATIONS[name]);
@@ -763,6 +815,12 @@ async function checkClientCannotReachInternalPages(harness, fx) {
   if (preview.errorCategory !== "denied_wrong_role") {
     return fail("B3.6", `the internal preview answered ${preview.errorCategory}, expected denied_wrong_role`);
   }
+  // The study work surface is the Studio address of the same internal-only
+  // material, and it is reached with the run's own study rather than a guess.
+  const studioStudy = await harness.run("tenantA", OPERATIONS["page.studioStudy"], { studyId: fx.studyId });
+  if (studioStudy.errorCategory !== "denied_wrong_role") {
+    return fail("B3.6", `the Studio study surface answered ${studioStudy.errorCategory}, expected denied_wrong_role`);
+  }
   const upload = await harness.run("tenantA", OPERATIONS["upload.analyze"], {
     tenant_id: fx.tenantId,
     file: fx.validCsvPath,
@@ -772,7 +830,7 @@ async function checkClientCannotReachInternalPages(harness, fx) {
   }
   return pass(
     "B3.6",
-    `${pages.length + 2} internal-only surfaces all answered denied_wrong_role to a client, including the ` +
+    `${pages.length + 3} internal-only surfaces all answered denied_wrong_role to a client, including the ` +
       "HTTP-200 denial page /admin/upload renders instead of redirecting",
   );
 }

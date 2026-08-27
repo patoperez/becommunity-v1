@@ -14,6 +14,8 @@ import {
 } from "@/lib/language/results";
 import { studyBaseSentence } from "@/lib/language/sample";
 import type { Audience } from "@/lib/dashboard/audience";
+import type { InterpretationContent } from "@/lib/interpretation/schema";
+import type { StudyPresentation } from "@/lib/dashboard/config";
 
 /**
  * The study panorama — the client's first impression.
@@ -36,14 +38,31 @@ export default function NarrativeHome({
   view,
   brand,
   audience = "client",
+  studyDestination,
+  interpretation = null,
+  presentation,
 }: {
   view: NarrativeHomeView;
   brand: BrandConfig;
   audience?: Audience;
+  /** Detail route for clients; internal preview keeps the same-page anchor. */
+  studyDestination?: string;
+  interpretation?: InterpretationContent | null;
+  presentation?: StudyPresentation;
 }) {
   const studyAnchor = `study-${view.currentStudy.id}`;
+  const studyHref = studyDestination ?? `#${studyAnchor}`;
   const reportHref = `/api/studies/${encodeURIComponent(view.currentStudy.id)}/report`;
   const findings: PanoramaFinding[] = [];
+  const thresholdMetric = presentation?.threshold
+    ? view.metrics.find((metric) => metric.key === presentation.threshold?.metric)
+    : null;
+  const thresholdValue = thresholdMetric?.value == null ? null : Number.parseFloat(thresholdMetric.value.replace("%", ""));
+  const thresholdAlert = presentation?.threshold && thresholdValue != null && Number.isFinite(thresholdValue)
+    && ((presentation.threshold.minimum != null && thresholdValue < presentation.threshold.minimum)
+      || (presentation.threshold.maximum != null && thresholdValue > presentation.threshold.maximum))
+    ? { label: presentation.threshold.label, metric: thresholdMetric?.title ?? presentation.threshold.metric, value: thresholdMetric?.value }
+    : null;
 
   // 1 — the results, in the order the view model already ranked them. The
   // FIRST is the lead; the rest become secondary findings in the same order.
@@ -81,6 +100,7 @@ export default function NarrativeHome({
       context: metric.movement === "unavailable" || !metric.delta
         ? null
         : movementLabel(metric.movement, metric.delta),
+      interpretation: findings.length === 0 ? interpretation?.whatHappened ?? null : null,
       sample: null,
       method: { summary: "Cómo se calcula", body: [language.method] },
       quote: null,
@@ -108,6 +128,7 @@ export default function NarrativeHome({
         : `El más bajo de los ${spot.comparedWith} momentos que se miden en la misma escala. ` +
           `La barra lo sitúa entre ellos, no contra un máximo.`,
       context: null,
+      interpretation: null,
       sample: { visibility: spot.visibility, count: spot.n },
       method: {
         summary: "Qué significa “el más bajo”",
@@ -142,6 +163,7 @@ export default function NarrativeHome({
             : ".")
         : null,
       context: "Los comentarios no se convierten en porcentaje: se leen.",
+      interpretation: null,
       sample: null,
       method: {
         summary: "Cómo se eligen los temas",
@@ -186,7 +208,7 @@ export default function NarrativeHome({
           }}
         >
           <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">
-            Panorama del estudio
+            {presentation?.coverLabel ?? "Panorama del estudio"}
           </p>
           <h2
             id="panorama-titulo"
@@ -203,10 +225,11 @@ export default function NarrativeHome({
               publishesVoices ? "voices" : "people",
             )}
           </p>
+          {presentation?.coverNote ? <p className="mt-2 max-w-2xl text-sm leading-relaxed opacity-85">{presentation.coverNote}</p> : null}
           {/* Two actions, once, at the top — not repeated on every finding. */}
           <div className="mt-6 flex flex-wrap gap-2.5">
             <a
-              href={`#${studyAnchor}`}
+              href={studyHref}
               className="inline-flex min-h-11 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold"
               style={{
                 backgroundColor: "var(--study-accent-on)",
@@ -235,6 +258,8 @@ export default function NarrativeHome({
         </div>
       </div>
 
+      {thresholdAlert ? <div className="mt-5 rounded-xl border border-caution-line bg-caution-surface px-5 py-4"><p className="text-xs font-semibold uppercase tracking-wide text-caution">Atención</p><p className="mt-1 text-base font-semibold text-strong">{thresholdAlert.label}</p><p className="mt-1 text-sm text-caution">{thresholdAlert.metric}: {thresholdAlert.value}. Es la única alerta configurada para este estudio.</p></div> : null}
+
       {readiness.length > 0 ? (
         <div className="mt-5 rounded-xl border border-caution-line bg-caution-surface px-5 py-4">
           <p className="text-sm font-semibold text-caution">
@@ -253,7 +278,7 @@ export default function NarrativeHome({
       ) : null}
 
       {findings.length > 0 ? (
-        <PanoramaFindings findings={findings} studyAnchor={studyAnchor} />
+        <PanoramaFindings findings={findings} studyDestination={studyHref} />
       ) : (
         <p className="mt-6 rounded-xl border border-dashed border-line-strong bg-surface px-5 py-6 text-sm text-muted">
           Este estudio todavía no tiene resultados publicables. En cuanto el
@@ -261,6 +286,21 @@ export default function NarrativeHome({
           aquí.
         </p>
       )}
+
+      {interpretation ? (
+        <section aria-labelledby="lectura-consultor" className="mt-8 overflow-hidden rounded-2xl border border-evidence-line bg-evidence-surface">
+          <div className="border-b border-evidence-line px-5 py-4 sm:px-7">
+            <p className="text-xs font-semibold uppercase tracking-[0.13em] text-evidence">Lectura del equipo</p>
+            <h3 id="lectura-consultor" className="mt-1 text-2xl text-strong">Lo que estos resultados permiten decidir</h3>
+          </div>
+          <div className="grid gap-6 px-5 py-5 sm:px-7 md:grid-cols-3">
+            <div><h4 className="text-sm font-semibold text-evidence">Qué pasó</h4><p className="mt-2 text-sm leading-relaxed text-strong">{interpretation.whatHappened}</p></div>
+            <div><h4 className="text-sm font-semibold text-evidence">Por qué importa</h4><p className="mt-2 text-sm leading-relaxed text-strong">{interpretation.whyItMatters}</p></div>
+            <div><h4 className="text-sm font-semibold text-evidence">Qué mirar después</h4><p className="mt-2 text-sm leading-relaxed text-strong">{interpretation.whatNext}</p></div>
+          </div>
+          {interpretation.evidence.length > 0 ? <div className="border-t border-evidence-line px-5 py-3 sm:px-7"><p className="text-xs text-muted"><span className="font-semibold text-strong">Se apoya en:</span> {interpretation.evidence.map((item) => item.label).join(" · ")}</p></div> : null}
+        </section>
+      ) : null}
 
       {view.characteristics.length > 0 ? (
         <p className="mt-4 text-sm text-muted">
@@ -304,8 +344,5 @@ function gaps(view: NarrativeHomeView): string[] {
   if (view.sample.visibility === "caution") {
     list.push("La base del estudio es pequeña; el cliente verá la advertencia de cautela.");
   }
-  // Structural, and true for every study until the interpretation surface
-  // exists: there is nowhere yet to store a published reading.
-  list.push("La lectura del consultor todavía no se puede publicar desde el producto.");
   return list;
 }

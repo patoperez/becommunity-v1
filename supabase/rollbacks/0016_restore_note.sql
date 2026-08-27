@@ -1,0 +1,26 @@
+-- =============================================================================
+-- ROLLBACK NOTE for 0016_remove_untracked_private_policy_experiment.sql
+-- =============================================================================
+-- There is deliberately NO executable rollback here, and this file contains no
+-- statements. Running it does nothing.
+--
+-- WHY. Every object 0016 removes was UNTRACKED: it existed in the synthetic
+-- database and in no migration. Recreating it would mean re-introducing
+-- `private.can_access_tenant()`, which queries `public.consultant_assignments`
+-- — a table that exists nowhere — and therefore re-breaking every authenticated
+-- read of `public.tenant`. A rollback script that restores a known outage is
+-- not a safety net; it is a loaded gun in the drawer.
+--
+-- IF A RESTORE IS GENUINELY NEEDED, the source is the pre-migration snapshot
+-- taken before 0016 was applied, alongside the pre-0015 dumps, in the retained
+-- backup directory recorded in the P8.2 evidence record
+-- (`.design/be-community-v2/implementation-reviews/p8-2-completion/REVIEW.md`).
+-- Those artifacts contain the exact `CREATE POLICY` and `CREATE FUNCTION` text.
+-- Restoring from them is a deliberate, reviewed act, not a scripted one.
+--
+-- WHAT 0016 DOES NOT TOUCH, so nothing about it needs rolling back:
+-- `profiles_select_own`, `tenant_isolation_select`, `published_study_select`,
+-- every `deny_browser_roles` policy, every RLS and FORCE RLS flag, every grant
+-- and revocation from 0000-0015 (including 0009's publication boundary on
+-- `confirmed_qual_observation`), and every row of data.
+-- =============================================================================

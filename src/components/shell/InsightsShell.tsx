@@ -77,12 +77,12 @@ export function InsightsShell({
             </div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex w-full min-w-0 items-center justify-between gap-4 sm:w-auto sm:justify-end">
             {/* Kept visible at every width — truncated, never hidden. It is the
                 application's own answer to "who am I signed in as", and the
                 isolation suite reads exactly this to confirm the app reports
                 the actor as itself. */}
-            <span className="min-w-0 max-w-[9rem] truncate text-sm text-muted sm:max-w-xs">
+            <span className="min-w-0 flex-1 truncate text-sm text-muted sm:max-w-xs sm:flex-none">
               {userEmail}
             </span>
             {utility}

@@ -50,6 +50,8 @@ export type PanoramaFinding = {
   scaleNote: string | null;
   /** Movement, or another one-line context sentence. */
   context: string | null;
+  /** Human-authored consultant reading. P8.4 supplies storage and publishing. */
+  interpretation: string | null;
   sample: { visibility: SampleVisibility; count: number | null } | null;
   method: { summary: string; body: string[] };
   quote: { quote: string; theme: string | null } | null;
@@ -61,10 +63,10 @@ export type PanoramaFinding = {
 
 export default function PanoramaFindings({
   findings,
-  studyAnchor,
+  studyDestination,
 }: {
   findings: PanoramaFinding[];
-  studyAnchor: string;
+  studyDestination: string;
 }) {
   const [active, setActive] = useState(0);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
@@ -202,7 +204,7 @@ export default function PanoramaFindings({
                 <>
                   <ScaleMark value={current.numeric} unit={current.unit} tone="accent" />
                   {current.scaleNote ? (
-                    <p className="mt-1.5 text-xs text-muted">{current.scaleNote}</p>
+                    <p className="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">{current.scaleNote}</p>
                   ) : null}
                 </>
               ) : current.peer && current.numeric != null ? (
@@ -214,7 +216,7 @@ export default function PanoramaFindings({
                     tone="accent"
                   />
                   {current.scaleNote ? (
-                    <p className="mt-1.5 text-xs text-muted">{current.scaleNote}</p>
+                    <p className="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">{current.scaleNote}</p>
                   ) : null}
                 </>
               ) : current.scaleNote ? (
@@ -224,6 +226,12 @@ export default function PanoramaFindings({
           </div>
 
           <div className="min-w-0">
+            {current.interpretation ? (
+              <div className="mb-4 rounded-lg border border-evidence-line bg-evidence-surface px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-evidence">Lectura del equipo</p>
+                <p className="mt-1 text-sm leading-relaxed text-strong">{current.interpretation}</p>
+              </div>
+            ) : null}
             {current.quote ? (
               <figure
                 className="rounded-lg border-l-4 px-4 py-3"
@@ -270,7 +278,7 @@ export default function PanoramaFindings({
         {/* One way in, from the finding you are actually looking at. */}
         <div className="border-t px-5 py-3.5 sm:px-7" style={{ borderColor: accent.line }}>
           <a
-            href={`#${studyAnchor}`}
+            href={studyDestination}
             className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
           >
             {current.actionLabel} <Forward />

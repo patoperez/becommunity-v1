@@ -1,8 +1,10 @@
 # P8 — Product Experience Transformation
 
-> **Authoritative P8 plan and experience contract.** Status: **discovery and
-> standalone visual comparison complete; implementation direction approved.**
-> P8-A is the next unit. No P8 product implementation has begun yet.
+> **Authoritative P8 plan and experience contract.** Status: **P8.1/P8-A,
+> P8.2, P8.3, the bounded P8.4 implementation and P8.5 are in the real product,
+> owner-accepted, and P8 closed on 2026-08-27.** Discovery
+> and standalone visual comparison are closed. Implementation records live in
+> `.design/be-community-v2/implementation-reviews/`.
 >
 > Companion documents:
 > - `docs/P8_CURRENT_EXPERIENCE_AUDIT.md` — the evidence: route/state inventory,
@@ -223,6 +225,11 @@ rebuilt mapping step with selection over transcription; the readable import
 preview replacing the JSON dump; the destructive-action dialog replacing
 `window.confirm()`; publication reachable only through preview; visible paging
 for qualitative observations and import history.
+**Status: all of it delivered.** Every `/admin/**` address still answers —
+Studio gained addresses and renamed none away — because bookmarks, emailed
+links and the frozen adversarial catalogue depend on the old paths. Gated by
+`npm run test:studio-workflows` (22 checks) and `npm run test:studio-completion`
+(44 checks).
 **Why second:** it removes the largest operational risk (a consultant silently
 breaking her own study) and it is the workstream the CEO will feel first.
 **Implementation review first:** deliver the data-scope picker and mapping step
@@ -230,7 +237,11 @@ inside the real Studio workflow, then stop for owner testing. Getting the
 mapping step wrong compromises longitudinal comparability, which is a data
 consequence rather than a visual one.
 
-**Accepted scope, owner decision 2026-08-24 — not started in P8-A.**
+**Accepted scope, owner decision 2026-08-24 — DELIVERED in two units.** Slice
+one (owner-accepted, PR #39) delivered the access-scope picker and the guided
+mapping and readable preview. The completion unit delivered everything else this
+workstream names, and is recorded in
+`.design/be-community-v2/implementation-reviews/p8-2-completion/REVIEW.md`.
 
 *Access scope, with no JSON anywhere an ordinary user can reach.* Every raw
 `data_scope` textarea is replaced by a no-code picker: a first choice between
@@ -248,10 +259,26 @@ client organisation is the ordinary, reversible action. Permanent organisation
 deletion exists but only behind an impact summary naming what will be destroyed
 and an exact-name confirmation, with defined, safe handling of dependent users,
 studies, responses, reports, logos and other stored files, and audit evidence.
-None of this is implemented in P8-A: it needs its own review, and probably its
-own migration.
+
+**Delivered, with one thing deliberately outside the schema and one thing
+deliberately still off.** Suspension is enforced at the AUTHENTICATION boundary
+rather than by a product column, so the interface can never show "con acceso"
+for an identity the Auth server is already refusing — and "invitación pendiente"
+became a third real state instead of being folded into "active". Archiving is
+enforced server-side against new studies, new invitations and new publications
+at the moment of the write. Permanent client deletion shows counted impact,
+requires the exact client name, RECOMPUTES the impact at execution time and
+stops if a single number moved, collects Auth identities and Storage objects
+before the row cascade, removes them explicitly afterwards, and reports whatever
+it could not remove. Migration `0015` — two nullable columns and one internal
+audit table with no foreign keys, so a record survives the deletion it records —
+is **applied nowhere**; until it is, the client archive and permanent-delete
+controls render disabled with the reason stated, which is the honest blocked
+state rather than a hidden one.
 
 ### P8.3 — Insights data story
+**Status:** implementation-complete and owner-accepted. The focused
+deterministic gate is `npm run test:insights-story`.
 **Depends on:** P8.1. Reads best after P8.2 exists, but does not require it.
 **Delivers:** `/insights` and the study routes; the finding block; the indicator
 card with method disclosure; the **sample-context component** and its single
@@ -277,6 +304,19 @@ block the foundational work.
 **Implementation review first:** add the smallest complete interpretation flow
 to the real product and stop for CEO testing before generalising it. It is the
 deliverable she sells and must be corrected against her actual workflow.
+
+**Status: bounded implementation delivered and owner-accepted.** Migration
+`0017` stores the private draft, explicit review state, immutable-at-publication
+client snapshot and transition-only event trail. Migration `0018` closes the
+approved shared-template rule while retaining author attribution. Insights and
+the PDF read only the published snapshot; later draft edits leave it untouched.
+The qualitative view adds an optional SVG word cloud with image export while
+the counted list remains canonical. Client defaults and study overrides cover
+identity/palette, cover copy, section visibility, journey configuration and one
+focused threshold rule, and templates preserve the resulting configuration.
+Both migrations are applied to the synthetic project only. Deterministic and
+disposable live gates cover the new boundary; no formula or ingestion contract
+changed.
 
 **Accepted customisation scope, owner decision 2026-08-24 — not started in
 P8-A.** Presentation is configurable per study through a three-level
@@ -313,6 +353,16 @@ closure record.
 **Why last:** it is acceptance, not polish. It must run against the finished
 surface.
 
+**Status: accepted and closed on 2026-08-27.** The
+deterministic gate inventories all Studio/Insights routes and enforces named
+states, plain language, keyboard affordances, reduced motion and accessible
+word-cloud structure. The authenticated rendered gate visits client and
+internal surfaces at 320/360/390/768/1024/1280 px and rejects document overflow,
+clipped text, duplicate IDs, unnamed graphics, missing alternatives and control
+targets below 24 px. No screenshots are required. The owner performed the final
+human pass on a physical phone after the LAN hydration, mobile account-row and
+relative journey-scale corrections, accepted the result, and closed P8.
+
 ### Dependency summary
 
 ```
@@ -331,15 +381,15 @@ every workstream, not once at the end.
 
 | Contract | Verified by | When |
 |---|---|---|
-| C1 no authored structure | Source review + a scan asserting no `JSON.stringify` reaches a user-visible surface | Each PR touching Studio |
+| C1 no authored structure | Source review + a scan asserting no `JSON.stringify` reaches a user-visible surface | Each PR touching Studio — **met for all four picker uses** as of the P8.2 completion unit |
 | C2 progressive disclosure | Design review against the IA disclosure tables | P8.2, P8.3 |
-| C3 plain language | Deterministic string gate over user-facing copy | P8.5, then every PR |
-| C4 sample context | One component, one string table; `n=` absent client-side | P8.3 |
-| C5 significance | Finding block cannot render without the slot | P8.3 |
-| C6 reversibility | Mutation classification table; no `window.confirm` | P8.2 |
-| C7 accessibility | P8.5 matrix incl. adversarial brand colours | P8.5 |
-| C8 responsive | Extended responsive matrix at six widths | P8.5 |
-| C9 states | Every surface enumerated; zero `null` returns | P8.5 |
+| C3 plain language | Deterministic string gate over user-facing copy | P8.5 — **met in automation**, then every PR |
+| C4 sample context | One component, one string table; `n=` absent client-side | P8.3 — **met** on screen, longitudinal views, comparison suppression and PDF |
+| C5 significance | Finding block cannot render without the slot | P8.4 — **met**: structured authoring/review/publication exists, only the published snapshot reaches clients/PDF, and an empty slot renders silence |
+| C6 reversibility | Mutation classification table; no `window.confirm` | P8.2 — **met**: `test:studio-completion` asserts no `window.confirm`/`alert`/`prompt` on any Studio surface, that every dialog carries object, consequence, severity and recovery, and that only the permanent severity reads as danger or requires typing |
+| C7 accessibility | Named-state, keyboard/focus, reduced-motion, semantic-graphic and adversarial brand-colour gates | P8.5 — **automated rows and owner real-phone acceptance met** |
+| C8 responsive | Authenticated rendered matrix at 320/360/390/768/1024/1280 px | P8.5 — **met in automation** |
+| C9 states | Every Studio/Insights route enumerated; zero blank `null` pages; shared loading/error/not-found system | P8.5 — **met** |
 | **C10 invariants** | `typecheck`, `lint`, `test`, `build` in WSL/Linux CI, plus the live chain where the PR touches an authorized path | **Every PR** |
 | C11 absence | Deterministic assertions in `scripts/design-tokens-test.mjs`: the missing-comparison and missing-qualitative copy cannot reach client output, empty wrappers are not rendered, and internal readiness still reports the same omissions | Each PR touching a client surface |
 

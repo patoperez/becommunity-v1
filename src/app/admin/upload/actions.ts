@@ -236,7 +236,7 @@ function readMapping(formData: FormData): { ok: true; mapping: ImportMapping } |
   try {
     value = JSON.parse(raw.data);
   } catch {
-    return { ok: false, message: "El mapeo no contiene JSON válido." };
+    return { ok: false, message: "La preparación de columnas ya no es válida. Vuelve a revisarla antes de continuar." };
   }
   const mapping = importMappingSchema.safeParse(value);
   if (!mapping.success) {

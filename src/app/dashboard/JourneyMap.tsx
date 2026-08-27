@@ -221,7 +221,7 @@ export default function JourneyMap({
                 <span className="tabular font-display text-2xl font-semibold leading-tight text-strong">
                   {stage.value ?? "—"}
                 </span>
-                <span className="text-xs text-muted">
+                <span className="text-xs text-muted [overflow-wrap:anywhere]">
                   {stage.value == null
                     ? STATE_WORD[state]
                     : `${unitLabel(stage.unit)}${domainFor(stage.unit) ? ` · ${domainFor(stage.unit)?.label}` : ""}`}
@@ -289,7 +289,7 @@ function StageDetail({
             </p>
           </div>
           {stage.description ? (
-            <p className="mt-1.5 max-w-prose text-sm text-muted">{stage.description}</p>
+            <p className="mt-1.5 max-w-prose text-sm text-muted [overflow-wrap:anywhere]">{stage.description}</p>
           ) : null}
 
           {state === "absent" ? (
@@ -354,7 +354,7 @@ function StageDetail({
           {hasVoices ? (
             <>
               <h6 className="text-xs font-semibold uppercase tracking-[0.12em] text-voice">
-                Lo que dijeron las personas aquí
+                Puntos de fricción y voces en este momento
               </h6>
               <QualitativeInsights summary={stage.qualitative} compact audience={audience} />
             </>
@@ -372,8 +372,7 @@ function StageDetail({
       {audience === "preview" ? (
         <p className="border-t border-caution-line bg-caution-surface px-5 py-2.5 text-xs text-caution">
           <span className="font-semibold">Sólo para el equipo:</span> este momento
-          {hasVoices ? "" : " no tiene comentarios aprobados y"} todavía no puede
-          llevar una lectura del consultor publicada.
+          {hasVoices ? " ya tiene hasta tres temas confirmados para contextualizarlo." : " no tiene comentarios aprobados; el cliente no ve este bloque."}
         </p>
       ) : null}
     </div>

@@ -123,7 +123,7 @@ export function classify(observation) {
   if (status === 401) return "denied_unauthenticated";
   if (status >= 300 && status < 400) {
     if (o.redirectTo === "/login") return "denied_unauthenticated";
-    if (o.redirectTo === "/dashboard") return o.fromAdminPath ? "denied_wrong_role" : "success";
+    if (o.redirectTo === "/dashboard") return o.fromInternalPath ? "denied_wrong_role" : "success";
     return "unclassified";
   }
   if (status === 404) return "not_found";
@@ -148,7 +148,8 @@ export function classify(observation) {
 export const CLASSIFIER_CASES = [
   { what: "302 to /login", input: { status: 302, redirectTo: "/login" }, expect: "denied_unauthenticated" },
   { what: "401 from a route handler", input: { status: 401 }, expect: "denied_unauthenticated" },
-  { what: "302 to /dashboard from /admin", input: { status: 307, redirectTo: "/dashboard", fromAdminPath: true }, expect: "denied_wrong_role" },
+  { what: "302 to /dashboard from an internal route", input: { status: 307, redirectTo: "/dashboard", fromInternalPath: true }, expect: "denied_wrong_role" },
+  { what: "302 to /dashboard after login", input: { status: 307, redirectTo: "/dashboard", fromInternalPath: false }, expect: "success" },
   { what: "404 not found", input: { status: 404 }, expect: "not_found" },
   { what: "405 method not allowed", input: { status: 405 }, expect: "method_not_allowed" },
   { what: "400 in the report route's error shape", input: { status: 400 }, expect: "validation_rejected" },
@@ -186,7 +187,7 @@ const page = (name, path, extra = {}) => ({
   method: "GET",
   mechanism: "http",
   mutating: false,
-  fromAdminPath: path.startsWith("/admin"),
+  fromInternalPath: path.startsWith("/admin") || path.startsWith("/studio"),
   ...extra,
 });
 
@@ -220,7 +221,7 @@ const routeProbe = (name, path) => ({
   outerRouteProbe: true,
   /** Declared, so `httpRun` never improvises a body or a content type. */
   contentType: "application/x-www-form-urlencoded",
-  fromAdminPath: path.startsWith("/admin"),
+  fromInternalPath: path.startsWith("/admin") || path.startsWith("/studio"),
 });
 
 /**
@@ -249,6 +250,11 @@ export const OPERATIONS = Object.freeze({
   "page.adminQualitative": page("page.adminQualitative", "/admin/qualitative", { acceptsForgedHeaders: true }),
   "page.adminUpload": page("page.adminUpload", "/admin/upload", { acceptsForgedHeaders: true }),
   "page.adminPreview": page("page.adminPreview", "/admin/preview/:studyId", { acceptsForgedHeaders: true }),
+  "page.studioHome": page("page.studioHome", "/studio", { acceptsForgedHeaders: true }),
+  "page.studioClients": page("page.studioClients", "/studio/clientes", { acceptsForgedHeaders: true }),
+  "page.studioStudies": page("page.studioStudies", "/studio/estudios", { acceptsForgedHeaders: true }),
+  "page.studioTemplates": page("page.studioTemplates", "/studio/plantillas", { acceptsForgedHeaders: true }),
+  "page.studioStudy": page("page.studioStudy", "/studio/e/:studyId", { acceptsForgedHeaders: true }),
   "health.get": page("health.get", "/api/health"),
   "report.download": page("report.download", "/api/studies/:studyId/report", {
     successSignalHeader: { header: "content-type", contains: "application/pdf" },
@@ -271,6 +277,31 @@ export const OPERATIONS = Object.freeze({
   // --- outer action-route probes: the POST method and path every Server
   // --- Action on that page is dispatched to (see `routeProbe`) ------------
   "route.postAdminClients": routeProbe("route.postAdminClients", "/admin/clients"),
+  // P8.2 gave every Studio surface its own address while every `/admin/*`
+  // address kept answering. A Server Action is dispatched by POSTing to the
+  // page that renders it, so each new address is a new protected POST path
+  // class and each one is catalogued here. The dynamic classes carry a literal
+  // all-zero id: the routes check the internal role BEFORE reading the id, so a
+  // wrong-role caller is redirected without the probe ever naming a real
+  // object.
+  "route.postStudioClients": routeProbe("route.postStudioClients", "/studio/clientes"),
+  "route.postStudioClient": routeProbe(
+    "route.postStudioClient",
+    "/studio/clientes/00000000-0000-0000-0000-000000000000",
+  ),
+  "route.postStudioTemplates": routeProbe("route.postStudioTemplates", "/studio/plantillas"),
+  "route.postStudioStudyIndicators": routeProbe(
+    "route.postStudioStudyIndicators",
+    "/studio/e/00000000-0000-0000-0000-000000000000/indicadores",
+  ),
+  "route.postStudioStudyQualitative": routeProbe(
+    "route.postStudioStudyQualitative",
+    "/studio/e/00000000-0000-0000-0000-000000000000/cualitativo",
+  ),
+  "route.postStudioStudyPublish": routeProbe(
+    "route.postStudioStudyPublish",
+    "/studio/e/00000000-0000-0000-0000-000000000000/publicar",
+  ),
   "route.postAdminStudies": routeProbe("route.postAdminStudies", "/admin/studies"),
   "route.postAdminQualitative": routeProbe("route.postAdminQualitative", "/admin/qualitative"),
   "route.postAdminUpload": routeProbe("route.postAdminUpload", "/admin/upload"),
@@ -313,6 +344,7 @@ export const OPERATIONS = Object.freeze({
 
   // --- internal-only admin mutations --------------------------------------
   "clients.createTenant": action("clients.createTenant", {
+    alsoDispatchedTo: ["route.postStudioClients"],
     actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients",
     mechanism: "form",
@@ -328,12 +360,14 @@ export const OPERATIONS = Object.freeze({
     outcome: adminOutcome("/admin/clients"),
   }),
   "clients.renameTenant": action("clients.renameTenant", {
+    alsoDispatchedTo: ["route.postStudioClient"],
     actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Guardar", fields: ["name"], identifyBy: "tenant_id",
     targetParams: ["tenant_id"], creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.updateTenantBrand": action("clients.updateTenantBrand", {
+    alsoDispatchedTo: ["route.postStudioClient"],
     actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     // Verified against `clients/page.tsx:92`: the accessible name is
@@ -345,6 +379,7 @@ export const OPERATIONS = Object.freeze({
     deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.inviteClientUser": action("clients.inviteClientUser", {
+    alsoDispatchedTo: ["route.postStudioClient"],
     actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Enviar invitación", fields: ["tenant_id", "email", "full_name", "data_scope"],
@@ -353,6 +388,7 @@ export const OPERATIONS = Object.freeze({
     deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.updateClientUser": action("clients.updateClientUser", {
+    alsoDispatchedTo: ["route.postStudioClient"],
     actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Guardar usuario", fields: ["full_name", "data_scope"], identifyBy: "user_id",
@@ -360,18 +396,21 @@ export const OPERATIONS = Object.freeze({
     deniedPathsOnly: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "clients.deleteClientUser": action("clients.deleteClientUser", {
+    alsoDispatchedTo: ["route.postStudioClient"],
     actionRoute: "route.postAdminClients",
     urlClass: "/admin/clients", mechanism: "browser", page: "/admin/clients",
     submitLabel: "Eliminar cuenta cliente", fields: ["confirmation_email"], identifyBy: "user_id",
     deniedPathsOnly: true, destructive: true, creates: [], outcome: adminOutcome("/admin/clients"),
   }),
   "qualitative.generateSuggestions": action("qualitative.generateSuggestions", {
+    alsoDispatchedTo: ["route.postStudioStudyQualitative"],
     actionRoute: "route.postAdminQualitative",
     urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative?study=:studyId",
     submitLabel: "Generar sugerencias pendientes", fields: [],
     targetParams: ["studyId"], creates: [], outcome: adminOutcome("/admin/qualitative"),
   }),
   "qualitative.reviewObservations": action("qualitative.reviewObservations", {
+    alsoDispatchedTo: ["route.postStudioStudyQualitative"],
     actionRoute: "route.postAdminQualitative",
     urlClass: "/admin/qualitative", mechanism: "browser", page: "/admin/qualitative?study=:studyId",
     submitLabel: "Aceptar sugerencias", fields: ["theme", "stage_key"],
@@ -398,6 +437,7 @@ export const OPERATIONS = Object.freeze({
     },
   }),
   "studies.createFromTemplate": action("studies.createFromTemplate", {
+    alsoDispatchedTo: ["route.postStudioTemplates"],
     actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Usar plantilla", fields: ["tenant_id", "name", "period"], identifyBy: "template_id",
@@ -405,18 +445,21 @@ export const OPERATIONS = Object.freeze({
     outcome: adminOutcome("/admin/studies"),
   }),
   "studies.saveAsTemplate": action("studies.saveAsTemplate", {
+    alsoDispatchedTo: ["route.postStudioTemplates"],
     actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Guardar como plantilla", fields: ["study_id", "template_id", "name", "description"],
     targetParams: ["study_id"], creates: ["studyTemplate"], outcome: adminOutcome("/admin/studies"),
   }),
   "studies.updateTemplateMetadata": action("studies.updateTemplateMetadata", {
+    alsoDispatchedTo: ["route.postStudioTemplates"],
     actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Guardar nueva versión", fields: ["name", "description"], identifyBy: "template_id",
     targetParams: ["template_id"], creates: [], outcome: adminOutcome("/admin/studies"),
   }),
   "studies.deleteTemplate": action("studies.deleteTemplate", {
+    alsoDispatchedTo: ["route.postStudioTemplates"],
     actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Eliminar plantilla", fields: [], identifyBy: "template_id",
@@ -426,10 +469,65 @@ export const OPERATIONS = Object.freeze({
     outcome: adminOutcome("/admin/studies"),
   }),
   "studies.updateConfiguration": action("studies.updateConfiguration", {
+    alsoDispatchedTo: ["route.postStudioStudyIndicators"],
     actionRoute: "route.postAdminStudies",
     urlClass: "/admin/studies", mechanism: "browser", page: "/admin/studies",
     submitLabel: "Guardar configuración", fields: ["name", "period", "status"], identifyBy: "study_id",
     targetParams: ["study_id"], creates: [], outcome: adminOutcome("/admin/studies"),
+  }),
+
+  // --- P8.2 account and client lifecycle, and publication -----------------
+  //
+  // All six are DENIAL-PATHS-ONLY. Their success would ban an Auth identity,
+  // destroy a client organisation with every row and Storage object under it,
+  // or change what a client can see — none of which this run can undo, and the
+  // fixture ledger enforces that independently. They are proven at the page
+  // gate exactly like the other denial-only operations.
+  "clients.suspendClientUser": action("clients.suspendClientUser", {
+    actionRoute: "route.postStudioClient",
+    urlClass: "/studio/clientes/:tenantId", mechanism: "browser",
+    page: "/studio/clientes/:tenantId",
+    submitLabel: "Suspender el acceso", fields: [], identifyBy: "user_id",
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/studio/clientes/:tenantId"),
+  }),
+  "clients.restoreClientUser": action("clients.restoreClientUser", {
+    actionRoute: "route.postStudioClient",
+    urlClass: "/studio/clientes/:tenantId", mechanism: "browser",
+    page: "/studio/clientes/:tenantId",
+    submitLabel: "Devolver el acceso", fields: [], identifyBy: "user_id",
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/studio/clientes/:tenantId"),
+  }),
+  "clients.archiveTenant": action("clients.archiveTenant", {
+    actionRoute: "route.postStudioClient",
+    urlClass: "/studio/clientes/:tenantId", mechanism: "browser",
+    page: "/studio/clientes/:tenantId",
+    submitLabel: "Archivar el cliente", fields: [], identifyBy: "tenant_id",
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/studio/clientes/:tenantId"),
+  }),
+  "clients.restoreTenant": action("clients.restoreTenant", {
+    actionRoute: "route.postStudioClient",
+    urlClass: "/studio/clientes/:tenantId", mechanism: "browser",
+    page: "/studio/clientes/:tenantId",
+    submitLabel: "Reactivar el cliente", fields: [], identifyBy: "tenant_id",
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/studio/clientes/:tenantId"),
+  }),
+  "clients.deleteTenant": action("clients.deleteTenant", {
+    actionRoute: "route.postStudioClient",
+    urlClass: "/studio/clientes/:tenantId", mechanism: "browser",
+    page: "/studio/clientes/:tenantId",
+    submitLabel: "Eliminar el cliente para siempre",
+    fields: ["confirmation_name", "impact"], identifyBy: "tenant_id",
+    deniedPathsOnly: true, destructive: true, creates: [],
+    outcome: adminOutcome("/studio/clientes/:tenantId"),
+  }),
+  "studies.setPublication": action("studies.setPublication", {
+    actionRoute: "route.postStudioStudyPublish",
+    urlClass: "/studio/e/:studyId/publicar", mechanism: "browser",
+    page: "/studio/e/:studyId/publicar",
+    submitLabel: "Publicar para el cliente", fields: [], identifyBy: "study_id",
+    // Publication changes what a real client account can see. The run never
+    // drives it to success; the denial paths are what this suite is for.
+    deniedPathsOnly: true, creates: [], outcome: adminOutcome("/studio/e/:studyId/publicar"),
   }),
 
   // --- imperative, client-invoked: browser only (§1.7) --------------------
@@ -754,7 +852,7 @@ export async function createHarness(options) {
     const observation = {
       status: response?.status ?? null,
       redirectTo: redirectPath(response?.headers.get("location"), origin),
-      fromAdminPath: Boolean(op.fromAdminPath),
+      fromInternalPath: Boolean(op.fromInternalPath),
       successSignal,
       transportError,
     };
@@ -774,7 +872,8 @@ export async function createHarness(options) {
    * The three denial shapes this application actually produces are all covered,
    * and none of them is inferred from a missing control:
    *   - a redirect to `/login`               -> denied_unauthenticated
-   *   - a redirect to `/dashboard` from /admin -> denied_wrong_role
+   *   - a redirect to `/dashboard` from an internal `/admin` or `/studio`
+   *     surface -> denied_wrong_role
    *   - HTTP 200 carrying the app's own "Acceso denegado" panel, which is how
    *     `/admin/upload` answers a `client` (AM4) -> denied_wrong_role
    *
@@ -798,7 +897,11 @@ export async function createHarness(options) {
       return { status: 302, redirectTo: "/login" };
     }
     if (landed === "/dashboard" && requested !== "/dashboard") {
-      return { status: 302, redirectTo: "/dashboard", fromAdminPath: requested.startsWith("/admin") };
+      return {
+        status: 302,
+        redirectTo: "/dashboard",
+        fromInternalPath: requested.startsWith("/admin") || requested.startsWith("/studio"),
+      };
     }
     if (await context.evaluate(PAGE.deniedPanel)) {
       // The product rendered its own denial page with HTTP 200. Reporting this
@@ -1074,7 +1177,7 @@ export async function createHarness(options) {
         status: inspection.status,
         transportError: inspection.transportError,
         successSignal: inspection.shapeMatchesExpectation,
-        fromAdminPath: Boolean(op.fromAdminPath),
+        fromInternalPath: Boolean(op.fromInternalPath),
       },
       now() - started,
     );

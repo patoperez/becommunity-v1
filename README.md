@@ -83,10 +83,50 @@ P0-P6 are implemented, technically accepted and human-accepted with synthetic
 data. P7 engineering is complete at `b8fcfc4` (delivery PR #38). P8-A is
 implementation-complete and owner-accepted at `3659a38` (delivery PR #37).
 P8.2's first owner-review slice — no-code access scope and guided import
-mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39). The
-current unit is the remaining P8.2 Studio workflow and account-lifecycle scope;
-P8.3 has not started. Standalone visual prototyping is closed: implement
-reviewable vertical slices in the real product and correct them through human
-testing. Read
+mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39).
+
+**P8.2 is implementation-complete and owner-accepted as part of the final P8
+pass on 2026-08-27.** Be Community
+Studio has its own addresses under `/studio/**` — every `/admin/**` address
+still answers — an actionable home, a study work surface with process steps,
+the journey-metric and theme pickers, visible paging, publication reachable only
+through the client preview, one accessible destructive-action dialog, and the
+account and client lifecycle. Migration `0015` is applied to the synthetic
+project only; the complete offline and live chains and the lifecycle acceptance
+passed at `543889a`, and all disposable acceptance data was removed with the
+protected fixture unchanged. Permanent client deletion remains deliberately
+disabled and refused server-side until a recoverable cross-system deletion
+workflow exists.
+
+**P8.3 is implementation-complete and owner-accepted.** `/insights` now has a
+compact study library and an authorized
+route per study; filter state is shareable in the URL and drives the same
+bounded grammar used by the PDF. Comparisons, longitudinal reading, sample
+context, recovery states and the PDF vocabulary are one client-facing story.
+Calculations, ingestion, RLS, roles and publication boundaries are unchanged.
+
+**P8.4 is implementation-complete and owner-accepted.**
+Studio now has a structured consultant-reading workflow with private draft,
+visible review state and a separately published client snapshot. The client
+story and PDF show only that snapshot. Qualitative results add an optional,
+downloadable word cloud while retaining the counted list as the reference; the
+journey keeps the most useful friction points close to each moment. Client and
+study presentation settings inherit predictably, support one focused threshold
+alert, and travel with team-shared templates. Migrations `0017` and `0018` are
+applied to the synthetic project only. `npm run test:p8-qualitative` is the
+30th deterministic gate; `npm run test:p8-qualitative-live` verifies the full
+interpretation lifecycle with disposable data.
+
+**P8.5 is implementation-complete and owner-accepted; P8 closed on
+2026-08-27.** The 31st deterministic gate checks named loading/empty/error/
+not-found states, keyboard and focus contracts, reduced motion, plain language
+and accessible word-cloud semantics. A separate authenticated rendered gate
+visits the client and Studio route set at 320, 360, 390, 768, 1024 and 1280 px,
+without screenshots, and fails on page overflow, clipped text, duplicate IDs,
+unnamed graphics, missing image alternatives or undersized controls. The human
+acceptance record is in `.design/be-community-v2/implementation-reviews/p8-5-final-acceptance/REVIEW.md`.
+
+Standalone visual prototyping is closed: implement reviewable vertical slices in
+the real product and correct them through human testing. Read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or handing off
 work; historical audit/phase documents are not authoritative.

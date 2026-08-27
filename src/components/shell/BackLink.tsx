@@ -17,10 +17,30 @@ import Link from "next/link";
 export type StudioParent = { href: string; label: string };
 
 /** The parents the internal routes actually have, in one place. */
-export const STUDIO_HOME: StudioParent = { href: "/dashboard", label: "Volver a Studio" };
+export const STUDIO_HOME: StudioParent = { href: "/studio", label: "Volver a Studio" };
 export const STUDIES_LIST: StudioParent = {
-  href: "/admin/studies",
-  label: "Volver a Estudios y plantillas",
+  href: "/studio/estudios",
+  label: "Volver a Estudios",
+};
+/**
+ * One study's own work surface, the parent of every surface inside it.
+ *
+ * The label carries the study's own name, and a study can be called anything —
+ * the acceptance fixture is 40 characters of shouting. It is bounded here so a
+ * long name cannot decide the width of the control that carries it.
+ */
+const MAX_PARENT_NAME = 28;
+export const studyParent = (studyId: string, name: string): StudioParent => {
+  const trimmed = name.trim();
+  const short = trimmed.length > MAX_PARENT_NAME
+    ? `${trimmed.slice(0, MAX_PARENT_NAME - 1).trimEnd()}…`
+    : trimmed;
+  return { href: `/studio/e/${studyId}`, label: `Volver a ${short}` };
+};
+/** The client list, parent of one client's own page. */
+export const CLIENTS_LIST: StudioParent = {
+  href: "/studio/clientes",
+  label: "Volver a Clientes y accesos",
 };
 
 export function BackLink({ parent }: { parent: StudioParent }) {

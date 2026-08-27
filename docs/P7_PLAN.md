@@ -16,6 +16,22 @@
 
 ---
 
+
+## 0.1 Migration numbering — `0015` is taken
+
+This plan was written when `0014` was the highest migration in the repository,
+and it reserved `0015` for the hardened `audit_log`. **`0015` is no longer
+available:** P8.2 used it for `0015_client_lifecycle_and_audit.sql`, the client
+archive columns and the bounded `admin_lifecycle_event` table. That table is
+P8 *lifecycle* evidence — six administrative actions on clients and client
+accounts — and is **not** the P7 audit log, which covers authentication,
+every administrative mutation and every import, with retention, an internal
+review surface and anomaly queries over it.
+
+The P7 audit-log migration therefore takes **the next available number** at the
+time it is written (`0016` as of this correction). Nothing else in this plan
+changes, and this note does not resume P7.
+
 ## 1. Objective and the three distinct completion states
 
 P7 is the final V2 hardening and go-live-preparedness phase. It adds no product
@@ -212,7 +228,7 @@ real Supabase project) · **manual** · **absent**.
 | R16 | The app cannot be framed | Partial | `X-Frame-Options: DENY` + `frame-ancestors 'none'`, both observed live | live, manual | No committed assertion | — | — | Yes |
 | R17 | Expired/invalid/tampered session is rejected and redirected | Missing | `getUser()` revalidation in `src/lib/supabase/middleware.ts:81` and in every protected page | absent | No test forges or expires a cookie and asserts the redirect/401 | harness (PR 5) | Authorization | Yes |
 | R18 | Login endpoint rate-limited at the edge | **Blocked** | `docs/GO_LIVE_SECURITY.md` B2 documents the intended Cloudflare rule; nothing is configured | absent | Cloudflare rate-limiting rules require a **zone**; the Worker runs on `*.workers.dev`. Per RD2, no interim app-layer throttle will be built; Supabase Auth's own limits are the only control until a zone exists | custom domain | Authorization | **No** |
-| R19 | Audit logging: authentication, admin mutations, imports | Missing | No audit table in any migration; no logger in `src/`. Partial provenance only: `import_batch` / `import_mapping` / `recoding_table` carry `created_by` + `created_at` (`0003`) | absent | The entire detection layer of the five-layer posture is absent. A breach today would be neither noticed nor reconstructable | migration `0015` | Authorization | Yes |
+| R19 | Audit logging: authentication, admin mutations, imports | Missing | No audit table in any migration; no logger in `src/`. Partial provenance only: `import_batch` / `import_mapping` / `recoding_table` carry `created_by` + `created_at` (`0003`) | absent | The entire detection layer of the five-layer posture is absent. A breach today would be neither noticed nor reconstructable | the next available migration (see §0.1) | Authorization | Yes |
 | R20 | Actionable anomaly monitoring and alerts | Missing | `docs/OPERATIONS.md` describes an Uptime Robot monitor on `/api/health`; the health route exists and returns 200 | absent in repo | Uptime Robot configuration is external and unverified from here; there is no denied-action-spike, failed-login-burst, or unusual-import alert. Cloudflare/Supabase anomaly alerting is largely zone/Pro-gated | R19, D2 | — | In-app signals yes; delivery channel per D2 |
 | R21 | **Application-data export** mechanism (portability) | Missing | none | absent | No export of any kind exists. This is a useful interim control and a prerequisite for R22 — it is **not** a disaster-recovery backup (see §10) | — | Secrets/config | Yes |
 | R22 | **Application-data export/import parity proof** | Missing | none | absent | Proves logical portability of application rows and metric parity after re-import. Does **not** satisfy the architecture's "backup restore tested" gate | R21 | — | Yes (synthetic) |
@@ -388,8 +404,9 @@ red and the PR does not merge.
 PostgreSQL grants `EXECUTE` on a new function to `PUBLIC` by default. A
 `security definer` function that is merely "not documented as callable" is
 therefore callable by `anon` and `authenticated`. Every such helper introduced by
-P7 — the `0014` RLS-coverage reporting function, and any helper added by `0015` —
-must carry this exact shape in the same migration that creates it:
+P7 — the `0014` RLS-coverage reporting function, and any helper added by the
+audit-log migration — must carry this exact shape in the same migration that
+creates it:
 
 ```sql
 create or replace function <schema>.<name>(<args>)
@@ -471,7 +488,7 @@ that changes no runtime code still produces a new Worker version, exactly as PR
 | **6** | `p7e-suite-a` | test(security): complete Suite A | `scripts/suite-a-isolation.mjs` — absorbs `isolation-test.mjs`, adds `data_scope` bypass attempts (dashboard path, PDF route, PostgREST), an internal-role positive control, and a service-role tenant-stamping proof. All assertions authenticate as real identities | **Yes — authorization** | Yes |
 | **7** | `p7f-suites-b-c` | test(security): add Suites B and C | `scripts/suite-b-authorization.mjs` (every admin mutation and the report route, unauthenticated and as `client`; role tampering) and `scripts/suite-c-input.mjs` (XSS payload end-to-end into dashboard HTML **and** the generated PDF; oversize/corrupt upload with a residue count; forged pivot intent; parameter-injection probes). Wires `pivot-test.mjs` in as `test:pivot`; retires or re-homes the orphaned V1-era scripts | **Yes — authorization** | Yes |
 | **8** | `p7g-suite-e-split` | test(security): add Suite E as `suite:e:available` and `suite:e:full` | `scripts/suite-e-edge.mjs` against the deployed beta Worker, exposed through the three commands in §5.1: `suite:e:available` (E2–E4, exits 0, prints the "not the complete Suite E" banner), `suite:e:full` (adds E1, exits non-zero while blocked), and `suite:e` aliasing `suite:e:full`. `npm run gates` picks up `suite:e:available` only | **Yes — authorization** | Yes — the merge gate is `suite:e:available` |
-| **9** | `p7h-audit-log` | feat(security): add hardened audit logging | migration `0015` — `audit_log` per §11; `src/lib/audit/log.ts`; instrumentation of login/logout, all admin mutations, and import commit/rollback; internal-only review surface; retention job; rollback script | **Yes — authorization** | Yes |
+| **9** | `p7h-audit-log` | feat(security): add hardened audit logging | the next available migration (§0.1) — `audit_log` per §11; `src/lib/audit/log.ts`; instrumentation of login/logout, all admin mutations, and import commit/rollback; internal-only review surface; retention job; rollback script | **Yes — authorization** | Yes |
 | **10** | `p7i-anomaly-signals` | feat(ops): add anomaly signals and alert delivery | Bounded, indexed queries over `audit_log` (failed-login bursts, denied-action spikes, cross-tenant probes, unusual import volume), internal review surface, and the delivery channel chosen in D2; `docs/MONITORING.md` | Authorization | Yes |
 | **11** | `p7j-data-portability` | feat(ops): add application-data export and import-parity proof | `scripts/data-export.mjs` and `scripts/import-parity-verify.mjs` per §10.1; `docs/DATA_PORTABILITY.md` stating in its first paragraph that this is **not** disaster recovery. Names the R35 gap explicitly | **Yes — secrets/config** | Yes |
 | **12** | `p7k-incident-playbook` | docs: add the incident playbook and the disaster-recovery design | `docs/INCIDENT_PLAYBOOK.md` (§12) plus the §10.2 disaster-recovery **design**: mechanism, isolated target, verification steps, and the approvals required. Written, never executed; no database credential is requested or used | **Yes — secrets/config** | Yes |
@@ -555,7 +572,7 @@ polling the deployment API in a loop. If the bounded pass fails, roll back per
 | PR 2 — Worker identity | Configuration revert. If the corrected name were ever to target the wrong script, redeploy the last known-good version id and revert the commit |
 | PR 3 — dependency remediation | Revert the commit together with `package-lock.json`; the previous lockfile is the rollback artifact. Verified by re-running the full suite and one bounded health pass |
 | Migration `0014` (RLS coverage function) | `supabase/rollbacks/0014_drop_rls_coverage_fn.sql`. Dropping the function removes its `service_role` grant with it; the function is metadata-only and grantless to the API roles, so nothing else changes |
-| Migration `0015` (`audit_log`) | `supabase/rollbacks/0015_drop_audit_log.sql`. Instrumentation sits behind `src/lib/audit/log.ts`, so reverting the app code alone stops writes without a schema change |
+| The `audit_log` migration (§0.1) | A matching `supabase/rollbacks/<n>_drop_audit_log.sql`, numbered to match. Instrumentation sits behind `src/lib/audit/log.ts`, so reverting the app code alone stops writes without a schema change |
 | Data export runs (§10.1) | Read-only against the database; the only artifact is a local file. No rollback needed |
 | Import-parity proof (§10.1) | Imports into a **brand-new synthetic tenant**, never over existing rows. Teardown deletes exactly the fixture ids it created. The P6E acceptance study `ad275928-dbd1-4acf-9de9-fa1623b32a60` and the two draft `Satisfacción 2026 (TEST)` studies are out of bounds |
 | Audited hard-delete path (PR 13) | Exercised only on a throwaway synthetic tenant. There is no undo for a hard delete — that is the point of it — so the gate is fixture isolation, not rollback |
@@ -640,7 +657,7 @@ cross-check afterwards.
 
 ## 11. Audit logging and alerting design boundaries
 
-### 11.1 `audit_log` requirements (migration `0015`)
+### 11.1 `audit_log` requirements (the next available migration, §0.1)
 
 Append-only. Columns: `id`, `occurred_at`, `actor_user_id` (nullable for
 anonymous attempts), `actor_role`, `tenant_id` (nullable for internal-scope

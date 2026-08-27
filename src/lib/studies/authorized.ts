@@ -6,6 +6,9 @@ import type { ConfirmedQualitative } from "@/lib/qualitative/published";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyDataScope, parseDataScope } from "@/lib/studies/scope";
 import { parseBrandConfig, type BrandConfig } from "@/lib/branding/config";
+import { parseDashboardConfig, type StudyPresentation } from "@/lib/dashboard/config";
+import { loadStudyInterpretation } from "@/lib/interpretation/load";
+import type { InterpretationContent } from "@/lib/interpretation/schema";
 
 export type AuthorizedStudy = {
   id: string;
@@ -22,8 +25,10 @@ export type AuthorizedStudyData = {
   study: AuthorizedStudy;
   tenantName: string;
   brand: BrandConfig;
+  presentation: StudyPresentation;
   rows: Awaited<ReturnType<typeof loadStudyRows>>;
   qualitative: ConfirmedQualitative[];
+  publishedInterpretation: InterpretationContent | null;
 };
 
 async function loadConfirmedQualitativeInternal(
@@ -84,18 +89,34 @@ export async function loadAuthorizedStudyData(
   const scope = profile.role === "internal" ? {} : parseDataScope(profile.data_scope);
 
   const admin = createAdminClient();
-  const [{ data: tenant, error: tenantError }, rows, qualitative] = await Promise.all([
+  const [{ data: tenant, error: tenantError }, rows, qualitative, interpretation] = await Promise.all([
     admin.from("tenant").select("name, brand_config").eq("id", study.tenant_id)
       .maybeSingle<{ name: string; brand_config: unknown }>(),
     loadStudyRows(admin, study.id),
     loadConfirmedQualitativeInternal(admin, study.id),
+    loadStudyInterpretation(admin, study.id),
   ]);
   if (tenantError) throw new Error(`tenant: ${tenantError.message}`);
+  const tenantBrand = parseBrandConfig(tenant?.brand_config);
+  const studyPresentation = parseDashboardConfig(study.dashboard_config).presentation;
+  const presentation: StudyPresentation = {
+    primaryColor: studyPresentation.primaryColor,
+    accentColor: studyPresentation.accentColor,
+    coverLabel: studyPresentation.coverLabel ?? tenantBrand.presentationDefaults.coverLabel,
+    coverNote: studyPresentation.coverNote ?? tenantBrand.presentationDefaults.coverNote,
+    threshold: studyPresentation.threshold ?? tenantBrand.presentationDefaults.threshold,
+  };
   return {
     study,
     tenantName: tenant?.name ?? "Be Community",
-    brand: parseBrandConfig(tenant?.brand_config),
+    brand: {
+      ...tenantBrand,
+      primaryColor: presentation.primaryColor ?? tenantBrand.primaryColor,
+      accentColor: presentation.accentColor ?? tenantBrand.accentColor,
+    },
+    presentation,
     rows: applyDataScope(rows, scope),
     qualitative: applyDataScope(qualitative, scope),
+    publishedInterpretation: interpretation.published,
   };
 }

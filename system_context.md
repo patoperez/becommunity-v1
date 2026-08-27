@@ -68,7 +68,7 @@ The number-one adversary is our own AI-generated code, not an external hacker. H
 
 Supabase Cloud (not self-hosted — self-hosting was considered and deferred; it's more work and less secure unless a contractual data-residency requirement appears, which would migrate the same Postgres without an app rewrite). Free tier through build/testing; Pro (~$25/mo) only when the first real client has live access, for leaked-password protection, session controls, and daily backups. Cloudflare free tier hosts and provides the security perimeter. Cost is ~$0 until a live client exists.
 
-## 7. Current phase (verified 2026-08-24)
+## 7. Current phase (verified 2026-08-25)
 
 P0-P6 of the V2 framework have been implemented. P6E synthetic acceptance was
 completed against the deployed Cloudflare Worker: CSV/XLSX ingestion, canonical
@@ -97,10 +97,33 @@ of the real product, not additional detached HTML prototypes. P8-A is complete
 and owner-accepted at `3659a38` (delivery PR #37). P8.2's first owner-review
 slice — the no-code access-scope picker and guided mapping/readable import
 preview — is owner-accepted and merged at `b1abfef` (delivery PR #39), with its
-storage, authorization and ingestion contracts unchanged. The current unit is
-the remaining P8.2 Studio scope: operational home/routes and study work surface,
-picker completion, paging, preview-before-publication, safe destructive actions
-and the reviewed user/client lifecycle. P8.3 has not started. Every P7 and
+storage, authorization and ingestion contracts unchanged.
+
+The remaining P8.2 scope is now implemented, synthetic-acceptance-complete and
+awaiting owner review: Studio's
+own `/studio/**` addresses beside every preserved `/admin/**` one, the
+actionable home, the study work surface, the journey-metric and theme pickers,
+visible paging, publication reachable only through the client preview, one
+accessible destructive-action dialog, and the account and client lifecycle. That
+lifecycle needed its own reviewed boundary, and got the smallest one that could
+carry it: migration `0015` adds two nullable columns and one internal audit
+table and changes no existing policy, grant or function. Suspending a person is
+deliberately NOT in that schema — it is enforced at the authentication boundary
+and read back from the account, so the product cannot show "con acceso" for an
+identity Auth is already refusing. `0015` is applied to the synthetic project
+only. At `543889a` the canonical offline chain, the complete live adversarial
+chain and exact-ledger lifecycle acceptance passed; all disposable acceptance
+objects were removed and the protected fixture remained unchanged. Permanent
+client deletion remains intentionally disabled until a recoverable cross-system
+workflow exists.
+
+P8.3 is implementation-complete on `p8d-insights-data-story` and awaiting owner
+review. It adds the authorized per-study Insights route, compact study library,
+URL/report filter parity, guided comparison over the unchanged pivot allowlist,
+adaptive longitudinal list/chart plus table, canonical sample language on screen
+and in the PDF, and explicit loading/error/invalid-filter states. It changes no
+formula, ingestion contract, role, RLS policy, migration or publication boundary.
+Every P7 and
 calculation boundary remains in force. V2.5 content still follows authoritative
 documented business definitions; never invent formulas.
 

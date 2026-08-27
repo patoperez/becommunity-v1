@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -9,6 +10,10 @@ import { logout } from "@/app/dashboard/actions";
 import { AccessScopeFields } from "@/components/studio/AccessScopeFields";
 import { loadTenantScopeInventories } from "@/lib/studies/scope-inventory";
 import { parseDataScope, type DataScope } from "@/lib/studies/scope";
+import { loadTenantArchiveState } from "@/lib/studio/lifecycle";
+import { clientUserAccess, CLIENT_USER_ACCESS_LABEL } from "@/lib/studio/lifecycle-model";
+import { studioClient } from "@/lib/studio/routes";
+import { Forward } from "@/components/Actions";
 
 export const metadata = { title: "Clientes y usuarios · Be Community" };
 
@@ -72,6 +77,9 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
     tenantList.map((tenant) => tenant.id),
   );
   const tenantChoices = tenantList.map((tenant) => ({ id: tenant.id, name: tenant.name }));
+  // Archive state, so this legacy address never contradicts the client's own
+  // page about whether a client still accepts new work.
+  const archiveState = await loadTenantArchiveState(admin, tenantList.map((tenant) => tenant.id));
 
   return <StudioShell
     userEmail={user.email ?? ""}
@@ -116,7 +124,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
           const brand = parseBrandConfig(tenant.brand_config);
           const logoUrl = logoPublicUrl(brand.logoPath);
           return <article key={tenant.id} className="rounded-xl border border-line bg-surface p-4">
-            <form action={renameTenant}><input type="hidden" name="tenant_id" value={tenant.id} /><div className="flex items-center gap-3"><input className={input} name="name" defaultValue={tenant.name} required maxLength={160} /><button className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-strong">Guardar</button></div><p className="mt-2 text-xs text-muted">{userCount} {userCount === 1 ? "usuario" : "usuarios"}</p></form>
+            <form action={renameTenant}><input type="hidden" name="tenant_id" value={tenant.id} /><div className="flex items-center gap-3"><input className={input} name="name" defaultValue={tenant.name} required maxLength={160} aria-label={`Nombre de ${tenant.name}`} /><button className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-strong">Guardar</button></div><p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">{userCount} {userCount === 1 ? "usuario" : "usuarios"}{archiveState.archivedAt[tenant.id] ? <span className="rounded-full border border-line bg-surface-sunken px-2 py-0.5 font-medium">Archivado</span> : null}</p></form>
+            <Link href={studioClient(tenant.id)} className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline">Abrir el cliente <Forward /></Link>
             <details className="mt-4 border-t border-line pt-3"><summary className="min-h-11 cursor-pointer text-sm font-medium text-strong">Identidad visual</summary>
               <form action={updateTenantBrand} className="mt-4 space-y-3"><input type="hidden" name="tenant_id" value={tenant.id} />
                 <div className="flex items-center gap-3">{logoUrl ? <>
@@ -140,8 +149,16 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
         const address = account?.email ?? "Cuenta sin correo";
         const stored = readStoredScope(profile.data_scope);
         const restricted = Object.keys(stored.scope).length > 0;
+        // Read from the Auth account itself, which is where suspension is
+        // enforced, so this legacy address can never show "con acceso" for
+        // somebody the authentication server is already refusing.
+        const access = clientUserAccess({
+          bannedUntil: account?.banned_until ?? null,
+          lastSignInAt: account?.last_sign_in_at ?? null,
+          emailConfirmedAt: account?.email_confirmed_at ?? null,
+        });
         return <details key={profile.user_id} className="rounded-xl border border-line bg-surface p-5 open:shadow-raised">
-          <summary className="min-h-11 cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-medium text-strong">{profile.full_name || address}</p><p className="text-sm text-muted">{address} · {tenantById.get(profile.tenant_id ?? "")?.name ?? "Sin cliente"}</p></div><span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${!stored.readable ? "border-danger-line bg-danger-surface text-danger" : restricted ? "border-caution-line bg-caution-surface text-caution" : "border-line bg-surface-sunken text-muted"}`}>{!stored.readable ? "Acceso por revisar" : restricted ? "Ve solo una parte" : "Ve todo el cliente"}</span></div></summary>
+          <summary className="min-h-11 cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-medium text-strong">{profile.full_name || address}</p><p className="text-sm text-muted">{address} · {tenantById.get(profile.tenant_id ?? "")?.name ?? "Sin cliente"}</p></div><div className="flex shrink-0 flex-wrap items-center gap-2"><span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${access === "suspended" ? "border-danger-line bg-danger-surface text-danger" : access === "invited" ? "border-caution-line bg-caution-surface text-caution" : "border-positive-line bg-positive-surface text-positive"}`}>{CLIENT_USER_ACCESS_LABEL[access]}</span><span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${!stored.readable ? "border-danger-line bg-danger-surface text-danger" : restricted ? "border-caution-line bg-caution-surface text-caution" : "border-line bg-surface-sunken text-muted"}`}>{!stored.readable ? "Acceso por revisar" : restricted ? "Ve solo una parte" : "Ve todo el cliente"}</span></div></div></summary>
           <div className="mt-5 grid gap-5 border-t pt-5 lg:grid-cols-[1fr_280px]">
             <form action={updateClientUser} className="space-y-3">
               <input type="hidden" name="user_id" value={profile.user_id} />
@@ -158,7 +175,14 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
                 <label className="mt-3 block text-sm font-medium text-strong">Nombre<input className={`${input} mt-1 font-normal`} name="full_name" defaultValue={profile.full_name ?? ""} maxLength={120} placeholder="Nombre de la persona" /></label>
               </AccessScopeFields>
             </form>
-            <form action={deleteClientUser} className="rounded-lg border border-danger-line bg-danger-surface p-4"><input type="hidden" name="user_id" value={profile.user_id} /><h3 className="text-sm font-semibold text-danger">Eliminar acceso</h3><p className="mt-1 text-xs text-danger">Elimina la cuenta, no los estudios. Escribe el correo exacto.</p><input className={`${input} mt-3`} name="confirmation_email" type="email" required placeholder={address} autoComplete="off" /><button className="mt-3 min-h-11 text-sm font-semibold text-danger underline underline-offset-4">Eliminar cuenta cliente</button></form>
+            <div className="space-y-3">
+              <div className="rounded-lg border border-line bg-surface-sunken p-4">
+                <h3 className="text-sm font-semibold text-strong">Suspender o eliminar</h3>
+                <p className="mt-1 text-xs text-muted">Suspender es reversible y quita el acceso al instante. Eliminar destruye la cuenta.</p>
+                <Link href={studioClient(profile.tenant_id ?? "")} className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline">Ir a la página del cliente <Forward /></Link>
+              </div>
+              <form action={deleteClientUser} className="rounded-lg border border-danger-line bg-danger-surface p-4"><input type="hidden" name="user_id" value={profile.user_id} /><h3 className="text-sm font-semibold text-danger">Eliminar acceso</h3><p className="mt-1 text-xs text-danger">Elimina la cuenta, no los estudios. Escribe el correo exacto.</p><input className={`${input} mt-3`} name="confirmation_email" type="email" required placeholder={address} autoComplete="off" aria-label={`Correo exacto de ${address}`} /><button className="mt-3 min-h-11 text-sm font-semibold text-danger underline underline-offset-4">Eliminar cuenta cliente</button></form>
+            </div>
           </div>
         </details>;
       }) : <p className="rounded-xl border border-line bg-surface p-8 text-center text-sm text-muted">Todavía no hay usuarios cliente.</p>}</div></section>

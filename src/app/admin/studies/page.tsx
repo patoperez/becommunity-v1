@@ -18,15 +18,20 @@ import { StateBlock } from "@/components/States";
 import { Forward } from "@/components/Actions";
 import { studyStateLabel } from "@/lib/language/results";
 import { logout } from "@/app/dashboard/actions";
+import { loadStudyMetricOptions } from "@/lib/studio/metric-inventory";
+import { loadTenantArchiveState } from "@/lib/studio/lifecycle";
+import { parsePageRequest, resolvePage } from "@/lib/studio/paging";
+import { Pager } from "@/components/studio/Pager";
+import { studioStudy, studioStudyPublish } from "@/lib/studio/routes";
 
 export const metadata = { title: "Estudios y plantillas · Be Community" };
 
-type Search = Promise<{ ok?: string; error?: string }>;
+type Search = Promise<{ ok?: string; error?: string; p?: string; por?: string }>;
 type Tenant = { id: string; name: string };
 type Study = { id: string; tenant_id: string; name: string; period: string | null; status: string; dashboard_config: unknown; journey_definition: unknown };
 type Template = {
   id: string; name: string; description: string; version: number; preview: Record<string, number>;
-  updated_at: string;
+  updated_at: string; created_by: string;
 };
 
 const input =
@@ -59,13 +64,27 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
   const [{ data: tenants }, { data: studies }, { data: templates }, query] = await Promise.all([
     admin.from("tenant").select("id, name").order("name").returns<Tenant[]>(),
     admin.from("study").select("id, tenant_id, name, period, status, dashboard_config, journey_definition").order("created_at", { ascending: false }).returns<Study[]>(),
-    admin.from("study_template").select("id, name, description, version, preview, updated_at")
-      .eq("created_by", user.id).order("updated_at", { ascending: false }).returns<Template[]>(),
+    admin.from("study_template").select("id, name, description, version, preview, updated_at, created_by")
+      .order("updated_at", { ascending: false }).returns<Template[]>(),
     searchParams,
   ]);
   const tenantList = tenants ?? [];
   const studyList = studies ?? [];
   const templateList = templates ?? [];
+
+  // The configurator used to render one open-ended editor for EVERY study in
+  // the database. It is now a bounded page of the newest studies, with the
+  // count stated, so the list can grow for years without the page growing with
+  // it — and so the results picker only has to read the studies on screen.
+  const configWindow = resolvePage(parsePageRequest(query), studyList.length);
+  const configurable = studyList.slice(configWindow.from, configWindow.from + configWindow.size);
+  const [metricOptions, archiveState] = await Promise.all([
+    loadStudyMetricOptions(admin, configurable.map((study) => study.id)),
+    loadTenantArchiveState(admin, tenantList.map((tenant) => tenant.id)),
+  ]);
+  const archivedTenants = new Set(
+    Object.entries(archiveState.archivedAt).flatMap(([id, at]) => (at ? [id] : [])),
+  );
 
   return <StudioShell
     userEmail={user.email ?? ""}
@@ -93,7 +112,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
             <div aria-hidden="true" className="text-3xl font-light text-line-strong">＋</div>
             <h3 className="mt-2 font-display text-lg font-semibold text-strong">Estudio en blanco</h3>
             <p className="mb-4 text-sm text-muted">Empieza sin configuración heredada.</p>
-            <select name="tenant_id" required className={input}><option value="">Selecciona cliente</option>{tenantList.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+            <select name="tenant_id" required className={input}><option value="">Selecciona cliente</option>{tenantList.filter(t => !archivedTenants.has(t.id)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
             <input name="name" required maxLength={200} placeholder="Nombre del estudio" className={`${input} mt-2`} />
             <input name="period" maxLength={100} placeholder="Periodo (opcional)" className={`${input} mt-2`} />
             <button className={`${button} mt-4`}>Crear y cargar datos</button>
@@ -111,7 +130,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
             <p className="mt-2 text-xs text-muted">{template.preview.metrics ?? 0} métricas · {template.preview.dimensions ?? 0} dimensiones · {template.preview.mappings ?? 0} mapeos</p>
             <form action={createStudyFromTemplate} className="mt-4 space-y-2">
               <input type="hidden" name="template_id" value={template.id} />
-              <select name="tenant_id" required className={input}><option value="">Selecciona cliente</option>{tenantList.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+              <select name="tenant_id" required className={input}><option value="">Selecciona cliente</option>{tenantList.filter(t => !archivedTenants.has(t.id)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
               <input name="name" required maxLength={200} placeholder="Nombre del nuevo estudio" className={input} />
               <input name="period" maxLength={100} placeholder="Periodo (opcional)" className={input} />
               <button className={button}>Usar plantilla</button>
@@ -155,6 +174,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
+                  <Link className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={studioStudy(study.id)}>Abrir el estudio <Forward /></Link>
                   <Link className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={`/admin/upload?tenant=${study.tenant_id}&study=${study.id}`}>Cargar datos <Forward /></Link>
                   <Link className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={`/admin/preview/${study.id}`}>Ver como el cliente <Forward /></Link>
                 </div>
@@ -168,7 +188,24 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
         <h2 id="configurar" className="text-xl">Configurar y publicar</h2>
         <p className="mt-1 max-w-prose text-sm text-muted">La configuración se aplica también al recálculo filtrado y al informe PDF.</p>
         <div className="mt-4 space-y-3">
-          {studyList.map(study => <StudyConfigurator key={study.id} study={study} sections={parseDashboardConfig(study.dashboard_config).sections} initialStages={parseJourneyDefinition(study.journey_definition)} />)}
+          {configurable.map(study => <StudyConfigurator
+            key={study.id}
+            study={study}
+            sections={parseDashboardConfig(study.dashboard_config).sections}
+            initialStages={parseJourneyDefinition(study.journey_definition)}
+            metricOptions={metricOptions[study.id] ?? []}
+            previewHref={`/admin/preview/${study.id}`}
+            publishHref={studioStudyPublish(study.id)}
+          />)}
+        </div>
+        <div className="mt-4">
+          <Pager
+            window={configWindow}
+            basePath="/admin/studies"
+            params={{ por: query.por ?? null }}
+            noun={{ one: "estudio", many: "estudios" }}
+            label="Paginación de estudios configurables"
+          />
         </div>
       </section>
     </div>

@@ -1,6 +1,6 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-24**.
+> Authoritative operational handoff. Last verified: **2026-08-27**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
@@ -119,7 +119,7 @@ PDF retained metric parity and the human reviewer confirmed the real-phone
 layout. The PR was squash-merged and the post-merge Worker health check returned
 200 with Supabase connected. **P6 is closed.**
 
-## Current task — P8 product experience implementation
+## Current task — P8 closure delivery
 
 P7 engineering is concluded and merged: PR #38 integrated Suites B and C, PR
 #37 integrated the owner-accepted P8-A foundation, and PR #39 integrated the
@@ -129,6 +129,13 @@ it directly. Do not reopen P7 correction loops
 during product construction; controls blocked on custom-domain, production
 Supabase, billing, full DR or real-client prerequisites return as a bounded
 go-live pass after the product is functionally and visually complete.
+
+**P8 is implementation-complete and owner-accepted on
+`p8f-responsive-accessibility-acceptance` at `b49df5d`.** Its closure record is
+being delivered from this branch; it is not yet merged or deployed. After that
+delivery, the next bounded phase is go-live hardening against the final domain,
+production Supabase project and operational prerequisites — not another P8
+design loop.
 
 P8 discovery and the A/B/C/synthesis comparison are complete. Those artifacts
 remain historical evidence, but standalone visual prototyping is closed. The
@@ -182,17 +189,193 @@ and no further P8.2 scope was started:
 
 The slice adds `npm run test:studio-workflows` (gate 27 of `npm test`). It
 introduces no migration, dependency, lockfile change, role, formula, RLS/grant,
-authorization or external-system change.
+authorization or external-system change. The completion unit below adds
+`npm run test:studio-completion` (gate 28, 44 checks) and one additive
+migration; it adds no dependency, no lockfile change, no role, no formula and no
+external-system change.
 
-**Current unit: remaining P8.2 Studio guided workflows.** Still pending are the
-`/studio` home and client/study routes, study work surface and process tabs,
-picker completion for journey/theme work, visible qualitative/import-history
-paging, preview-before-publication flow, destructive-action dialog and the
-reviewed account/client lifecycle (suspend versus delete; archive versus
-permanent organisation deletion with impact summary, exact-name confirmation,
-dependent-object handling and audit evidence). This lifecycle likely needs a
-separate migration/review boundary; do not improvise it inside presentation
-work. P8.3 has not started.
+**P8.2 completion — implemented, synthetic-accepted and owner-accepted in the
+final P8 pass on 2026-08-27.** The record is
+`.design/be-community-v2/implementation-reviews/p8-2-completion/REVIEW.md`.
+
+What now exists in the real product:
+
+- **Eleven `/studio/**` routes**, and every `/admin/**` address still answers.
+  Studio gained addresses and renamed none away, because bookmarks, emailed
+  links and the frozen adversarial catalogue all depend on the old paths.
+  `/dashboard` and `/studio` render the SAME internal home, so the two cannot
+  drift. `src/lib/studio/routes.ts` records the pairing.
+- **An actionable home.** "¿Qué necesita mi atención?" is built only from state
+  the schema can prove: an import left staged or failed, a study with no
+  answers, comments nobody reviewed, a moment of the recorrido pointing at a
+  result the study does not produce, and a draft carrying data. It is bounded
+  and says how many items it left out. No deadline, no assignee, no approval.
+- **A study work surface** at `/studio/e/[studyId]` with process steps (datos ·
+  resultados y recorrido · lo que dijeron · vista del cliente · publicación),
+  each showing where that step stands, and a readiness panel that separates
+  what BLOCKS from what merely IMPROVES.
+- **The picker contract completed.** The journey's canonical metric key became a
+  choice over the results the study genuinely produced, with a consequence
+  preview; a stage identifier is generated once and then frozen, because
+  `qual_observation.confirmed_stage_key` points at it. The qualitative theme box
+  became a selection over existing themes plus a deliberate "create new" path
+  that refuses a colliding name instead of silently making a third theme. A
+  stored value the data no longer offers is preserved and marked, never dropped
+  or repointed.
+- **Visible paging.** The qualitative review's `.limit(100)` and the import
+  history's global `.limit(30)` are gone; both are counted, filtered and paged,
+  page/size/filter parameters are validated server-side against fixed ranges,
+  and every read is scoped with an explicit `.eq()`. Bulk qualitative actions
+  are page-scoped and say so.
+- **Publication has exactly one surface**, `/studio/e/[studyId]/publicar`,
+  reached from the client preview. `updateStudyConfiguration` may only re-save
+  the state that already holds; `setStudyPublication` independently refuses a
+  publication with no acknowledgement, an empty study or an archived client.
+- **No `window.confirm()` anywhere.** One accessible dialog names the object,
+  the consequence, the reversibility and the recovery path, with honest
+  severity: a revert is an ordinary control, and only a permanent action reads
+  as danger or requires typing.
+- **The account and client lifecycle.** Suspending a person is separate from
+  deleting them and is enforced at the authentication boundary, so the product
+  can never show "con acceso" for an identity Auth already refuses; "invitación
+  pendiente" is a third real state. Archiving a client is the ordinary
+  reversible action and is enforced server-side against new studies, new
+  invitations and new publications.
+- **Permanent client deletion is DISABLED and refused on the server.** It spans
+  Postgres rows, Auth identities and Storage objects with no shared transaction,
+  and the only order the code could run them in destroys the tenant row first —
+  which is exactly the order that can orphan an account or a file. No path
+  through the action reaches a row delete, an Auth call or a Storage call. The
+  executable impact summary and the exact-name rule are retained and still
+  proved; they gate nothing destructive. It returns when there is a recoverable,
+  idempotent, resumable cross-system deletion workflow.
+- **No lifecycle action succeeds unrecorded.** Permanent USER deletion writes
+  durable intent and checks the write BEFORE deleting, then records the outcome;
+  a missing outcome is reported as an error, never as a clean success. The
+  reversible mutations refuse when the record is unavailable, and undo
+  themselves with their own inverse if the record cannot be written after the
+  change.
+
+**Migration `0015_client_lifecycle_and_audit.sql` is additive and APPLIED TO THE
+SYNTHETIC PROJECT ONLY.** It adds `tenant.archived_at` / `archived_by` with a partial index and
+one internal `admin_lifecycle_event` table with RLS, FORCE RLS, a
+deny-browser-roles policy, a database-enforced 4096-byte bound on its metadata
+(the application sanitiser holds to half that), and **least-privilege grants**:
+the default ALL that migration 0001 hands every new table is revoked and only
+`select, insert` is granted back to `service_role`, so the evidence table is
+append-only at the privilege level. It creates no function, no security-definer
+helper and alters no existing policy or grant beyond its own table's defaults,
+and `supabase/rollbacks/0015_*.sql` reverses exactly it.
+
+**`docs/P7_PLAN.md` §0.1** records that `0015` is taken: the deferred P7
+`audit_log` takes the next available migration number instead. That is a
+numbering correction only; P7 is not resumed.
+
+### Tracked schema versus removed drift — migration `0016`
+
+The synthetic project carried RLS policies, and a `private` schema of helper
+functions behind them, that existed in **no tracked migration**: the Fase 0
+proposal for SECURITY DEFINER helpers that `system_context.md` and
+`docs/P7_PLAN.md` both record as **never adopted**. It reached the database
+anyway. One of those helpers, `private.can_access_tenant()`, queries
+`public.consultant_assignments` — a table in no migration — so every policy
+calling it RAISED instead of filtering, and **no authenticated role, client or
+internal, could read `public.tenant` at all**.
+
+`0016_remove_untracked_private_policy_experiment.sql` removes exactly that
+experiment: seven policies (`profiles_admin_write`, `profiles_select_self`,
+`tenant_admin_write`, `tenant_select`, `respondent_select`, `quant_select`,
+`qual_select`), the four `private` helpers, the `authenticated` usage grant on
+that schema, and the schema itself — the last only after proving it empty and
+unreferenced by any policy, routine or view. Every statement is guarded, so the
+migration is a no-op on a database built solely from tracked migrations.
+
+It preserves `profiles_select_own`, `tenant_isolation_select`,
+`published_study_select`, every `deny_browser_roles` policy, every RLS and FORCE
+RLS flag, every grant and revocation from `0000`-`0015`, and every row.
+Dropping the rogue SELECT policies **restores** the direct-browser denial on
+`respondent`, `quant_response` and `qual_observation`: those tables are left
+with no permissive policy, which is the tracked design.
+
+**`confirmed_qual_observation` is not a defect and is not changed.** Migration
+`0008` granted `authenticated` SELECT on the view; migration
+`0009_client_publication_boundary.sql` deliberately superseded that, revoking
+`anon`/`authenticated` and granting only `service_role`. The application loads
+confirmed qualitative content server-side on purpose. That boundary stays.
+Suspension is deliberately outside that schema. Environments without `0015`
+still degrade honestly: `src/lib/studio/lifecycle.ts` detects its absence and
+the administrative actions refuse with a stated reason.
+
+**Synthetic acceptance completed 2026-08-25 at `543889a`.** Migration `0015`
+was applied to synthetic project `ontvqazsqiwisdddblif`; the canonical offline
+chain and the complete live chain passed. Exact-ledger browser acceptance then
+proved tenant archive/restore, denial of new work while archived, preservation
+of existing client access, user suspension/restore at the authentication
+boundary, and permanent deletion of one disposable user with durable intent and
+outcome evidence. Cleanup removed both disposable studies and the disposable
+tenant; the profile and Auth identity were already absent after the deletion
+flow. No matching database, Auth or Storage residue remained. The protected
+fixture stayed at 3 tenants, 3 studies, 4 profiles, 22 respondents, 82
+quantitative responses, 2 qualitative observations, 1 import batch and 4 Auth
+users (0 banned); P6E remained published at 20 / 80 / 0 / 1. Eight append-only
+lifecycle evidence rows intentionally remain.
+
+**One lifecycle item remains unavailable:** permanent CLIENT deletion is
+disabled outright, independently of migration availability, until a
+recoverable, idempotent and resumable cross-system workflow exists.
+
+The supported responsive floor is 320 px. P8.5 also keeps the inherited 258 px
+dashboard stress probe as a diagnostic and makes the previously clipped sample
+and metric captions wrap safely; 258 px is not promoted into the product
+contract.
+
+Template ownership is now closed: the library is shared across the internal
+team, the original author remains visible, and migration `0018` makes creation,
+updates and instantiation match that product rule without changing the single
+internal role model.
+
+**P8.3 Insights data story — implementation-complete and owner-accepted.** The
+real product now has
+`/insights` and an authorized `/insights/e/[studyId]` route. The home keeps the
+latest panorama plus a compact study library instead of stacking complete
+studies. A study link carries the same bounded `f.*` selection grammar as the
+authenticated PDF; invalid or disallowed selections fail closed and reopen the
+unfiltered study with an explicit explanation.
+
+The client story uses the P8-A panorama/finding and journey components, a
+plain-language `Compara por...` surface over the unchanged pivot Server Action
+and allowlist, and an adaptive longitudinal view: list for fewer than four
+periods, chart thereafter, and an expandable table alternative throughout.
+Chart points are keyboard reachable and missing results are encoded by shape
+and text, never colour alone. The canonical sample string table now also owns
+the PDF's privacy and small-base wording. Loading, not-found, route error,
+invalid-filter and comparison-error states are named and recoverable.
+
+The finding DTO includes a nullable human-authored interpretation slot. P8.4
+now supplies it from a separately published snapshot; an absent snapshot is
+still silent and no business interpretation is invented. No formula, canonical
+row, ingestion adapter, role or study-publication boundary changed.
+`npm run test:insights-story` remains gate 29 of `npm test`. No screenshots were
+produced, by owner request; review is in
+`.design/be-community-v2/implementation-reviews/p8-3-insights-story/REVIEW.md`.
+
+**P8.4 qualitative, interpretation and customisation — implementation-complete
+and owner-accepted.** The
+real product adds `/studio/e/[studyId]/interpretacion` with bounded structured
+copy and evidence selection, explicit draft/review/approval state and a
+published snapshot that is independent from later edits. Only that snapshot
+can reach Insights or the PDF. The qualitative view adds a React/SVG word cloud
+and image download without replacing the counted list; the journey keeps a
+small set of confirmed friction themes next to each moment.
+
+Presentation now resolves Be Community defaults → client identity/defaults →
+study override. The ordinary interface exposes palette, cover copy, visible
+modules, journey setup and one focused metric threshold without JSON, internal
+keys or arbitrary CSS; templates preserve the study configuration and are
+shared with author attribution. Migrations `0017` and `0018` are applied only
+to the synthetic project. The deterministic gate is
+`npm run test:p8-qualitative` (gate 30); the disposable live lifecycle also
+passed and left zero interpretation-event residue.
 
 **Owner decisions recorded 2026-08-24, binding on every later unit:**
 
@@ -218,9 +401,16 @@ work. P8.3 has not started.
   no-code customisation: contrast, responsiveness, semantic meaning, analytical
   honesty and accessible fallbacks stay enforced by the product.
 
-Details for all three are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5
-P8.2 and P8.4). Only the first P8.2 owner-review slice described above is
-implemented; the remaining P8.2 and all P8.3-P8.5 work remain pending.
+Details are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5). P8.2, P8.3
+and the bounded P8.4 implementation are complete and owner-accepted.
+P8.5 is complete: the deterministic gate is gate 31,
+and the rendered authenticated matrix covers the client and Studio route set at
+320/360/390/768/1024/1280 px without screenshots. The owner completed the real-
+phone pass on 2026-08-27 after the LAN hydration, mobile account-row and
+relative-scale corrections in `8a4437a` and `b49df5d`, then accepted the result.
+P8 is closed. Studio intentionally has no top-level loading boundary: the internal-role guard
+must resolve before the framework can stream a successful response. Pending
+labels inside authorized tasks provide progress without weakening that rule.
 
 ## P7 engineering record (historical; do not resume during P8)
 

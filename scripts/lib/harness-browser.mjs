@@ -233,11 +233,13 @@ export async function launchBrowser() {
     await cdp.send("Network.enable", {}, sessionId);
     if (!javaScript) await cdp.send("Emulation.setScriptExecutionDisabled", { value: true }, sessionId);
 
-    // The import-rollback control asks for confirmation through `window.confirm`
-    // (UploadForm.tsx:208). A headless page blocks on that dialog until it is
-    // answered, so the context answers it the way the user who clicked the
-    // control would. Nothing else is automated: the dialog is the browser's own
-    // event, and accepting it neither adds authority nor changes a request.
+    // P8.2 retired the product's last `window.confirm`: the import revert now
+    // asks through an in-page dialog. This handler stays as a defensive catch
+    // so a native dialog raised by anything else cannot block a headless page
+    // forever, and `dialogsAccepted` stays readable — a run that reports any
+    // accepted dialog is reporting something the product should no longer do.
+    // Nothing else is automated: the dialog is the browser's own event, and
+    // accepting it neither adds authority nor changes a request.
     let dialogsAccepted = 0;
     cdp.on((message) => {
       if (message.sessionId !== sessionId || message.method !== "Page.javascriptDialogOpening") return;
@@ -525,6 +527,7 @@ export const PAGE = {
       ];
       if (denials.some((marker) => body.includes(marker))) return 'denial';
       const validations = [
+        'No pudimos recalcular con esa selección',
         'Solicitud invalida',
         'Filtros no permitidos',
         'No fue posible recalcular el estudio',
@@ -653,23 +656,25 @@ export const PAGE = {
     })()`,
 
   /**
-   * Inserts a value the server never offered into the product's own control and
-   * selects it — the visible-client-state tampering case. The framework still
-   * builds the request; only the value is hostile.
+   * Temporarily rewrites an existing option to a value the server never offered
+   * and selects it — the visible-client-state tampering case. Reusing an option
+   * preserves React's managed child tree while the synchronous change handler
+   * captures the hostile value and builds the request.
    */
   forgeSelectValueByAriaLabel: (prefix, value) => `
     (() => {
       const select = [...document.querySelectorAll('select')]
         .find((node) => (node.getAttribute('aria-label') || '').startsWith(${JSON.stringify(prefix)}));
       if (!select) return 'no-control';
-      const option = document.createElement('option');
-      option.value = ${JSON.stringify(value)};
-      option.textContent = 'forged';
-      select.appendChild(option);
+      const target = [...select.options].find((option) => option.value !== select.value);
+      if (!target) return 'no-alternative';
+      const original = target.value;
+      target.value = ${JSON.stringify(value)};
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(select, option.value);
+      setter.call(select, target.value);
       select.dispatchEvent(new Event('input', { bubbles: true }));
       select.dispatchEvent(new Event('change', { bubbles: true }));
+      target.value = original;
       return 'ok';
     })()`,
 
@@ -711,14 +716,15 @@ export const PAGE = {
         .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
       const select = label && label.querySelector('select');
       if (!select) return 'no-control';
-      const option = document.createElement('option');
-      option.value = ${JSON.stringify(value)};
-      option.textContent = 'forged';
-      select.appendChild(option);
+      const target = [...select.options].find((option) => option.value !== select.value);
+      if (!target) return 'no-alternative';
+      const original = target.value;
+      target.value = ${JSON.stringify(value)};
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-      setter.call(select, option.value);
+      setter.call(select, target.value);
       select.dispatchEvent(new Event('input', { bubbles: true }));
       select.dispatchEvent(new Event('change', { bubbles: true }));
+      target.value = original;
       return 'ok';
     })()`,
 
@@ -829,15 +835,15 @@ const selectByValue = (labelPrefix, value) => `
     return 'ok';
   })()`;
 
-/** The upload screen's own "analysis is ready" signal (UploadForm.tsx:272). */
-const UPLOAD_READY = "() => /filas detectadas/.test(document.body.innerText)";
+/** The upload screen's own "analysis is ready" signal (UploadForm.tsx:223). */
+const UPLOAD_READY = "() => /filas en el archivo/.test(document.body.innerText)";
 /** The preview screen's own "preview is ready" signal (its confirm control). */
 const PREVIEW_READY =
-  "() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim().startsWith('Confirmar importaci'))";
+  "() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim().startsWith('Confirmar y guardar'))";
 /** The confirm stage's own success signal (UploadForm renders the batch id). */
 const CONFIRM_DONE = "() => /importaci[oó]n\\s+(confirmada|completada)|filas importadas|lote\\s+creado/i.test(document.body.innerText)";
 /** The rollback control's own settled signal. */
-const ROLLBACK_DONE = "() => /revertid/i.test(document.body.innerText)";
+const ROLLBACK_DONE = "() => /Se revirti[oó]/i.test(document.body.innerText)";
 
 /**
  * The `upload.*` stages share one sequence, so each driver assumes the previous
@@ -938,7 +944,7 @@ export const BROWSER_DRIVERS = Object.freeze({
         .waitForDom(`() => ${PAGE.actionOutcomeKind} !== 'none'`, params.settleTimeoutMs)
         .catch(() => false);
       const outcome = settled ? await context.evaluate(PAGE.actionOutcomeKind) : "none";
-      const enabled = await context.evaluate(PAGE.controlEnabled("Analizar"));
+      const enabled = await context.evaluate(PAGE.controlEnabled("Revisar archivo"));
       return {
         status: 200,
         domSignal: outcome,
@@ -948,7 +954,7 @@ export const BROWSER_DRIVERS = Object.freeze({
       };
     }
 
-    const clicked = await context.evaluate(PAGE.clickByName("Analizar"));
+    const clicked = await context.evaluate(PAGE.clickByName("Revisar archivo"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `analyze-${clicked}` };
     // `settleTimeoutMs` is a wider BOUND, never a retry: a large source is
     // megabytes of body that must be transferred and buffered before the action
@@ -959,7 +965,7 @@ export const BROWSER_DRIVERS = Object.freeze({
 
   /** `previewImportFile` — the staged validation pass; it writes nothing. */
   "upload.preview": async ({ context, PAGE }) => {
-    const clicked = await context.evaluate(PAGE.clickByName("Generar vista previa"));
+    const clicked = await context.evaluate(PAGE.clickByName("Ver cómo quedará"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `preview-${clicked}` };
     return settleImperative(context, PAGE, PREVIEW_READY);
   },
@@ -977,15 +983,15 @@ export const BROWSER_DRIVERS = Object.freeze({
     // label text. Ticking every checkbox on the page also toggles the mapping
     // controls, and those call `updateMapping`, which clears the preview and
     // unmounts the confirm step — the control then legitimately disappears.
-    const boxes = await context.evaluate(PAGE.checkByLabelTextPrefix("Confirmo que"));
+    const boxes = await context.evaluate(PAGE.checkByLabelTextPrefix("Revisé cómo se leyó"));
     if (boxes !== "ok") return { status: 200, domSignal: "none", note: `confirm-checkbox-${boxes}` };
     // Let React settle before reading the submit control: `canConfirm` is
     // derived at render time, so reading it in the same turn would observe the
     // state as it was before the change.
     const enabled = await context
-      .waitForDom(`() => ${PAGE.controlEnabled("Confirmar importación")}`, 5000)
+      .waitForDom(`() => ${PAGE.controlEnabled("Confirmar y guardar")}`, 5000)
       .catch(() => false);
-    const clicked = enabled ? await context.evaluate(PAGE.clickByName("Confirmar importación")) : "disabled";
+    const clicked = enabled ? await context.evaluate(PAGE.clickByName("Confirmar y guardar")) : "disabled";
     if (clicked !== "ok") {
       // The note carries control-state tokens, counts and booleans only —
       // never a rendered message and never product data.
@@ -997,7 +1003,7 @@ export const BROWSER_DRIVERS = Object.freeze({
             'checked=' + boxes.filter((b) => b.checked).length + '/' + boxes.length,
             'selects=' + selects.length,
             'selectsWithValue=' + selects.filter((s) => s.value !== '').length,
-            'confirmStepPresent=' + /Revisa y confirma/.test(document.body.innerText),
+            'confirmStepPresent=' + /Revisa cómo quedará y confirma/.test(document.body.innerText),
           ].join(' ');
         })()`);
       return { status: 200, domSignal: "none", note: `confirm-${clicked} ${state}` };
@@ -1007,11 +1013,20 @@ export const BROWSER_DRIVERS = Object.freeze({
 
   /**
    * `rollbackLatestImport` — takes a bare string, so no form can express it.
-   * Its control asks `window.confirm` first; the context answers that dialog
-   * exactly as the user who clicked it would (see `dialogsAccepted`).
+   *
+   * P8.2 replaced its `window.confirm` with an in-page dialog, so the driver
+   * now does what the operator does: open the dialog, then confirm inside it.
+   * Two deliberate clicks, exactly as the product asks for them — the driver
+   * gains no shortcut and no authority from the change.
    */
   "upload.rollback": async ({ context, PAGE }) => {
-    const clicked = await context.evaluate(PAGE.clickByName("Revertir último lote"));
+    const opened = await context.evaluate(PAGE.clickByName("Deshacer esta carga"));
+    if (opened !== "ok") return { status: 200, domSignal: "none", note: `rollback-open-${opened}` };
+    const ready = await context
+      .waitForDom(`() => ${PAGE.controlEnabled("Sí, deshacer la carga")}`, 5000)
+      .catch(() => false);
+    if (!ready) return { status: 200, domSignal: "none", note: "rollback-dialog-absent" };
+    const clicked = await context.evaluate(PAGE.clickByName("Sí, deshacer la carga"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `rollback-${clicked}` };
     return settleImperative(context, PAGE, ROLLBACK_DONE);
   },

@@ -449,7 +449,18 @@ async function checkScopedDashboard(harness) {
   // still be scope-limited. This is what proves the scope is re-derived on the
   // server for every data request rather than baked into the initial page.
   await scoped.context.evaluate(`window.__p7aStatus = ${STATUS_EXPR}; "ok";`);
-  const driven = await scoped.context.evaluate(PAGE.changeSelectByLabel(ORTHOGONAL_DIMENSION));
+  // The filter is located by its own frozen `aria-label`, not by the visible
+  // label text. `StudyCard.tsx` renders `aria-label={`Filtrar por ${key}`}` from
+  // the raw dimension key, which is a stable contract, while the VISIBLE label
+  // is `characteristicLabel(key)` — humanised by P8, so "genero" now reads
+  // "Genero" and a visible-text search finds nothing. Matching the aria-label
+  // is what this control was always supposed to use; `changeSelectByLabel`
+  // here was a driver bug, and it made a passing product look like a failing
+  // one. The probe is not weakened: it still drives the real control and still
+  // requires the returned view to stay scope-limited.
+  const driven = await scoped.context.evaluate(
+    PAGE.changeSelectByAriaLabel(`Filtrar por ${ORTHOGONAL_DIMENSION}`),
+  );
   if (driven !== "ok") return fail("A2.2", `the "${ORTHOGONAL_DIMENSION}" control could not be driven (${driven})`);
   const settled = await scoped.context
     .waitForDom(

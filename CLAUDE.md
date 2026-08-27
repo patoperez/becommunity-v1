@@ -114,7 +114,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (27 gates; P8.2 adds test:studio-workflows)
+npm test             # complete deterministic suite (31 gates; P8.5 adds test:p8-acceptance)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -182,9 +182,15 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — do not skip ahead
+## Current work — P8 closure delivery; do not skip ahead
 
 The authoritative state is `docs/CURRENT_STATE.md`.
+
+P8 is implementation-complete and owner-accepted on
+`p8f-responsive-accessibility-acceptance` at `b49df5d`. Deliver the closure
+record without reopening design scope. It is not merged or deployed; after
+delivery, the next bounded unit is go-live hardening for the final domain,
+production Supabase and operational prerequisites.
 
 - P0-P6 are implemented, technically accepted and human-accepted on synthetic
   data. P6E completed with 108 automated checks and 0 failures.
@@ -205,21 +211,64 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
   semantic foundation, sign-in, shells, client panorama and journey slice are
   established. Do not reopen its visual-prototype loop.
-- **Current unit: remaining P8.2 Studio guided workflows.** Its first
-  owner-review slice was accepted and squash-merged through PR #39 at
-  `b1abfef`: the
-  no-code access-scope picker (`src/components/studio/AccessScopeFields.tsx` over
-  the aggregate-only `src/lib/studies/scope-inventory.ts`) and the guided import
-  mapping plus readable preview (`MappingWorkbench.tsx`, `ImportPreview.tsx` over
-  `src/lib/ingestion/destinations.ts`). The stored `data_scope` shape,
-  `ImportMapping` and every ingestion contract are unchanged; `npm run
-  test:studio-workflows` proves it. The remaining P8.2 scope is not started:
-  `/studio` home and routes, study work surface, the picker in journey/theme
-  work, paging, preview-before-publication, destructive-action dialog and the
-  reviewed account/client lifecycle (suspend vs delete, archive vs permanent
-  deletion with impact summary and exact-name confirmation). P8.3 has not
-  started. No ordinary Studio workflow may ask for raw JSON, an internal
+- **P8.2 is implementation-complete and owner-accepted in the final P8 pass on
+  2026-08-27.** Slice one
+  (owner-accepted, PR #39, `b1abfef`) delivered the no-code access-scope picker
+  and the guided import mapping and readable preview. The completion unit adds
+  the eleven `/studio/**` routes, the actionable home, the study work surface
+  and its process steps, the journey-metric and theme pickers, visible paging on
+  the qualitative review and the import history, publication reachable only
+  through the client preview, one accessible destructive-action dialog in place
+  of `window.confirm()`, and the account and client lifecycle. It is gated by
+  `npm run test:studio-completion` (48 checks) beside
+  `npm run test:studio-workflows` (22). Migration `0015` is applied to the
+  synthetic project only. On 2026-08-25 the canonical offline chain, the live
+  adversarial chain and the exact-ledger lifecycle acceptance passed at
+  `543889a`; cleanup left no disposable rows, Auth identities or Storage
+  objects, and the protected fixture remained unchanged. **One lifecycle item
+  remains deliberately unavailable:** permanent CLIENT deletion is disabled
+  and refused server-side until a recoverable cross-system deletion workflow
+  exists. No ordinary Studio workflow may ask for raw JSON, an internal
   identifier or a metric key.
+- **P8.3 is implementation-complete and owner-accepted.**
+  `/insights/e/[studyId]` is the authorized client study route;
+  the dashboard remains its compatibility home. URL and PDF filters share the
+  exact `f.*` parser, the free comparison keeps the existing server allowlist,
+  fewer than four periods use a list while longer histories use a chart, and
+  every history has a table alternative.
+- **P8.4 is implementation-complete and owner-accepted.**
+  `/studio/e/[studyId]/interpretacion` owns the explicit draft → review →
+  approved → published workflow. A newer draft never replaces the client
+  snapshot until it is approved and published again. Client absence remains
+  silence. The study/client presentation controls are bounded, no-code and
+  inherited; templates are team-shared with author attribution and preserve
+  the configuration. Migrations `0017` and `0018` are applied to the synthetic
+  project only. Never invent interpretation copy or expose draft content.
+- **P8.5 is implementation-complete and owner-accepted; P8 closed on
+  2026-08-27.**
+  `test:p8-acceptance` covers the named state system, plain language, keyboard
+  affordances, unique word-cloud semantics and the declared six-width matrix.
+  `test:p8-acceptance-live` renders the authorized client and Studio route set
+  at 320/360/390/768/1024/1280 px without screenshots and rejects page-level
+  overflow, clipped text, duplicate IDs, unnamed graphics, missing alt text or
+  sub-24 px control targets. The owner completed and accepted the real-phone
+  pass after the LAN hydration, mobile account-row and relative-scale fixes at
+  `8a4437a` and `b49df5d`. Studio deliberately has no top-level
+  `loading.tsx`: its role check must finish before any streamed HTTP 200 UI.
+- **Every `/admin/**` address still answers.** Studio gained addresses; it
+  renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
+  frozen adversarial catalogue all depend on the old paths, and
+  `src/lib/studio/routes.ts` records the pairing so a gate can assert it.
+- ⓘ **No lifecycle action succeeds unrecorded.** Suspend, restore, archive and
+  restore refuse when the administrative record is unavailable, and undo
+  themselves if the record cannot be written after the change. Permanent user
+  deletion writes durable intent and checks that write BEFORE deleting. Do not
+  reintroduce a best-effort "we could not record this" success path.
+- ⓘ **Publication has exactly one surface.** `/studio/e/[studyId]/publicar`,
+  reached from the client preview, is the only path that moves a study between
+  draft, published and archived. `updateStudyConfiguration` may only re-save the
+  state that already holds, and `setStudyPublication` independently refuses a
+  publication with no acknowledgement, an empty study or an archived client.
 - Preserve P7 authorization/input gates, all calculation outputs, ingestion,
   RLS, roles and publication boundaries. P8 changes presentation and guided
   workflow first; migrations or authorization changes require a separate,

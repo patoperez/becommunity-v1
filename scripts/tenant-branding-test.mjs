@@ -17,6 +17,7 @@ assert.deepEqual(parseBrandConfig({
   primaryColor: "#abcdef",
   accentColor: "#123456",
   logoPath: null,
+  presentationDefaults: { coverLabel: null, coverNote: null, threshold: null },
 });
 assert.deepEqual(parseBrandConfig({ primaryColor: "javascript:red" }), DEFAULT_BRAND);
 assert.deepEqual(hexToRgb("#ff8000"), [1, 128 / 255, 0]);
@@ -38,7 +39,8 @@ const migration = await readFile(new URL("../supabase/migrations/0013_tenant_bra
 assert.ok(action.indexOf("internalContext()") < action.indexOf('storage.from("tenant-branding")'), "auth must precede logo storage access");
 assert.match(action, /imageExtension\(bytes, file\.type\)/, "logo uploads must validate magic bytes");
 assert.match(dashboard, /select\("name, brand_config"\)/, "portal must load tenant branding through RLS");
-assert.match(dashboard, /linear-gradient|NarrativeHome view=\{narrative\} brand=\{brand\}/, "portal narrative must receive tenant branding");
+assert.match(dashboard, /NarrativeHome view=\{narrative\} brand=\{\{ \.\.\.brand,[\s\S]*primaryColor:[\s\S]*accentColor:/, "portal narrative must receive the tenant brand with validated study overrides");
+assert.match(dashboard, /presentation=\{studyData\[0\]\?\.presentation\}/, "portal narrative receives the effective presentation configuration");
 assert.match(report, /hexToRgb\(brand\.primaryColor\)/, "PDF must use the tenant palette");
 assert.match(middleware, /img-src 'self' data: \$\{supabaseOrigin\}/, "CSP must allow tenant logos from the configured Supabase origin");
 assert.match(migration, /file_size_limit[\s\S]*1048576/, "storage must enforce the 1 MB logo limit");

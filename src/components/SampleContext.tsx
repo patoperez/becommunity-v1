@@ -44,7 +44,7 @@ export function SampleContext({
       <span aria-hidden="true" className="mt-[0.15em] text-[0.7em] leading-none">
         {GLYPH[copy.tone]}
       </span>
-      <span>
+      <span className="min-w-0 [overflow-wrap:anywhere]">
         {copy.headline}
         {detail && copy.detail ? (
           <span className="block text-muted">{copy.detail}</span>
@@ -78,7 +78,7 @@ export function MethodDisclosure({
         </span>
         {summary}
       </summary>
-      <div className="border-t border-line px-3.5 py-3 text-sm leading-relaxed text-muted">
+      <div className="border-t border-line px-3.5 py-3 text-sm leading-relaxed text-muted [overflow-wrap:anywhere]">
         {children}
       </div>
     </details>
