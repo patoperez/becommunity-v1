@@ -312,12 +312,13 @@ ok("saved destinations keep their keys; the label is derived, never stored");
 
 console.log("\n[14] Every mapping kind is still representable, and still adapts");
 assert.deepEqual(DESTINATION_CHOICES.map((choice) => choice.kind),
-  ["ignore", "segment", "quantitative", "qualitative"]);
+  ["ignore", "private", "segment", "quantitative", "qualitative"]);
 assert.deepEqual(DESTINATION_CHOICES.map((choice) => choice.label),
-  ["No importar", "Dato para filtrar", "Resultado numérico", "Comentario abierto"]);
+  ["No importar", "Dato privado del equipo", "Dato para filtrar", "Resultado numérico", "Comentario abierto"]);
 assert.deepEqual(QUALITATIVE_SOURCE_CHOICES.map((choice) => choice.value), [...QUALITATIVE_SOURCES],
   "the qualitative source allowlist is unchanged; only its labels are friendly");
 assert.equal(qualitativeSourceLabel("mystery_shopper"), "Visita de cliente incógnito");
+assert.equal(targetForKind("private", "priv_nombre").key, "nombre");
 assert.equal(targetForKind("segment", "seg_nivel").key, "nivel");
 assert.equal(targetForKind("quantitative", "q_sat_general").metricKey, "sat_general");
 assert.equal(targetForKind("qualitative", "qual_comentario").theme, "comentario");
