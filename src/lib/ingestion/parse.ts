@@ -61,8 +61,10 @@ const SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/mai
  * SpreadsheetML namespace. ExcelJS 4's SAX reader only recognizes the same
  * elements when that namespace is the default, and otherwise fails before it
  * can even find `workbook.sheets`. Normalize only that known namespace and only
- * after the ordinary reader fails; relationships and every cell value remain
- * byte-for-byte equivalent at the XML level.
+ * after the ordinary reader fails. Some of those writers also emit absolute
+ * table relationships that ExcelJS cannot resolve. Tables are presentation
+ * metadata for this read-only ingestion path, so their worksheet references are
+ * removed while every cell value and formula remains unchanged.
  */
 async function normalizePrefixedSpreadsheetXml(buffer: ArrayBuffer): Promise<ArrayBuffer | null> {
   const { default: JSZip } = await import("jszip");
@@ -71,10 +73,21 @@ async function normalizePrefixedSpreadsheetXml(buffer: ArrayBuffer): Promise<Arr
   let changed = false;
   await Promise.all(targets.map(async (entry) => {
     const xml = await entry.async("string");
-    if (!xml.includes(`xmlns:x="${SPREADSHEET_NS}"`)) return;
-    const normalized = xml
-      .replace(`xmlns:x="${SPREADSHEET_NS}"`, `xmlns="${SPREADSHEET_NS}"`)
-      .replace(/(<\/?)(?:x):/g, "$1");
+    let normalized = xml;
+    if (normalized.includes(`xmlns:x="${SPREADSHEET_NS}"`)) {
+      normalized = normalized
+        .replace(`xmlns:x="${SPREADSHEET_NS}"`, `xmlns="${SPREADSHEET_NS}"`)
+        .replace(/(<\/?)(?:x):/g, "$1");
+    }
+    if (/^xl\/worksheets\/[^/]+\.xml$/.test(entry.name)) {
+      normalized = normalized.replace(/<tableParts\b[^>]*>[\s\S]*?<\/tableParts>/g, "");
+    }
+    if (/^xl\/worksheets\/_rels\/[^/]+\.rels$/.test(entry.name)) {
+      normalized = normalized.replace(
+        /<Relationship\b(?=[^>]*\bType="[^"]*\/relationships\/table")[^>]*\/>/g,
+        "",
+      );
+    }
     if (normalized !== xml) {
       zip.file(entry.name, normalized);
       changed = true;

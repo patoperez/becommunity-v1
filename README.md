@@ -126,6 +126,11 @@ without screenshots, and fails on page overflow, clipped text, duplicate IDs,
 unnamed graphics, missing image alternatives or undersized controls. The human
 acceptance record is in `.design/be-community-v2/implementation-reviews/p8-5-final-acceptance/REVIEW.md`.
 
+**Real-study import support is prepared after P8.** Guided XLSX/CSV mapping now
+includes internal-only respondent metadata, and aggregate retention/churn
+history has its own period-series upload instead of being represented as survey
+responses. Migration `0019` is required before using these additions.
+
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or handing off

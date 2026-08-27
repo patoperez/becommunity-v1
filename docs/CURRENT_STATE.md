@@ -574,6 +574,27 @@ deferred release-state evidence, not the active product-construction unit.
   these dependencies rather than silently skipping them or treating them as
   already complete.
 
+## Real-study ingestion extension (2026-08-27)
+
+The first full-fidelity client workbook exposed two source shapes that the
+synthetic fixtures intentionally did not model. They now have explicit, separate
+boundaries:
+
+- respondent identifiers and operational timestamps may be mapped as **private
+  team data**; they are stored only with raw respondents and are never selected
+  by the client-authorized study loader;
+- monthly membership counts are imported as an aggregate period series, with
+  retention and churn recalculated from the counts, never synthesized as fake
+  respondents;
+- standards-compliant XLSX files that use an explicit SpreadsheetML namespace
+  prefix are accepted. Unsupported table presentation metadata is ignored only
+  in the fallback reader; worksheet cell values remain the import source.
+
+Migration `0019_private_metadata_and_period_series.sql` carries the new private
+column, aggregate tables, forced RLS/revocations, and atomic commit functions.
+The extension does not broaden the browser data boundary or alter existing
+calculation formulas.
+
 ## Required verification discipline
 
 Use the scripts in `package.json` as the source of truth. At minimum, every PR

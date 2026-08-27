@@ -33,6 +33,12 @@ const series = adaptPeriodSeries({
 check(series.ok && series.points.length === 2, "aggregate periods are accepted as two periods, not respondents");
 check(series.ok && series.points[0].retention === 74 && series.points[0].churn === 26, "retention and churn are recalculated canonically");
 
+const fractionalSeries = adaptPeriodSeries({
+  headers: ["Periodo", "Miembros inicio", "Miembros nuevos", "Miembros final", "Miembros perdidos", "Retención (%)", "Deserción (%)"],
+  rows: [{ Periodo: "Marzo", "Miembros inicio": "11", "Miembros nuevos": "13", "Miembros final": "21", "Miembros perdidos": "3", "Retención (%)": "0.7272727273", "Deserción (%)": "0.2727272727" }],
+});
+check(fractionalSeries.ok, "stored spreadsheet percentage fractions are interpreted as display percentages");
+
 const impossible = adaptPeriodSeries({
   headers: ["Periodo", "Miembros inicio", "Miembros nuevos", "Miembros final", "Miembros perdidos"],
   rows: [{ Periodo: "Marzo", "Miembros inicio": "100", "Miembros nuevos": "10", "Miembros final": "99", "Miembros perdidos": "3" }],
@@ -51,4 +57,3 @@ check(!/select\([^)]*private_metadata/.test(authorized), "client-authorized load
 
 if (failures) process.exit(1);
 console.log("RESULT: private metadata and aggregate-series contracts passed.");
-

@@ -46,10 +46,16 @@ function parseCount(raw: string): number | null {
 }
 
 function parsePercent(raw: string): number | null {
-  const cleaned = raw.trim().replace("%", "").replace(",", ".");
+  const trimmed = raw.trim();
+  const hasPercentSign = trimmed.includes("%");
+  const cleaned = trimmed.replace("%", "").replace(",", ".");
   if (cleaned === "") return null;
   const value = Number(cleaned);
-  return Number.isFinite(value) ? value : null;
+  if (!Number.isFinite(value)) return null;
+  // Spreadsheet readers may expose a percentage-formatted cell as its stored
+  // fraction (0.7273) instead of its display text (72.73%). Both represent the
+  // same authored value; plain values above 1 remain percentage points.
+  return !hasPercentSign && value >= 0 && value <= 1 ? value * 100 : value;
 }
 
 /** Reads aggregate period rows without ever treating them as respondents. */

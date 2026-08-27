@@ -160,7 +160,17 @@ eq("later header keeps physical column", parsedXlsx.rows[0].NPS, "9");
 // A standards-compliant explicit prefix is accepted too. This is how the
 // prepared Cuicuilco workbooks are written, and used to make ExcelJS fail
 // before it found the workbook model.
-const prefixedZip = await JSZip.loadAsync(xlsxBytes);
+const tableWorkbook = new ExcelJS.Workbook();
+const tableSheet = tableWorkbook.addWorksheet("Respuestas");
+tableSheet.addTable({
+  name: "ImportTable",
+  ref: "A1",
+  headerRow: true,
+  columns: [{ name: "Nivel" }, { name: "Auxiliar" }, { name: "NPS" }],
+  rows: [["Primaria", "dato conservado", 9]],
+});
+const tableBytes = await tableWorkbook.xlsx.writeBuffer();
+const prefixedZip = await JSZip.loadAsync(tableBytes);
 for (const entry of Object.values(prefixedZip.files)) {
   if (entry.dir || !entry.name.endsWith(".xml")) continue;
   const xml = await entry.async("string");
@@ -168,6 +178,13 @@ for (const entry of Object.values(prefixedZip.files)) {
   prefixedZip.file(entry.name, xml
     .replace('xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"', 'xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"')
     .replace(/<(\/?)((?:workbook|sheets|sheet|worksheet|dimension|sheetFormatPr|sheetData|row|c|v|pageMargins|pageSetup|sst|si|t|cols|col|mergeCells|mergeCell|tableParts|tablePart|autoFilter|tableColumns|tableColumn|tableStyleInfo|styleSheet|numFmts|numFmt|fonts|font|fills|fill|borders|border|cellStyleXfs|cellXfs|xf|cellStyles|cellStyle|dxfs|tableStyles|calcPr|fileVersion|workbookPr))\b/g, '<$1x:$2'));
+}
+const prefixedRelationships = prefixedZip.file("xl/worksheets/_rels/sheet1.xml.rels");
+if (prefixedRelationships) {
+  prefixedZip.file(
+    "xl/worksheets/_rels/sheet1.xml.rels",
+    (await prefixedRelationships.async("string")).replace("../tables/", "/xl/tables/"),
+  );
 }
 const prefixedBytes = await prefixedZip.generateAsync({ type: "uint8array" });
 const prefixedBuffer = prefixedBytes.buffer.slice(prefixedBytes.byteOffset, prefixedBytes.byteOffset + prefixedBytes.byteLength);
