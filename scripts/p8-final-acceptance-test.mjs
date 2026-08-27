@@ -82,6 +82,7 @@ for (const path of pages) lacks(await read(path.replace(/^.*?src\//, "src/")), /
 has(routes, /studioStudyInterpretation[\s\S]*studioStudyPreview[\s\S]*studioStudyPublish/, "the complete study workflow remains addressable");
 has(matrix, /320 px[\s\S]*360 px[\s\S]*390 px[\s\S]*768 px[\s\S]*1024 px[\s\S]*1280 px/, "the acceptance matrix declares six widths");
 has(matrix, /Carga[\s\S]*Vacío[\s\S]*Error[\s\S]*No encontrado[\s\S]*Sin permiso/, "the state matrix names every required state class");
-has(matrix, /Revisión humana en teléfono real: pendiente/, "automation does not counterfeit human acceptance");
+has(matrix, /browser script is not a person and cannot approve the experience on her behalf/, "automation remains unable to counterfeit human acceptance");
+has(matrix, /owner completed the real-phone pass on 2026-08-27/, "the matrix records the owner's dated real-device acceptance");
 
 console.log(`P8.5 final product acceptance: PASS (${checks} checks across ${pages.length} routes)`);
