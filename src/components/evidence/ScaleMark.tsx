@@ -210,7 +210,7 @@ export function PeerMark({
         <span aria-hidden="true" className="absolute inset-y-0 right-0 w-0.5 rounded-full bg-line-strong" />
         <Marker percent={geometry.markerPercent} fill={fill} />
       </div>
-      <Anchors left={String(min)} right={String(max)} />
+      <Anchors left={`Más bajo · ${min}`} right={`Más alto · ${max}`} />
     </div>
   );
 }

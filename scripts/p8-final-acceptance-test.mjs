@@ -23,7 +23,7 @@ async function pageFiles(root) {
 
 const [layout, css, states, studioError, studioMissing, insightsLoading, insightsError,
   insightsMissing, cloud, panorama, journey, trends, dialog, tabs, uploadActions, legacyConfig,
-  studioConfig, matrix, routes, nextConfig, insightsShell, lifecyclePanel] = await Promise.all([
+  studioConfig, matrix, routes, nextConfig, insightsShell, lifecyclePanel, scaleMark] = await Promise.all([
   read("src/app/layout.tsx"), read("src/app/globals.css"), read("src/components/States.tsx"),
   read("src/app/studio/error.tsx"), read("src/app/studio/not-found.tsx"),
   read("src/app/insights/loading.tsx"), read("src/app/insights/error.tsx"), read("src/app/insights/not-found.tsx"),
@@ -35,6 +35,7 @@ const [layout, css, states, studioError, studioMissing, insightsLoading, insight
   read("src/lib/studio/routes.ts"), read("next.config.ts"),
   read("src/components/shell/InsightsShell.tsx"),
   read("src/components/studio/ClientLifecyclePanel.tsx"),
+  read("src/components/evidence/ScaleMark.tsx"),
 ]);
 
 has(layout, /lang="es"/, "the document language is Spanish");
@@ -69,6 +70,7 @@ has(panorama, /\[overflow-wrap:anywhere\]/, "tight client captions may break saf
 has(nextConfig, /DEV_ALLOWED_ORIGINS[\s\S]*allowedDevOrigins/, "phone review can opt into its exact LAN origin without a production wildcard");
 has(insightsShell, /w-full min-w-0 items-center justify-between[\s\S]*sm:w-auto sm:justify-end/, "the mobile account row gives the identity and sign-out control their own width");
 has(lifecyclePanel, /<details[\s\S]*Por qué no está disponible[\s\S]*TENANT_DELETION_DISABLED_REASON/, "the unavailable client deletion keeps technical detail behind an intentional disclosure");
+has(scaleMark, /Más bajo · \$\{min\}[\s\S]*Más alto · \$\{max\}/, "peer scales name their relative endpoints instead of looking like an empty absolute bar");
 
 lacks(uploadActions, /message: "[^"]*JSON/, "ordinary import errors never ask staff to understand JSON");
 lacks(legacyConfig, /Explorador pivote/, "legacy configuration no longer exposes pivot jargon");
