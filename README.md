@@ -85,8 +85,8 @@ implementation-complete and owner-accepted at `3659a38` (delivery PR #37).
 P8.2's first owner-review slice — no-code access scope and guided import
 mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39).
 
-**P8.2 is implementation- and synthetic-acceptance-complete and awaiting owner
-review.** Be Community
+**P8.2 is implementation-complete and owner-accepted as part of the final P8
+pass on 2026-08-27.** Be Community
 Studio has its own addresses under `/studio/**` — every `/admin/**` address
 still answers — an actionable home, a study work surface with process steps,
 the journey-metric and theme pickers, visible paging, publication reachable only
@@ -98,15 +98,14 @@ protected fixture unchanged. Permanent client deletion remains deliberately
 disabled and refused server-side until a recoverable cross-system deletion
 workflow exists.
 
-**P8.3 is implementation-complete on `p8d-insights-data-story` and awaiting
-owner review.** `/insights` now has a compact study library and an authorized
+**P8.3 is implementation-complete and owner-accepted.** `/insights` now has a
+compact study library and an authorized
 route per study; filter state is shareable in the URL and drives the same
 bounded grammar used by the PDF. Comparisons, longitudinal reading, sample
 context, recovery states and the PDF vocabulary are one client-facing story.
 Calculations, ingestion, RLS, roles and publication boundaries are unchanged.
 
-**P8.4 is implementation-complete on
-`p8e-qualitative-interpretation-customization` and awaiting owner review.**
+**P8.4 is implementation-complete and owner-accepted.**
 Studio now has a structured consultant-reading workflow with private draft,
 visible review state and a separately published client snapshot. The client
 story and PDF show only that snapshot. Qualitative results add an optional,
@@ -118,15 +117,14 @@ applied to the synthetic project only. `npm run test:p8-qualitative` is the
 30th deterministic gate; `npm run test:p8-qualitative-live` verifies the full
 interpretation lifecycle with disposable data.
 
-**P8.5 automated acceptance is implementation-complete on
-`p8f-responsive-accessibility-acceptance`; the owner's real-phone pass remains
-pending.** The 31st deterministic gate checks named loading/empty/error/
+**P8.5 is implementation-complete and owner-accepted; P8 closed on
+2026-08-27.** The 31st deterministic gate checks named loading/empty/error/
 not-found states, keyboard and focus contracts, reduced motion, plain language
 and accessible word-cloud semantics. A separate authenticated rendered gate
 visits the client and Studio route set at 320, 360, 390, 768, 1024 and 1280 px,
 without screenshots, and fails on page overflow, clipped text, duplicate IDs,
 unnamed graphics, missing image alternatives or undersized controls. The human
-checklist is in `.design/be-community-v2/implementation-reviews/p8-5-final-acceptance/REVIEW.md`.
+acceptance record is in `.design/be-community-v2/implementation-reviews/p8-5-final-acceptance/REVIEW.md`.
 
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read

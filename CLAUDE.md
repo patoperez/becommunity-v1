@@ -182,9 +182,15 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — do not skip ahead
+## Current work — P8 closure delivery; do not skip ahead
 
 The authoritative state is `docs/CURRENT_STATE.md`.
+
+P8 is implementation-complete and owner-accepted on
+`p8f-responsive-accessibility-acceptance` at `b49df5d`. Deliver the closure
+record without reopening design scope. It is not merged or deployed; after
+delivery, the next bounded unit is go-live hardening for the final domain,
+production Supabase and operational prerequisites.
 
 - P0-P6 are implemented, technically accepted and human-accepted on synthetic
   data. P6E completed with 108 automated checks and 0 failures.
@@ -205,8 +211,8 @@ The authoritative state is `docs/CURRENT_STATE.md`.
 - **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
   semantic foundation, sign-in, shells, client panorama and journey slice are
   established. Do not reopen its visual-prototype loop.
-- **P8.2 is implementation- and synthetic-acceptance-complete and awaiting
-  owner review.** Slice one
+- **P8.2 is implementation-complete and owner-accepted in the final P8 pass on
+  2026-08-27.** Slice one
   (owner-accepted, PR #39, `b1abfef`) delivered the no-code access-scope picker
   and the guided import mapping and readable preview. The completion unit adds
   the eleven `/studio/**` routes, the actionable home, the study work surface
@@ -224,14 +230,13 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   and refused server-side until a recoverable cross-system deletion workflow
   exists. No ordinary Studio workflow may ask for raw JSON, an internal
   identifier or a metric key.
-- **P8.3 is implementation-complete on `p8d-insights-data-story` and awaiting
-  owner review.** `/insights/e/[studyId]` is the authorized client study route;
+- **P8.3 is implementation-complete and owner-accepted.**
+  `/insights/e/[studyId]` is the authorized client study route;
   the dashboard remains its compatibility home. URL and PDF filters share the
   exact `f.*` parser, the free comparison keeps the existing server allowlist,
   fewer than four periods use a list while longer histories use a chart, and
   every history has a table alternative.
-- **P8.4 is implementation-complete on
-  `p8e-qualitative-interpretation-customization` and awaiting owner review.**
+- **P8.4 is implementation-complete and owner-accepted.**
   `/studio/e/[studyId]/interpretacion` owns the explicit draft → review →
   approved → published workflow. A newer draft never replaces the client
   snapshot until it is approved and published again. Client absence remains
@@ -239,15 +244,16 @@ The authoritative state is `docs/CURRENT_STATE.md`.
   inherited; templates are team-shared with author attribution and preserve
   the configuration. Migrations `0017` and `0018` are applied to the synthetic
   project only. Never invent interpretation copy or expose draft content.
-- **P8.5 automated acceptance is implementation-complete on
-  `p8f-responsive-accessibility-acceptance`; owner phone review is pending.**
+- **P8.5 is implementation-complete and owner-accepted; P8 closed on
+  2026-08-27.**
   `test:p8-acceptance` covers the named state system, plain language, keyboard
   affordances, unique word-cloud semantics and the declared six-width matrix.
   `test:p8-acceptance-live` renders the authorized client and Studio route set
   at 320/360/390/768/1024/1280 px without screenshots and rejects page-level
   overflow, clipped text, duplicate IDs, unnamed graphics, missing alt text or
-  sub-24 px control targets. Never record the human phone row as passed until
-  the owner actually performs it. Studio deliberately has no top-level
+  sub-24 px control targets. The owner completed and accepted the real-phone
+  pass after the LAN hydration, mobile account-row and relative-scale fixes at
+  `8a4437a` and `b49df5d`. Studio deliberately has no top-level
   `loading.tsx`: its role check must finish before any streamed HTTP 200 UI.
 - **Every `/admin/**` address still answers.** Studio gained addresses; it
   renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the

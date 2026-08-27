@@ -1,6 +1,7 @@
 # P8 final acceptance matrix
 
-Status: automated acceptance complete. Revisión humana en teléfono real: pendiente.
+Status: **P8 accepted and closed.** Automated acceptance and the owner's
+real-phone review are complete.
 
 This is the final P8 acceptance contract. It records what automation can prove
 and keeps the owner's real-device judgment separate; a browser script is not a
@@ -31,13 +32,13 @@ silently clipping.
 
 | Concern | Automated evidence | Human evidence |
 |---|---|---|
-| Spanish language and landmarks | `lang="es"`, skip link, one named `main` target | Pending |
-| Keyboard | global visible focus; finding/journey arrow keys; chart points; modal trap/Escape | Pending |
-| Contrast | semantic-token and adversarial client-colour calculations | Pending |
-| Meaning without colour | written state words, glyphs and chart/table alternatives | Pending |
-| Reduced motion | global `prefers-reduced-motion` override | Pending |
-| Touch targets | rendered 24 px floor; primary controls use 44 px | Pending |
-| Zoom/reflow | six-width rendered matrix with no page-level overflow | Pending |
+| Spanish language and landmarks | `lang="es"`, skip link, one named `main` target | Accepted in the owner pass on 2026-08-27 |
+| Keyboard | global visible focus; finding/journey arrow keys; chart points; modal trap/Escape | Automated contract accepted; phone review is touch-based |
+| Contrast | semantic-token and adversarial client-colour calculations | Accepted in the owner pass on 2026-08-27 |
+| Meaning without colour | written state words, glyphs and chart/table alternatives | Accepted in the owner pass on 2026-08-27 |
+| Reduced motion | global `prefers-reduced-motion` override | Automated contract accepted; no motion blocker reported |
+| Touch targets | rendered 24 px floor; primary controls use 44 px | Accepted on a physical phone on 2026-08-27 |
+| Zoom/reflow | six-width rendered matrix with no page-level overflow | Accepted on a physical phone on 2026-08-27 |
 
 ## State matrix
 
@@ -55,11 +56,21 @@ keys, stored status values or a “pivot”. Methodological terms may appear onl
 inside a deliberate explanation. Stored field names and machine payloads stay
 behind the application boundary.
 
-## Human review still required
+## Human review record
 
-On a real phone, the owner must still confirm: the sign-in fits without losing
-its action; Studio navigation feels understandable rather than merely fitting;
-the client story is pleasant to explore; the word cloud is readable and useful;
-focus order follows the visual order; browser text zoom remains usable; and no
-important action feels too small. Record that pass here after it actually
-happens. Until then P8.5 is automated-acceptance-complete, not human-approved.
+The owner completed the real-phone pass on 2026-08-27. The first pass found
+that client-side interactions were not hydrating over the LAN review address,
+the account row was cramped, and the relative journey scale was ambiguous.
+Those findings were corrected in `8a4437a` and `b49df5d`. The owner then
+re-tested the mobile product and accepted it with “todo perfecto”. Sign-in,
+client navigation, finding selection, journey exploration, filters, disclosure
+controls and the mobile account header were all usable. No remaining clipped
+text, inaccessible action, dead end or technical-language blocker was reported.
+
+The reviewed client fixture did not expose a qualitative word cloud, so this
+record does not claim a separate visual judgment of that state. Its counted-list
+fallback, accessible naming and responsive structure remain covered by the
+deterministic and rendered gates. The owner explicitly accepted P8 without
+holding closure for another seeded-content review.
+
+This closes the human acceptance row and P8.

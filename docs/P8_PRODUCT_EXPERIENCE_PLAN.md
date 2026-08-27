@@ -1,8 +1,8 @@
 # P8 — Product Experience Transformation
 
-> **Authoritative P8 plan and experience contract.** Status: **P8.1/P8-A and
-> P8.2, P8.3, the bounded P8.4 implementation and P8.5 automated acceptance
-> are in the real product; P8.5 awaits the owner's real-phone pass.** Discovery
+> **Authoritative P8 plan and experience contract.** Status: **P8.1/P8-A,
+> P8.2, P8.3, the bounded P8.4 implementation and P8.5 are in the real product,
+> owner-accepted, and P8 closed on 2026-08-27.** Discovery
 > and standalone visual comparison are closed. Implementation records live in
 > `.design/be-community-v2/implementation-reviews/`.
 >
@@ -277,8 +277,8 @@ controls render disabled with the reason stated, which is the honest blocked
 state rather than a hidden one.
 
 ### P8.3 — Insights data story
-**Status:** implementation-complete on `p8d-insights-data-story`; awaiting owner
-review. The focused deterministic gate is `npm run test:insights-story`.
+**Status:** implementation-complete and owner-accepted. The focused
+deterministic gate is `npm run test:insights-story`.
 **Depends on:** P8.1. Reads best after P8.2 exists, but does not require it.
 **Delivers:** `/insights` and the study routes; the finding block; the indicator
 card with method disclosure; the **sample-context component** and its single
@@ -305,7 +305,7 @@ block the foundational work.
 to the real product and stop for CEO testing before generalising it. It is the
 deliverable she sells and must be corrected against her actual workflow.
 
-**Status: bounded implementation delivered; awaiting owner review.** Migration
+**Status: bounded implementation delivered and owner-accepted.** Migration
 `0017` stores the private draft, explicit review state, immutable-at-publication
 client snapshot and transition-only event trail. Migration `0018` closes the
 approved shared-template rule while retaining author attribution. Insights and
@@ -353,15 +353,15 @@ closure record.
 **Why last:** it is acceptance, not polish. It must run against the finished
 surface.
 
-**Status: automated acceptance delivered; human phone pass pending.** The
+**Status: accepted and closed on 2026-08-27.** The
 deterministic gate inventories all Studio/Insights routes and enforces named
 states, plain language, keyboard affordances, reduced motion and accessible
 word-cloud structure. The authenticated rendered gate visits client and
 internal surfaces at 320/360/390/768/1024/1280 px and rejects document overflow,
 clipped text, duplicate IDs, unnamed graphics, missing alternatives and control
-targets below 24 px. No screenshots are required. The final human row remains
-explicitly pending in `docs/P8_ACCEPTANCE_MATRIX.md` until the owner performs it
-on a physical phone.
+targets below 24 px. No screenshots are required. The owner performed the final
+human pass on a physical phone after the LAN hydration, mobile account-row and
+relative journey-scale corrections, accepted the result, and closed P8.
 
 ### Dependency summary
 
@@ -387,7 +387,7 @@ every workstream, not once at the end.
 | C4 sample context | One component, one string table; `n=` absent client-side | P8.3 — **met** on screen, longitudinal views, comparison suppression and PDF |
 | C5 significance | Finding block cannot render without the slot | P8.4 — **met**: structured authoring/review/publication exists, only the published snapshot reaches clients/PDF, and an empty slot renders silence |
 | C6 reversibility | Mutation classification table; no `window.confirm` | P8.2 — **met**: `test:studio-completion` asserts no `window.confirm`/`alert`/`prompt` on any Studio surface, that every dialog carries object, consequence, severity and recovery, and that only the permanent severity reads as danger or requires typing |
-| C7 accessibility | Named-state, keyboard/focus, reduced-motion, semantic-graphic and adversarial brand-colour gates | P8.5 — **automated rows met; real-phone row pending** |
+| C7 accessibility | Named-state, keyboard/focus, reduced-motion, semantic-graphic and adversarial brand-colour gates | P8.5 — **automated rows and owner real-phone acceptance met** |
 | C8 responsive | Authenticated rendered matrix at 320/360/390/768/1024/1280 px | P8.5 — **met in automation** |
 | C9 states | Every Studio/Insights route enumerated; zero blank `null` pages; shared loading/error/not-found system | P8.5 — **met** |
 | **C10 invariants** | `typecheck`, `lint`, `test`, `build` in WSL/Linux CI, plus the live chain where the PR touches an authorized path | **Every PR** |

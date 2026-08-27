@@ -1,6 +1,7 @@
 # P8.5 — revisión final de experiencia
 
-Estado: **automatización terminada; revisión humana en teléfono real pendiente**.
+Estado: **aceptado por automatización y por la revisión humana en teléfono real;
+P8 cerrado el 2026-08-27**.
 
 No se generaron screenshots. La revisión automatizada abre el producto real con
 sesiones de cliente y equipo interno, y mide directamente lo que renderiza.
@@ -19,10 +20,11 @@ sesiones de cliente y equipo interno, y mide directamente lo que renderiza.
 - Estados de carga, vacío, error, no encontrado y sin permiso con salida clara.
 - Lenguaje ordinario: el equipo no ve JSON, claves internas ni “pivote”.
 
-## Recorrido humano pendiente
+## Recorrido humano completado
 
-En un teléfono físico, revisar una vez cada bloque. No hace falta comparar
-capturas; importa que la experiencia se entienda y se pueda operar.
+El propietario revisó el producto en un teléfono físico. No se usaron capturas
+como sustituto de la interacción: se operaron las vistas reales por la dirección
+LAN del servidor de desarrollo.
 
 ### Cliente
 
@@ -46,8 +48,23 @@ capturas; importa que la experiencia se entienda y se pueda operar.
 5. Abrir una confirmación destructiva solo hasta el diálogo; cancelar con Escape
    y comprobar que el foco vuelve al botón que lo abrió. No ejecutar la acción.
 
-## Criterio de cierre
+## Resultado y criterio de cierre
 
-Marcar la fila humana como aprobada solo si no hay texto cortado, controles
-inaccesibles, callejones sin salida ni pasos que requieran conocimiento técnico.
-Registrar cualquier observación con ruta, rol y tamaño aproximado de pantalla.
+La primera pasada detectó tres problemas reales: los componentes React no
+respondían en la revisión LAN por el bloqueo de orígenes de desarrollo de Next,
+la fila de cuenta se amontonaba en móvil y la escala relativa del journey no
+explicaba sus extremos. `8a4437a` habilitó explícitamente el origen LAN de
+revisión mediante `DEV_ALLOWED_ORIGINS`, corrigió la fila de cuenta y mantuvo
+los controles de ciclo de vida legibles. `b49df5d` cambió los extremos por
+“Más bajo” y “Más alto”.
+
+Después de esas correcciones, el propietario volvió a probar la experiencia y
+la aceptó el 2026-08-27 con “todo perfecto”. No quedaron texto cortado,
+controles inaccesibles, callejones sin salida ni pasos que requieran conocimiento
+técnico. La matriz humana queda aprobada y P8 se considera cerrado.
+
+El fixture revisado no mostraba una nube de palabras cualitativa, así que este
+registro no inventa una validación visual humana de ese estado. Su lista contada
+alternativa, nombre accesible y estructura responsive sí están cubiertos por los
+gates; el propietario decidió no condicionar el cierre de P8 a otra carga de
+contenido sintético.

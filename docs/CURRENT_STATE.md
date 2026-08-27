@@ -1,6 +1,6 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-24**.
+> Authoritative operational handoff. Last verified: **2026-08-27**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
@@ -119,7 +119,7 @@ PDF retained metric parity and the human reviewer confirmed the real-phone
 layout. The PR was squash-merged and the post-merge Worker health check returned
 200 with Supabase connected. **P6 is closed.**
 
-## Current task — P8 product experience implementation
+## Current task — P8 closure delivery
 
 P7 engineering is concluded and merged: PR #38 integrated Suites B and C, PR
 #37 integrated the owner-accepted P8-A foundation, and PR #39 integrated the
@@ -129,6 +129,13 @@ it directly. Do not reopen P7 correction loops
 during product construction; controls blocked on custom-domain, production
 Supabase, billing, full DR or real-client prerequisites return as a bounded
 go-live pass after the product is functionally and visually complete.
+
+**P8 is implementation-complete and owner-accepted on
+`p8f-responsive-accessibility-acceptance` at `b49df5d`.** Its closure record is
+being delivered from this branch; it is not yet merged or deployed. After that
+delivery, the next bounded phase is go-live hardening against the final domain,
+production Supabase project and operational prerequisites — not another P8
+design loop.
 
 P8 discovery and the A/B/C/synthesis comparison are complete. Those artifacts
 remain historical evidence, but standalone visual prototyping is closed. The
@@ -187,9 +194,8 @@ authorization or external-system change. The completion unit below adds
 migration; it adds no dependency, no lockfile change, no role, no formula and no
 external-system change.
 
-**P8.2 completion — implemented and synthetic-acceptance-complete on
-`claude/p8c-studio-workflows-completion-9bab28` from `ff87b84`, awaiting owner
-review.** The record is
+**P8.2 completion — implemented, synthetic-accepted and owner-accepted in the
+final P8 pass on 2026-08-27.** The record is
 `.design/be-community-v2/implementation-reviews/p8-2-completion/REVIEW.md`.
 
 What now exists in the real product:
@@ -328,8 +334,8 @@ team, the original author remains visible, and migration `0018` makes creation,
 updates and instantiation match that product rule without changing the single
 internal role model.
 
-**P8.3 Insights data story — implementation-complete on
-`p8d-insights-data-story`, awaiting owner review.** The real product now has
+**P8.3 Insights data story — implementation-complete and owner-accepted.** The
+real product now has
 `/insights` and an authorized `/insights/e/[studyId]` route. The home keeps the
 latest panorama plus a compact study library instead of stacking complete
 studies. A study link carries the same bounded `f.*` selection grammar as the
@@ -354,7 +360,7 @@ produced, by owner request; review is in
 `.design/be-community-v2/implementation-reviews/p8-3-insights-story/REVIEW.md`.
 
 **P8.4 qualitative, interpretation and customisation — implementation-complete
-on `p8e-qualitative-interpretation-customization`, awaiting owner review.** The
+and owner-accepted.** The
 real product adds `/studio/e/[studyId]/interpretacion` with bounded structured
 copy and evidence selection, explicit draft/review/approval state and a
 published snapshot that is independent from later edits. Only that snapshot
@@ -396,12 +402,13 @@ passed and left zero interpretation-event residue.
   honesty and accessible fallbacks stay enforced by the product.
 
 Details are in `docs/P8_PRODUCT_EXPERIENCE_PLAN.md` (§3 C11, §5). P8.2, P8.3
-and the bounded P8.4 implementation are complete and awaiting owner review.
-P8.5's automated acceptance is complete: the deterministic gate is gate 31,
+and the bounded P8.4 implementation are complete and owner-accepted.
+P8.5 is complete: the deterministic gate is gate 31,
 and the rendered authenticated matrix covers the client and Studio route set at
-320/360/390/768/1024/1280 px without screenshots. The only open P8.5 row is the
-owner's documented pass on a real phone; automation must not mark it complete.
-Studio intentionally has no top-level loading boundary: the internal-role guard
+320/360/390/768/1024/1280 px without screenshots. The owner completed the real-
+phone pass on 2026-08-27 after the LAN hydration, mobile account-row and
+relative-scale corrections in `8a4437a` and `b49df5d`, then accepted the result.
+P8 is closed. Studio intentionally has no top-level loading boundary: the internal-role guard
 must resolve before the framework can stream a successful response. Pending
 labels inside authorized tasks provide progress without weakening that rule.
 
