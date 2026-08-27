@@ -155,19 +155,28 @@ export function ClientLifecyclePanel({
         <h3 id="eliminacion" className="text-sm font-semibold text-strong">
           Eliminar el cliente para siempre · no disponible
         </h3>
-        <p className="mt-1.5 max-w-prose text-sm text-body">{TENANT_DELETION_DISABLED_REASON}</p>
-        <p className="mt-2 max-w-prose text-xs text-muted">
-          Si aun así hace falta destruir los datos de un cliente, escríbele al equipo técnico: hoy
-          se hace con una revisión explícita y no desde esta pantalla.
+        <p className="mt-1.5 max-w-prose text-sm text-body">
+          Por ahora, archiva el cliente. Es reversible, conserva toda su información y evita que se
+          cree o publique trabajo nuevo.
         </p>
-        <div className="mt-3 max-w-prose text-xs text-muted">
-          <p>Cuando vuelva a estar disponible, esto es lo que se conservará:</p>
-          <ul className="mt-1 list-disc space-y-1 pl-5">
-            {TENANT_DELETION_RETAINED.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </div>
+        <details className="mt-3 max-w-prose rounded-lg border border-line bg-surface px-3 py-2.5 text-xs text-muted">
+          <summary className="min-h-6 cursor-pointer font-semibold text-strong">
+            Por qué no está disponible
+          </summary>
+          <p className="mt-2">{TENANT_DELETION_DISABLED_REASON}</p>
+          <p className="mt-2">
+            Si aun así hace falta destruir los datos de un cliente, solicítalo al equipo técnico:
+            hoy requiere una revisión explícita y no se hace desde esta pantalla.
+          </p>
+          <div className="mt-3">
+            <p>Cuando vuelva a estar disponible, esto es lo que se conservará:</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
+              {TENANT_DELETION_RETAINED.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        </details>
       </section>
     </section>
   );

@@ -1,5 +1,16 @@
 import type { NextConfig } from "next";
 
+// A phone reaches the local dev server through the workstation's LAN address,
+// not through `localhost`. Next blocks dev chunks from any unlisted origin, so
+// the page would render its HTML but never hydrate: native selects/details kept
+// working while React controls appeared dead. Keep this opt-in and development
+// only; the comma-separated host list is supplied by the person running the
+// local review and no private-network wildcard reaches production.
+const allowedDevOrigins = process.env.DEV_ALLOWED_ORIGINS
+  ?.split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 // Static security response headers (§5.2). Applied to every response so they
 // cover assets and redirects too; the per-request CSP (with nonce) is set in the
 // session middleware. X-Frame-Options + the CSP frame-ancestors together deny
@@ -13,6 +24,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  ...(allowedDevOrigins?.length ? { allowedDevOrigins } : {}),
   experimental: {
     serverActions: {
       // Upload validation below still enforces the exact 10 MiB product limit.
