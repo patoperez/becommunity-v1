@@ -20,7 +20,7 @@ import type { ColumnTarget, ImportMapping } from "./mapping";
 
 export type DestinationKind = ColumnTarget["kind"];
 
-/** The four choices an operator actually makes about a column. */
+/** The choices an operator actually makes about a column. */
 export const DESTINATION_CHOICES: {
   kind: DestinationKind;
   label: string;
@@ -30,6 +30,11 @@ export const DESTINATION_CHOICES: {
     kind: "ignore",
     label: "No importar",
     hint: "La columna se queda en el archivo y no entra al estudio.",
+  },
+  {
+    kind: "private",
+    label: "Dato privado del equipo",
+    hint: "Nombre, correo, matrícula o fecha: se conserva para el equipo y nunca aparece al cliente.",
   },
   {
     kind: "segment",
@@ -119,15 +124,16 @@ export function nameRejectionReason(label: string, taken: Iterable<string>): str
  * has something selectable.
  */
 export function proposedKeyFromHeader(header: string, kind: DestinationKind): string {
-  const stripped = header.trim().replace(/^(seg|q|qual)_/i, "");
+  const stripped = header.trim().replace(/^(priv|seg|q|qual)_/i, "");
   const fallback =
-    kind === "quantitative" ? "resultado" : kind === "qualitative" ? "comentario" : "dato";
+    kind === "quantitative" ? "resultado" : kind === "qualitative" ? "comentario" : kind === "private" ? "dato_privado" : "dato";
   return keyFromLabel(stripped) ?? keyFromLabel(header) ?? fallback;
 }
 
 /** The target a newly chosen kind starts from, with its proposed destination. */
 export function targetForKind(kind: DestinationKind, header: string): ColumnTarget {
   const key = proposedKeyFromHeader(header, kind);
+  if (kind === "private") return { kind, key };
   if (kind === "segment") return { kind, key };
   if (kind === "quantitative") return { kind, metricKey: key };
   if (kind === "qualitative") return { kind, theme: key, source: "encuesta" };
@@ -136,6 +142,7 @@ export function targetForKind(kind: DestinationKind, header: string): ColumnTarg
 
 /** The stored key a target points at, or null when the column is not imported. */
 export function targetKey(target: ColumnTarget): string | null {
+  if (target.kind === "private") return target.key;
   if (target.kind === "segment") return target.key;
   if (target.kind === "quantitative") return target.metricKey;
   if (target.kind === "qualitative") return target.theme;
@@ -144,6 +151,7 @@ export function targetKey(target: ColumnTarget): string | null {
 
 /** The same target pointed at a different stored key, preserving its settings. */
 export function withTargetKey(target: ColumnTarget, key: string): ColumnTarget {
+  if (target.kind === "private") return { ...target, key };
   if (target.kind === "segment") return { ...target, key };
   if (target.kind === "quantitative") return { ...target, metricKey: key };
   if (target.kind === "qualitative") return { ...target, theme: key };

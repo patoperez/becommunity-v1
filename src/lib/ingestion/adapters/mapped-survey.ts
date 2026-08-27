@@ -4,7 +4,7 @@ import type {
   IngestError,
   ParsedFile,
 } from "../canonical";
-import { qualSchema, quantSchema, segmentsSchema } from "../canonical";
+import { privateMetadataSchema, qualSchema, quantSchema, segmentsSchema } from "../canonical";
 import {
   importMappingSchema,
   normalizeHeader,
@@ -120,6 +120,7 @@ export function adaptMappedSurvey(file: ParsedFile, rawMapping: unknown): AdaptR
     const respondent: CanonicalRespondent = {
       id: crypto.randomUUID(),
       sourceRow: lineNo,
+      privateMetadata: {},
       segments: {},
       quant: [],
       qual: [],
@@ -134,7 +135,9 @@ export function adaptMappedSurvey(file: ParsedFile, rawMapping: unknown): AdaptR
         continue;
       }
 
-      if (target.kind === "segment") {
+      if (target.kind === "private") {
+        respondent.privateMetadata[target.key] = raw;
+      } else if (target.kind === "segment") {
         respondent.segments[target.key] = raw;
       } else if (target.kind === "qualitative") {
         respondent.qual.push({
@@ -162,6 +165,7 @@ export function adaptMappedSurvey(file: ParsedFile, rawMapping: unknown): AdaptR
     }
 
     if (
+      Object.keys(respondent.privateMetadata).length > 0 ||
       Object.keys(respondent.segments).length > 0 ||
       respondent.quant.length > 0 ||
       respondent.qual.length > 0
@@ -176,6 +180,9 @@ export function adaptMappedSurvey(file: ParsedFile, rawMapping: unknown): AdaptR
   let quantCount = 0;
   let qualCount = 0;
   for (const respondent of respondents) {
+    if (!privateMetadataSchema.safeParse(respondent.privateMetadata).success) {
+      return configError("El adaptador produjo datos privados inválidos.");
+    }
     if (!segmentsSchema.safeParse(respondent.segments).success) {
       return configError("El adaptador produjo segmentos inválidos.");
     }

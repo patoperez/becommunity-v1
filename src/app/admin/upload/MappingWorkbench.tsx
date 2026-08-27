@@ -44,6 +44,7 @@ const quietButton =
   "inline-flex min-h-11 items-center justify-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong transition-colors duration-[var(--motion-state)] hover:bg-surface-sunken";
 
 function knownFor(known: KnownDestinations, kind: DestinationKind): string[] {
+  if (kind === "private") return known.privateFields;
   if (kind === "segment") return known.segments;
   if (kind === "quantitative") return known.metrics;
   if (kind === "qualitative") return known.themes;

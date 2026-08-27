@@ -30,7 +30,13 @@ function expectedSummary(respondents: CanonicalRespondent[]): IngestSummary {
 }
 
 function canonicalPayload(respondents: CanonicalRespondent[]) {
-  return respondents.map(({ id, segments, quant, qual }) => ({ id, segments, quant, qual }));
+  return respondents.map(({ id, privateMetadata, segments, quant, qual }) => ({
+    id,
+    privateMetadata,
+    segments,
+    quant,
+    qual,
+  }));
 }
 
 function safeFailureMessage(error: string): string {
@@ -81,7 +87,7 @@ export async function persistRespondents(
     throw new Error(`import_batch: ${stageError?.message ?? "could not stage import"}`);
   }
 
-  const { data, error } = await client.rpc("commit_import_batch", {
+  const { data, error } = await client.rpc("commit_import_batch_with_private", {
     p_import_batch_id: batch.id,
     p_respondents: canonicalPayload(params.respondents),
   });
@@ -92,7 +98,7 @@ export async function persistRespondents(
       .update({ status: "failed", error_message: safeFailureMessage(error.message) })
       .eq("id", batch.id)
       .eq("status", "staged");
-    throw new Error(`commit_import_batch: ${error.message}`);
+    throw new Error(`commit_import_batch_with_private: ${error.message}`);
   }
 
   const committed = data as CommitResult | null;

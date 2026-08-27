@@ -9,6 +9,7 @@ import { parseBrandConfig, type BrandConfig } from "@/lib/branding/config";
 import { parseDashboardConfig, type StudyPresentation } from "@/lib/dashboard/config";
 import { loadStudyInterpretation } from "@/lib/interpretation/load";
 import type { InterpretationContent } from "@/lib/interpretation/schema";
+import { loadLatestPeriodSeries } from "@/lib/studies/period-series";
 
 export type AuthorizedStudy = {
   id: string;
@@ -29,6 +30,7 @@ export type AuthorizedStudyData = {
   rows: Awaited<ReturnType<typeof loadStudyRows>>;
   qualitative: ConfirmedQualitative[];
   publishedInterpretation: InterpretationContent | null;
+  periodSeries: Awaited<ReturnType<typeof loadLatestPeriodSeries>>;
 };
 
 async function loadConfirmedQualitativeInternal(
@@ -89,12 +91,13 @@ export async function loadAuthorizedStudyData(
   const scope = profile.role === "internal" ? {} : parseDataScope(profile.data_scope);
 
   const admin = createAdminClient();
-  const [{ data: tenant, error: tenantError }, rows, qualitative, interpretation] = await Promise.all([
+  const [{ data: tenant, error: tenantError }, rows, qualitative, interpretation, periodSeries] = await Promise.all([
     admin.from("tenant").select("name, brand_config").eq("id", study.tenant_id)
       .maybeSingle<{ name: string; brand_config: unknown }>(),
     loadStudyRows(admin, study.id),
     loadConfirmedQualitativeInternal(admin, study.id),
     loadStudyInterpretation(admin, study.id),
+    loadLatestPeriodSeries(admin, study.id),
   ]);
   if (tenantError) throw new Error(`tenant: ${tenantError.message}`);
   const tenantBrand = parseBrandConfig(tenant?.brand_config);
@@ -118,5 +121,6 @@ export async function loadAuthorizedStudyData(
     rows: applyDataScope(rows, scope),
     qualitative: applyDataScope(qualitative, scope),
     publishedInterpretation: interpretation.published,
+    periodSeries,
   };
 }

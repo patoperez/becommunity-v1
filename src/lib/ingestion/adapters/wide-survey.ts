@@ -115,7 +115,7 @@ function adapt(file: ParsedFile, opts: AdaptOptions = {}): AdaptResult {
     }
     // Web Crypto global — works on Node 18+ and the Edge runtime (node:crypto
     // is not available on Edge / Cloudflare).
-    respondents.push({ id: crypto.randomUUID(), segments, quant, qual });
+    respondents.push({ id: crypto.randomUUID(), privateMetadata: {}, segments, quant, qual });
   });
 
   if (errors.length > 0) return { ok: false, errors };

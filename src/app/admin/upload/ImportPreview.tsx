@@ -63,6 +63,7 @@ export function ImportPreview({
                   <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-medium text-strong">
                     Persona de la fila {row.sourceRow}
                     <span className="block text-xs font-normal text-muted">
+                      {plural(raw.privateFields.length, "dato privado protegido", "datos privados protegidos")} ·{" "}
                       {plural(row.filters.length, "dato para filtrar", "datos para filtrar")} ·{" "}
                       {plural(row.results.length, "resultado", "resultados")} ·{" "}
                       {plural(row.comments.length, "comentario", "comentarios")}
@@ -70,6 +71,16 @@ export function ImportPreview({
                   </summary>
 
                   <div className="space-y-4 border-t border-line px-4 py-4">
+                    {raw.privateFields.length > 0 ? (
+                      <section className="rounded-lg border border-caution-line bg-caution-surface p-3">
+                        <h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-caution">
+                          Datos privados protegidos
+                        </h4>
+                        <p className="mt-1 text-sm text-body">
+                          Se guardarán {raw.privateFields.length} campos sólo para el equipo. Sus valores se ocultan incluso en esta vista previa.
+                        </p>
+                      </section>
+                    ) : null}
                     <section>
                       <h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">
                         Datos para filtrar

@@ -20,6 +20,7 @@ const commonTarget = { required: z.boolean().optional() };
 
 export const columnTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ignore") }),
+  z.object({ kind: z.literal("private"), key: keySchema, ...commonTarget }),
   z.object({ kind: z.literal("segment"), key: keySchema, ...commonTarget }),
   z
     .object({

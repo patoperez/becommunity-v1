@@ -19,6 +19,7 @@ const SIGNATURE = `sha256:${"a".repeat(64)}`;
 const respondents = [{
   id: "20000000-0000-4000-8000-000000000001",
   sourceRow: 41,
+  privateMetadata: { folio: "INTERNO-41" },
   segments: { nivel: "Primaria" },
   quant: [{ metric_key: "nps", value: 9 }],
   qual: [{ source: "encuesta", category: null, theme: "comentario", quote: "Buen servicio" }],
@@ -53,7 +54,7 @@ function fakeClient({ commitError = null, commitData = null } = {}) {
     },
     async rpc(name, args) {
       calls.push({ kind: "rpc", name, args });
-      if (name === "commit_import_batch") {
+      if (name === "commit_import_batch_with_private") {
         if (commitError) return { data: null, error: { message: commitError } };
         return {
           data: commitData ?? { import_batch_id: BATCH_ID, respondents: 1, quant: 1, qual: 1 },
@@ -84,14 +85,15 @@ const summary = await persistRespondents(successClient, params);
 eq("batch id returned", summary.importBatchId, BATCH_ID);
 eq("respondents returned", summary.respondents, 1);
 eq("only control table is addressed directly", successClient.calls.filter((call) => call.kind === "from").every((call) => call.table === "import_batch"), true);
-eq("commit RPC called once", successClient.calls.filter((call) => call.kind === "rpc" && call.name === "commit_import_batch").length, 1);
+eq("private-aware commit RPC called once", successClient.calls.filter((call) => call.kind === "rpc" && call.name === "commit_import_batch_with_private").length, 1);
 const staged = successClient.calls.find((call) => call.kind === "insert")?.row;
 eq("preview respondent count staged", staged.expected_respondents, 1);
 eq("preview quant count staged", staged.expected_quant, 1);
 eq("preview qual count staged", staged.expected_qual, 1);
-const commitPayload = successClient.calls.find((call) => call.kind === "rpc" && call.name === "commit_import_batch")?.args.p_respondents;
+const commitPayload = successClient.calls.find((call) => call.kind === "rpc" && call.name === "commit_import_batch_with_private")?.args.p_respondents;
 eq("source row is not persisted", "sourceRow" in commitPayload[0], false);
 eq("tenant id is absent from canonical payload", "tenant_id" in commitPayload[0], false);
+eq("private metadata is carried only inside the canonical payload", commitPayload[0].privateMetadata.folio, "INTERNO-41");
 
 console.log("\n[2] RPC failure records audit state, not fallback writes");
 const failureClient = fakeClient({ commitError: "invalid canonical quantitative response" });

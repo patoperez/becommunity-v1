@@ -15,11 +15,12 @@ const includes = (label, errors, pattern) => errors.some((error) => pattern.test
   ? ok(label)
   : bad(`${label}: ${JSON.stringify(errors)}`);
 
-const headers = ["Marca temporal", "Nivel escolar", "Probabilidad de recomendar", "Satisfacción docentes", "Comentario"];
+const headers = ["Folio interno", "Marca temporal", "Nivel escolar", "Probabilidad de recomendar", "Satisfacción docentes", "Comentario"];
 const mapping = {
   version: 1,
   name: "Encuesta escolar",
   columns: [
+    { sourceColumn: "Folio interno", target: { kind: "private", key: "folio" } },
     { sourceColumn: "Marca temporal", target: { kind: "ignore" } },
     { sourceColumn: "Nivel escolar", target: { kind: "segment", key: "nivel", required: true } },
     { sourceColumn: "Probabilidad de recomendar", target: { kind: "quantitative", metricKey: "nps", min: 1, max: 10, required: true } },
@@ -53,8 +54,8 @@ console.log("\n[2] Raw Forms-style headers map without prefixes");
 const goodFile = {
   headers,
   rows: [
-    { "Marca temporal": "2026-08-20", "Nivel escolar": "Primaria", "Probabilidad de recomendar": "9", "Satisfacción docentes": "Muy satisfecho", Comentario: "Excelente atención" },
-    { "Marca temporal": "2026-08-20", "Nivel escolar": "Secundaria", "Probabilidad de recomendar": "6", "Satisfacción docentes": " neutral ", Comentario: "" },
+    { "Folio interno": "A-001", "Marca temporal": "2026-08-20", "Nivel escolar": "Primaria", "Probabilidad de recomendar": "9", "Satisfacción docentes": "Muy satisfecho", Comentario: "Excelente atención" },
+    { "Folio interno": "A-002", "Marca temporal": "2026-08-20", "Nivel escolar": "Secundaria", "Probabilidad de recomendar": "6", "Satisfacción docentes": " neutral ", Comentario: "" },
   ],
 };
 const good = adaptMappedSurvey(goodFile, mapping);
@@ -65,6 +66,7 @@ if (!good.ok) {
   eq("quantitative rows", good.summary.quant, 4);
   eq("qualitative rows", good.summary.qual, 1);
   eq("segment mapped", good.respondents[0].segments.nivel, "Primaria");
+  eq("private metadata mapped", good.respondents[0].privateMetadata.folio, "A-001");
   eq("numeric metric mapped", good.respondents[0].quant[0].value, 9);
   eq("text recoded to number", good.respondents[0].quant[1].value, 5);
   eq("recoding ignores surrounding whitespace/case", good.respondents[1].quant[1].value, 3);

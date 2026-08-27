@@ -17,6 +17,7 @@ import { logoPublicUrl } from "@/lib/branding/config";
 import { parseInsightsFilters, type InsightsSearchParams } from "@/lib/insights/filters";
 import { loadAuthorizedStudyData, type AuthorizedStudy } from "@/lib/studies/authorized";
 import { createClient } from "@/lib/supabase/server";
+import { PeriodSeries } from "@/components/studio/PeriodSeries";
 
 export const metadata = { title: "Estudio · Insights" };
 
@@ -43,7 +44,7 @@ export default async function InsightsStudyPage({
 
   const selected = await loadAuthorizedStudyData(supabase, studyId);
   if (!selected) notFound();
-  const { study, tenantName, brand, presentation, rows, qualitative, publishedInterpretation } = selected;
+  const { study, tenantName, brand, presentation, rows, qualitative, publishedInterpretation, periodSeries } = selected;
   const { sections } = parseDashboardConfig(study.dashboard_config);
   const parsed = parseInsightsFilters(await searchParams);
   const options = buildSegmentFilterOptions([...rows, ...qualitative]);
@@ -133,6 +134,7 @@ export default async function InsightsStudyPage({
         <NarrativeHome view={narrative} brand={brand} presentation={presentation} interpretation={publishedInterpretation} studyDestination={`#study-${study.id}`} />
       ) : null}
       <LongitudinalTrends view={longitudinal} />
+      <PeriodSeries points={periodSeries} />
       <h1 className="sr-only">{study.name}</h1>
       <StudyCard
         study={study}

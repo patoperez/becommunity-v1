@@ -12,6 +12,7 @@ import NarrativeHome from "@/app/dashboard/NarrativeHome";
 import LongitudinalTrends from "@/app/dashboard/LongitudinalTrends";
 import StudyCard from "@/app/dashboard/StudyCard";
 import { InsightsShell } from "@/components/shell/InsightsShell";
+import { PeriodSeries } from "@/components/studio/PeriodSeries";
 
 /**
  * The internal client preview, rendered once for both of its addresses.
@@ -61,7 +62,7 @@ export async function ClientPreviewView({
   // saying "denied" here would misdescribe what happened.
   const selected = await loadAuthorizedStudyData(requestClient, studyId);
   if (!selected) notFound();
-  const { study, rows, qualitative, tenantName, brand, presentation, publishedInterpretation } = selected;
+  const { study, rows, qualitative, tenantName, brand, presentation, publishedInterpretation, periodSeries } = selected;
   const { sections } = parseDashboardConfig(study.dashboard_config);
   const dashboard = buildStudyDashboard(
     rows,
@@ -110,6 +111,7 @@ export async function ClientPreviewView({
     >
       {narrative ? <NarrativeHome view={narrative} brand={brand} presentation={presentation} interpretation={publishedInterpretation} audience="preview" /> : null}
       <LongitudinalTrends view={longitudinal} />
+      <PeriodSeries points={periodSeries} />
       <h2 className="sr-only">Vista del estudio</h2>
       <StudyCard study={study} initialDashboard={dashboard} audience="preview" />
       {footer}

@@ -23,6 +23,7 @@ export async function previewMappedImport(
   const sample = result.ok
     ? result.respondents.slice(0, sampleSize).map((respondent) => ({
         sourceRow: respondent.sourceRow ?? 2,
+        privateFields: Object.keys(respondent.privateMetadata),
         segments: respondent.segments,
         quant: respondent.quant,
         qual: respondent.qual.map(({ source, theme, quote }) => ({ source, theme, quote })),

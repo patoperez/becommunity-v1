@@ -20,6 +20,7 @@ import { ImportPreview } from "./ImportPreview";
 import { ConfirmAction } from "@/components/studio/ConfirmAction";
 import { Pager } from "@/components/studio/Pager";
 import type { PageWindow } from "@/lib/studio/paging";
+import { PeriodSeriesUpload } from "./PeriodSeriesUpload";
 
 export type TenantOption = { id: string; name: string };
 export type StudyOption = { id: string; tenantId: string; name: string; period: string | null };
@@ -211,6 +212,12 @@ export default function UploadForm({
 
   return (
     <div className="space-y-8">
+      <PeriodSeriesUpload
+        tenants={tenants}
+        studies={studies}
+        initialTenantId={initialTenantId}
+        initialStudyId={initialStudyId}
+      />
       <section className="rounded-xl border border-line bg-surface p-6">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>

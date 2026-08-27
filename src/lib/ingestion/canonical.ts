@@ -25,6 +25,8 @@ export type CanonicalRespondent = {
   id: string;
   /** Original 1-based file line, used only for preview/audit; never persisted. */
   sourceRow?: number;
+  /** Internal-only identifying/context fields. Never included in client DTOs. */
+  privateMetadata: Record<string, string>;
   segments: Record<string, string>;
   quant: { metric_key: string; value: number }[];
   qual: { source: QualitativeSource; category: string | null; theme: string; quote: string }[];
@@ -33,6 +35,8 @@ export type CanonicalRespondent = {
 /** A small, safe sample shown before an operator confirms an import. */
 export type ImportPreviewRow = {
   sourceRow: number;
+  /** Field names only: preview responses must never echo private values. */
+  privateFields: string[];
   segments: Record<string, string>;
   quant: { metric_key: string; value: number }[];
   qual: { source: QualitativeSource; theme: string; quote: string }[];
@@ -76,6 +80,9 @@ export interface SourceAdapter {
  * so a bug in an adapter can never push malformed rows into Postgres.
  */
 export const segmentsSchema = z.record(z.string(), z.string());
+export const privateMetadataSchema = z
+  .record(z.string(), z.string().max(2_000))
+  .refine((value) => Object.keys(value).length <= 100, "demasiados datos privados en una fila");
 
 export const quantSchema = z.object({
   metric_key: z.string().min(1),

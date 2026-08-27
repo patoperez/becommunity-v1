@@ -15,6 +15,7 @@ import { persistRespondents, rollbackImportBatch } from "@/lib/ingestion/persist
 import type { ImportPreviewRow, IngestError, IngestSummary, ParsedFile } from "@/lib/ingestion/canonical";
 import { ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/validation/schemas";
 import { templatePayloadSchema } from "@/lib/templates/schema";
+import { adaptPeriodSeries, persistPeriodSeries, type PeriodPoint } from "@/lib/ingestion/period-series";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -30,6 +31,7 @@ export type ColumnSample = {
  * destination is also what keeps two periods of one study comparable.
  */
 export type KnownDestinations = {
+  privateFields: string[];
   segments: string[];
   metrics: string[];
   themes: string[];
@@ -76,6 +78,11 @@ export type ConfirmResult =
 export type RollbackResult =
   | { status: "error"; message: string }
   | { status: "success"; message: string };
+
+export type PeriodSeriesResult =
+  | { status: "error"; message: string; errors?: IngestError[] }
+  | { status: "ready"; fileName: string; signature: string; points: PeriodPoint[] }
+  | { status: "success"; message: string; periods: number; importId: string };
 
 const tenantSchema = z.string().uuid("Cliente inválido.");
 const mappingJsonSchema = z.string().min(2).max(500_000, "El mapeo es demasiado grande.");
@@ -165,6 +172,9 @@ function suggestedMapping(file: ParsedFile, fileName: string): ImportMapping {
       if (normalized.startsWith("seg_")) {
         return { sourceColumn, target: { kind: "segment" as const, key: suggestedKey(sourceColumn, "seg_") } };
       }
+      if (normalized.startsWith("priv_")) {
+        return { sourceColumn, target: { kind: "private" as const, key: suggestedKey(sourceColumn, "priv_") } };
+      }
       if (normalized.startsWith("q_")) {
         return { sourceColumn, target: { kind: "quantitative" as const, metricKey: suggestedKey(sourceColumn, "q_") } };
       }
@@ -211,6 +221,7 @@ async function loadKnownDestinations(
     }
   }
   return {
+    privateFields: [],
     segments: collect(segmentKeys),
     metrics: collect((metrics ?? []).map((row) => row.metric_key)),
     themes: collect((themes ?? []).map((row) => row.theme)),
@@ -485,5 +496,64 @@ export async function rollbackLatestImport(importBatchId: string): Promise<Rollb
     return { status: "success", message: `Se revirtió “${latest.file_name}” sin afectar otros lotes.` };
   } catch (error) {
     return { status: "error", message: `No se pudo revertir el lote: ${(error as Error).message}` };
+  }
+}
+
+/** Separate aggregate path: a month is never allowed to masquerade as a person. */
+export async function analyzePeriodSeriesFile(formData: FormData): Promise<PeriodSeriesResult> {
+  const auth = await authorizeInternal();
+  if (!auth.ok) return { status: "error", message: auth.message };
+  const tenant = await verifyTenant(auth.admin, formData.get("tenant_id"));
+  if (!tenant.ok) return { status: "error", message: tenant.message };
+  const upload = await readUpload(formData);
+  if (!upload.ok) return { status: "error", message: upload.message };
+  const result = adaptPeriodSeries(upload.parsed);
+  if (!result.ok) return { status: "error", message: "La serie necesita correcciones antes de guardarse.", errors: result.errors };
+  try {
+    return {
+      status: "ready",
+      fileName: upload.file.name,
+      signature: await sourceSignature(upload.parsed.headers),
+      points: result.points,
+    };
+  } catch (error) {
+    return { status: "error", message: (error as Error).message };
+  }
+}
+
+export async function confirmPeriodSeriesFile(formData: FormData): Promise<PeriodSeriesResult> {
+  const auth = await authorizeInternal();
+  if (!auth.ok) return { status: "error", message: auth.message };
+  const tenant = await verifyTenant(auth.admin, formData.get("tenant_id"));
+  if (!tenant.ok) return { status: "error", message: tenant.message };
+  const studyId = z.string().uuid("Estudio inválido.").safeParse(formData.get("study_id"));
+  if (!studyId.success) return { status: "error", message: studyId.error.issues[0]?.message ?? "Estudio inválido." };
+  const { data: study, error: studyError } = await auth.admin.from("study")
+    .select("id, name")
+    .eq("id", studyId.data)
+    .eq("tenant_id", tenant.tenant.id)
+    .maybeSingle<{ id: string; name: string }>();
+  if (studyError) return { status: "error", message: `No se pudo verificar el estudio: ${studyError.message}` };
+  if (!study) return { status: "error", message: "El estudio no pertenece al cliente seleccionado." };
+  const upload = await readUpload(formData);
+  if (!upload.ok) return { status: "error", message: upload.message };
+  const result = adaptPeriodSeries(upload.parsed);
+  if (!result.ok) return { status: "error", message: "El archivo cambió o contiene errores. No se guardó nada.", errors: result.errors };
+  try {
+    const signature = await sourceSignature(upload.parsed.headers);
+    const importId = await persistPeriodSeries(auth.admin, {
+      tenantId: tenant.tenant.id,
+      studyId: study.id,
+      sourceSignature: signature,
+      fileName: upload.file.name,
+      createdBy: auth.userId,
+      points: result.points,
+    });
+    revalidatePath("/admin/upload");
+    revalidatePath("/dashboard");
+    revalidatePath(`/insights/e/${study.id}`);
+    return { status: "success", message: `Serie guardada en “${study.name}”.`, periods: result.points.length, importId };
+  } catch (error) {
+    return { status: "error", message: (error as Error).message };
   }
 }
