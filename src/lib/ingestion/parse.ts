@@ -54,6 +54,37 @@ export function parseCsv(text: string): ParsedFile {
 
 type ExcelJsModule = typeof import("exceljs");
 
+const SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+/**
+ * Some standards-compliant writers use an explicit `x:` prefix for the main
+ * SpreadsheetML namespace. ExcelJS 4's SAX reader only recognizes the same
+ * elements when that namespace is the default, and otherwise fails before it
+ * can even find `workbook.sheets`. Normalize only that known namespace and only
+ * after the ordinary reader fails; relationships and every cell value remain
+ * byte-for-byte equivalent at the XML level.
+ */
+async function normalizePrefixedSpreadsheetXml(buffer: ArrayBuffer): Promise<ArrayBuffer | null> {
+  const { default: JSZip } = await import("jszip");
+  const zip = await JSZip.loadAsync(buffer);
+  const targets = Object.values(zip.files).filter((entry) => !entry.dir && entry.name.endsWith(".xml"));
+  let changed = false;
+  await Promise.all(targets.map(async (entry) => {
+    const xml = await entry.async("string");
+    if (!xml.includes(`xmlns:x="${SPREADSHEET_NS}"`)) return;
+    const normalized = xml
+      .replace(`xmlns:x="${SPREADSHEET_NS}"`, `xmlns="${SPREADSHEET_NS}"`)
+      .replace(/(<\/?)(?:x):/g, "$1");
+    if (normalized !== xml) {
+      zip.file(entry.name, normalized);
+      changed = true;
+    }
+  }));
+  if (!changed) return null;
+  const bytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 /** Interop: the CJS/UMD builds resolve to { default: module.exports, ...named }. */
 function unwrapExcelJs(mod: unknown): ExcelJsModule | null {
   const api = ((mod as { default?: unknown })?.default ?? mod) as ExcelJsModule | undefined;
@@ -93,8 +124,15 @@ async function loadExcelJs(): Promise<ExcelJsModule> {
 
 export async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedFile> {
   const ExcelJS = await loadExcelJs();
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  let workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(buffer);
+  } catch (originalError) {
+    const normalized = await normalizePrefixedSpreadsheetXml(buffer).catch(() => null);
+    if (!normalized) throw originalError;
+    workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(normalized);
+  }
   const sheet = workbook.worksheets[0];
   if (!sheet) throw new Error("El archivo Excel no tiene hojas.");
 

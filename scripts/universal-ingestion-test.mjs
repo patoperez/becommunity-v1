@@ -4,6 +4,7 @@ import { previewMappedImport } from "../src/lib/ingestion/preview.ts";
 import { parseXlsx } from "../src/lib/ingestion/parse.ts";
 import ExcelJS from "exceljs";
 import { wideSurveyAdapter } from "../src/lib/ingestion/adapters/wide-survey.ts";
+import JSZip from "jszip";
 
 let failures = 0;
 const ok = (message) => console.log("  ✓", message);
@@ -155,6 +156,23 @@ const xlsxBuffer = xlsxBytes.buffer.slice(xlsxBytes.byteOffset, xlsxBytes.byteOf
 const parsedXlsx = await parseXlsx(xlsxBuffer);
 eq("blank middle header preserved", parsedXlsx.headers[1], "");
 eq("later header keeps physical column", parsedXlsx.rows[0].NPS, "9");
+
+// A standards-compliant explicit prefix is accepted too. This is how the
+// prepared Cuicuilco workbooks are written, and used to make ExcelJS fail
+// before it found the workbook model.
+const prefixedZip = await JSZip.loadAsync(xlsxBytes);
+for (const entry of Object.values(prefixedZip.files)) {
+  if (entry.dir || !entry.name.endsWith(".xml")) continue;
+  const xml = await entry.async("string");
+  if (!xml.includes('xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"')) continue;
+  prefixedZip.file(entry.name, xml
+    .replace('xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"', 'xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"')
+    .replace(/<(\/?)((?:workbook|sheets|sheet|worksheet|dimension|sheetFormatPr|sheetData|row|c|v|pageMargins|pageSetup|sst|si|t|cols|col|mergeCells|mergeCell|tableParts|tablePart|autoFilter|tableColumns|tableColumn|tableStyleInfo|styleSheet|numFmts|numFmt|fonts|font|fills|fill|borders|border|cellStyleXfs|cellXfs|xf|cellStyles|cellStyle|dxfs|tableStyles|calcPr|fileVersion|workbookPr))\b/g, '<$1x:$2'));
+}
+const prefixedBytes = await prefixedZip.generateAsync({ type: "uint8array" });
+const prefixedBuffer = prefixedBytes.buffer.slice(prefixedBytes.byteOffset, prefixedBytes.byteOffset + prefixedBytes.byteLength);
+const parsedPrefixed = await parseXlsx(prefixedBuffer);
+eq("explicit SpreadsheetML prefix is normalized", parsedPrefixed.rows[0].NPS, "9");
 const blankHeaderResult = adaptMappedSurvey(parsedXlsx, {
   version: 1,
   name: "XLSX inválido",
