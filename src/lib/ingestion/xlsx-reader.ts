@@ -35,6 +35,49 @@ import type { ParsedFile, RawRow } from "./canonical";
 const P = "(?:[A-Za-z0-9]+:)?";
 const re = (body: string, flags = "g") => new RegExp(body, flags);
 
+/**
+ * RESOURCE CEILINGS.
+ *
+ * A .xlsx is a ZIP, and a ZIP says how big it will be only after you have
+ * expanded it. Ten megabytes of upload — the product limit — can declare
+ * gigabytes of XML, and this reader runs inside a Worker with a small, hard
+ * memory budget: the isolate is killed, not slowed, and the operator gets a
+ * blank 500 with nothing to act on.
+ *
+ * These ceilings are deliberately far above any real study (volumes here are
+ * thousands of rows) and far below what would exhaust the isolate. Every one of
+ * them produces a plain Spanish sentence, and every one of them is reached
+ * BEFORE any database write: the import commits in a single transaction after
+ * parsing succeeds, so a refusal here leaves nothing behind.
+ */
+export const XLSX_LIMITS = {
+  /** Expanded bytes for one part, and for the whole workbook. */
+  partBytes: 32 * 1024 * 1024,
+  totalBytes: 48 * 1024 * 1024,
+  rows: 100_000,
+  columns: 4_096,
+  cells: 1_000_000,
+  sharedStrings: 500_000,
+} as const;
+
+export class XlsxLimitError extends Error {}
+
+/** Tracks how much expanded XML one workbook has been allowed to produce. */
+function budget() {
+  let remaining: number = XLSX_LIMITS.totalBytes;
+  return {
+    take(bytes: number, what: string) {
+      if (bytes > XLSX_LIMITS.partBytes || bytes > remaining) {
+        throw new XlsxLimitError(
+          "El archivo Excel es demasiado grande al descomprimirse (" + what + "). " +
+            "Divídelo en archivos más pequeños o exporta solo las columnas que necesitas.",
+        );
+      }
+      remaining -= bytes;
+    },
+  };
+}
+
 /** Excel's 1900 date system has a deliberate leap-year bug; day 0 is 1899-12-30. */
 const EPOCH_1900 = Date.UTC(1899, 11, 30);
 const EPOCH_1904 = Date.UTC(1904, 0, 1);
@@ -68,6 +111,12 @@ function columnIndex(reference: string): number {
 function parseSharedStrings(xml: string | null): string[] {
   if (!xml) return [];
   const items = xml.match(re(`<${P}si\\b[^>]*\\/>|<${P}si\\b[^>]*>[\\s\\S]*?<\\/${P}si>`)) ?? [];
+  if (items.length > XLSX_LIMITS.sharedStrings) {
+    throw new XlsxLimitError(
+      "El archivo Excel contiene demasiado texto distinto para procesarlo (" +
+        items.length + " valores). Reduce el archivo antes de subirlo.",
+    );
+  }
   return items.map((item) =>
     [...item.matchAll(re(`<${P}t\\b[^>]*>([\\s\\S]*?)<\\/${P}t>`))].map((m) => decodeXml(m[1])).join(""),
   );
@@ -129,10 +178,17 @@ function parseSheet(
   use1904: boolean,
 ): SheetCell[][] {
   const rows: SheetCell[][] = [];
+  let cellCount = 0;
   const rowMatches = xml.match(re(`<${P}row\\b[^>]*\\/>|<${P}row\\b[^>]*>[\\s\\S]*?<\\/${P}row>`)) ?? [];
   for (const rowXml of rowMatches) {
     const rowNumber = Number(rowXml.match(/\br="(\d+)"/)?.[1] ?? "0");
     if (rowNumber <= 0) continue;
+    if (rowNumber > XLSX_LIMITS.rows) {
+      throw new XlsxLimitError(
+        "El archivo Excel tiene más de " + XLSX_LIMITS.rows +
+          " filas. Divídelo antes de subirlo.",
+      );
+    }
     const cells: SheetCell[] = [];
     // Self-closing cells MUST be matched first. A lazy `<c …>…</c>` would run
     // past `<c r="W3"/>` to the NEXT cell's closing tag and attribute that
@@ -142,6 +198,19 @@ function parseSheet(
     for (const cellXml of cellMatches) {
       const reference = cellXml.match(/\br="([A-Z]+\d+)"/)?.[1];
       const column = reference ? columnIndex(reference) : fallbackColumn;
+      if (column < 0 || column >= XLSX_LIMITS.columns) {
+        throw new XlsxLimitError(
+          "El archivo Excel tiene más de " + XLSX_LIMITS.columns +
+            " columnas. Exporta solo las columnas que necesitas.",
+        );
+      }
+      cellCount += 1;
+      if (cellCount > XLSX_LIMITS.cells) {
+        throw new XlsxLimitError(
+          "El archivo Excel tiene demasiadas celdas con contenido. " +
+            "Divídelo antes de subirlo.",
+        );
+      }
       fallbackColumn = column + 1;
       const type = cellXml.match(/\bt="([^"]+)"/)?.[1] ?? "n";
       const styleIndex = Number(cellXml.match(/\bs="(\d+)"/)?.[1] ?? "-1");
@@ -175,22 +244,57 @@ function parseSheet(
   return rows;
 }
 
-function entryText(zip: { file(path: string): { async(kind: "string"): Promise<string> } | null }, path: string) {
+type ZipEntry = {
+  async(kind: "string"): Promise<string>;
+  /** JSZip records the declared expanded size here. Absent on some entries. */
+  _data?: { uncompressedSize?: number };
+};
+type ZipLike = { file(path: string): ZipEntry | null };
+
+/**
+ * Read one part of the workbook, against a shared expansion budget.
+ *
+ * The DECLARED size is checked first, so a zip bomb is refused before it is
+ * expanded rather than after the isolate has already died allocating it. The
+ * declaration is only a claim, so the produced string is measured too.
+ */
+async function entryText(zip: ZipLike, path: string, take: (bytes: number, what: string) => void) {
   const entry = zip.file(path);
-  return entry ? entry.async("string") : Promise.resolve(null);
+  if (!entry) return null;
+  const declared = entry._data?.uncompressedSize;
+  if (typeof declared === "number" && Number.isFinite(declared)) take(declared, path);
+  const text = await entry.async("string");
+  // Counted whether or not a declaration was available, and never twice for the
+  // same part: a declared part costs the larger of the two, which is the honest
+  // figure for what this workbook was allowed to expand to.
+  if (typeof declared === "number" && Number.isFinite(declared)) {
+    if (text.length > declared) take(text.length - declared, path);
+  } else {
+    take(text.length, path);
+  }
+  return text;
 }
 
 export async function readXlsx(buffer: ArrayBuffer): Promise<ParsedFile> {
   const { default: JSZip } = await import("jszip");
-  const zip = await JSZip.loadAsync(buffer);
+  // A .xlsx that is not a ZIP fails deep inside the library with an English,
+  // technical message. An operator who picked the wrong file needs a sentence,
+  // not a stack trace.
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch {
+    throw new Error("El archivo no es un .xlsx válido. Vuelve a exportarlo desde Excel y súbelo de nuevo.");
+  }
+  const { take } = budget();
 
-  const workbookXml = await entryText(zip, "xl/workbook.xml");
+  const workbookXml = await entryText(zip, "xl/workbook.xml", take);
   if (!workbookXml) throw new Error("El archivo Excel no tiene un libro legible.");
   const use1904 = /date1904="(1|true)"/i.test(workbookXml);
 
   // Relationship attributes appear in any order, so each element is read whole
   // rather than assuming `Id` precedes `Target`.
-  const relsXml = (await entryText(zip, "xl/_rels/workbook.xml.rels")) ?? "";
+  const relsXml = (await entryText(zip, "xl/_rels/workbook.xml.rels", take)) ?? "";
   const relationships = new Map<string, string>();
   for (const element of relsXml.match(/<Relationship\b[^>]*?\/?>/g) ?? []) {
     const id = element.match(/\bId="([^"]+)"/)?.[1];
@@ -208,11 +312,11 @@ export async function readXlsx(buffer: ArrayBuffer): Promise<ParsedFile> {
   target = target.replace(/^\//, "");
   if (!target.startsWith("xl/")) target = `xl/${target}`;
 
-  const sheetXml = await entryText(zip, target);
+  const sheetXml = await entryText(zip, target, take);
   if (!sheetXml) throw new Error("El archivo Excel no tiene hojas.");
 
-  const shared = parseSharedStrings(await entryText(zip, "xl/sharedStrings.xml"));
-  const dateStyles = parseDateStyles(await entryText(zip, "xl/styles.xml"));
+  const shared = parseSharedStrings(await entryText(zip, "xl/sharedStrings.xml", take));
+  const dateStyles = parseDateStyles(await entryText(zip, "xl/styles.xml", take));
   const rows = parseSheet(sheetXml, shared, dateStyles, use1904);
 
   const headerCells = rows[0] ?? [];
