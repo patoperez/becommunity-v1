@@ -16,7 +16,7 @@ import type { ImportPreviewRow, IngestError, IngestSummary, ParsedFile } from "@
 import { ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/validation/schemas";
 import { templatePayloadSchema } from "@/lib/templates/schema";
 import { adaptPeriodSeries, persistPeriodSeries, type PeriodPoint } from "@/lib/ingestion/period-series";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -216,23 +216,29 @@ async function loadKnownDestinations(
   // above 1000 was silently capped, so a tenant past its first page stopped
   // being offered its own existing segments and metrics.
   const [respondents, metrics, themes] = await Promise.all([
-    selectAllPages<{ segments: unknown }>(
+    selectAllPages<{ id: string; segments: unknown }>(
       "known segments",
-      (from, to) => admin.from("respondent").select("segments").eq("tenant_id", tenantId)
-        .range(from, to).returns<{ segments: unknown }[]>(),
-      MAX_KNOWN_RESPONDENTS,
+      (cursor, size) => keysetWindow(
+        admin.from("respondent").select("id, segments").eq("tenant_id", tenantId),
+        { column: "id", cursor, size },
+      ).returns<{ id: string; segments: unknown }[]>(),
+      { maxRows: MAX_KNOWN_RESPONDENTS, cursorOf: (row) => row.id },
     ),
-    selectAllPages<{ metric_key: string }>(
+    selectAllPages<{ id: string; metric_key: string }>(
       "known metrics",
-      (from, to) => admin.from("quant_response").select("metric_key").eq("tenant_id", tenantId)
-        .range(from, to).returns<{ metric_key: string }[]>(),
-      MAX_KNOWN_RESPONSES,
+      (cursor, size) => keysetWindow(
+        admin.from("quant_response").select("id, metric_key").eq("tenant_id", tenantId),
+        { column: "id", cursor, size },
+      ).returns<{ id: string; metric_key: string }[]>(),
+      { maxRows: MAX_KNOWN_RESPONSES, cursorOf: (row) => row.id },
     ),
-    selectAllPages<{ theme: string | null }>(
+    selectAllPages<{ id: string; theme: string | null }>(
       "known themes",
-      (from, to) => admin.from("qual_observation").select("theme").eq("tenant_id", tenantId)
-        .range(from, to).returns<{ theme: string | null }[]>(),
-      MAX_KNOWN_OBSERVATIONS,
+      (cursor, size) => keysetWindow(
+        admin.from("qual_observation").select("id, theme").eq("tenant_id", tenantId),
+        { column: "id", cursor, size },
+      ).returns<{ id: string; theme: string | null }[]>(),
+      { maxRows: MAX_KNOWN_OBSERVATIONS, cursorOf: (row) => row.id },
     ),
   ]);
   const segmentKeys: string[] = [];

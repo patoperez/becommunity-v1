@@ -2,7 +2,7 @@ import "server-only";
 
 import type { LongRow } from "@/lib/calc/engine";
 import type { createAdminClient } from "@/lib/supabase/admin";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 import { journeyMetricOptions, type JourneyMetricOption } from "./journey-picker";
 
 /**
@@ -24,7 +24,7 @@ import { journeyMetricOptions, type JourneyMetricOption } from "./journey-picker
 
 const MAX_RESPONSES = 200_000;
 
-type ResponseRow = { study_id: string; metric_key: string; value: number | string | null };
+type ResponseRow = { id: string; study_id: string; metric_key: string; value: number | string | null };
 
 export async function loadStudyMetricOptions(
   admin: ReturnType<typeof createAdminClient>,
@@ -40,14 +40,12 @@ export async function loadStudyMetricOptions(
   // fraction of its answers (src/lib/supabase/paginate.ts).
   const data = await selectAllPages<ResponseRow>(
     "quant_response metrics",
-    (from, to) =>
-      admin
-        .from("quant_response")
-        .select("study_id, metric_key, value")
-        .in("study_id", studyIds)
-        .range(from, to)
-        .returns<ResponseRow[]>(),
-    MAX_RESPONSES,
+    (cursor, size) =>
+      keysetWindow(
+        admin.from("quant_response").select("id, study_id, metric_key, value").in("study_id", studyIds),
+        { column: "id", cursor, size },
+      ).returns<ResponseRow[]>(),
+    { maxRows: MAX_RESPONSES, cursorOf: (row) => row.id },
   );
 
   const byStudy = new Map<string, LongRow[]>();

@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { importMappingSchema } from "@/lib/ingestion/mapping";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 import {
   EMPTY_TEMPLATE_PAYLOAD,
   templatePayloadSchema,
@@ -47,11 +47,13 @@ export async function collectStudyTemplatePayload(
   const baseline = prior.success ? prior.data : EMPTY_TEMPLATE_PAYLOAD;
 
   const [metrics, { data: dimensions }, { data: recodings }, { data: batches }] = await Promise.all([
-    selectAllPages<{ metric_key: string }>(
+    selectAllPages<{ id: string; metric_key: string }>(
       "template metric keys",
-      (from, to) => admin.from("quant_response").select("metric_key").eq("study_id", study.id)
-        .range(from, to).returns<{ metric_key: string }[]>(),
-      MAX_RESPONSES,
+      (cursor, size) => keysetWindow(
+        admin.from("quant_response").select("id, metric_key").eq("study_id", study.id),
+        { column: "id", cursor, size },
+      ).returns<{ id: string; metric_key: string }[]>(),
+      { maxRows: MAX_RESPONSES, cursorOf: (row) => row.id },
     ),
     admin.from("segment_dimension").select("id, key, label, parent_id, config").eq("study_id", study.id),
     admin.from("recoding_table").select("key, name, version, values").eq("study_id", study.id).eq("is_active", true),

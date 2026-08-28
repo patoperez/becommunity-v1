@@ -2,7 +2,7 @@ import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { themeOptions, type ThemeBearingRow, type ThemeOption } from "./theme-picker";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 
 /**
  * The themes one study already carries, for the merge picker (P8.2).
@@ -21,20 +21,24 @@ import { selectAllPages } from "@/lib/supabase/paginate";
 
 const MAX_OBSERVATIONS = 100_000;
 
+/** The theme columns plus the primary key, which is the keyset cursor. */
+type KeyedThemeRow = ThemeBearingRow & { id: string };
+
 export async function loadStudyThemeOptions(
   admin: ReturnType<typeof createAdminClient>,
   studyId: string,
 ): Promise<ThemeOption[]> {
-  const data = await selectAllPages<ThemeBearingRow>(
+  const data = await selectAllPages<KeyedThemeRow>(
     "study themes",
-    (from, to) =>
-      admin
-        .from("qual_observation")
-        .select("theme, suggested_theme, confirmed_theme, review_status")
-        .eq("study_id", studyId)
-        .range(from, to)
-        .returns<ThemeBearingRow[]>(),
-    MAX_OBSERVATIONS,
+    (cursor, size) =>
+      keysetWindow(
+        admin
+          .from("qual_observation")
+          .select("id, theme, suggested_theme, confirmed_theme, review_status")
+          .eq("study_id", studyId),
+        { column: "id", cursor, size },
+      ).returns<KeyedThemeRow[]>(),
+    { maxRows: MAX_OBSERVATIONS, cursorOf: (row) => row.id },
   );
   return themeOptions(data);
 }

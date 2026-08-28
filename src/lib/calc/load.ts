@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 import type { LongRow } from "./engine";
 
 /**
@@ -9,6 +9,16 @@ import type { LongRow } from "./engine";
  */
 const MAX_RESPONSES = 500_000;
 const MAX_RESPONDENTS = 50_000;
+
+/** Both reads carry the primary key: it is the keyset cursor, not a value the
+ * caller uses. See src/lib/supabase/paginate.ts. */
+type ResponseRow = {
+  id: string;
+  respondent_id: string;
+  metric_key: string;
+  value: number | string | null;
+};
+type RespondentRow = { id: string; segments: Record<string, unknown> | null };
 
 /**
  * Load one study's quantitative answers as engine-ready long rows, with each
@@ -31,27 +41,26 @@ export async function loadStudyRows(
   // Data API's 1000-row cap and aggregate a fraction of the study without
   // saying so — see src/lib/supabase/paginate.ts.
   const [responses, respondents] = await Promise.all([
-    selectAllPages<{ respondent_id: string; metric_key: string; value: number | string | null }>(
+    selectAllPages<ResponseRow>(
       "quant_response",
-      (from, to) =>
-        client
-          .from("quant_response")
-          .select("respondent_id, metric_key, value")
-          .eq("study_id", studyId)
-          .range(from, to)
-          .returns<{ respondent_id: string; metric_key: string; value: number | string | null }[]>(),
-      MAX_RESPONSES,
+      (cursor, size) =>
+        keysetWindow(
+          client
+            .from("quant_response")
+            .select("id, respondent_id, metric_key, value")
+            .eq("study_id", studyId),
+          { column: "id", cursor, size },
+        ).returns<ResponseRow[]>(),
+      { maxRows: MAX_RESPONSES, cursorOf: (row) => row.id },
     ),
-    selectAllPages<{ id: string; segments: Record<string, unknown> | null }>(
+    selectAllPages<RespondentRow>(
       "respondent",
-      (from, to) =>
-        client
-          .from("respondent")
-          .select("id, segments")
-          .eq("study_id", studyId)
-          .range(from, to)
-          .returns<{ id: string; segments: Record<string, unknown> | null }[]>(),
-      MAX_RESPONDENTS,
+      (cursor, size) =>
+        keysetWindow(
+          client.from("respondent").select("id, segments").eq("study_id", studyId),
+          { column: "id", cursor, size },
+        ).returns<RespondentRow[]>(),
+      { maxRows: MAX_RESPONDENTS, cursorOf: (row) => row.id },
     ),
   ]);
 

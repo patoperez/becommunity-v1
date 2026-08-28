@@ -94,7 +94,11 @@ export default async function StudioClientPage({
       admin.from("profiles").select("user_id", { count: "exact", head: true })
         .eq("tenant_id", tenantId).eq("role", "client"),
       admin.from("study").select("id, name, period, status")
-        .eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(20)
+        .eq("tenant_id", tenantId)
+        // created_at is not unique: two studies instantiated from one template
+        // share a timestamp. The primary key breaks the tie so "the newest 20"
+        // is the same 20 on every render.
+        .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20)
         .returns<{ id: string; name: string; period: string | null; status: string }[]>(),
     ]);
 
@@ -107,7 +111,12 @@ export default async function StudioClientPage({
     .select("user_id, full_name, data_scope")
     .eq("tenant_id", tenantId)
     .eq("role", "client")
+    // A PAGED list needs a TOTAL order, not just an order. created_at alone
+    // leaves rows that share a timestamp free to swap between requests, which
+    // shows one person twice on page 1 and drops another from page 2. The
+    // primary key is the tiebreaker.
     .order("created_at")
+    .order("user_id")
     .range(view.from, view.to)
     .returns<{ user_id: string; full_name: string | null; data_scope: unknown }[]>();
 

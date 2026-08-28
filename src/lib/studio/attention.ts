@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 import { parseJourneyDefinition } from "@/lib/calc/journey";
 import { loadTenantArchiveState } from "./lifecycle";
 import {
@@ -75,17 +75,21 @@ export async function loadAttentionBoard(
       .returns<{ id: string; name: string }[]>(),
     // Paged: `.limit()` cannot beat the Data API's 1000-row cap, so the home
     // used to judge "has data" from a first page (src/lib/supabase/paginate.ts).
-    selectAllPages<{ study_id: string; metric_key: string }>(
+    selectAllPages<{ id: string; study_id: string; metric_key: string }>(
       "attention responses",
-      (from, to) => admin.from("quant_response").select("study_id, metric_key").in("study_id", studyIds)
-        .range(from, to).returns<{ study_id: string; metric_key: string }[]>(),
-      MAX_RESPONSES,
+      (cursor, size) => keysetWindow(
+        admin.from("quant_response").select("id, study_id, metric_key").in("study_id", studyIds),
+        { column: "id", cursor, size },
+      ).returns<{ id: string; study_id: string; metric_key: string }[]>(),
+      { maxRows: MAX_RESPONSES, cursorOf: (row) => row.id },
     ),
-    selectAllPages<{ study_id: string; review_status: string }>(
+    selectAllPages<{ id: string; study_id: string; review_status: string }>(
       "attention observations",
-      (from, to) => admin.from("qual_observation").select("study_id, review_status").in("study_id", studyIds)
-        .range(from, to).returns<{ study_id: string; review_status: string }[]>(),
-      MAX_OBSERVATIONS,
+      (cursor, size) => keysetWindow(
+        admin.from("qual_observation").select("id, study_id, review_status").in("study_id", studyIds),
+        { column: "id", cursor, size },
+      ).returns<{ id: string; study_id: string; review_status: string }[]>(),
+      { maxRows: MAX_OBSERVATIONS, cursorOf: (row) => row.id },
     ),
     admin.from("import_batch").select("study_id, status").in("study_id", studyIds)
       .in("status", ["staged", "failed"]).returns<{ study_id: string; status: string }[]>(),

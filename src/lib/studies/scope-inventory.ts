@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 import {
   dimensionFallbackLabel,
   EMPTY_INVENTORY,
@@ -37,7 +37,7 @@ const MAX_COMBINATIONS = 500;
 const STORABLE_DIMENSION = /^[\p{L}\p{N}_-]{1,80}$/u;
 const MAX_VALUE_LENGTH = 200;
 
-type RespondentSegments = { tenant_id: string; segments: unknown };
+type RespondentSegments = { id: string; tenant_id: string; segments: unknown };
 
 export async function loadTenantScopeInventories(
   admin: ReturnType<typeof createAdminClient>,
@@ -50,13 +50,11 @@ export async function loadTenantScopeInventories(
 
   const data = await selectAllPages<RespondentSegments>(
     "respondent segments",
-    (from, to) => admin
-      .from("respondent")
-      .select("tenant_id, segments")
-      .in("tenant_id", tenantIds)
-      .range(from, to)
-      .returns<RespondentSegments[]>(),
-    MAX_RESPONDENTS,
+    (cursor, size) => keysetWindow(
+      admin.from("respondent").select("id, tenant_id, segments").in("tenant_id", tenantIds),
+      { column: "id", cursor, size },
+    ).returns<RespondentSegments[]>(),
+    { maxRows: MAX_RESPONDENTS, cursorOf: (row) => row.id },
   );
 
   const perTenant = new Map<string, Map<string, number>>();

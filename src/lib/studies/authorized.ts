@@ -10,7 +10,7 @@ import { parseDashboardConfig, type StudyPresentation } from "@/lib/dashboard/co
 import { loadStudyInterpretation } from "@/lib/interpretation/load";
 import type { InterpretationContent } from "@/lib/interpretation/schema";
 import { loadLatestPeriodSeries } from "@/lib/studies/period-series";
-import { selectAllPages } from "@/lib/supabase/paginate";
+import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
 
 /** Refusal thresholds, not page sizes (src/lib/supabase/paginate.ts). */
 const MAX_OBSERVATIONS = 100_000;
@@ -52,21 +52,24 @@ async function loadConfirmedQualitativeInternal(
   const [observations, respondents] = await Promise.all([
     selectAllPages<ObservationRow>(
       "qual_observation",
-      (from, to) =>
-        admin.from("qual_observation")
-          .select("id, respondent_id, confirmed_theme, confirmed_stage_key, quote, quote_approved, source, category")
-          .eq("study_id", studyId)
-          .eq("review_status", "confirmed")
-          .range(from, to)
-          .returns<ObservationRow[]>(),
-      MAX_OBSERVATIONS,
+      (cursor, size) =>
+        keysetWindow(
+          admin.from("qual_observation")
+            .select("id, respondent_id, confirmed_theme, confirmed_stage_key, quote, quote_approved, source, category")
+            .eq("study_id", studyId)
+            .eq("review_status", "confirmed"),
+          { column: "id", cursor, size },
+        ).returns<ObservationRow[]>(),
+      { maxRows: MAX_OBSERVATIONS, cursorOf: (row) => row.id },
     ),
     selectAllPages<{ id: string; segments: Record<string, unknown> | null }>(
       "respondent",
-      (from, to) =>
-        admin.from("respondent").select("id, segments").eq("study_id", studyId).range(from, to)
-          .returns<{ id: string; segments: Record<string, unknown> | null }[]>(),
-      MAX_RESPONDENTS,
+      (cursor, size) =>
+        keysetWindow(
+          admin.from("respondent").select("id, segments").eq("study_id", studyId),
+          { column: "id", cursor, size },
+        ).returns<{ id: string; segments: Record<string, unknown> | null }[]>(),
+      { maxRows: MAX_RESPONDENTS, cursorOf: (row) => row.id },
     ),
   ]);
 
