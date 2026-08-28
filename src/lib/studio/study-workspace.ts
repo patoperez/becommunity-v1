@@ -48,6 +48,8 @@ export type StudioStudyWorkspace = {
     rejectedObservations: number;
     importBatches: number;
     unfinishedImports: number;
+    /** Category decisions recorded for this study, any kind, any version. */
+    categoryDecisions: number;
   };
 };
 
@@ -67,11 +69,19 @@ async function headCount(
   table: string,
   filters: [string, string][],
   selectColumn = "id",
+  options: { optionalTable?: boolean } = {},
 ): Promise<number> {
   let query = admin.from(table).select(selectColumn, { count: "exact", head: true });
   for (const [column, value] of filters) query = query.eq(column, value);
   const { count, error } = await query;
-  if (error) throw new Error(`${table} count: ${error.message}`);
+  if (error) {
+    // A table a migration has not created yet is not a broken study. Only the
+    // counts marked optional may degrade this way, and they degrade to zero,
+    // which reads on screen as "nobody has done this yet" rather than as a
+    // claim that there is nothing to do.
+    if (options.optionalTable && (error.code === "42P01" || error.code === "PGRST205")) return 0;
+    throw new Error(`${table} count: ${error.message}`);
+  }
   return count ?? 0;
 }
 
@@ -97,6 +107,7 @@ export async function loadStudioStudy(
     importBatches,
     stagedImports,
     failedImports,
+    categoryDecisions,
     archiveState,
     metricOptionsByStudy,
   ] = await Promise.all([
@@ -109,6 +120,9 @@ export async function loadStudioStudy(
     headCount(admin, "import_batch", [["study_id", study.id]]),
     headCount(admin, "import_batch", [["study_id", study.id], ["status", "staged"]]),
     headCount(admin, "import_batch", [["study_id", study.id], ["status", "failed"]]),
+    // A head count, so the process row can say whether anyone has reviewed the
+    // categories without reading a single respondent.
+    headCount(admin, "category_decision", [["study_id", study.id]], "id", { optionalTable: true }),
     loadTenantArchiveState(admin, [study.tenant_id]),
     loadStudyMetricOptions(admin, [study.id]),
   ]);
@@ -155,6 +169,7 @@ export async function loadStudioStudy(
       rejectedObservations,
       importBatches,
       unfinishedImports,
+      categoryDecisions,
     },
   };
 }

@@ -26,6 +26,7 @@ export const STUDIO_TEMPLATES = "/studio/plantillas";
 export const studioClient = (tenantId: string) => `/studio/clientes/${tenantId}`;
 export const studioStudy = (studyId: string) => `/studio/e/${studyId}`;
 export const studioStudyData = (studyId: string) => `/studio/e/${studyId}/datos`;
+export const studioStudyCategories = (studyId: string) => `/studio/e/${studyId}/categorias`;
 export const studioStudyIndicators = (studyId: string) => `/studio/e/${studyId}/indicadores`;
 export const studioStudyQualitative = (studyId: string) => `/studio/e/${studyId}/cualitativo`;
 export const studioStudyInterpretation = (studyId: string) => `/studio/e/${studyId}/interpretacion`;
@@ -63,6 +64,11 @@ export function qualitativeReturnPaths(studyId: string): string[] {
 
 export function interpretationReturnPaths(studyId: string): string[] {
   return [studioStudyInterpretation(studyId)];
+}
+
+/** Every Studio address that may host the category review of one study. */
+export function categoryReturnPaths(studyId: string): string[] {
+  return [studioStudyCategories(studyId)];
 }
 
 /** Every Studio address that may host the configuration of one study. */

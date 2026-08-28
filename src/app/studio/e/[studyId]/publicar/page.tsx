@@ -6,7 +6,8 @@ import { loadStudioStudy } from "@/lib/studio/study-workspace";
 import { StudyWorkSurface } from "@/components/studio/StudyWorkSurface";
 import { ConfirmAction } from "@/components/studio/ConfirmAction";
 import { setStudyPublication } from "@/app/admin/studies/actions";
-import { studioStudyPreview, studioStudyPublish } from "@/lib/studio/routes";
+import { studioStudyCategories, studioStudyPreview, studioStudyPublish } from "@/lib/studio/routes";
+import { loadCategoryWorkspace } from "@/lib/categories/load";
 
 export const metadata = { title: "Publicación · Be Community" };
 
@@ -38,8 +39,13 @@ export default async function StudioPublishPage({
   if (!z.string().uuid().safeParse(studyId).success) notFound();
   const workspace = await loadStudioStudy(admin, studyId);
   if (!workspace) notFound();
+  // Publication is a rare, deliberate act, so this screen can afford the full
+  // category scan that the other study screens deliberately do not run.
+  const categories = await loadCategoryWorkspace(admin, studyId);
   const query = await searchParams;
   const { study, readiness, counts } = workspace;
+  const categoryGate = categories?.gate ?? null;
+  const categoriesBlock = (categoryGate?.blocking.length ?? 0) > 0;
   const fields = { study_id: study.id, return_to: studioStudyPublish(study.id) };
 
   return (
@@ -69,6 +75,52 @@ export default async function StudioPublishPage({
           Ver como el cliente
         </Link>
       </section>
+
+      {categoriesBlock ? (
+        <section className="rounded-xl border border-danger-line bg-danger-surface p-5">
+          <h2 className="text-base font-semibold text-danger">
+            Hay categorías repetidas sin decidir
+          </h2>
+          <ul className="mt-2 space-y-2">
+            {(categoryGate?.blocking ?? []).map((finding) => (
+              <li key={`${finding.dimensionKey}${finding.groupKey}`}>
+                <p className="text-sm font-semibold text-danger">{finding.summary}</p>
+                <p className="text-sm text-danger">{finding.because}</p>
+              </li>
+            ))}
+          </ul>
+          <Link
+            href={studioStudyCategories(study.id)}
+            className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-danger-line bg-surface px-4 py-2.5 text-sm font-semibold text-danger hover:bg-danger-surface"
+          >
+            Ir a revisar categorías
+          </Link>
+        </section>
+      ) : null}
+
+      {(categoryGate?.warnings.length ?? 0) > 0 ? (
+        <section className="rounded-xl border border-caution-line bg-caution-surface p-5">
+          <h2 className="text-base font-semibold text-caution">
+            Puede que haya categorías repetidas
+          </h2>
+          <ul className="mt-2 space-y-2">
+            {(categoryGate?.warnings ?? []).map((finding) => (
+              <li key={`${finding.dimensionKey}${finding.groupKey}`} className="text-sm text-caution">
+                {finding.summary} {finding.because}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-sm text-caution">
+            Esto no impide publicar. Si publicas así, esas respuestas se cuentan por separado.
+          </p>
+          <Link
+            href={studioStudyCategories(study.id)}
+            className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken"
+          >
+            Revisar categorías
+          </Link>
+        </section>
+      ) : null}
 
       {readiness.blocking.length > 0 ? (
         <section className="rounded-xl border border-danger-line bg-danger-surface p-5">
@@ -110,7 +162,7 @@ export default async function StudioPublishPage({
         </h2>
         <div className="mt-4 flex flex-wrap gap-3">
           {study.status !== "published" ? (
-            readiness.canPublish ? (
+            readiness.canPublish && !categoriesBlock ? (
               <ConfirmAction
                 trigger="Publicar para el cliente"
                 triggerClassName="inline-flex min-h-11 items-center justify-center rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-paper hover:bg-[#183b5c]"
@@ -138,7 +190,9 @@ export default async function StudioPublishPage({
               />
             ) : (
               <p className="text-sm text-muted">
-                Resuelve primero lo que impide publicarlo. El servidor lo rechazaría igual.
+                Resuelve primero lo que impide publicarlo
+                {categoriesBlock ? ", empezando por las categorías repetidas" : ""}. El servidor lo
+                rechazaría igual.
               </p>
             )
           ) : (

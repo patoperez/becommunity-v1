@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { StudioStudyWorkspace } from "@/lib/studio/study-workspace";
 import {
   studioStudy,
+  studioStudyCategories,
   studioStudyData,
   studioStudyIndicators,
   studioStudyInterpretation,
@@ -23,6 +24,7 @@ import {
 export type StudyTabId =
   | "resumen"
   | "datos"
+  | "categorias"
   | "indicadores"
   | "cualitativo"
   | "interpretacion"
@@ -52,6 +54,21 @@ export function studySteps(workspace: StudioStudyWorkspace): Step[] {
           : `${counts.respondents} personas`
         : "sin datos",
       tone: hasData && counts.unfinishedImports === 0 ? "done" : "todo",
+    },
+    {
+      id: "categorias",
+      label: "Categorías",
+      href: studioStudyCategories(study.id),
+      // Deliberately NOT a candidate count. Knowing how many questions are open
+      // means reading every respondent, and this row renders on every screen of
+      // every study. It says whether anyone has looked, which is cheap, true,
+      // and never claims "nothing to review" on a study nobody has opened.
+      state: !hasData
+        ? "sin datos"
+        : counts.categoryDecisions > 0
+          ? "revisadas"
+          : "sin revisar",
+      tone: !hasData ? "quiet" : counts.categoryDecisions > 0 ? "done" : "todo",
     },
     {
       id: "indicadores",

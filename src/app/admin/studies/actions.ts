@@ -12,6 +12,7 @@ import { journeyDefinitionSchema } from "@/lib/calc/journey";
 import { tenantRefusesNewWork } from "@/lib/studio/lifecycle";
 import { ARCHIVED_TENANT_REFUSAL } from "@/lib/studio/lifecycle-model";
 import { loadStudyMetricOptions } from "@/lib/studio/metric-inventory";
+import { loadCategoryWorkspace } from "@/lib/categories/load";
 import {
   safeReturnPath,
   studyConfigurationReturnPaths,
@@ -288,7 +289,7 @@ export async function updateStudyConfiguration(formData: FormData) {
  *    a request that never passed through the preview is refused here as well.
  */
 export async function setStudyPublication(formData: FormData) {
-  const { admin } = await internalContext();
+  const { user, admin } = await internalContext();
   const studyId = uuid.safeParse(formData.get("study_id"));
   const next = statusSchema.safeParse(formData.get("next_status"));
   if (!studyId.success || !next.success) finish("error", "Revisa el estudio y el estado.");
@@ -322,6 +323,27 @@ export async function setStudyPublication(formData: FormData) {
     if ((responses ?? 0) + (observations ?? 0) === 0) {
       finish("error", "Carga respuestas o confirma hallazgos antes de publicar el estudio.", { returnTo, allowed });
     }
+
+    // CATEGORIES THAT ARE ALMOST CERTAINLY ONE ANSWER, STILL UNDECIDED.
+    //
+    // Re-derived from the database here, not read from the request: a caller
+    // that never opened the review screen is refused on exactly the same
+    // grounds as one that opened it and clicked past. Only deterministic,
+    // high-confidence, materially significant differences block — a resemblance
+    // never does, and neither does anything the advisor said. See
+    // src/lib/categories/gate.ts for the whole rule.
+    const categories = await loadCategoryWorkspace(admin, studyId.data);
+    if (categories && categories.gate.blocking.length > 0) {
+      const first = categories.gate.blocking[0];
+      const rest = categories.gate.blocking.length - 1;
+      finish(
+        "error",
+        `${first.summary} ${first.because}` +
+          (rest > 0 ? ` Y ${rest} caso${rest === 1 ? "" : "s"} más.` : "") +
+          " Revísalo en “Categorías”: agruparlas, dejarlas separadas o posponerlo lo resuelve.",
+        { returnTo, allowed },
+      );
+    }
   }
 
   const { data, error } = await admin.from("study").update({ status: next.data })
@@ -329,6 +351,37 @@ export async function setStudyPublication(formData: FormData) {
   if (error || !data) {
     finish("error", `No se pudo cambiar el estado: ${error?.message ?? "estudio inexistente"}`, { returnTo, allowed });
   }
+
+  // PIN THE GROUPING THIS PUBLICATION WAS CALCULATED WITH.
+  //
+  // From here on, the client reads this exact set of category decisions. A
+  // decision recorded tomorrow changes Studio immediately and changes what the
+  // client sees only when somebody publishes again — so a PDF already on a
+  // school's desk keeps matching the product.
+  //
+  // A failure here does NOT undo the publication: the study is published and
+  // visible, and a missing pin degrades to the live grouping, which is what the
+  // product did before this feature existed. Refusing to publish because a
+  // reproducibility pin could not be written would be the more damaging
+  // outcome, and it is reported rather than hidden.
+  if (next.data === "published") {
+    const { error: snapshotError } = await admin.rpc("capture_study_category_snapshot", {
+      p_study_id: studyId.data,
+      p_actor: user.id,
+    });
+    if (snapshotError) {
+      revalidatePath("/admin/studies");
+      revalidatePath("/dashboard");
+      finish(
+        "error",
+        `“${study.name}” se publicó, pero no se pudo fijar la versión de las categorías ` +
+          `(${snapshotError.message}). El cliente ve las categorías actuales; si cambian, su ` +
+          "informe cambiará con ellas. Avisa al equipo técnico.",
+        { returnTo, allowed },
+      );
+    }
+  }
+
   revalidatePath("/admin/studies");
   revalidatePath("/dashboard");
   const message = next.data === "published"

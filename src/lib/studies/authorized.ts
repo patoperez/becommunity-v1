@@ -2,6 +2,12 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadStudyRows } from "@/lib/calc/load";
+import {
+  canonicalSegmentLabels,
+  canonicalizeSegments,
+  parseSegmentAliases,
+  type SegmentAliases,
+} from "@/lib/calc/segments";
 import type { ConfirmedQualitative } from "@/lib/qualitative/published";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyDataScope, parseDataScope } from "@/lib/studies/scope";
@@ -38,9 +44,20 @@ export type AuthorizedStudyData = {
   periodSeries: Awaited<ReturnType<typeof loadLatestPeriodSeries>>;
 };
 
+/**
+ * Confirmed qualitative findings, with their respondent's characteristics
+ * attached — through the SAME grouping the quantitative rows use.
+ *
+ * The canonicalisation here is not decoration. `buildSegmentFilterOptions` is
+ * given the quantitative and qualitative rows together, so if one side carried
+ * "Legal y Contable" and the other the raw "Legal y contable", the filter would
+ * offer both, and choosing either would silently hide half the evidence. The
+ * two sides must be grouped identically or they are not the same study.
+ */
 async function loadConfirmedQualitativeInternal(
   admin: ReturnType<typeof createAdminClient>,
   studyId: string,
+  aliases: SegmentAliases,
 ): Promise<ConfirmedQualitative[]> {
   // Paged: a single `.select()` stops at the Data API's 1000-row cap without
   // saying so, which would drop confirmed findings from a large study.
@@ -73,9 +90,10 @@ async function loadConfirmedQualitativeInternal(
     ),
   ]);
 
+  const labels = canonicalSegmentLabels(respondents ?? [], aliases);
   const segments = new Map((respondents ?? []).map((row) => [
     String(row.id),
-    (row.segments ?? {}) as Record<string, unknown>,
+    canonicalizeSegments(row.segments, labels) as Record<string, unknown>,
   ]));
   return (observations ?? []).flatMap((row) => {
     const theme = typeof row.confirmed_theme === "string" ? row.confirmed_theme.trim() : "";
@@ -92,6 +110,57 @@ async function loadConfirmedQualitativeInternal(
       ...(respondentId ? segments.get(respondentId) ?? {} : {}),
     }];
   });
+}
+
+/** A study's live grouping, read from its own configuration. */
+async function loadLiveAliases(
+  admin: ReturnType<typeof createAdminClient>,
+  studyId: string,
+): Promise<SegmentAliases> {
+  const { data } = await admin
+    .from("segment_dimension")
+    .select("key, config")
+    .eq("study_id", studyId)
+    .limit(500)
+    .returns<{ key: string; config: unknown }[]>();
+  return parseSegmentAliases(data ?? []);
+}
+
+/**
+ * The grouping a publication pinned, or null when there is none.
+ *
+ * The snapshot stores `{ dimension: { label: [folds] } }` — deliberately the
+ * same shape `segment_dimension.config.aliases` holds — so the pin is read
+ * through the SAME parser as the live configuration. One code path builds a
+ * grouping, whichever source it came from.
+ *
+ * A missing table (a deployment where 0022 has not been applied) is treated as
+ * "no pin" rather than an error: the feature degrades to the previous behaviour
+ * instead of taking down every study page.
+ */
+async function loadPinnedAliases(
+  admin: ReturnType<typeof createAdminClient>,
+  studyId: string,
+  status: string,
+): Promise<SegmentAliases | null> {
+  if (status !== "published") return null;
+  const { data, error } = await admin
+    .from("study_category_snapshot")
+    .select("resolution")
+    .eq("study_id", studyId)
+    .maybeSingle<{ resolution: unknown }>();
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") return null;
+    throw new Error(`study_category_snapshot: ${error.message}`);
+  }
+  const resolution = data?.resolution;
+  if (!resolution || typeof resolution !== "object" || Array.isArray(resolution)) return null;
+  const dimensions = Object.entries(resolution as Record<string, unknown>).map(([key, aliases]) => ({
+    key,
+    config: { aliases },
+  }));
+  const parsed = parseSegmentAliases(dimensions);
+  return Object.keys(parsed).length > 0 ? parsed : null;
 }
 
 /**
@@ -117,11 +186,24 @@ export async function loadAuthorizedStudyData(
   const scope = profile.role === "internal" ? {} : parseDataScope(profile.data_scope);
 
   const admin = createAdminClient();
+
+  // THE PUBLISHED GROUPING IS PINNED (migration 0022).
+  //
+  // A study that is published carries the exact category grouping it was
+  // published with, so a report already delivered stays reproducible when a
+  // consultant records a new decision afterwards. The pin is a property of the
+  // STUDY's published state, not of who is reading: the internal client preview
+  // must show what the client sees, or it is not a preview.
+  //
+  // A draft study, or a published one from before this feature, has no pin and
+  // reads its live configuration exactly as before.
+  const aliasOverride = await loadPinnedAliases(admin, study.id, study.status);
+
   const [{ data: tenant, error: tenantError }, rows, qualitative, interpretation, periodSeries] = await Promise.all([
     admin.from("tenant").select("name, brand_config").eq("id", study.tenant_id)
       .maybeSingle<{ name: string; brand_config: unknown }>(),
-    loadStudyRows(admin, study.id),
-    loadConfirmedQualitativeInternal(admin, study.id),
+    loadStudyRows(admin, study.id, aliasOverride ? { aliasOverride } : {}),
+    loadConfirmedQualitativeInternal(admin, study.id, aliasOverride ?? await loadLiveAliases(admin, study.id)),
     loadStudyInterpretation(admin, study.id),
     loadLatestPeriodSeries(admin, study.id),
   ]);

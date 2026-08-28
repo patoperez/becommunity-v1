@@ -4,6 +4,7 @@ import {
   canonicalizeSegments,
   canonicalSegmentLabels,
   parseSegmentAliases,
+  type SegmentAliases,
 } from "./segments";
 import type { LongRow } from "./engine";
 
@@ -43,6 +44,20 @@ type RespondentRow = { id: string; segments: Record<string, unknown> | null };
 export async function loadStudyRows(
   client: SupabaseClient,
   studyId: string,
+  options: {
+    /**
+     * The grouping a PUBLISHED study was calculated with, when one was pinned.
+     *
+     * A report a client has already read must not change because somebody
+     * edited an alias afterwards. When a publication pinned its grouping
+     * (`study_category_snapshot`, migration 0022), that pin is passed here and
+     * the study's current configuration is ignored — so the number in the PDF
+     * on the client's desk is still the number the product shows.
+     *
+     * Absent, the live configuration is read exactly as before.
+     */
+    aliasOverride?: SegmentAliases;
+  } = {},
 ): Promise<LongRow[]> {
   // Both sets are read page by page. A single `.select()` would stop at the
   // Data API's 1000-row cap and aggregate a fraction of the study without
@@ -84,7 +99,7 @@ export async function loadStudyRows(
   // and "Legal y contable"), and every filter, count, chart and export must
   // agree on which is which. The raw value stays in the database untouched;
   // the grouping happens here, on the way out. See src/lib/calc/segments.ts.
-  const aliases = parseSegmentAliases(dimensions ?? []);
+  const aliases = options.aliasOverride ?? parseSegmentAliases(dimensions ?? []);
   const labels = canonicalSegmentLabels(respondents ?? [], aliases);
 
   const segmentsById = new Map<string, Record<string, string>>();
