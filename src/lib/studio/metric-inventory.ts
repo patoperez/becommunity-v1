@@ -2,6 +2,7 @@ import "server-only";
 
 import type { LongRow } from "@/lib/calc/engine";
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { selectAllPages } from "@/lib/supabase/paginate";
 import { journeyMetricOptions, type JourneyMetricOption } from "./journey-picker";
 
 /**
@@ -34,13 +35,20 @@ export async function loadStudyMetricOptions(
   );
   if (studyIds.length === 0) return options;
 
-  const { data, error } = await admin
-    .from("quant_response")
-    .select("study_id, metric_key, value")
-    .in("study_id", studyIds)
-    .limit(MAX_RESPONSES)
-    .returns<ResponseRow[]>();
-  if (error) throw new Error(`quant_response metrics: ${error.message}`);
+  // Paged. `.limit()` alone is not enough: the Data API caps a response at
+  // 1000 rows regardless, so this read used to preview a metric over a
+  // fraction of its answers (src/lib/supabase/paginate.ts).
+  const data = await selectAllPages<ResponseRow>(
+    "quant_response metrics",
+    (from, to) =>
+      admin
+        .from("quant_response")
+        .select("study_id, metric_key, value")
+        .in("study_id", studyIds)
+        .range(from, to)
+        .returns<ResponseRow[]>(),
+    MAX_RESPONSES,
+  );
 
   const byStudy = new Map<string, LongRow[]>();
   for (const row of data ?? []) {

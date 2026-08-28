@@ -2,6 +2,9 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PeriodPoint } from "@/lib/ingestion/period-series";
 
+/** migration 0019: `expected_periods between 1 and 240`. */
+const MAX_PERIODS = 240;
+
 export async function loadLatestPeriodSeries(client: SupabaseClient, studyId: string): Promise<PeriodPoint[]> {
   const { data: latest, error: latestError } = await client.from("period_series_import")
     .select("id")
@@ -16,6 +19,9 @@ export async function loadLatestPeriodSeries(client: SupabaseClient, studyId: st
     .select("period_label, period_order, starting_members, new_members, ending_members, lost_members, retention_rate, churn_rate")
     .eq("import_id", latest.id)
     .order("period_order")
+    // One import can carry at most 240 periods (migration 0019 enforces it), so
+    // this is a complete read, not a first page.
+    .limit(MAX_PERIODS)
     .returns<Record<string, unknown>[]>();
   if (error) throw new Error(`study_period_snapshot: ${error.message}`);
   return (data ?? []).map((row) => ({

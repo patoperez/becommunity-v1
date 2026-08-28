@@ -2,6 +2,7 @@ import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { themeOptions, type ThemeBearingRow, type ThemeOption } from "./theme-picker";
+import { selectAllPages } from "@/lib/supabase/paginate";
 
 /**
  * The themes one study already carries, for the merge picker (P8.2).
@@ -18,18 +19,22 @@ import { themeOptions, type ThemeBearingRow, type ThemeOption } from "./theme-pi
  * no respondent id is read here.
  */
 
-const MAX_OBSERVATIONS = 5_000;
+const MAX_OBSERVATIONS = 100_000;
 
 export async function loadStudyThemeOptions(
   admin: ReturnType<typeof createAdminClient>,
   studyId: string,
 ): Promise<ThemeOption[]> {
-  const { data, error } = await admin
-    .from("qual_observation")
-    .select("theme, suggested_theme, confirmed_theme, review_status")
-    .eq("study_id", studyId)
-    .limit(MAX_OBSERVATIONS)
-    .returns<ThemeBearingRow[]>();
-  if (error) throw new Error(`study themes: ${error.message}`);
-  return themeOptions(data ?? []);
+  const data = await selectAllPages<ThemeBearingRow>(
+    "study themes",
+    (from, to) =>
+      admin
+        .from("qual_observation")
+        .select("theme, suggested_theme, confirmed_theme, review_status")
+        .eq("study_id", studyId)
+        .range(from, to)
+        .returns<ThemeBearingRow[]>(),
+    MAX_OBSERVATIONS,
+  );
+  return themeOptions(data);
 }

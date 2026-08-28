@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { selectAllPages } from "@/lib/supabase/paginate";
 import {
   dimensionFallbackLabel,
   EMPTY_INVENTORY,
@@ -47,13 +48,16 @@ export async function loadTenantScopeInventories(
   );
   if (tenantIds.length === 0) return inventories;
 
-  const { data, error } = await admin
-    .from("respondent")
-    .select("tenant_id, segments")
-    .in("tenant_id", tenantIds)
-    .limit(MAX_RESPONDENTS)
-    .returns<RespondentSegments[]>();
-  if (error) throw new Error(`respondent segments: ${error.message}`);
+  const data = await selectAllPages<RespondentSegments>(
+    "respondent segments",
+    (from, to) => admin
+      .from("respondent")
+      .select("tenant_id, segments")
+      .in("tenant_id", tenantIds)
+      .range(from, to)
+      .returns<RespondentSegments[]>(),
+    MAX_RESPONDENTS,
+  );
 
   const perTenant = new Map<string, Map<string, number>>();
   const valueCounts = new Map<string, Map<string, Map<string, number>>>();

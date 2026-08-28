@@ -3,6 +3,10 @@ import "server-only";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import type { JourneyStage } from "@/lib/calc/journey";
 import type { JourneyMetricOption } from "@/lib/studio/journey-picker";
+import { selectAllPages } from "@/lib/supabase/paginate";
+
+/** Refusal threshold, not a page size (src/lib/supabase/paginate.ts). */
+const MAX_OBSERVATIONS = 100_000;
 
 export type InterpretationEvidenceOption = {
   kind: "metric" | "journey" | "theme";
@@ -16,10 +20,15 @@ export async function loadInterpretationEvidence(
   metrics: JourneyMetricOption[],
   stages: JourneyStage[],
 ): Promise<InterpretationEvidenceOption[]> {
-  const { data: themeRows, error } = await admin.from("qual_observation")
-    .select("confirmed_theme").eq("study_id", studyId).eq("review_status", "confirmed")
-    .returns<{ confirmed_theme: string | null }[]>();
-  if (error) throw new Error(`qualitative evidence: ${error.message}`);
+  const themeRows = await selectAllPages<{ confirmed_theme: string | null }>(
+    "qualitative evidence",
+    (from, to) =>
+      admin.from("qual_observation")
+        .select("confirmed_theme").eq("study_id", studyId).eq("review_status", "confirmed")
+        .range(from, to)
+        .returns<{ confirmed_theme: string | null }[]>(),
+    MAX_OBSERVATIONS,
+  );
 
   const themeCounts = new Map<string, number>();
   for (const row of themeRows ?? []) {

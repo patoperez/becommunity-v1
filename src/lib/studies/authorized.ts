@@ -10,6 +10,11 @@ import { parseDashboardConfig, type StudyPresentation } from "@/lib/dashboard/co
 import { loadStudyInterpretation } from "@/lib/interpretation/load";
 import type { InterpretationContent } from "@/lib/interpretation/schema";
 import { loadLatestPeriodSeries } from "@/lib/studies/period-series";
+import { selectAllPages } from "@/lib/supabase/paginate";
+
+/** Refusal thresholds, not page sizes (src/lib/supabase/paginate.ts). */
+const MAX_OBSERVATIONS = 100_000;
+const MAX_RESPONDENTS = 50_000;
 
 export type AuthorizedStudy = {
   id: string;
@@ -37,15 +42,33 @@ async function loadConfirmedQualitativeInternal(
   admin: ReturnType<typeof createAdminClient>,
   studyId: string,
 ): Promise<ConfirmedQualitative[]> {
-  const [{ data: observations, error: observationError }, { data: respondents, error: respondentError }] = await Promise.all([
-    admin.from("qual_observation")
-      .select("id, respondent_id, confirmed_theme, confirmed_stage_key, quote, quote_approved, source, category")
-      .eq("study_id", studyId)
-      .eq("review_status", "confirmed"),
-    admin.from("respondent").select("id, segments").eq("study_id", studyId),
+  // Paged: a single `.select()` stops at the Data API's 1000-row cap without
+  // saying so, which would drop confirmed findings from a large study.
+  type ObservationRow = {
+    id: string; respondent_id: string | null; confirmed_theme: string | null;
+    confirmed_stage_key: string | null; quote: string | null; quote_approved: boolean | null;
+    source: string | null; category: string | null;
+  };
+  const [observations, respondents] = await Promise.all([
+    selectAllPages<ObservationRow>(
+      "qual_observation",
+      (from, to) =>
+        admin.from("qual_observation")
+          .select("id, respondent_id, confirmed_theme, confirmed_stage_key, quote, quote_approved, source, category")
+          .eq("study_id", studyId)
+          .eq("review_status", "confirmed")
+          .range(from, to)
+          .returns<ObservationRow[]>(),
+      MAX_OBSERVATIONS,
+    ),
+    selectAllPages<{ id: string; segments: Record<string, unknown> | null }>(
+      "respondent",
+      (from, to) =>
+        admin.from("respondent").select("id, segments").eq("study_id", studyId).range(from, to)
+          .returns<{ id: string; segments: Record<string, unknown> | null }[]>(),
+      MAX_RESPONDENTS,
+    ),
   ]);
-  if (observationError) throw new Error(`qual_observation: ${observationError.message}`);
-  if (respondentError) throw new Error(`respondent: ${respondentError.message}`);
 
   const segments = new Map((respondents ?? []).map((row) => [
     String(row.id),

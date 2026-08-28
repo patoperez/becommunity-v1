@@ -16,6 +16,7 @@ import type { ImportPreviewRow, IngestError, IngestSummary, ParsedFile } from "@
 import { ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/validation/schemas";
 import { templatePayloadSchema } from "@/lib/templates/schema";
 import { adaptPeriodSeries, persistPeriodSeries, type PeriodPoint } from "@/lib/ingestion/period-series";
+import { selectAllPages } from "@/lib/supabase/paginate";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -191,6 +192,11 @@ function suggestedMapping(file: ParsedFile, fileName: string): ImportMapping {
 const STORABLE_KEY = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_DESTINATIONS = 200;
 
+/** Refusal thresholds, not page sizes (src/lib/supabase/paginate.ts). */
+const MAX_KNOWN_RESPONDENTS = 50_000;
+const MAX_KNOWN_RESPONSES = 500_000;
+const MAX_KNOWN_OBSERVATIONS = 100_000;
+
 function collect(values: Iterable<unknown>): string[] {
   const keys = new Set<string>();
   for (const value of values) {
@@ -206,16 +212,31 @@ async function loadKnownDestinations(
   admin: AdminClient,
   tenantId: string,
 ): Promise<KnownDestinations> {
-  const [{ data: respondents }, { data: metrics }, { data: themes }] = await Promise.all([
-    admin.from("respondent").select("segments").eq("tenant_id", tenantId).limit(2_000)
-      .returns<{ segments: unknown }[]>(),
-    admin.from("quant_response").select("metric_key").eq("tenant_id", tenantId).limit(5_000)
-      .returns<{ metric_key: string }[]>(),
-    admin.from("qual_observation").select("theme").eq("tenant_id", tenantId).limit(5_000)
-      .returns<{ theme: string | null }[]>(),
+  // Paged. These build the "destinations you already use" lists; a `.limit()`
+  // above 1000 was silently capped, so a tenant past its first page stopped
+  // being offered its own existing segments and metrics.
+  const [respondents, metrics, themes] = await Promise.all([
+    selectAllPages<{ segments: unknown }>(
+      "known segments",
+      (from, to) => admin.from("respondent").select("segments").eq("tenant_id", tenantId)
+        .range(from, to).returns<{ segments: unknown }[]>(),
+      MAX_KNOWN_RESPONDENTS,
+    ),
+    selectAllPages<{ metric_key: string }>(
+      "known metrics",
+      (from, to) => admin.from("quant_response").select("metric_key").eq("tenant_id", tenantId)
+        .range(from, to).returns<{ metric_key: string }[]>(),
+      MAX_KNOWN_RESPONSES,
+    ),
+    selectAllPages<{ theme: string | null }>(
+      "known themes",
+      (from, to) => admin.from("qual_observation").select("theme").eq("tenant_id", tenantId)
+        .range(from, to).returns<{ theme: string | null }[]>(),
+      MAX_KNOWN_OBSERVATIONS,
+    ),
   ]);
   const segmentKeys: string[] = [];
-  for (const row of respondents ?? []) {
+  for (const row of respondents) {
     if (row.segments && typeof row.segments === "object" && !Array.isArray(row.segments)) {
       segmentKeys.push(...Object.keys(row.segments as Record<string, unknown>));
     }
@@ -223,8 +244,8 @@ async function loadKnownDestinations(
   return {
     privateFields: [],
     segments: collect(segmentKeys),
-    metrics: collect((metrics ?? []).map((row) => row.metric_key)),
-    themes: collect((themes ?? []).map((row) => row.theme)),
+    metrics: collect(metrics.map((row) => row.metric_key)),
+    themes: collect(themes.map((row) => row.theme)),
   };
 }
 

@@ -1,5 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { selectAllPages } from "@/lib/supabase/paginate";
 import type { LongRow } from "./engine";
+
+/**
+ * Bounds for one study. They are refusal thresholds, not page sizes: reaching
+ * one means the study is larger than this loader is willing to read in full,
+ * and the caller gets an error instead of a silently partial aggregate.
+ */
+const MAX_RESPONSES = 500_000;
+const MAX_RESPONDENTS = 50_000;
 
 /**
  * Load one study's quantitative answers as engine-ready long rows, with each
@@ -18,15 +27,33 @@ export async function loadStudyRows(
   client: SupabaseClient,
   studyId: string,
 ): Promise<LongRow[]> {
-  const [{ data: responses, error: rErr }, { data: respondents, error: pErr }] = await Promise.all([
-    client
-      .from("quant_response")
-      .select("respondent_id, metric_key, value")
-      .eq("study_id", studyId),
-    client.from("respondent").select("id, segments").eq("study_id", studyId),
+  // Both sets are read page by page. A single `.select()` would stop at the
+  // Data API's 1000-row cap and aggregate a fraction of the study without
+  // saying so — see src/lib/supabase/paginate.ts.
+  const [responses, respondents] = await Promise.all([
+    selectAllPages<{ respondent_id: string; metric_key: string; value: number | string | null }>(
+      "quant_response",
+      (from, to) =>
+        client
+          .from("quant_response")
+          .select("respondent_id, metric_key, value")
+          .eq("study_id", studyId)
+          .range(from, to)
+          .returns<{ respondent_id: string; metric_key: string; value: number | string | null }[]>(),
+      MAX_RESPONSES,
+    ),
+    selectAllPages<{ id: string; segments: Record<string, unknown> | null }>(
+      "respondent",
+      (from, to) =>
+        client
+          .from("respondent")
+          .select("id, segments")
+          .eq("study_id", studyId)
+          .range(from, to)
+          .returns<{ id: string; segments: Record<string, unknown> | null }[]>(),
+      MAX_RESPONDENTS,
+    ),
   ]);
-  if (rErr) throw new Error(`quant_response: ${rErr.message}`);
-  if (pErr) throw new Error(`respondent: ${pErr.message}`);
 
   const segmentsById = new Map<string, Record<string, unknown>>();
   const segmentKeys = new Set<string>();

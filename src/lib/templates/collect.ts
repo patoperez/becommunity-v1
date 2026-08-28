@@ -2,11 +2,15 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { importMappingSchema } from "@/lib/ingestion/mapping";
+import { selectAllPages } from "@/lib/supabase/paginate";
 import {
   EMPTY_TEMPLATE_PAYLOAD,
   templatePayloadSchema,
   type TemplatePayload,
 } from "./schema";
+
+/** Refusal threshold, not a page size (src/lib/supabase/paginate.ts). */
+const MAX_RESPONSES = 500_000;
 
 type StudyConfig = {
   id: string;
@@ -42,8 +46,13 @@ export async function collectStudyTemplatePayload(
   const prior = templatePayloadSchema.safeParse(study.template_snapshot);
   const baseline = prior.success ? prior.data : EMPTY_TEMPLATE_PAYLOAD;
 
-  const [{ data: metrics }, { data: dimensions }, { data: recodings }, { data: batches }] = await Promise.all([
-    admin.from("quant_response").select("metric_key").eq("study_id", study.id),
+  const [metrics, { data: dimensions }, { data: recodings }, { data: batches }] = await Promise.all([
+    selectAllPages<{ metric_key: string }>(
+      "template metric keys",
+      (from, to) => admin.from("quant_response").select("metric_key").eq("study_id", study.id)
+        .range(from, to).returns<{ metric_key: string }[]>(),
+      MAX_RESPONSES,
+    ),
     admin.from("segment_dimension").select("id, key, label, parent_id, config").eq("study_id", study.id),
     admin.from("recoding_table").select("key, name, version, values").eq("study_id", study.id).eq("is_active", true),
     admin.from("import_batch").select("mapping_id").eq("study_id", study.id).not("mapping_id", "is", null),
@@ -58,7 +67,7 @@ export async function collectStudyTemplatePayload(
     id: string; key: string; label: string | null; parent_id: string | null; config: unknown;
   }[]);
   const keyById = new Map(dimensionRows.map((row) => [row.id, row.key]));
-  const discoveredMetrics = (metrics ?? []).map((row) => String(row.metric_key));
+  const discoveredMetrics = metrics.map((row) => String(row.metric_key));
   const validMappings = (mappings ?? []).flatMap((row) => {
     const mapping = importMappingSchema.safeParse(row.configuration);
     return mapping.success ? [{ sourceSignature: row.source_signature, mapping: mapping.data }] : [];
