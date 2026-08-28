@@ -114,7 +114,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (39 gates at the 2026-08-28 handoff)
+npm test             # complete deterministic suite (41 gates at the 2026-08-28 handoff)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -263,6 +263,20 @@ production Supabase and operational prerequisites.
   shifts after removal. `npm run test:journey-editor` and the credential-bearing
   `npm run test:journey-editor-live` are the regression witnesses. The same
   unstable-label key defect was removed from the import mapping workbench.
+- ⓘ **A category is never merged by code.** Values that differ only by case or
+  whitespace are folded automatically; everything else — accents, punctuation,
+  invisible characters, wording — is a QUESTION put to a consultant on
+  `/studio/e/[studyId]/categorias`, and only a recorded human decision groups
+  anything. Decisions are an append-only ledger (`category_decision`, migration
+  `0022`); undo writes an inverse version. Raw rows are never rewritten. A
+  publication pins its grouping so a delivered report stays reproducible. A
+  resemblance, and anything a model says, can never block a publication. See
+  `docs/SEMANTIC_CATEGORY_REVIEW.md`.
+- ⓘ **The OpenAI advisor is off, and a flag alone cannot turn it on.**
+  `EVALUATION_APPROVED` in `src/lib/categories/advisor/flags.ts` is a reviewed
+  constant, not configuration. Flipping it requires the measured false-merge
+  rate and recall to be recorded by a named person. No key is configured in any
+  environment; every workflow works identically without one.
 - **Only one task may mutate or deploy a shared environment at a time.** A task
   may develop in an isolated worktree, but it must integrate every completed
   prerequisite commit before migration or deployment. Supabase migrations and
@@ -277,6 +291,10 @@ production Supabase and operational prerequisites.
   Until the repository config carries the protection, no task may deploy.
   Always select and verify the Ollin Cloudflare account explicitly before a
   manual deploy; this operator has access to more than one account.
+  **`keep_vars = true` is now committed in `wrangler.toml` and enforced by Suite
+  D's D-g check.** Never satisfy a missing binding by adding a `[vars]` block:
+  that commits configuration to git and puts the privileged key one edit away
+  from the repository.
 - **Every `/admin/**` address still answers.** Studio gained addresses; it
   renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
   frozen adversarial catalogue all depend on the old paths, and

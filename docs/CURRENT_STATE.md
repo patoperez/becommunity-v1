@@ -45,6 +45,21 @@ reader, or the real BNI Cuicuilco study.
   answers, 31 qualitative answers, 123 metric keys, zero discrepancies across
   every key and every segment value — and remains `draft`. Re-prove it with
   `scripts/real-study-verify.mjs`.
+- **Categories are reviewed by a person, between import and publication.**
+  `/studio/e/[studyId]/categorias` finds answers that may be the same written
+  two ways, shows what grouping each pair would change, and records the decision
+  in an append-only ledger (`category_decision`, migration `0022`). Nothing ever
+  merges automatically, at any confidence, from any source. Raw rows are never
+  rewritten: the grouping is projected onto
+  `segment_dimension.config.aliases`, the mechanism the calculation layer
+  already read. Publishing pins the grouping into `study_category_snapshot` so
+  a delivered report stays reproducible when a later decision changes the
+  working state. Undo writes an inverse version and destroys nothing. The
+  OpenAI advisor is implemented, tested against mocks, and **disabled**: no key
+  is configured anywhere and `EVALUATION_APPROVED` is `false`. Standing
+  reference: `docs/SEMANTIC_CATEGORY_REVIEW.md`. Gates:
+  `test:categories` (324 checks), `test:category-evaluation` (0.0% false-merge
+  rate over 33 labelled pairs), `test:categories-live`.
 - **Journey editing no longer loses focus while typing.** The verified fix at
   `cda09ac` separates stable editor identity from the stored journey-stage id,
   removes the same unstable-key pattern from the import mapper, and adds both a
@@ -62,6 +77,12 @@ reader, or the real BNI Cuicuilco study.
   verify Wrangler's `keep_vars = true` protection (or the equivalent
   `--keep-vars` invocation) and confirm the Worker-level variables still exist.
   Secrets were not deleted by the deploy.
+- **That precondition is now satisfied in the repository.** `wrangler.toml`
+  carries `keep_vars = true`, and Suite D's new **D-g** check fails if it is
+  removed, flipped, commented out, or joined by a `[vars]` block — with six
+  synthetic drift cases exercised on every run. The public values stay in the
+  dashboard and the privileged key stays an encrypted secret; neither is
+  committed.
 
 ## Product and roadmap boundary
 
