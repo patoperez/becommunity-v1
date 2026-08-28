@@ -27,9 +27,20 @@ reader, or the real BNI Cuicuilco study.
   alias. Grouping happens on read, so stored rows still match the source exactly.
 - **Published rates are derived once from exact counts**, not re-rounded from a
   stored rate.
-- **AI execution is not editorial confirmation.** Migration `0021` provides the
-  only supported way to return an automated qualitative confirmation to the human
-  review queue, and records itself in the same transaction.
+- **AI execution is not editorial confirmation.** Migration `0021` is **applied**
+  to the provisional project through `supabase db push`, and is the only
+  supported way to return an automated qualitative confirmation to the human
+  review queue. It records itself in the same transaction, and only
+  `service_role` may execute it.
+- **The Cuicuilco study's 31 qualitative observations are `pending`**, awaiting a
+  real human editorial review. Their text and the generated suggestions are
+  preserved; no theme is confirmed, no quote is approved, and nothing
+  qualitative is client-visible. The study is `draft`.
+- **The live suites refuse to run on an incoherent build or with stale synthetic
+  accounts.** `/admin/upload` carries two upload forms, so the harness scopes
+  its locators to the form that owns the control it will click; a first-match
+  locator silently drove the wrong one and made eight Suite C checks look like a
+  broken upload boundary.
 - **The real study reconciles exactly** — 60 respondents, 3 282 quantitative
   answers, 31 qualitative answers, 123 metric keys, zero discrepancies across
   every key and every segment value — and remains `draft`. Re-prove it with

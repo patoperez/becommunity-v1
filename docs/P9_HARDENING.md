@@ -420,3 +420,65 @@ update, and if the control never enables it says which half of the form is
 missing rather than reporting an unexplained refusal.
 
 `npm run test:suite-bc-selftest` pins all of it offline.
+
+---
+
+## 12. What was applied to the provisional project, and how
+
+### Migration `0021`
+
+Applied through the project's own tracked workflow, not by pasting SQL:
+
+```
+npx supabase db push --dry-run --linked   # names exactly 0021 and nothing else
+npx supabase db push --linked
+```
+
+Verified afterwards against the live database:
+
+- `supabase_migrations.schema_migrations` ends `… 0019, 0020, 0021`.
+- `public.reset_qual_observation_review(p_ids uuid[], p_study_id uuid, p_actor uuid, p_reason text)`
+  returns `integer`, is `SECURITY DEFINER`, carries `search_path=""`, and is owned
+  by `postgres`.
+- Execute privilege: `service_role` **true**; `anon`, `authenticated` and
+  `public` **false**.
+- Every check constraint on `admin_lifecycle_event` is still `validated`. The
+  action list keeps all seven original values and adds
+  `qualitative_review_reset`; `subject_kind` adds `study`.
+
+The guards were exercised against the live function before it was used in
+anger. A non-internal actor, an observation outside the study, an empty reason,
+an empty id list and an unknown study were each refused with their intended
+SQLSTATE, and the study still held its 31 confirmations afterwards — the
+function changes nothing on the path to a refusal.
+
+### The qualitative reset
+
+One call, 31 observations, one audit record, written in the same transaction.
+
+| | before | after |
+| --- | --- | --- |
+| `confirmed` | 31 | **0** |
+| `pending` | 0 | **31** |
+| `rejected` | 0 | 0 |
+| approved quotes | 0 | 0 |
+| `reviewed_by` stamps | 31 | **0** |
+| `reviewed_at` stamps | 31 | **0** |
+| `confirmed_theme` | 31 | **0** |
+| `confirmed_stage_key` | 0 | 0 |
+| `suggested_theme` | 31 | **31** |
+| non-empty `quote` | 31 | **31** |
+| source `theme` | 11 + 20 | **11 + 20** |
+
+The evidence is preserved and the decision is not: participants' words and the
+generated suggestions are exactly as imported, and nothing is client-visible.
+The study stayed `draft` throughout.
+
+Idempotent, proved twice: the tool reports "Nothing is confirmed. Nothing to
+do.", and the function called again with the same 31 ids returns `0` and writes
+**no** second audit event — a run that moves nothing is not an administrative
+action.
+
+The backup of the previous review state (review-state columns only — no quote,
+no respondent id, no private metadata) is written outside the working tree by
+the tool itself, and its path is deliberately not recorded here.
