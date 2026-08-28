@@ -91,6 +91,31 @@ reader, or the real BNI Cuicuilco study.
   synthetic drift cases exercised on every run. The public values stay in the
   dashboard and the privileged key stays an encrypted secret; neither is
   committed.
+- **The Cuicuilco preview is a reading, not the instrument.** Until
+  `claude/bni-executive-preview-hotfix` the study page opened with all 123
+  results as cards and then crossed every one of them against a characteristic
+  with 28 values — 852 KB of HTML, 122 000 characters of visible text, and the
+  sentence "muy pocas respuestas para mostrarlo" repeated **1 455 times**. It
+  now opens on the panorama, the retention series, the recorrido and the
+  results the study's own configuration names; the complete inventory sits
+  behind a closed `Explorar todos los resultados (124 resultados)` disclosure
+  with a search, and one `Comparar por segmento` explorer replaces the matrix.
+  Measured on the same page: 208 KB, 18 900 characters, **zero** repetitions.
+  No formula, threshold, stored row or published snapshot moved.
+  `computeStudyMetrics` gained `includeCrosses`, default `true`, so the PDF and
+  every other caller keep the exact result they had. Gate:
+  `npm run test:executive-preview` (63 checks).
+- **54 is the right number, and it is not 60.** The study holds **60**
+  respondent rows, **3 282** quantitative answers and **31** comments. Exactly
+  **54** of those people left at least one answer of either kind; the other
+  **six** are all `estado_membresia = Desertor` with `respondio_encuesta = No`
+  and have no quantitative row and no comment. The screen counts response
+  units, so it says 54, and the base sentence now states what it counts: *"Se
+  cuenta a quien dejó al menos una respuesta."* This is a fact about the
+  fieldwork, **not** an application defect and not a paging fault — the
+  reconciliation in `scripts/real-study-verify.mjs` still matches the workbooks
+  exactly. Nothing was corrected, deleted or re-imported. The retention series
+  remains a single committed import of **six** periods; do not upload it again.
 
 ## Product and roadmap boundary
 
