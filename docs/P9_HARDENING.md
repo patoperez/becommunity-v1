@@ -63,6 +63,28 @@ Workers Builds, then Build variables, must contain **only** the two public
 values. If `SUPABASE_SERVICE_ROLE_KEY` is present there, remove it: the build has
 no use for it, and a build variable is visible to anything the build runs.
 
+### Preserving dashboard variables during a Wrangler deploy
+
+Wrangler treats repository configuration as authoritative. Without
+`keep_vars = true` (or the `--keep-vars` flag), a deployment removes
+dashboard-managed plain-text variables that are absent from the configuration;
+secrets are preserved. On 2026-08-28 this exact behavior removed both public
+Supabase text bindings and caused the Worker to return HTTP 500 until rollback.
+
+The next deployment is blocked until all of the following hold:
+
+1. `keep_vars = true` is committed in `wrangler.toml`, or the reviewed deploy
+   command demonstrably includes `--keep-vars`;
+2. both public values exist under Worker → Settings → Variables and Secrets;
+3. both public values exist under Workers Builds → Build variables;
+4. the intended Cloudflare account id is selected explicitly and a read-only
+   listing proves that it owns the existing `becommunity-v1` Worker;
+5. a zero-traffic preview version passes health, login and the focused smoke
+   check before promotion when the deployment path permits version staging.
+
+Never solve this by placing the service-role key in `[vars]`, a build variable,
+or a repository file.
+
 ### Verifying the binding after a deploy
 
 Do not add an endpoint that reports whether a secret is configured. Sign in as an

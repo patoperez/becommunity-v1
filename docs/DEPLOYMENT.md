@@ -74,6 +74,23 @@ static-assets binding. The name must match the live Worker: if it names a script
 that does not exist on the account, an ad-hoc `npm run cf:deploy` silently
 publishes a **second, separate** Worker instead of updating the running one.
 
+> **Open deployment precondition (2026-08-28): preserve dashboard vars.** By
+> default, `wrangler deploy` deletes dashboard-managed plain-text variables that
+> are not declared in the Wrangler configuration; encrypted secrets are
+> preserved. Before the next deployment, set `keep_vars = true` in
+> `wrangler.toml` (preferred repository-level protection) or prove that the
+> invocation uses `--keep-vars`. Until one of those protections is present and
+> reviewed, **do not deploy**. The Journey hotfix deployment demonstrated the
+> failure mode by removing `NEXT_PUBLIC_SUPABASE_URL` and
+> `NEXT_PUBLIC_SUPABASE_ANON_KEY`, making every route return HTTP 500 until a
+> rollback and corrected preview promotion restored service.
+
+This operator can access multiple Cloudflare accounts. A manual deploy must set
+the intended `CLOUDFLARE_ACCOUNT_ID`, confirm with a read-only deployment list
+that `becommunity-v1` already exists in that account, and refuse to upload if the
+identity is ambiguous. The live Worker is in the Ollin account; account names or
+URLs are not a substitute for checking the exact account id at execution time.
+
 ## Deployment discipline — the current synthetic beta
 
 The Worker this repository deploys to is **`becommunity-v1`**
@@ -173,6 +190,11 @@ How the connected Worker was created — Workers & Pages → **Create** → **Wo
 | `NEXT_PUBLIC_SUPABASE_URL` | Plain | Public |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Plain | Public — safe only because RLS is on every table (§6.3) |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Encrypted secret** | Server only — bypasses RLS. NEVER `NEXT_PUBLIC_*` |
+
+Worker-level Variables and Secrets and Workers Builds variables are separate
+surfaces. The two public values must be present in both places for the current
+OpenNext build/runtime contract. After every deploy, verify `/api/health`,
+`/login`, and one authenticated `/studio/**` route in one bounded pass.
 
 ### Secret-leak gate
 

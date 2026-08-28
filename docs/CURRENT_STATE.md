@@ -45,6 +45,23 @@ reader, or the real BNI Cuicuilco study.
   answers, 31 qualitative answers, 123 metric keys, zero discrepancies across
   every key and every segment value — and remains `draft`. Re-prove it with
   `scripts/real-study-verify.mjs`.
+- **Journey editing no longer loses focus while typing.** The verified fix at
+  `cda09ac` separates stable editor identity from the stored journey-stage id,
+  removes the same unstable-key pattern from the import mapper, and adds both a
+  deterministic gate (`test:journey-editor`) and a real-browser gate
+  (`test:journey-editor-live`). The latter reproduced 26/26 caret losses on the
+  prior Worker and then passed on localhost, preview and the live Worker at
+  desktop and 375 px. The disposable study was restored and the Cuicuilco study
+  was not written.
+- **Cloudflare deployment has an open configuration precondition.** A manual
+  `wrangler deploy` on 2026-08-28 replaced the two dashboard-managed public
+  Supabase text variables and caused an approximately nine-minute HTTP 500
+  incident. Service was rolled back, a preview version was verified, and Worker
+  version `677979fc-b5fa-4704-ba9b-622cedf24f44` was promoted healthy with the
+  two text bindings restored for that version. Before any later deploy, add and
+  verify Wrangler's `keep_vars = true` protection (or the equivalent
+  `--keep-vars` invocation) and confirm the Worker-level variables still exist.
+  Secrets were not deleted by the deploy.
 
 ## Product and roadmap boundary
 
@@ -71,6 +88,14 @@ must use documented authoritative definitions rather than invented rules.
 
 ## Verified source and deployment baseline
 
+- Active verified P9 delivery baseline: `cda09acbfe0eab54e32a8505e3b6020c9dd68c10`
+  on `claude/final-security-data-hardening`; it is pushed, deployed and
+  live-verified. A first superseded commit contains a variable-name-shaped test
+  fixture that Suite D's full-history D-d scan intentionally flags. The final
+  tree contains no such shape, and the identical tree tested as a squash commit
+  over `main` passes D-d. Preserve history on the branch; clear the reachable
+  superseded blob only through the planned squash merge followed by branch
+  deletion.
 - Current `main`: `fd986940accae5a87170e3de0cb4b2f52dc9d7a9`
   (`feat(p8): establish the Be Community product experience foundation (#37)`),
   which also carries the merged P7 Suites B/C delivery (#38). Always verify

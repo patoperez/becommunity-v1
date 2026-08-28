@@ -131,6 +131,12 @@ includes internal-only respondent metadata, and aggregate retention/churn
 history has its own period-series upload instead of being represented as survey
 responses. Migration `0019` is required before using these additions.
 
+**Current P9 handoff:** the Journey stage editor's per-keystroke focus loss is
+fixed and guarded by deterministic and real-browser tests. Before any subsequent
+manual Cloudflare deployment, read `docs/CURRENT_STATE.md` and
+`docs/DEPLOYMENT.md`: the next deploy is blocked until Wrangler is configured to
+preserve the dashboard-managed public Supabase variables.
+
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) before starting or handing off

@@ -114,7 +114,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (31 gates; P8.5 adds test:p8-acceptance)
+npm test             # complete deterministic suite (39 gates at the 2026-08-28 handoff)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -182,7 +182,7 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — P8 closure delivery; do not skip ahead
+## Current work — P9 hardening and semantic category review; do not skip ahead
 
 The authoritative state is `docs/CURRENT_STATE.md`.
 
@@ -255,6 +255,28 @@ production Supabase and operational prerequisites.
   pass after the LAN hydration, mobile account-row and relative-scale fixes at
   `8a4437a` and `b49df5d`. Studio deliberately has no top-level
   `loading.tsx`: its role check must finish before any streamed HTTP 200 UI.
+- **The Journey editor focus-loss regression is fixed and live-verified at
+  `cda09ac` on `claude/final-security-data-hardening`.** Unsaved stage identity
+  is now a stable editor `uid`, separate from the stored id derived from the
+  visible label. Never key an editable React row by its typed value or by an id
+  regenerated from that value; never address a mutable list row by an index that
+  shifts after removal. `npm run test:journey-editor` and the credential-bearing
+  `npm run test:journey-editor-live` are the regression witnesses. The same
+  unstable-label key defect was removed from the import mapping workbench.
+- **Only one task may mutate or deploy a shared environment at a time.** A task
+  may develop in an isolated worktree, but it must integrate every completed
+  prerequisite commit before migration or deployment. Supabase migrations and
+  Cloudflare deployments are serialized explicitly; a clean Git worktree does
+  not make concurrent external mutations safe.
+- **Manual Wrangler deployments must preserve dashboard-managed text
+  variables.** `wrangler deploy` deletes dashboard vars that are absent from the
+  repository configuration unless `keep_vars = true` (or `--keep-vars`) is in
+  effect. The 2026-08-28 journey deployment briefly returned HTTP 500 after
+  replacing `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`; it
+  was rolled back, repaired through a verified preview version and promoted.
+  Until the repository config carries the protection, no task may deploy.
+  Always select and verify the Ollin Cloudflare account explicitly before a
+  manual deploy; this operator has access to more than one account.
 - **Every `/admin/**` address still answers.** Studio gained addresses; it
   renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
   frozen adversarial catalogue all depend on the old paths, and
