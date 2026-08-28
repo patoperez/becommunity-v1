@@ -15,6 +15,7 @@ import { DECIMALS, roundTo } from "@/lib/calc/metrics";
 import { buildAllowlist, type PivotAllowlist, type PivotResult } from "@/lib/calc/pivot";
 import type { JourneyStage } from "@/lib/calc/journey";
 import { parseDashboardConfig, type DashboardSections } from "@/lib/dashboard/config";
+import { authoredResultLabels, featuredResultKeys } from "@/lib/dashboard/results";
 import {
   summarizeConfirmedQualitative,
   type ConfirmedQualitative,
@@ -64,16 +65,6 @@ export type SafeJourneyStage = {
   qualitative: SafeQualitativeSummary;
 };
 
-export type SafeCross = {
-  metricKey: string;
-  rows: {
-    segment: string;
-    value: string | null;
-    n: number | null;
-    visibility: SampleVisibility;
-  }[];
-};
-
 export type SafeStudyView = {
   emptyStudy: boolean;
   emptySelection: boolean;
@@ -82,8 +73,18 @@ export type SafeStudyView = {
   sourceUnits: number | null;
   tiles: SafeMetric[];
   averages: SafeMetric[];
+  /**
+   * The characteristic a segment comparison opens on. It names the DEFAULT of
+   * the one comparison explorer; it no longer introduces a pre-rendered matrix.
+   */
   crossSegment: string | null;
-  crosses: SafeCross[];
+  /**
+   * The results the study's own configuration singles out, in reading order.
+   * Everything else stays in the complete inventory behind its disclosure.
+   */
+  featuredKeys: string[];
+  /** Display names the study authored for its results (recorrido moments). */
+  resultLabels: Record<string, string>;
   journey: SafeJourneyStage[];
   qualitative: SafeQualitativeSummary;
   canPivot: boolean;
@@ -178,7 +179,7 @@ export function buildStudyDashboard(
   filters: SegmentFilters,
   rawConfig: unknown = {},
 ): StudyDashboardPayload {
-  const { sections } = parseDashboardConfig(rawConfig);
+  const { sections, presentation } = parseDashboardConfig(rawConfig);
   const filterOptions = buildSegmentFilterOptions([...rows, ...qualitative]);
   const pivotAllowlist = buildAllowlist(rows);
   const filteredRows = filterRowsBySegments(rows, filters, filterOptions);
@@ -187,7 +188,12 @@ export function buildStudyDashboard(
   const selectedCount = distinctUnits(filteredRows, filteredQualitative);
   const selectionVisibility = sampleVisibility(selectedCount);
   const selectionSuppressed = selectionVisibility === "suppressed";
-  const metrics = computeStudyMetrics(filteredRows);
+  // `includeCrosses: false` — the exhaustive metric x segment product is no
+  // longer rendered anywhere on this surface, so it is no longer computed here.
+  // Every formula, and every cross a reader actually asks for, is unchanged:
+  // the comparison explorer computes exactly the one cross it was asked for,
+  // through the same allowlisted server path it always used.
+  const metrics = computeStudyMetrics(filteredRows, { includeCrosses: false });
 
   const tiles: SafeMetric[] = [];
   if (!selectionSuppressed && selectedCount > 0) {
@@ -220,18 +226,11 @@ export function buildStudyDashboard(
     item.n,
   ));
 
-  const crosses: SafeCross[] = selectionSuppressed ? [] : metrics.crosses.map((cross) => ({
-    metricKey: cross.metric_key,
-    rows: cross.rows.map((row) => {
-      const visibility = sampleVisibility(row.n);
-      return {
-        segment: row.segment,
-        value: visibility === "suppressed" ? null : formatScore(row.average),
-        n: visibleCount(row.n, visibility),
-        visibility,
-      };
-    }),
-  }));
+  // The study's own configuration decides what leads. `published` is exactly
+  // what the reader can be shown, so a result the selection suppressed can
+  // never be promoted into the lead by having been named somewhere.
+  const published = [...tiles, ...averages];
+  const featured = featuredResultKeys(published, stages, presentation.threshold);
 
   const journey: SafeJourneyStage[] = selectionSuppressed ? [] : stages.map((stage) => {
     const metric = computeStageMetric(filteredRows, stage.metric);
@@ -269,7 +268,8 @@ export function buildStudyDashboard(
       tiles: sections.metrics ? tiles : [],
       averages: sections.metrics ? averages : [],
       crossSegment: sections.segments && !selectionSuppressed ? metrics.crossSegment : null,
-      crosses: sections.segments ? crosses : [],
+      featuredKeys: sections.metrics ? featured : [],
+      resultLabels: sections.metrics ? authoredResultLabels(published, stages) : {},
       journey: sections.journey ? journey : [],
       qualitative: !sections.qualitative || selectionSuppressed
         ? { themes: [], quotes: [], hasSuppressedThemes: false }

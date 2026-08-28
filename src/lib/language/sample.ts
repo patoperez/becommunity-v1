@@ -121,9 +121,17 @@ export function studyBaseSentence(
   const copy = sampleCopy(visibility, count, unit);
   if (count != null && (copy.tone === "standard" || copy.tone === "caution")) {
     const base = `Este estudio recoge la voz de ${noun(count, unit)}`;
+    // WHAT THE NUMBER COUNTS, said in the same breath as the number.
+    //
+    // It is the people who left at least one recorded answer — not everyone on
+    // the list a study was drawn from. The real Cuicuilco study imported 60
+    // people and this sentence says 54, because six of them answered nothing at
+    // all. Both numbers are correct; only one of them is a base for a result,
+    // and a reader who is not told which is looking at will assume the other.
+    const counted = " Se cuenta a quien dejó al menos una respuesta.";
     return copy.tone === "caution"
-      ? `${base} — todavía pocas, así que léelo como un indicio.`
-      : `${base}.`;
+      ? `${base} — todavía pocas, así que léelo como un indicio.${counted}`
+      : `${base}.${counted}`;
   }
   return copy.headline + ".";
 }

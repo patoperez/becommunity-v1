@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import type { SegmentFilters } from "@/lib/calc/filters";
 import type { SafeMetric, StudyDashboardPayload } from "@/lib/dashboard/view";
+import { buildResultInventory } from "@/lib/dashboard/results";
 import PivotExplorer from "./PivotExplorer";
 import JourneyMap from "./JourneyMap";
 import QualitativeInsights, { hasPublishableQualitative } from "./QualitativeInsights";
@@ -11,9 +12,9 @@ import { MethodDisclosure, SampleContext } from "@/components/SampleContext";
 import { StateBlock } from "@/components/States";
 import {
   characteristicLabel,
-  comparisonQuestion,
-  humanize,
+  hasAuthoredName,
   resultLanguage,
+  resultName,
   studyStateLabel,
 } from "@/lib/language/results";
 import { sampleCopy } from "@/lib/language/sample";
@@ -39,12 +40,12 @@ type Study = { id: string; name: string; period: string | null; status: string }
  */
 function label(value: string) { return value.replace(/_/g, " "); }
 
-function ResultCard({ metric }: { metric: SafeMetric }) {
+function ResultCard({ metric, authored }: { metric: SafeMetric; authored?: string | null }) {
   const language = resultLanguage(metric.key, metric.title);
   const suppressed = metric.visibility === "suppressed";
   return (
     <div className="flex min-w-0 flex-col rounded-lg border border-line bg-surface px-4 py-3.5">
-      <p className="text-sm font-medium text-muted">{language.name}</p>
+      <p className="text-sm font-medium text-muted">{resultName(metric.key, metric.title, authored)}</p>
       <p className="tabular mt-1 font-display text-2xl font-semibold text-strong">
         {suppressed ? "—" : metric.value ?? "—"}
       </p>
@@ -64,6 +65,120 @@ function ResultCard({ metric }: { metric: SafeMetric }) {
         </MethodDisclosure>
       )}
     </div>
+  );
+}
+
+/**
+ * THE COMPLETE RESULT INVENTORY — reference material, not the page.
+ *
+ * A real instrument produces more numbers than a reading. Rendered open, one
+ * card each, the Cuicuilco study's 123 results were the first thing a client
+ * saw and they buried the recorrido, the retention series and the consultant's
+ * own interpretation under several screens of scroll.
+ *
+ * Nothing is withheld by closing it: every result the study produced is in
+ * here, in the order the view built them, with the values and the disclosure
+ * decisions already applied upstream. The summary carries the count, so the
+ * decision to open it is made with the size known.
+ *
+ * SUPPRESSION IS SUMMARISED ONCE. Repeating "muy pocas respuestas" on row after
+ * row taught a reader nothing and made the sentence invisible; the count is
+ * stated at the top and each withheld value is an em dash with an accessible
+ * name of its own.
+ */
+function AllResults({
+  items,
+  labels,
+  suppressed,
+  audience,
+}: {
+  items: SafeMetric[];
+  labels: Record<string, string>;
+  suppressed: number;
+  audience: Audience;
+}) {
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const named = useMemo(
+    () => items.map((metric) => ({
+      metric,
+      name: resultName(metric.key, metric.title, labels[metric.key]),
+      authored: hasAuthoredName(metric.key, labels[metric.key]),
+    })),
+    [items, labels],
+  );
+  const visible = needle
+    ? named.filter((item) => item.name.toLowerCase().includes(needle))
+    : named;
+  // Internal only. What Be Community has not finished naming is its own work,
+  // never a note on the client's screen (contract C11).
+  const unnamed = audience === "preview" ? named.filter((item) => !item.authored).length : 0;
+
+  return (
+    <details className="mt-5 rounded-xl border border-line bg-surface-sunken/50">
+      <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-sm font-semibold text-strong">
+        <span aria-hidden="true" className="inline-block transition-transform duration-[var(--motion-state)]">
+          ›
+        </span>
+        Explorar todos los resultados
+        <span className="font-normal text-muted">
+          ({items.length === 1 ? "1 resultado" : `${items.length} resultados`})
+        </span>
+      </summary>
+      <div className="border-t border-line px-4 py-4">
+        {suppressed > 0 ? (
+          <p className="text-sm text-caution">
+            {suppressed === 1
+              ? "Se ocultó 1 resultado porque no alcanza el mínimo necesario para proteger la privacidad."
+              : `Se ocultaron ${suppressed} resultados porque no alcanzan el mínimo necesario para proteger la privacidad.`}
+          </p>
+        ) : null}
+        {unnamed > 0 ? (
+          <p className="mt-2 text-sm text-caution">
+            Sólo para el equipo: {unnamed === 1
+              ? "1 resultado todavía no tiene un nombre configurado y se muestra con el de la columna importada."
+              : `${unnamed} resultados todavía no tienen un nombre configurado y se muestran con el de la columna importada.`}
+          </p>
+        ) : null}
+        <label className="mt-3 flex flex-col gap-1 text-sm font-medium text-strong">
+          Buscar un resultado
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Escribe parte del nombre"
+            className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-normal text-strong"
+          />
+        </label>
+        <p aria-live="polite" className="mt-2 text-xs text-muted">
+          {visible.length === items.length
+            ? `${items.length} resultados`
+            : `${visible.length} de ${items.length} resultados`}
+        </p>
+        {visible.length === 0 ? (
+          <p className="mt-3 text-sm text-muted">Ningún resultado se llama así. Prueba con otra palabra.</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-line rounded-lg border border-line bg-surface">
+            {visible.map(({ metric, name }) => (
+              <li
+                key={metric.key}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3.5 py-2.5"
+              >
+                <span className="min-w-0 break-words text-sm text-strong">{name}</span>
+                {metric.visibility === "suppressed" ? (
+                  <span className="text-base text-muted">
+                    <span aria-hidden="true">—</span>
+                    <span className="sr-only">Oculto para proteger la privacidad</span>
+                  </span>
+                ) : (
+                  <span className="tabular text-base font-semibold text-strong">{metric.value ?? "—"}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -94,6 +209,13 @@ export default function StudyCard({
     const query = filterQuery(filters);
     return `/api/studies/${encodeURIComponent(study.id)}/report${query ? `?${query}` : ""}`;
   }, [filters, study.id]);
+  // What leads, and what stays complete behind a disclosure. The split is the
+  // study's own configuration (see src/lib/dashboard/results.ts); nothing is
+  // dropped and no number is recomputed here.
+  const inventory = useMemo(
+    () => buildResultInventory([...view.tiles, ...view.averages], view.featuredKeys),
+    [view.averages, view.featuredKeys, view.tiles],
+  );
 
   function applyFilters(next: SegmentFilters) {
     setFilters(next);
@@ -290,55 +412,53 @@ export default function StudyCard({
             </section>
           ) : null}
 
-          {view.tiles.length || view.averages.length ? (
-            <section className="rounded-xl border border-line bg-surface p-5 sm:p-6">
-              <h4 className="text-xl">Los resultados, uno por uno</h4>
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {view.tiles.map((metric) => <ResultCard key={metric.key} metric={metric} />)}
-                {view.averages.map((metric) => <ResultCard key={metric.key} metric={metric} />)}
+          {inventory.total > 0 ? (
+            <section
+              aria-labelledby={`resultados-${study.id}`}
+              className="rounded-xl border border-line bg-surface p-5 sm:p-6"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                <h4 id={`resultados-${study.id}`} className="text-xl">
+                  Los resultados de este estudio
+                </h4>
+                <p className="text-sm text-muted">
+                  {inventory.total === 1 ? "1 resultado" : `${inventory.total} resultados`}
+                </p>
               </div>
-            </section>
-          ) : null}
-
-          {view.crossSegment && view.crosses.length ? (
-            <section className="rounded-xl border border-line bg-surface p-5 sm:p-6">
-              <h4 className="text-xl">{comparisonQuestion(view.crossSegment)}</h4>
-              <p className="mt-1 text-sm text-muted">
-                El mismo resultado, separado por {characteristicLabel(view.crossSegment).toLowerCase()}.
-              </p>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {view.crosses.map((cross) => (
-                  <div key={cross.metricKey} className="min-w-0 overflow-hidden rounded-lg border border-line">
-                    <p className="border-b border-line bg-surface-sunken px-3.5 py-2 text-sm font-semibold text-strong">
-                      {humanize(cross.metricKey)}
-                    </p>
-                    <ul className="divide-y divide-line">
-                      {cross.rows.map((row) => (
-                        <li key={row.segment} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3.5 py-2.5">
-                          <span className="min-w-0 break-words text-sm text-strong">{row.segment}</span>
-                          {row.visibility === "suppressed" ? (
-                            <span className="text-xs font-medium text-caution">
-                              Muy pocas respuestas para mostrarlo
-                            </span>
-                          ) : (
-                            <span className="flex items-baseline gap-2">
-                              <span className="tabular text-base font-semibold text-strong">{row.value}</span>
-                              <span className="text-xs text-muted">
-                                {row.n === 1 ? "1 persona" : `${row.n} personas`}
-                              </span>
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+              {inventory.featured.length > 0 ? (
+                <>
+                  <p className="mt-1 max-w-prose text-sm text-muted">
+                    {inventory.needsDisclosure
+                      ? "Estos son los que el estudio sigue de cerca. El resto está completo más abajo."
+                      : "Uno por uno, tal como los calculó el estudio."}
+                  </p>
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {inventory.featured.map((metric) => (
+                      <ResultCard key={metric.key} metric={metric} authored={view.resultLabels[metric.key]} />
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              ) : null}
+              {inventory.needsDisclosure ? (
+                <AllResults
+                  items={inventory.all}
+                  labels={view.resultLabels}
+                  suppressed={inventory.suppressed}
+                  audience={audience}
+                />
+              ) : null}
             </section>
           ) : null}
 
           {view.canPivot ? (
-            <PivotExplorer studyId={study.id} filters={filters} allowlist={dashboard.pivotAllowlist} />
+            <PivotExplorer
+              studyId={study.id}
+              filters={filters}
+              allowlist={dashboard.pivotAllowlist}
+              defaultDimension={view.crossSegment}
+              featuredKeys={view.featuredKeys}
+              labels={view.resultLabels}
+            />
           ) : null}
         </div>
       )}
