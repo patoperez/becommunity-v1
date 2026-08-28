@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
+import {
+  canonicalizeSegments,
+  canonicalSegmentLabels,
+  parseSegmentAliases,
+} from "./segments";
 import type { LongRow } from "./engine";
 
 /**
@@ -9,6 +14,8 @@ import type { LongRow } from "./engine";
  */
 const MAX_RESPONSES = 500_000;
 const MAX_RESPONDENTS = 50_000;
+/** A study's declared characteristics. Well under the Data API page cap. */
+const MAX_DIMENSIONS = 500;
 
 /** Both reads carry the primary key: it is the keyset cursor, not a value the
  * caller uses. See src/lib/supabase/paginate.ts. */
@@ -40,7 +47,7 @@ export async function loadStudyRows(
   // Both sets are read page by page. A single `.select()` would stop at the
   // Data API's 1000-row cap and aggregate a fraction of the study without
   // saying so — see src/lib/supabase/paginate.ts.
-  const [responses, respondents] = await Promise.all([
+  const [responses, respondents, { data: dimensions }] = await Promise.all([
     selectAllPages<ResponseRow>(
       "quant_response",
       (cursor, size) =>
@@ -62,12 +69,28 @@ export async function loadStudyRows(
         ).returns<RespondentRow[]>(),
       { maxRows: MAX_RESPONDENTS, cursorOf: (row) => row.id },
     ),
+    // A study declares at most a handful of characteristics, so this is a
+    // single bounded read, not a paged one.
+    client
+      .from("segment_dimension")
+      .select("key, config")
+      .eq("study_id", studyId)
+      .limit(MAX_DIMENSIONS)
+      .returns<{ key: string; config: unknown }[]>(),
   ]);
 
-  const segmentsById = new Map<string, Record<string, unknown>>();
+  // One category, one name. The same answer collected through two
+  // questionnaires reaches the database written two ways ("Legal y Contable"
+  // and "Legal y contable"), and every filter, count, chart and export must
+  // agree on which is which. The raw value stays in the database untouched;
+  // the grouping happens here, on the way out. See src/lib/calc/segments.ts.
+  const aliases = parseSegmentAliases(dimensions ?? []);
+  const labels = canonicalSegmentLabels(respondents ?? [], aliases);
+
+  const segmentsById = new Map<string, Record<string, string>>();
   const segmentKeys = new Set<string>();
   for (const r of respondents ?? []) {
-    const segs = (r.segments ?? {}) as Record<string, unknown>;
+    const segs = canonicalizeSegments(r.segments, labels);
     segmentsById.set(r.id as string, segs);
     for (const k of Object.keys(segs)) segmentKeys.add(k);
   }

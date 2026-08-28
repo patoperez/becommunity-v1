@@ -2,6 +2,7 @@ import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { keysetWindow, selectAllPages } from "@/lib/supabase/paginate";
+import { canonicalizeSegments, canonicalSegmentLabels } from "@/lib/calc/segments";
 import {
   dimensionFallbackLabel,
   EMPTY_INVENTORY,
@@ -57,6 +58,23 @@ export async function loadTenantScopeInventories(
     { maxRows: MAX_RESPONDENTS, cursorOf: (row) => row.id },
   );
 
+  // The picker must offer ONE entry per category. Two spellings of the same
+  // characteristic would otherwise appear as two options, and choosing one of
+  // them would scope a person to part of their own segment. Tenant-wide, so
+  // only the lexical fold applies — a study's editorial aliases are study
+  // scoped and are applied where a study is read.
+  const labelsByTenant = new Map<string, ReturnType<typeof canonicalSegmentLabels>>();
+  for (const tenantId of tenantIds) {
+    labelsByTenant.set(
+      tenantId,
+      canonicalSegmentLabels(
+        (data ?? [])
+          .filter((row) => String(row.tenant_id) === tenantId)
+          .map((row) => ({ segments: readSegments(row.segments) })),
+      ),
+    );
+  }
+
   const perTenant = new Map<string, Map<string, number>>();
   const valueCounts = new Map<string, Map<string, Map<string, number>>>();
   const totals = new Map<string, number>();
@@ -66,7 +84,10 @@ export async function loadTenantScopeInventories(
     if (!(tenantId in inventories)) continue;
     totals.set(tenantId, (totals.get(tenantId) ?? 0) + 1);
 
-    const segments = readSegments(row.segments);
+    const segments = canonicalizeSegments(
+      readSegments(row.segments),
+      labelsByTenant.get(tenantId) ?? new Map(),
+    );
     const combinationKey = JSON.stringify(segments);
     const combinations = perTenant.get(tenantId) ?? new Map<string, number>();
     combinations.set(combinationKey, (combinations.get(combinationKey) ?? 0) + 1);

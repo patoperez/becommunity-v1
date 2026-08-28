@@ -800,9 +800,13 @@ console.log("\n[7] Canonical gate wiring:");
   assert.ok((scripts.gates ?? "").indexOf("gates:offline") < (scripts.gates ?? "").indexOf("gates:live"));
   ok("gates:offline stays credentials-free and gates still composes offline then live");
 
-  // The live scripts carry the env file; the offline ones must not need one.
+  // The live scripts read the env file WHEN IT EXISTS; the offline ones must not
+  // need one. --env-file-if-exists is deliberate: an OpenNext build compiles the
+  // project .env files into the Worker bundle, so the deployable artifact must be
+  // built in a directory with no such file and the chain has to run with the
+  // credentials in the shell environment instead.
   for (const name of ["suite:b", "suite:c"]) {
-    assert.match(scripts[name], /--env-file=\.env\.local/, `${name} is live and reads the local env file`);
+    assert.match(scripts[name], /--env-file-if-exists=\.env\.local/, `${name} is live and reads the local env file`);
   }
   assert.ok(!/--env-file/.test(scripts["test:pivot"]), "test:pivot must not require a credential file");
   assert.ok(!/--env-file/.test(scripts["test:suite-bc-selftest"]), "this self-test must not require a credential file");

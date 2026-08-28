@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { foldSegmentValue } from "@/lib/calc/segments";
 
 export type DataScope = Record<string, string[]>;
 
@@ -16,12 +17,24 @@ export function parseDataScope(value: unknown): DataScope {
   ]));
 }
 
-/** Empty scope means full tenant access; dimensions combine with AND. */
+/**
+ * Empty scope means full tenant access; dimensions combine with AND.
+ *
+ * Values are compared through the same lexical fold the rest of the product
+ * groups characteristics by (src/lib/calc/segments.ts). A scope saved as
+ * "Legal y Contable" and a row that arrived as "Legal y contable" are the same
+ * category — matching them by exact string would silently hide a person's data
+ * from someone authorized to see it, and would break the moment a study
+ * canonicalises its labels.
+ */
 export function applyDataScope<T extends Record<string, unknown>>(rows: T[], scope: DataScope): T[] {
-  const entries = Object.entries(scope);
+  const entries = Object.entries(scope).map(([dimension, allowed]) => [
+    dimension,
+    new Set(allowed.map(foldSegmentValue)),
+  ] as const);
   if (!entries.length) return rows;
   return rows.filter((row) => entries.every(([dimension, allowed]) => {
     const value = row[dimension];
-    return value != null && allowed.includes(String(value));
+    return value != null && allowed.has(foldSegmentValue(String(value)));
   }));
 }

@@ -190,8 +190,9 @@ ok("the count matches the enforcement rule and declines rather than guessing");
 console.log("\n[7] Only aggregates reach the browser, after the internal-role check");
 const inventoryLoader = await readCode("src/lib/studies/scope-inventory.ts");
 assert.match(inventoryLoader, /import "server-only";/, "the inventory loader must never bundle client-side");
-assert.match(inventoryLoader, /\.select\("tenant_id, segments"\)/,
-  "only the characteristic map is read — no answer, no quote, no identifier");
+assert.match(inventoryLoader, /\.select\("id, tenant_id, segments"\)/,
+  "only the characteristic map is read — no answer, no quote, no identifier " +
+    "(id is the keyset cursor for a complete read, and never leaves the server)");
 assert.doesNotMatch(inventoryLoader, /quant_response|qual_observation|quote/,
   "no answer or quote may be read by the access picker's inventory");
 const clientsPage = await readCode("src/app/admin/clients/page.tsx");
