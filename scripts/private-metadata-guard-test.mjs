@@ -185,8 +185,14 @@ console.log("\n[3] Migration 0020 reproduces the whole function and every guaran
     /\(\s*select count\(\*\)\s*from jsonb_object_keys\(/i.test(body),
     "0020 counts keys with count(*) over jsonb_object_keys — a real PostgreSQL set-returning function",
   );
-  // The header comment names the defect on purpose; no executable line may.
+  // The file header names the defect on purpose. Nothing inside the dollar-quoted
+  // body may, comments included: PostgreSQL stores the body verbatim, so a
+  // catalog-level search of pg_get_functiondef must come back empty.
   check(!/jsonb_object_length/i.test(code), "no executable statement in 0020 references jsonb_object_length");
+  check(
+    !/jsonb_object_length/i.test(raw.match(/\$\$([\s\S]*?)\$\$/)?.[1] ?? ""),
+    "the stored function body carries no occurrence of jsonb_object_length, not even in a comment",
+  );
   check(
     code.includes(`revoke all on function ${SIGNATURE} from public, anon, authenticated;`),
     "0020 revokes execute from public, anon and authenticated",

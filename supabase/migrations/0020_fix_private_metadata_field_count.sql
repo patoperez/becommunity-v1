@@ -59,8 +59,8 @@ begin
     raise exception using errcode = '22023', message = 'invalid private metadata field';
   end if;
 
-  -- PostgreSQL has no `jsonb_object_length`. `jsonb_object_keys` is a
-  -- set-returning function, so the key count is a scalar aggregate over it.
+  -- PostgreSQL has no object-length function for jsonb. jsonb_object_keys is
+  -- a set-returning function, so the key count is a scalar aggregate over it.
   -- 100 keys are accepted; 101 are refused.
   if exists (
     select 1
