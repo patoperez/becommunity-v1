@@ -209,3 +209,98 @@ export function stageDraftRefusal(drafts: StageDraft[]): string | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// The editor's list identity — deliberately not the stored identifier
+// ---------------------------------------------------------------------------
+
+/**
+ * A stage as the editor holds it while somebody is still writing it.
+ *
+ * `uid` exists for exactly one reason: React needs a key for the row, and every
+ * other value on the row is something the operator changes mid-keystroke. The
+ * editor used to key the row on the stored `id`, which a stage that has never
+ * been saved still derives from its own name — so the key changed on every
+ * character typed, React replaced the whole row, and the browser discarded the
+ * focused `<input>` along with the caret. Naming a moment cost one click per
+ * letter.
+ *
+ * `uid` is assigned once, when the row appears, and never reflects anything
+ * typed into it. It is client-side identity only: never submitted, never
+ * stored, never sent anywhere. The stored `id` keeps its own rules below.
+ */
+export type StageEditorDraft = StageDraft & { uid: string; isNew: boolean };
+
+/** Only what a person can type. `id`, `uid` and `isNew` are not editable. */
+export type StageDraftPatch = Partial<Pick<StageDraft, "label" | "metric" | "description">>;
+
+/**
+ * The rows a saved journey starts as.
+ *
+ * The uid is positional and therefore deterministic: the server's HTML and the
+ * client's first render must agree, so nothing random may appear here.
+ */
+export function toStageEditorDrafts(stages: JourneyStage[]): StageEditorDraft[] {
+  return toStageDrafts(stages).map((draft, index) => ({
+    ...draft,
+    uid: `saved:${index}`,
+    isNew: false,
+  }));
+}
+
+/**
+ * A new, empty moment appended to the list.
+ *
+ * `sequence` is a counter the editor never reuses, so removing a row and adding
+ * another cannot resurrect a uid that React has already seen.
+ */
+export function addStageDraft(drafts: StageEditorDraft[], sequence: number): StageEditorDraft[] {
+  const taken = drafts.map((draft) => draft.id);
+  return [
+    ...drafts,
+    {
+      uid: `added:${sequence}`,
+      id: stageIdFromLabel("", taken, drafts.length + 1),
+      label: "",
+      metric: "",
+      description: "",
+      isNew: true,
+    },
+  ];
+}
+
+/**
+ * One row edited, addressed by its stable uid rather than by position.
+ *
+ * A stage that has already been saved keeps the identifier it was saved with,
+ * whatever its name becomes: `qual_observation.confirmed_stage_key` points at
+ * that identifier, so moving it would detach every comment already filed
+ * against that moment.
+ */
+export function editStageDraft(
+  drafts: StageEditorDraft[],
+  uid: string,
+  patch: StageDraftPatch,
+): StageEditorDraft[] {
+  return drafts.map((draft, index) => {
+    if (draft.uid !== uid) return draft;
+    // The three typed fields are applied by name, never spread: a patch can
+    // not reach `id`, `uid` or `isNew` whatever it happens to carry.
+    const next: StageEditorDraft = {
+      ...draft,
+      label: patch.label ?? draft.label,
+      metric: patch.metric ?? draft.metric,
+      description: patch.description ?? draft.description,
+    };
+    if (next.isNew && patch.label !== undefined) {
+      const taken = drafts.filter((other) => other.uid !== uid).map((other) => other.id);
+      next.id = stageIdFromLabel(next.label, taken, index + 1);
+    }
+    return next;
+  });
+}
+
+/** One row removed, and only that one. */
+export function removeStageDraft(drafts: StageEditorDraft[], uid: string): StageEditorDraft[] {
+  return drafts.filter((draft) => draft.uid !== uid);
+}
