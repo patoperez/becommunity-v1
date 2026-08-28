@@ -74,7 +74,6 @@
   "dependencies": {
     "@supabase/ssr": "0.12.0",
     "@supabase/supabase-js": "2.108.2",
-    "exceljs": "4.4.0",
     "jszip": "3.10.1",
     "next": "16.3.2",
     "papaparse": "5.5.4",
@@ -94,6 +93,7 @@
     "arquero": "8.0.3",
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.2",
+    "exceljs": "4.4.0",
     "tailwindcss": "4.3.3",
     "tsx": "4.22.4",
     "typescript": "5.9.3",

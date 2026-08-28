@@ -21,12 +21,21 @@
 //   [2] The production ingestion parser IMPORTS cleanly under that runtime.
 //   [3] A synthetic, data-bearing CSV parses through the REAL production
 //       parseFile(), with headers, row count and cell values asserted.
-//   [4] No module under src/ may STATICALLY import exceljs; the lazy
-//       `await import(...)` inside the XLSX branch is what keeps CSV alive.
+//   [4] No module under src/ may resolve exceljs AT ALL — not even lazily.
+//       The lazy `await import()` was the earlier fix; it is no longer enough.
+//       Under workerd, ExcelJS's `xlsx.load` poisons the isolate: the first two
+//       requests that reach it succeed and the THIRD never settles, so the
+//       runtime cancels the request and answers HTTP 500. An operator saw that
+//       as "confirmar" failing after analyze and preview had both worked, with
+//       nothing written. XLSX is now read by src/lib/ingestion/xlsx-reader.ts.
+//   [5] A real, prefixed-namespace XLSX round trips through the production
+//       parseFile() FIVE times, asserting values, blank-cell alignment and a
+//       stable ISO date — one round trip could not have caught the defect.
 //
 // Verified against real workerd (wrangler dev, nodejs_compat) while this gate
-// was written: `exceljs/excel.js` throws the umask error there, while
-// `exceljs/dist/exceljs.min.js` loads and parses a real .xlsx.
+// was written: `exceljs/excel.js` throws the umask error there; ExcelJS's
+// browser bundle loads but hangs from the third request onward, while a
+// JSZip-only round trip over the same bytes succeeds on every request.
 //
 // Fixtures are synthetic. No client, consultant or production data.
 // =============================================================================
@@ -147,8 +156,16 @@ check(
   `positive control: ExcelJS Node entry "exceljs/excel.js" is fatal here (${nodeEntryError ? "throws" : "loaded — regression would be missed"})`,
 );
 
-// ---- [4] ExcelJS must never become a static import in production source -----
-console.log("\n[4] No module under src/ statically imports ExcelJS");
+// ---- [4] ExcelJS must not be reachable from production source at all --------
+// It used to be loaded lazily inside the XLSX branch. That is no longer allowed
+// EITHER: under workerd, ExcelJS's `xlsx.load` poisons the isolate — the first
+// two requests that call it succeed and the third never settles, so the runtime
+// cancels the request and answers HTTP 500. XLSX is now read by
+// src/lib/ingestion/xlsx-reader.ts (JSZip + string parsing), which was verified
+// safe across requests on real workerd. ExcelJS remains a DEV dependency: the
+// ingestion tests use it to AUTHOR fixture workbooks, which keeps the reader
+// honest by reading bytes a different library wrote.
+console.log("\n[4] ExcelJS is unreachable from src/, statically or lazily");
 function walk(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -158,18 +175,90 @@ function walk(dir) {
   }
   return out;
 }
-// Matches `import ... from "exceljs..."` and `require("exceljs...")`, but NOT
-// `await import("exceljs...")`, which is the whole point of the fix.
-const STATIC_IMPORT = /(^|\n)\s*import\s[^;]*?from\s*['"]exceljs[^'"]*['"]|(^|[^.\w])require\(\s*['"]exceljs[^'"]*['"]\s*\)/;
 const srcFiles = walk("src").filter((f) => !f.endsWith(".d.ts"));
-const offenders = srcFiles.filter((f) => STATIC_IMPORT.test(readFileSync(f, "utf8")));
+// The MODULE SPECIFIER is what matters: prose naming the library in a comment
+// is documentation, but a quoted "exceljs..." specifier is a real dependency.
+const EXCELJS_SPECIFIER = /['"]exceljs[^'"]*['"]/;
+const offenders = srcFiles.filter((f) => EXCELJS_SPECIFIER.test(readFileSync(f, "utf8")));
 check(offenders.length === 0,
-  `scanned ${srcFiles.length} files under src/ — zero static ExcelJS imports${offenders.length ? `: ${offenders.join(", ")}` : ""}`);
+  `scanned ${srcFiles.length} files under src/ — no module resolves ExcelJS${offenders.length ? `: ${offenders.join(", ")}` : ""}`);
 
-// The parser must still reach ExcelJS lazily, or XLSX support is silently gone.
 const parseSource = readFileSync("src/lib/ingestion/parse.ts", "utf8");
-check(/await\s+import\(\s*['"]exceljs[^'"]*['"]\s*\)/.test(parseSource),
-  "parse.ts still loads ExcelJS lazily inside the XLSX branch");
+check(/from\s+['"]\.\/xlsx-reader['"]/.test(parseSource),
+  "parse.ts reads XLSX through the project's own reader");
+
+const readerSource = readFileSync("src/lib/ingestion/xlsx-reader.ts", "utf8");
+check(!EXCELJS_SPECIFIER.test(readerSource), "the reader itself resolves no ExcelJS module");
+check(/await import\(\s*['"]jszip['"]\s*\)/.test(readerSource),
+  "the reader loads JSZip lazily, the only library it needs");
+
+const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+check(!("exceljs" in (pkg.dependencies ?? {})),
+  "exceljs is not a production dependency");
+check("exceljs" in (pkg.devDependencies ?? {}),
+  "exceljs stays a dev dependency so fixtures are authored by a different library");
+
+// ---- [5] A real XLSX through the real parser, under the same runtime --------
+// The reader must survive being called many times: the defect it replaces only
+// appeared from the third call onwards, so a single round trip proves nothing.
+console.log("\n[5] Real XLSX round trips through parseFile(), repeatedly");
+if (parse) {
+  const { default: JSZipLib } = await import("jszip");
+  // A workbook written the way the real-world source files are written: the
+  // `x:` namespace prefix, inline strings, an explicitly EMPTY cell in the
+  // middle of the row, and a date-formatted cell.
+  const sheet =
+    '<?xml version="1.0" encoding="utf-8"?>' +
+    '<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData>' +
+    '<x:row r="1">' +
+    '<x:c r="A1" t="str"><x:v>seg_nivel</x:v></x:c>' +
+    '<x:c r="B1" t="str"><x:v>q_uno</x:v></x:c>' +
+    '<x:c r="C1" t="str"><x:v>q_dos</x:v></x:c>' +
+    '<x:c r="D1" t="str"><x:v>priv_fecha</x:v></x:c>' +
+    "</x:row>" +
+    '<x:row r="2">' +
+    '<x:c r="A2" t="str"><x:v>primaria</x:v></x:c>' +
+    '<x:c r="B2" s="1" />' +
+    '<x:c r="C2" t="n"><x:v>7</x:v></x:c>' +
+    '<x:c r="D2" s="2" t="n"><x:v>45992</x:v></x:c>' +
+    "</x:row>" +
+    "</x:sheetData></x:worksheet>";
+  const zip = new JSZipLib();
+  zip.file("xl/workbook.xml",
+    '<?xml version="1.0" encoding="utf-8"?><x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<x:sheets><x:sheet name="Datos" sheetId="1" r:id="R1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" /></x:sheets></x:workbook>');
+  zip.file("xl/_rels/workbook.xml.rels",
+    '<?xml version="1.0" encoding="utf-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet1.xml" Id="R1" /></Relationships>');
+  zip.file("xl/worksheets/sheet1.xml", sheet);
+  zip.file("xl/styles.xml",
+    '<?xml version="1.0" encoding="utf-8"?><x:styleSheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<x:cellXfs count="3"><x:xf numFmtId="0" /><x:xf numFmtId="0" /><x:xf numFmtId="14" /></x:cellXfs></x:styleSheet>');
+  const bytes = await zip.generateAsync({ type: "uint8array" });
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    let out = null;
+    try {
+      out = await parse.parseFile("prefixed.xlsx", buffer.slice(0));
+    } catch (e) {
+      bad(`parseFile threw on attempt ${attempt}: ${e.message}`);
+      break;
+    }
+    if (attempt === 1) {
+      check(JSON.stringify(out.headers) === JSON.stringify(["seg_nivel", "q_uno", "q_dos", "priv_fecha"]),
+        `prefixed-namespace headers read (got ${out.headers.join(",")})`);
+      check(out.rows.length === 1, `one data row (got ${out.rows.length})`);
+      check(out.rows[0]?.seg_nivel === "primaria", "string cell read");
+      check(out.rows[0]?.q_uno === "", "an explicitly empty cell stays empty");
+      check(out.rows[0]?.q_dos === "7",
+        `the value AFTER the empty cell keeps its own column (got ${JSON.stringify(out.rows[0]?.q_dos)})`);
+      check(out.rows[0]?.priv_fecha === "2025-12-01",
+        `a date-formatted cell renders as a stable ISO date (got ${JSON.stringify(out.rows[0]?.priv_fecha)})`);
+    }
+    if (attempt === 5) ok("five consecutive parses all succeeded");
+  }
+}
 
 // Restore the real runtime facts.
 Object.defineProperty(process, "platform", { value: realPlatform, configurable: true });
@@ -180,4 +269,4 @@ if (failures > 0) {
   console.error(`RESULT: ${failures} failure(s). GATE BLOCKED.`);
   process.exit(1);
 }
-console.log("RESULT: ingestion parses CSV with the Node-only ExcelJS graph fatal. GATE PASSED.");
+console.log("RESULT: ingestion reads CSV and XLSX with the Node-only ExcelJS graph fatal. GATE PASSED.");
