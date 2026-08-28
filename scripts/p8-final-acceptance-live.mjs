@@ -177,7 +177,7 @@ async function discoveredRoutes(session, origin, role) {
       const base = study.match(/^\/studio\/e\/[^/]+/)?.[0];
       if (base) {
         const studyId = base.split("/").at(-1);
-        routes.push(base, `${base}/datos`, `${base}/indicadores`, `${base}/cualitativo`, `${base}/interpretacion`, `${base}/vista-cliente`, `${base}/publicar`, `/admin/preview/${studyId}`);
+        routes.push(base, `${base}/datos`, `${base}/categorias`, `${base}/indicadores`, `${base}/cualitativo`, `${base}/interpretacion`, `${base}/vista-cliente`, `${base}/publicar`, `/admin/preview/${studyId}`);
       }
     }
     await session.load(`${origin}/studio/clientes`);

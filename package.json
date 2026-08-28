@@ -22,6 +22,7 @@
     "test:category-evaluation": "tsx scripts/category-evaluation.mjs",
     "test:category-evaluation-live": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/category-evaluation.mjs --live",
     "test:categories-live": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/category-review-live-test.mjs",
+    "test:categories-e2e": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs scripts/category-review-e2e-live.mjs",
     "test:periods": "tsx scripts/period-continuity-test.mjs",
     "test:xlsx-hardening": "tsx scripts/xlsx-hardening-test.mjs",
     "test:private-metadata-live": "node --env-file-if-exists=.env.local scripts/private-metadata-live-test.mjs",
