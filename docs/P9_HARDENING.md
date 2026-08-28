@@ -366,3 +366,57 @@ throughout.
 
 **Never re-import to repair.** The study's 60 respondents are reconciled; a
 re-import risks duplicating them. Repair configuration, or restore from a backup.
+
+---
+
+## 11. Running the live suites: one build, one server, one order
+
+The live suites drive a real browser against a real server. Two environment
+faults have masqueraded as product failures, and both are now refused by a
+preflight before any fixture object is created.
+
+### The order, and why each step is where it is
+
+```
+rm -rf .next          # nothing from an earlier build survives
+npm run build         # the ONE build the browser and the server will share
+npm run start         # serve exactly that build
+npm run gates:live    # qualitative-live, private-metadata-live, Suite A, B, C
+npm run cf:build      # LAST — it rewrites .next for the Worker
+```
+
+`next build` and the OpenNext build write into the **same** `.next` directory.
+Running `cf:build` and then `next start` serves client assets from one build
+while the server resolves Server Actions from another, and every action fails
+with `Failed to find Server Action` — which reads exactly like a broken
+workflow. `assertServedBuildIsCoherent` compares the served pages against
+`.next/BUILD_ID` and refuses to run when they disagree, naming this order.
+
+### Stale synthetic accounts
+
+`assertFixtureCredentials` signs in as each configured actor against Supabase
+Auth **before** the harness creates anything. A removed or renamed synthetic
+account now fails with the environment variable to repair
+(`TEST_INTERNAL_EMAIL` / `TEST_INTERNAL_PASSWORD`, …) and the command that
+recreates it, instead of aborting the run and leaving a report that says the
+suite was red. It never prints a credential. These are throwaway accounts in the
+synthetic project; no client, respondent or real user is involved.
+
+### The upload page has two forms
+
+`/admin/upload` renders the membership-series uploader **above** the main import
+form, and both label a client select `Cliente` and a file input
+`Archivo CSV o Excel`. A locator that takes the first match therefore fills one
+form and clicks the other form's still-disabled button: the Server Action never
+runs, nothing changes in the DOM, and the probe reports `unclassified`.
+
+That is what made eight Suite C checks fail — on the audited baseline as well as
+on this branch. It was never a product defect: the upload boundary accepts,
+refuses and rolls back exactly as designed. The driver now anchors on the button
+it is going to click and walks up to the nearest container holding both a select
+and a file input, which is one form — what an operator sees and uses. It then
+waits for the product to enable that control instead of racing React's state
+update, and if the control never enables it says which half of the form is
+missing rather than reporting an unexplained refusal.
+
+`npm run test:suite-bc-selftest` pins all of it offline.

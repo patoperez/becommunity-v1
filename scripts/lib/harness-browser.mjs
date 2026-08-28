@@ -321,18 +321,27 @@ export async function launchBrowser() {
        * builds a multipart body and never touches the framework's transport.
        * The input is located by the accessible text of its own `<label>` (§4.1).
        */
-      async setFileInput(labelPrefix, absolutePaths) {
-        // The index is derived from the label the product renders; nothing is
+      /**
+       * `locator` is either a label prefix, or `{ indexExpression }` when the
+       * page carries more than one file input and the caller has already
+       * decided which form owns the one it means.
+       */
+      async setFileInput(locator, absolutePaths) {
+        // The index is derived from what the product renders; nothing is
         // added to the page. No `data-*` test attribute is ever introduced
         // here or in application source (§4.1).
-        const index = await context.evaluate(`
+        const index = await context.evaluate(
+          typeof locator === "string"
+            ? `
           (() => {
             const fields = [...document.querySelectorAll('input[type=file]')];
             const label = [...document.querySelectorAll('label')]
-              .find((item) => item.textContent.trim().startsWith(${JSON.stringify(labelPrefix)}));
+              .find((item) => item.textContent.trim().startsWith(${JSON.stringify(locator)}));
             const field = label && label.querySelector('input[type=file]');
             return field ? fields.indexOf(field) : -1;
-          })()`);
+          })()`
+            : locator.indexExpression,
+        );
         if (index < 0) return "no-control";
         // The DOM domain is enabled lazily, here and nowhere else. Enabling it
         // for every context would make the browser push a DOM mutation event
@@ -562,6 +571,80 @@ export const PAGE = {
       const control = [...document.querySelectorAll('button, input[type=submit]')]
         .find((node) => (node.textContent || node.value || '').trim() === ${JSON.stringify(label)});
       return Boolean(control) && !control.disabled;
+    })()`,
+
+  /**
+   * THE PAGE HAS MORE THAN ONE UPLOAD FORM.
+   *
+   * /admin/upload renders the aggregate membership-series uploader ABOVE the
+   * main import form, and both label a client select "Cliente" and a file input
+   * "Archivo CSV o Excel". A locator that takes the FIRST match therefore fills
+   * one form and then clicks the other form's button, which is still disabled
+   * because its own client and file were never chosen. That reads in the
+   * transcript as an upload boundary that refuses everything — a false red that
+   * is indistinguishable from a broken product.
+   *
+   * These locators anchor on the button that is actually going to be clicked
+   * and walk UP to the nearest ancestor holding both a select and a file input.
+   * That container is one form, which is what an operator sees and uses.
+   */
+  uploadScopeSelect: (anchor, value) => `
+    (() => {
+      const button = [...document.querySelectorAll('button')]
+        .find((node) => (node.textContent || '').trim() === ${JSON.stringify(anchor)});
+      if (!button) return 'no-anchor';
+      let scope = button;
+      while (scope && !(scope.querySelector('select') && scope.querySelector('input[type=file]'))) {
+        scope = scope.parentElement;
+      }
+      if (!scope) return 'no-scope';
+      const select = scope.querySelector('select');
+      const option = [...select.options].find((item) => item.value === ${JSON.stringify(value)});
+      if (!option) return 'no-option';
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, option.value);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    })()`,
+
+  /** The index, among ALL file inputs, of the one in the anchor's own form. */
+  uploadScopeFileIndex: (anchor) => `
+    (() => {
+      const fields = [...document.querySelectorAll('input[type=file]')];
+      const button = [...document.querySelectorAll('button')]
+        .find((node) => (node.textContent || '').trim() === ${JSON.stringify(anchor)});
+      if (!button) return -1;
+      let scope = button;
+      while (scope && !(scope.querySelector('select') && scope.querySelector('input[type=file]'))) {
+        scope = scope.parentElement;
+      }
+      const field = scope && scope.querySelector('input[type=file]');
+      return field ? fields.indexOf(field) : -1;
+    })()`,
+
+  /**
+   * The upload form's own readiness, as fixed tokens. The product enables its
+   * analyze control only once a client and a source are both chosen, so when
+   * that control stays disabled this says WHICH half is missing instead of
+   * leaving an unexplained "unclassified" in the transcript.
+   */
+  uploadSourceState: (label) => `
+    (() => {
+      const control = [...document.querySelectorAll('button')]
+        .find((node) => (node.textContent || '').trim() === ${JSON.stringify(label)});
+      if (!control) return 'control=missing';
+      let scope = control;
+      while (scope && !(scope.querySelector('select') && scope.querySelector('input[type=file]'))) {
+        scope = scope.parentElement;
+      }
+      if (!scope) return 'scope=missing';
+      const field = scope.querySelector('input[type=file]');
+      const select = scope.querySelector('select');
+      return 'files=' + (field ? field.files.length : 'none') +
+        ' client=' + (select && select.value ? 'set' : 'unset') +
+        ' forms=' + document.querySelectorAll('input[type=file]').length +
+        ' enabled=' + String(!control.disabled);
     })()`,
 
   /** Clicks a control located by its accessible name anywhere on the page. */
@@ -836,6 +919,13 @@ const selectByValue = (labelPrefix, value) => `
   })()`;
 
 /** The upload screen's own "analysis is ready" signal (UploadForm.tsx:223). */
+/**
+ * How long a control may take to come alive after the source is chosen. This is
+ * a BOUND on the product's own reaction, not a retry: React re-renders in
+ * milliseconds, and anything approaching this ceiling is a real defect.
+ */
+const CONTROL_READY_MS = 10000;
+
 const UPLOAD_READY = "() => /filas en el archivo/.test(document.body.innerText)";
 /** The preview screen's own "preview is ready" signal (its confirm control). */
 const PREVIEW_READY =
@@ -851,10 +941,21 @@ const ROLLBACK_DONE = "() => /Se revirti[oó]/i.test(document.body.innerText)";
  * does. `params.file` is an absolute path to a run-owned temporary file; the
  * BROWSER reads it, so no multipart body is ever constructed here.
  */
+const ANALYZE_CONTROL = "Revisar archivo";
+
+/**
+ * Choose the client and the source IN THE FORM THAT OWNS THE ANALYZE BUTTON.
+ * The page renders a second uploader with identically labelled controls, and
+ * filling that one instead is silent: every later step still runs, and the
+ * button that never became clickable is the only evidence.
+ */
 async function selectUploadSource({ context, params }) {
-  const tenant = await context.evaluate(selectByValue("Cliente", params.tenant_id));
+  const tenant = await context.evaluate(PAGE.uploadScopeSelect(ANALYZE_CONTROL, params.tenant_id));
   if (tenant !== "ok") return { status: 200, domSignal: "none", note: `tenant-${tenant}` };
-  const attached = await context.setFileInput("Archivo CSV o Excel", [params.file]);
+  const attached = await context.setFileInput(
+    { indexExpression: PAGE.uploadScopeFileIndex(ANALYZE_CONTROL) },
+    [params.file],
+  );
   if (attached !== "ok") return { status: 200, domSignal: "none", note: `file-${attached}` };
   return null;
 }
@@ -954,6 +1055,22 @@ export const BROWSER_DRIVERS = Object.freeze({
       };
     }
 
+    // WAIT FOR THE CONTROL, DO NOT RACE IT. The product enables "Revisar
+    // archivo" only after React has processed the client and the file the
+    // harness just chose, and React 19 flushes that state asynchronously.
+    // Clicking the instant the file is attached therefore clicked a still
+    // disabled button: no Server Action ran, no DOM changed, and every upload
+    // probe reported "unclassified" — a false red that looked identical to a
+    // broken upload boundary. A real operator waits for the button to come
+    // alive; so does this. If it never does, the note says which half of the
+    // form the product is still missing, which is a genuine finding.
+    const ready = await context
+      .waitForDom(`() => ${PAGE.controlEnabled("Revisar archivo")}`, CONTROL_READY_MS)
+      .catch(() => false);
+    if (!ready) {
+      const state = await context.evaluate(PAGE.uploadSourceState("Revisar archivo"));
+      return { status: 200, domSignal: "none", note: `analyze-disabled ${state}` };
+    }
     const clicked = await context.evaluate(PAGE.clickByName("Revisar archivo"));
     if (clicked !== "ok") return { status: 200, domSignal: "none", note: `analyze-${clicked}` };
     // `settleTimeoutMs` is a wider BOUND, never a retry: a large source is

@@ -662,6 +662,9 @@ export function unsupportedMutations() {
 // Evidence ledger — sanitized at construction, so nothing needs redacting
 // ---------------------------------------------------------------------------
 
+/** A driver diagnostic: fixed tokens only, short, no rendered product text. */
+const FIXED_TOKEN_NOTE = /^[A-Za-z0-9 _.:=-]{1,80}$/;
+
 export function createLedger() {
   const records = [];
   return {
@@ -680,6 +683,15 @@ export function createLedger() {
         residue: record.residue ?? null,
         assertion: record.assertion ?? "not_asserted",
         durationMs: record.durationMs ?? 0,
+        // A driver's own diagnostic token, and ONLY that. Drivers report why a
+        // step could not proceed with fixed words they choose themselves
+        // ("tenant-no-option", "file-no-control", "analyze-disabled"), never
+        // with anything the product rendered. The pattern is the guarantee: a
+        // note that could carry rendered text, a quote or a credential does not
+        // match it and is dropped. Without this, a step that never ran is
+        // indistinguishable in the transcript from one that ran and was refused
+        // — which is exactly how eight upload checks stayed unexplained.
+        note: FIXED_TOKEN_NOTE.test(record.note ?? "") ? record.note : null,
       };
       records.push(sanitized);
       return sanitized;
@@ -690,7 +702,8 @@ export function createLedger() {
         (r) =>
           `${r.actor}/${r.sessionKind}[${r.sessionLabel ?? "-"}] ${r.operation} ` +
           `${r.mechanism} ${r.urlClass} -> ${r.httpStatus ?? "-"} ` +
-          `${r.redirectTo ? `=> ${r.redirectTo} ` : ""}${r.errorCategory} (${r.durationMs}ms)`,
+          `${r.redirectTo ? `=> ${r.redirectTo} ` : ""}${r.errorCategory} (${r.durationMs}ms)` +
+          `${r.note ? ` [${r.note}]` : ""}`,
       ),
   };
 }
@@ -1018,6 +1031,8 @@ export async function createHarness(options) {
       redirectTo: observation.redirectTo ?? null,
       errorCategory: classify(observation),
       durationMs,
+      // The driver's own fixed-token diagnostic, bounded by the ledger.
+      note: observation.note ?? null,
     });
   }
 

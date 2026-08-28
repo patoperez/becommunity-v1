@@ -1129,4 +1129,69 @@ console.log("\n[11] PDF displayed-text marker extraction:");
   ok("C1.3 fails unless the approved hostile quote is positively observed in the PDF's displayed text");
 }
 
+
+// ---------------------------------------------------------------------------
+// The upload driver must address ONE form, and must not race it
+// ---------------------------------------------------------------------------
+// /admin/upload renders the membership-series uploader above the main import
+// form. Both label a client select Cliente and a file input Archivo CSV o
+// Excel, so a first-match locator fills one form and then clicks the other
+// form's still-disabled button. Every upload probe then reports unclassified,
+// which is indistinguishable in the transcript from an upload boundary that
+// refuses everything. Eight Suite C checks failed that way, on the product's
+// own audited baseline, for an entirely non-product reason.
+{
+  console.log("");
+  console.log("[9] The upload driver addresses one form and waits for its control");
+  const browserLib = readFileSync("scripts/lib/harness-browser.mjs", "utf8");
+
+  const selector = browserLib.slice(browserLib.indexOf("async function selectUploadSource"));
+  const body = selector.slice(0, selector.indexOf("return null;"));
+  assert.ok(body.includes("uploadScopeSelect("), "the client is chosen inside the analyze control's own form");
+  assert.ok(body.includes("uploadScopeFileIndex("), "the source is attached to that same form's file input");
+  assert.ok(!body.includes("selectByValue("), "a first-match locator must not choose the client");
+  assert.ok(!body.includes('setFileInput("'), "a first-match label must not choose the file input");
+  ok("the upload driver scopes the client and the source to the form it will submit");
+
+  const analyze = browserLib.slice(browserLib.indexOf('"upload.analyze"'));
+  const analyzeBody = analyze.slice(0, analyze.indexOf('"upload.preview"'));
+  assert.ok(
+    analyzeBody.indexOf("controlEnabled") < analyzeBody.indexOf('clickByName("Revisar archivo")'),
+    "the driver must wait for the analyze control before clicking it",
+  );
+  assert.ok(analyzeBody.includes("analyze-disabled"), "and must say so when the control never becomes clickable");
+  ok("the driver waits for the product to enable the control rather than racing it");
+}
+
+// ---------------------------------------------------------------------------
+// An environment fault must never be reported as a product finding
+// ---------------------------------------------------------------------------
+{
+  console.log("");
+  console.log("[10] Every live suite preflights its build and its fixture accounts");
+  for (const file of [
+    "scripts/suite-a-isolation.mjs",
+    "scripts/suite-b-authorization.mjs",
+    "scripts/suite-c-input.mjs",
+  ]) {
+    const source = readFileSync(file, "utf8");
+    assert.ok(source.includes("assertServedBuildIsCoherent("), file + " must prove the served build is this checkout's");
+    assert.ok(source.includes("assertFixtureCredentials("), file + " must prove its synthetic accounts authenticate");
+    assert.ok(
+      source.indexOf("assertFixtureCredentials(") < source.indexOf("createHarness({"),
+      file + " must preflight BEFORE it creates anything",
+    );
+  }
+  ok("all three live suites check the build and the accounts before creating a fixture");
+
+  const preflight = readFileSync("scripts/lib/harness-preflight.mjs", "utf8");
+  assert.ok(preflight.includes("envEmail"), "a stale credential is named by its environment variable");
+  assert.ok(preflight.includes("BUILD_ID"), "build coherence is checked against the build id on disk");
+  ok("the preflight names the environment variable to repair, never a credential");
+
+  const harnessLib = readFileSync("scripts/lib/http-harness.mjs", "utf8");
+  assert.ok(harnessLib.includes("FIXED_TOKEN_NOTE"), "the ledger carries a driver diagnostic token");
+  assert.ok(harnessLib.includes("{1,80}"), "bounded, so no rendered text can ride along");
+  ok("the evidence ledger records why a step could not proceed, in fixed tokens only");
+}
 console.log(`\nSuites B and C offline self-test: ${passed} checks passed.`);

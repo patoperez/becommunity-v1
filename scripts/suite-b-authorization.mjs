@@ -68,6 +68,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanText } from "./lib/secret-patterns.mjs";
 import { OPERATIONS, createHarness, operationSupport } from "./lib/http-harness.mjs";
+import { assertFixtureCredentials, assertServedBuildIsCoherent } from "./lib/harness-preflight.mjs";
 import { launchBrowser, PAGE } from "./lib/harness-browser.mjs";
 import {
   createFixtures,
@@ -978,8 +979,38 @@ async function livePhase(signal, fixtures, prefix, tempDir) {
     signal: AbortSignal.any([AbortSignal.timeout(15000), signal]),
   }).catch(() => null);
   if (!health?.ok) {
-    throw new Error(`the app is not answering at ${ORIGIN} — start it first (npm run build && npm run start)`);
+    throw new Error(
+      `the app is not answering at ${ORIGIN}. Start it in the documented order: ` +
+      "`rm -rf .next && npm run build && npm run start`. Never start it from a `.next` " +
+      "that `npm run cf:build` has since rewritten.",
+    );
   }
+
+  // Environment faults are not product findings. Both of these run BEFORE any
+  // fixture object exists, and each names exactly what to repair.
+  console.log("");
+  console.log("[preflight] The served build and the synthetic accounts:");
+  await assertServedBuildIsCoherent({ origin: ORIGIN, signal, log: note });
+  await assertFixtureCredentials({
+    supabaseUrl: SUPABASE_URL,
+    anonKey: PUBLISHABLE_KEY,
+    signal,
+    log: note,
+    credentials: {
+      tenantA: {
+        email: process.env.TEST_USER_A_EMAIL,
+        password: process.env.TEST_USER_A_PASSWORD,
+        envEmail: "TEST_USER_A_EMAIL",
+        envPassword: "TEST_USER_A_PASSWORD",
+      },
+      internal: {
+        email: process.env.TEST_INTERNAL_EMAIL,
+        password: process.env.TEST_INTERNAL_PASSWORD,
+        envEmail: "TEST_INTERNAL_EMAIL",
+        envPassword: "TEST_INTERNAL_PASSWORD",
+      },
+    },
+  });
 
   console.log("\n[preflight] Fixture namespace and pre-run object counts:");
   const before = {
