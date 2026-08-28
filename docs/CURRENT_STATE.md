@@ -1,9 +1,39 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-27**.
+> Authoritative operational handoff. Last verified: **2026-08-28**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
+
+## P9 — final hardening and the first real study (read this first)
+
+`docs/P9_HARDENING.md` is the standing reference for everything below and must
+be read before touching deployment configuration, a paged read, the ingestion
+reader, or the real BNI Cuicuilco study.
+
+- **The privileged key never enters a build.** OpenNext compiles the project's
+  `.env` FILES into the Worker bundle, so the deployable artifact is built from
+  a checkout with no `.env` file and credentials live in the shell environment.
+  `SUPABASE_SERVICE_ROLE_KEY` is an encrypted Worker **secret** and must not be
+  a Workers Builds **build variable**. `npm run test:secrets` fails on the
+  variable NAME appearing in the compiled env snapshot, so it is red regardless
+  of the value.
+- **Every complete read is a keyset, never an offset.** Offset paging reads rows
+  by position in an order SQL never promised. `selectAllPages` orders by primary
+  key, asks for rows after the last id it saw, and refuses a page that did not
+  come back in key order. There is no snapshot across pages and none is claimed.
+- **One category, one name.** Case and whitespace variants are folded
+  automatically; different WORDS are merged only by a configured, per-study
+  alias. Grouping happens on read, so stored rows still match the source exactly.
+- **Published rates are derived once from exact counts**, not re-rounded from a
+  stored rate.
+- **AI execution is not editorial confirmation.** Migration `0021` provides the
+  only supported way to return an automated qualitative confirmation to the human
+  review queue, and records itself in the same transaction.
+- **The real study reconciles exactly** — 60 respondents, 3 282 quantitative
+  answers, 31 qualitative answers, 123 metric keys, zero discrepancies across
+  every key and every segment value — and remains `draft`. Re-prove it with
+  `scripts/real-study-verify.mjs`.
 
 ## Product and roadmap boundary
 

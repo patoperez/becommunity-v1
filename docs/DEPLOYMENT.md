@@ -5,6 +5,14 @@ This app is **dynamic** (server components do RLS-scoped reads, Server Actions
 handle login/logout/upload, the session middleware runs on every request), so it
 is **not** a static export.
 
+> **Configuration is split, and the split is a security boundary.**
+> `SUPABASE_SERVICE_ROLE_KEY` is an **encrypted Worker secret** and must never be
+> a build variable or reachable from a `.env` file at build time — the adapter
+> compiles `.env` FILES into `.open-next/cloudflare/next-env.mjs` and ships them
+> inside the bundle. Build the deployable artifact from a checkout with no
+> `.env` file. See `docs/P9_HARDENING.md` §1 for the full table, the gate that
+> enforces it, and the rotation procedure.
+
 ## Adapter: OpenNext (Cloudflare Workers)
 
 We deploy with **[`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare)**
