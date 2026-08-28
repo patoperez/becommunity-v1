@@ -4,7 +4,7 @@
 //   npm run suite:d          complete gate (merge gate; requires both builds)
 //   npm run suite:d:local    Windows-local subset — NOT the complete Suite D
 // =============================================================================
-// Six deterministic checks, no credentials, no network mutation:
+// Seven deterministic checks, no credentials, no network mutation:
 //
 //   D-a  npm audit           zero critical/high, unless a complete, explicitly
 //                            human-approved §6.3 exception record matches
@@ -18,6 +18,8 @@
 //   D-e  build artifacts     delegates to scripts/secret-leak-test.mjs (D1)
 //   D-f  toolchain pin       package.json and CI declare the same exact npm,
 //                            and CI proves it took effect before `npm ci`
+//   D-g  deploy config       wrangler.toml keeps the dashboard's plain-text
+//                            variables and declares no value of its own
 //
 // Reporting contract: this script prints commit / path / secret-class metadata
 // only. It never prints a matched value or any fragment of one.
@@ -653,6 +655,152 @@ function checkToolchain() {
 }
 
 // ---------------------------------------------------------------------------
+// D-g — deployment configuration (keep the dashboard's plain-text variables)
+//
+// Wrangler treats its configuration file as the source of truth for a Worker's
+// environment. At `keep_vars`'s default of false, a deploy DELETES every
+// dashboard-managed plain-text variable the file does not declare — and on
+// 2026-08-28 it did: both public Supabase bindings disappeared, every route
+// answered HTTP 500, and the Worker came back only after a rollback and a
+// corrected preview promotion. Encrypted secrets were never at risk; the
+// plain-text half of the configuration was.
+//
+// The check has two halves, and the second matters as much as the first. It is
+// not enough to keep the dashboard's variables: the file must also stay empty
+// of values. `keep_vars = true` beside a `[vars]` block would invite an
+// operator to "fix" a missing binding by committing it, which is how the
+// privileged key ends up in git.
+//
+// Pure evaluator, like D-f, so the detector is exercised against synthetic
+// drift on every run rather than only against this branch's own file.
+// ---------------------------------------------------------------------------
+
+const DEPLOY_CONFIG_FILE = "wrangler.toml";
+
+/** Variable names that must never appear as a committed configuration value. */
+const NEVER_IN_CONFIG = ["SUPABASE_SERVICE_ROLE_KEY", "OPENAI_API_KEY"];
+
+/**
+ * Strip comments so a rule is never satisfied by prose describing it. A `#`
+ * inside a quoted string is not a comment, so quotes are tracked.
+ */
+export function stripTomlComments(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      let quoted = false;
+      for (let i = 0; i < line.length; i += 1) {
+        const ch = line[i];
+        if (ch === '"' && line[i - 1] !== "\\") quoted = !quoted;
+        else if (ch === "#" && !quoted) return line.slice(0, i);
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+export function evaluateDeployConfig({ config }) {
+  const checks = [];
+  const add = (id, passed, message) => checks.push({ id, ok: passed, message });
+
+  if (config == null) {
+    add("present", false, `${DEPLOY_CONFIG_FILE} is missing — deployment safety cannot be proved`);
+    return checks;
+  }
+
+  // Comments are removed first: a line explaining keep_vars must not satisfy
+  // the assertion that keep_vars is set.
+  const code = stripTomlComments(config);
+
+  const keepVars = /^\s*keep_vars\s*=\s*true\s*$/m.test(code);
+  add(
+    "keep-vars",
+    keepVars,
+    keepVars
+      ? "wrangler.toml sets keep_vars = true — a deploy leaves dashboard plain-text variables alone"
+      : "wrangler.toml does NOT set keep_vars = true — the next deploy would delete every " +
+          "dashboard-managed plain-text variable it does not declare (2026-08-28 incident)",
+  );
+
+  // `[vars]` and any `[env.<name>.vars]` table. Either one puts configuration
+  // values into a committed file.
+  const varsTable = /^\s*\[(?:[A-Za-z0-9_.-]+\.)?vars\]\s*$/m.exec(code);
+  add(
+    "no-vars-table",
+    varsTable === null,
+    varsTable === null
+      ? "wrangler.toml declares no [vars] table — configuration values stay out of git"
+      : `wrangler.toml declares ${varsTable[0].trim()} — configuration values must not be committed`,
+  );
+
+  const named = NEVER_IN_CONFIG.filter((name) => code.includes(name));
+  add(
+    "no-privileged-name",
+    named.length === 0,
+    named.length === 0
+      ? `wrangler.toml names no privileged variable outside its comments`
+      : `wrangler.toml names ${named.join(", ")} outside its comments`,
+  );
+
+  return checks;
+}
+
+/**
+ * Synthetic drift, evaluated on every run. A gate that has never been shown to
+ * fail is a gate nobody knows is connected.
+ */
+const DEPLOY_DRIFT_CASES = [
+  { why: "keep_vars removed entirely", config: 'name = "w"\nmain = "x"\n' },
+  { why: "keep_vars flipped to false", config: 'name = "w"\nkeep_vars = false\n' },
+  {
+    why: "keep_vars present only inside a comment",
+    config: 'name = "w"\n# keep_vars = true\n',
+  },
+  {
+    why: "a [vars] table committed beside the flag",
+    config: 'name = "w"\nkeep_vars = true\n\n[vars]\nNEXT_PUBLIC_SUPABASE_URL = "https://x"\n',
+  },
+  {
+    why: "an environment-scoped vars table",
+    config: 'name = "w"\nkeep_vars = true\n\n[env.production.vars]\nA = "b"\n',
+  },
+  {
+    why: "the privileged key named outside a comment",
+    config: 'name = "w"\nkeep_vars = true\nSUPABASE_SERVICE_ROLE_KEY = "x"\n',
+  },
+];
+
+function deployConfigSelfTest() {
+  const clean = 'name = "w"\nmain = "x"\nkeep_vars = true\n';
+  const cleanPasses = evaluateDeployConfig({ config: clean }).every((c) => c.ok);
+  const undetected = DEPLOY_DRIFT_CASES.filter((c) =>
+    evaluateDeployConfig({ config: c.config }).every((check) => check.ok),
+  );
+  cleanPasses
+    ? ok("deploy-config", "self-test: a correct deployment configuration passes")
+    : fail("deploy-config", "self-test: a correct deployment configuration was rejected");
+  undetected.length === 0
+    ? ok(
+        "deploy-config",
+        `self-test: all ${DEPLOY_DRIFT_CASES.length} deployment-config drift cases are caught`,
+      )
+    : undetected.forEach((c) => fail("deploy-config", `drift NOT caught by D-g: ${c.why}`));
+}
+
+function checkDeployConfig() {
+  heading("D-g  deployment configuration — dashboard variables survive a deploy");
+
+  const config = existsSync(DEPLOY_CONFIG_FILE)
+    ? readFileSync(DEPLOY_CONFIG_FILE, "utf8")
+    : null;
+
+  for (const check of evaluateDeployConfig({ config })) {
+    check.ok ? ok("deploy-config", check.message) : fail("deploy-config", check.message);
+  }
+  deployConfigSelfTest();
+}
+
+// ---------------------------------------------------------------------------
 console.log("=".repeat(72));
 console.log("SUITE D — secrets and supply chain" + (LOCAL_SUBSET ? "   [LOCAL SUBSET]" : ""));
 if (LOCAL_SUBSET) {
@@ -667,6 +815,7 @@ checkLockfile();
 checkHistory();
 checkArtifacts();
 checkToolchain();
+checkDeployConfig();
 
 console.log("\n" + "=".repeat(72));
 const passed = results.filter((r) => r[1] === "PASS").length;
