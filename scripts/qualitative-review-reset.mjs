@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 const arg = (name) => {
@@ -44,7 +44,10 @@ if (confirm && !backupDir) {
   console.error("--backup-dir is required with --confirm: the previous review state must be recoverable.");
   process.exit(2);
 }
-if (backupDir && backupDir.includes("becommunity-software")) {
+// A backup of real study configuration must not land where git can see it.
+// The test is containment in the working tree, not a name: a scratch directory
+// may legitimately carry the project name in its path.
+if (backupDir && resolve(backupDir).startsWith(resolve(process.cwd()))) {
   console.error("Refusing to write a backup inside the repository. Choose a path outside it.");
   process.exit(2);
 }
