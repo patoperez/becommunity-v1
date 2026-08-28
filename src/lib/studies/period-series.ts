@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { canonicalPeriodPoints } from "@/lib/calc/period-continuity";
 import type { PeriodPoint } from "@/lib/ingestion/period-series";
 
 /** migration 0019: `expected_periods between 1 and 240`. */
@@ -24,7 +25,14 @@ export async function loadLatestPeriodSeries(client: SupabaseClient, studyId: st
     .limit(MAX_PERIODS)
     .returns<Record<string, unknown>[]>();
   if (error) throw new Error(`study_period_snapshot: ${error.message}`);
-  return (data ?? []).map((row) => ({
+  // The RATES ARE DERIVED HERE, not read. The stored rate is the value the
+  // source workbook authored, already rounded once by numeric(7,2); rendering
+  // it and rounding again to the declared percent precision would be a second
+  // rounding, which the calculation policy forbids and which is not always the
+  // same number. The counts are exact, so the canonical functions round once.
+  // The stored rate stays in the database as the source's own value, and
+  // arithmeticFindings reports internally when the two disagree.
+  return canonicalPeriodPoints((data ?? []).map((row) => ({
     periodLabel: String(row.period_label),
     periodOrder: Number(row.period_order),
     startingMembers: Number(row.starting_members),
@@ -33,6 +41,6 @@ export async function loadLatestPeriodSeries(client: SupabaseClient, studyId: st
     lostMembers: Number(row.lost_members),
     retention: Number(row.retention_rate),
     churn: Number(row.churn_rate),
-  }));
+  })));
 }
 
