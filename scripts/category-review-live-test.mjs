@@ -21,7 +21,6 @@ import {
   foldSegmentValue,
   parseSegmentAliases,
 } from "../src/lib/calc/segments.ts";
-import { groupKeyFor } from "../src/lib/categories/candidates.ts";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -71,6 +70,7 @@ async function fingerprintProtected() {
 }
 
 let studyId = null;
+let disposableB = null;
 let actorId = null;
 const before = await fingerprintProtected();
 
@@ -357,41 +357,60 @@ try {
   // -------------------------------------------------------------------------
   section("[9] Tenant isolation");
   {
+    // A SECOND DISPOSABLE STUDY, never a pre-existing one.
+    //
+    // The property under test is that a decision's tenant comes from the STUDY
+    // and not from the caller, which needs a real write against another client.
+    // An earlier version of this test wrote that decision onto tenant B's
+    // standing "Satisfacción 2026 (TEST)" study — inert, but the ledger has no
+    // DELETE grant by design, so the row could not be cleaned up afterwards and
+    // had to be removed by hand. A disposable study cascades.
     if (tenantB) {
-      const { data: otherStudy } = await admin
-        .from("study").select("id").eq("tenant_id", tenantB).limit(1).maybeSingle();
-      if (otherStudy) {
+      const { data: bStudy, error: bError } = await admin.from("study").insert({
+        tenant_id: tenantB,
+        name: "DESECHABLE — aislamiento de categorías (TEST)",
+        status: "draft",
+      }).select("id").single();
+
+      if (bError) {
+        bad(`could not create the tenant-B disposable study: ${bError.message}`);
+      } else {
+        disposableB = bStudy.id;
+        await admin.from("respondent").insert([
+          { tenant_id: tenantB, study_id: disposableB, segments: { [DIMENSION]: ROI_A } },
+          { tenant_id: tenantB, study_id: disposableB, segments: { [DIMENSION]: ROI_B } },
+        ]);
+
         const crossed = await admin.rpc("record_category_decision", {
-          p_study_id: otherStudy.id, p_dimension_key: DIMENSION,
+          p_study_id: disposableB, p_dimension_key: DIMENSION,
           p_member_folds: folds, p_member_values: [ROI_A, ROI_B],
           p_context_signature: "c", p_decision: "grouped",
           p_canonical_label: ROI_A, p_canonical_fold: foldSegmentValue(ROI_A),
           p_reason: null, p_suggestion_source: "manual", p_language: "es",
           p_advisor: null, p_actor: actorId,
         });
-        // It may legitimately succeed — an internal operator may act on any
-        // client — but the ROW must carry tenant B, never tenant A.
+        check(!crossed.error, `an internal operator may act on another client's study${crossed.error ? `: ${crossed.error.message}` : ""}`);
+
         if (!crossed.error) {
           const { data: written } = await admin
             .from("category_decision").select("tenant_id").eq("id", crossed.data.id).maybeSingle();
           check(written?.tenant_id === tenantB,
-            "a decision's tenant is taken from the STUDY, never from the caller");
-          await admin.from("study_category_snapshot").delete().eq("study_id", otherStudy.id);
-          console.log("    (that tenant-B decision is cleaned up below)");
-        } else {
-          ok("a decision on another client's study was refused outright");
+            "and the row's tenant is taken from the STUDY, never from the caller");
         }
-      } else {
-        ok("tenant B has no study to cross into (nothing to prove here)");
+
+        // Tenant A's ledger must be untouched by any of that.
+        const { data: aRows } = await admin
+          .from("category_decision").select("tenant_id").eq("study_id", studyId);
+        check((aRows ?? []).every((row) => row.tenant_id === tenantA),
+          "every decision for the tenant-A study still belongs to tenant A");
+        const { count: bInA } = await admin
+          .from("category_decision").select("id", { count: "exact", head: true })
+          .eq("study_id", studyId).eq("tenant_id", tenantB);
+        check(bInA === 0, "no tenant-B decision leaked into the tenant-A study");
       }
     } else {
       ok("TEST_TENANT_B_ID not set; the cross-tenant write was not exercised");
     }
-
-    const { data: mine } = await admin
-      .from("category_decision").select("tenant_id").eq("study_id", studyId);
-    check((mine ?? []).every((row) => row.tenant_id === tenantA),
-      "every decision for the disposable study belongs to tenant A");
   }
 } catch (error) {
   bad(`unexpected error: ${error instanceof Error ? error.message : String(error)}`);
@@ -418,17 +437,23 @@ try {
     check(respondentsLeft === 0, "no respondents were left behind");
   }
 
-  // Any tenant-B decision written by [9].
-  if (tenantB) {
-    const { data: bStudies } = await admin.from("study").select("id").eq("tenant_id", tenantB);
-    for (const s of bStudies ?? []) {
-      await admin.from("study_category_snapshot").delete().eq("study_id", s.id);
-      const { data: dims } = await admin
-        .from("segment_dimension").select("id, config").eq("study_id", s.id).eq("key", DIMENSION);
-      for (const d of dims ?? []) await admin.from("segment_dimension").delete().eq("id", d.id);
-    }
-    ok("tenant B's disposable configuration was removed");
+  if (disposableB) {
+    await admin.from("study_category_snapshot").delete().eq("study_id", disposableB);
+    await admin.from("segment_dimension").delete().eq("study_id", disposableB);
+    await admin.from("respondent").delete().eq("study_id", disposableB);
+    const { error } = await admin.from("study").delete().eq("id", disposableB);
+    check(!error, `the tenant-B disposable study was deleted${error ? `: ${error.message}` : ""}`);
+    const { count } = await admin
+      .from("category_decision").select("id", { count: "exact", head: true }).eq("study_id", disposableB);
+    check(count === 0, "and its ledger rows went with it through the cascade");
   }
+
+  // Nothing may be left anywhere. The ledger has no DELETE grant, so a row that
+  // outlives its study would need a hand-written repair — which is exactly why
+  // both studies above are disposable.
+  const { count: strayDimensions } = await admin
+    .from("segment_dimension").select("id", { count: "exact", head: true }).eq("key", DIMENSION);
+  check(strayDimensions === 0, `no test dimension survived anywhere (${strayDimensions})`);
 
   const after = await fingerprintProtected();
   check(after === before, "THE REAL CUICUILCO STUDY IS BYTE-FOR-BYTE UNCHANGED");
