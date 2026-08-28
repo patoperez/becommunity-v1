@@ -74,7 +74,18 @@ static-assets binding. The name must match the live Worker: if it names a script
 that does not exist on the account, an ad-hoc `npm run cf:deploy` silently
 publishes a **second, separate** Worker instead of updating the running one.
 
-> **Open deployment precondition (2026-08-28): preserve dashboard vars.** By
+> **RESOLVED IN THE REPOSITORY, WITH ONE HUMAN STEP LEFT.** `keep_vars = true`
+> is committed and Suite D's **D-g** check enforces it. But `keep_vars` only
+> preserves variables that exist on the WORKER, and the two public values
+> currently exist only on a VERSION — so `wrangler versions upload` still needs
+> `--var` for both until somebody adds them as Text variables in the dashboard.
+> Measured on a zero-traffic preview: without them, every route answers 500.
+> See `docs/P9_HARDENING.md` §"What `keep_vars` does NOT do".
+>
+> **Always upload a zero-traffic preview and curl `/api/health` and `/login`
+> before promoting.** That is what turned this from an outage into a non-event.
+
+> **Original precondition (2026-08-28): preserve dashboard vars.** By
 > default, `wrangler deploy` deletes dashboard-managed plain-text variables that
 > are not declared in the Wrangler configuration; encrypted secrets are
 > preserved. Before the next deployment, set `keep_vars = true` in

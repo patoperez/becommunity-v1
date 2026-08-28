@@ -77,6 +77,14 @@ reader, or the real BNI Cuicuilco study.
   verify Wrangler's `keep_vars = true` protection (or the equivalent
   `--keep-vars` invocation) and confirm the Worker-level variables still exist.
   Secrets were not deleted by the deploy.
+- **`keep_vars` is necessary but not sufficient, and that is now measured.** It
+  preserves WORKER-level plain-text variables; the two public values currently
+  live only at the VERSION level, so a `versions upload` without `--var` yields
+  a version bound to `ASSETS` alone and every route answers 500. Proven on a
+  zero-traffic preview on 2026-08-28 and never seen by a user. The durable fix
+  is a human adding the two Text variables in the dashboard. Until then, upload
+  with `--var` for both public values, verify the preview, and only then
+  promote.
 - **That precondition is now satisfied in the repository.** `wrangler.toml`
   carries `keep_vars = true`, and Suite D's new **D-g** check fails if it is
   removed, flipped, commented out, or joined by a `[vars]` block — with six

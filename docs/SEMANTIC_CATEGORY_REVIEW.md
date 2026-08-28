@@ -257,3 +257,28 @@ npm run test:categories-live        # end-to-end against a running app
 ```
 
 `npm run suite:d` covers the deployment configuration (`D-g`).
+
+## 13. Verified live
+
+Against the provisional project `ontvqazsqiwisdddblif` (`be-community-dev`) and
+the synthetic beta Worker `becommunity-v1`, 2026-08-28:
+
+- migration `0022` applied and recorded; both tables RLS-enabled **and** forced,
+  browser roles denied, `service_role` holding `SELECT, INSERT` on the ledger and
+  nothing else, and zero public tables missing RLS anywhere in the schema;
+- `test:categories-live` — 54 checks: the SQL refusals, the append-only
+  privileges, the projection, the publication pin, undo as an inverse version,
+  and tenant isolation;
+- `test:categories-e2e` — 13 checks through a real browser against the deployed
+  Worker: the screen renders, pressing *Agrupar* records an attributed decision
+  and updates the projection, the raw spellings stay on the respondents, and
+  undo appends a reversal;
+- `test:p8-acceptance-live` — 108 views across 18 routes and 6 widths, including
+  `/studio/e/[studyId]/categorias` at 320 px;
+- `test:journey-editor-live` — 13 checks: the journey focus fix is intact on
+  this build.
+
+Every run used a disposable study and deleted it. The real study was
+fingerprinted before and after and is unchanged: 60 respondents, 3 282
+quantitative answers, 31 qualitative answers, 123 metric keys, `draft`, and zero
+category decisions.

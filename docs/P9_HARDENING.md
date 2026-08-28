@@ -85,6 +85,42 @@ The next deployment is blocked until all of the following hold:
 Never solve this by placing the service-role key in `[vars]`, a build variable,
 or a repository file.
 
+### What `keep_vars` does NOT do — measured on 2026-08-28
+
+`keep_vars = true` is committed and Suite D's **D-g** enforces it. It is
+necessary and it is **not sufficient**, and the difference cost a zero-traffic
+preview to discover:
+
+> `keep_vars` stops `wrangler deploy` from reconciling away the variables that
+> exist **on the Worker**. It cannot inherit a variable that exists only on a
+> previous **version**.
+
+The two public values are currently bound at the version level, because the
+2026-08-28 recovery re-supplied them with `--var`. There are therefore no
+Worker-level plain-text variables for `keep_vars` to keep, and a
+`wrangler versions upload` with no `--var` produced a version whose only binding
+was `ASSETS`. Every route on it answered HTTP 500 — the same failure as the
+incident, caught on a version serving no traffic.
+
+**Until the two Text variables are set at the Worker level in the dashboard,
+every `versions upload` must pass them:**
+
+```
+npx wrangler versions upload --name becommunity-v1   --var "NEXT_PUBLIC_SUPABASE_URL:<public value>"   --var "NEXT_PUBLIC_SUPABASE_ANON_KEY:<publishable value>"
+```
+
+Both are public by design. `SUPABASE_SERVICE_ROLE_KEY` is **never** passed this
+way: it is an encrypted Worker secret and versions inherit secrets
+automatically, which was confirmed on every version uploaded that day.
+
+**The durable fix is a human action in the dashboard**: add the two values under
+Worker → Settings → Variables and Secrets as **Text**. After that, `keep_vars`
+protects them and the `--var` arguments stop being necessary.
+
+**And the procedure that actually caught this**: upload a zero-traffic preview,
+`curl` its `/api/health` and `/login`, and promote only if both answer 200.
+That sequence turned a nine-minute outage into a 500 nobody saw.
+
 ### Verifying the binding after a deploy
 
 Do not add an endpoint that reports whether a secret is configured. Sign in as an
