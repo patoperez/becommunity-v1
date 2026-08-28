@@ -27,7 +27,13 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { scanText, selfTest, looksBinary, classifyJwt } from "./lib/secret-patterns.mjs";
+import {
+  scanText,
+  selfTest,
+  looksBinary,
+  privilegedEnvNames,
+  isPrivilegedSupabaseKey,
+} from "./lib/secret-patterns.mjs";
 
 const CLIENT_DIR = ".next/static";
 const SERVER_DIR = ".open-next";
@@ -60,7 +66,9 @@ if (serviceKey.length < 16) {
 // the anon key, and never printed by this script.
 const serviceParts = serviceKey.split(".");
 const serviceSignature = serviceParts.length === 3 ? serviceParts[2] : serviceKey;
-const isCanary = classifyJwt(serviceKey) !== "service_role";
+// Both supported Supabase formats count as real: the legacy service_role JWT
+// and the current sb_secret_ key. Anything else is a synthetic CI canary.
+const isCanary = !isPrivilegedSupabaseKey(serviceKey);
 
 function walk(dir) {
   const files = [];
@@ -192,6 +200,42 @@ if (clientOnly) {
   process.exit(2);
 } else {
   scanArtifact("server", SERVER_DIR, { allowIdentifier: true });
+}
+
+// ---------------------------------------------------------------------------
+// The build-time env snapshot. This is the check that would have caught the
+// real defect on its own: it fails on the NAME, so it is red whether the build
+// ran with the production key, with a canary, or with nothing at all.
+//
+// The OpenNext Cloudflare adapter compiles the project .env FILES into
+// .open-next/cloudflare/next-env.mjs and replays them into process.env inside
+// the Worker. A .env.local sitting next to the build therefore ships its
+// contents in the bundle. Worker secrets are applied FIRST at runtime and take
+// precedence, so this snapshot is never needed for a privileged value and is
+// only capable of leaking one.
+if (!clientOnly) {
+  console.log("");
+  console.log("-".repeat(70));
+  console.log("[server] OpenNext build-time env snapshot carries no privileged name");
+  const snapshot = join(SERVER_DIR, "cloudflare", "next-env.mjs");
+  if (!existsSync(snapshot)) {
+    console.error("");
+    console.error("x REQUIRED ARTIFACT MISSING: " + snapshot);
+    console.error("  The OpenNext build emitted no env snapshot, so this boundary cannot be");
+    console.error("  proved. Do NOT treat a missing artifact as a pass.");
+    process.exit(2);
+  }
+  const declared = privilegedEnvNames(readFileSync(snapshot, "utf8"));
+  if (declared.length === 0) {
+    ok("no privileged variable is compiled into the Worker bundle");
+    console.log("    SUPABASE_SERVICE_ROLE_KEY must reach the Worker as an encrypted runtime");
+    console.log("    secret instead. See docs/DEPLOYMENT.md.");
+  } else {
+    fail("privileged variable(s) compiled into " + snapshot + ": " + declared.join(", "));
+    console.error("      The build read them from a .env file in the build directory. Build the");
+    console.error("      deployable artifact from a checkout with no such file, and bind the");
+    console.error("      value as a Worker secret instead (docs/DEPLOYMENT.md).");
+  }
 }
 
 // ---------------------------------------------------------------------------

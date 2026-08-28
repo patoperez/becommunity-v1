@@ -1,7 +1,7 @@
 # Cloudflare deployment for Be Community via the OpenNext adapter
 # (@opennextjs/cloudflare). This builds a Cloudflare **Worker** that runs the
 # full Next.js server on the Node.js runtime — so Server Actions, the session
-# proxy, RLS-scoped reads, and Node libs (exceljs) all work. See docs/DEPLOYMENT.md.
+# proxy, RLS-scoped reads, and Node libs all work. See docs/DEPLOYMENT.md.
 
 name = "becommunity-v1"
 main = ".open-next/worker.js"
@@ -15,8 +15,33 @@ compatibility_flags = ["nodejs_compat"]
 directory = ".open-next/assets"
 binding = "ASSETS"
 
-# NOTE: secrets are NOT stored here. Set them on the Worker (dashboard ->
-# Settings -> Variables, or `wrangler secret put`):
-#   NEXT_PUBLIC_SUPABASE_URL        (plain)
-#   NEXT_PUBLIC_SUPABASE_ANON_KEY   (plain — public, RLS-protected)
-#   SUPABASE_SERVICE_ROLE_KEY       (ENCRYPTED secret — server only, never public)
+# -----------------------------------------------------------------------------
+# CONFIGURATION IS SPLIT IN TWO, AND THE SPLIT IS A SECURITY BOUNDARY.
+# -----------------------------------------------------------------------------
+# No value is stored in this file. It is committed, so anything written here is
+# public. The two halves are set on the Worker itself:
+#
+#   RUNTIME (Worker -> Settings -> Variables and Secrets)
+#     NEXT_PUBLIC_SUPABASE_URL        plain text  — public
+#     NEXT_PUBLIC_SUPABASE_ANON_KEY   plain text  — public by design, RLS-protected
+#     SUPABASE_SERVICE_ROLE_KEY       SECRET      — server only, bypasses all RLS
+#
+#   BUILD (Workers Builds -> Build variables)
+#     NEXT_PUBLIC_SUPABASE_URL        only if a build-time inline is needed
+#     NEXT_PUBLIC_SUPABASE_ANON_KEY   likewise
+#
+# SUPABASE_SERVICE_ROLE_KEY MUST NOT BE A BUILD VARIABLE. The build never needs
+# it: nothing is rendered with privileged access at build time, and OpenNext
+# copies Worker bindings into `process.env` BEFORE the first request handler
+# runs, so the runtime secret is the value the server actually reads.
+#
+# The adapter also compiles the project's `.env` FILES into
+# `.open-next/cloudflare/next-env.mjs` and replays them into `process.env` as
+# defaults. A `.env.local` present in the build directory therefore ships its
+# contents inside the Worker bundle — this is exactly how a service_role key
+# reached a bundle once. Build the deployable artifact from a checkout with no
+# `.env` file and keep credentials in the shell environment instead.
+#
+# `npm run test:secrets` (Suite D, D-e) enforces both halves of this: it fails
+# if a privileged variable NAME appears in the compiled env snapshot, and it
+# fails if the configured key's value appears anywhere in the build output.

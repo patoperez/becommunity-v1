@@ -130,5 +130,63 @@ export function selfTest() {
   if (scanText(syntheticAnonJwt).some((f) => f.id === "service-role-jwt")) {
     missed.push("negative-control:anon-jwt-must-not-match");
   }
+
+  // The build-time env snapshot check is value-independent, so it needs its own
+  // controls: a privileged NAME must be reported even with a harmless value,
+  // and the two public NEXT_PUBLIC_ names must never be.
+  const poisoned = 'export const production = {"SUPABASE_SERVICE_ROLE_KEY":"x"};';
+  const clean =
+    'export const production = {"NEXT_PUBLIC_SUPABASE_URL":"https://example.invalid",' +
+    '"NEXT_PUBLIC_SUPABASE_ANON_KEY":"public"};';
+  if (!privilegedEnvNames(poisoned).includes("SUPABASE_SERVICE_ROLE_KEY")) {
+    missed.push("env-snapshot:privileged-name-must-match");
+  }
+  if (privilegedEnvNames(clean).length !== 0) {
+    missed.push("negative-control:public-env-names-must-not-match");
+  }
+  if (!isPrivilegedSupabaseKey("sb_secret_" + "CANARY".repeat(3))) {
+    missed.push("key-format:sb_secret-must-be-recognised");
+  }
+  if (isPrivilegedSupabaseKey("sb_publishable_" + "CANARY".repeat(3))) {
+    missed.push("negative-control:publishable-key-is-not-privileged");
+  }
+
   return missed;
+}
+
+// ---------------------------------------------------------------------------
+// Build-time env snapshot (P9).
+// ---------------------------------------------------------------------------
+// The OpenNext Cloudflare adapter compiles the project's `.env` FILES into
+// `.open-next/cloudflare/next-env.mjs` and replays them into `process.env`
+// inside the Worker. That file therefore ships whatever a `.env.local` on the
+// build machine happened to contain — which is how a service_role key reached
+// a Worker bundle. Worker secrets are applied FIRST at runtime and take
+// precedence, so the snapshot is not needed for a privileged value and must
+// never carry one.
+//
+// This check is deliberately VALUE-INDEPENDENT: a privileged variable NAME in
+// the snapshot is a finding even when the value is a canary, because the same
+// build performed with the real value would ship the real value.
+
+/** Names that must only ever be resolved from a runtime secret binding. */
+const PRIVILEGED_NAME = /\b(?!NEXT_PUBLIC_)[A-Z][A-Z0-9_]*(SERVICE_ROLE|SECRET|PASSWORD|PRIVATE_KEY|API_TOKEN|ACCESS_TOKEN)[A-Z0-9_]*\b/g;
+
+/**
+ * Return the privileged environment-variable NAMES declared in a build-time env
+ * snapshot. Names are not secret; values are never read, returned or logged.
+ */
+export function privilegedEnvNames(text) {
+  return [...new Set([...text.matchAll(PRIVILEGED_NAME)].map((m) => m[0]))].sort();
+}
+
+/**
+ * True when a key is a Supabase privileged credential in either supported
+ * format — the legacy `service_role` JWT or the current `sb_secret_…` key.
+ * Used to tell a real key from a synthetic CI canary WITHOUT printing either.
+ */
+export function isPrivilegedSupabaseKey(token) {
+  if (typeof token !== "string" || token === "") return false;
+  if (classifyJwt(token) === "service_role") return true;
+  return /^sb_secret_[A-Za-z0-9_-]{12,}$/.test(token);
 }
