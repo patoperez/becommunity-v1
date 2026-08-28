@@ -96,8 +96,12 @@ const results = [...view.tiles, ...view.averages];
 console.log("\n[1] The default view carries no exhaustive metric x segment product");
 assert.equal("crosses" in view, false, "the pre-rendered cross matrix is gone from the payload");
 ok("the study payload no longer ships a cross of every metric against a characteristic");
-assert.equal(view.crossSegment, "giro", "the default characteristic for a comparison is still named");
-ok("the characteristic a comparison opens on survives as a single name");
+assert.equal(
+  view.comparisonDimension,
+  "estado_membresia",
+  "a comparison opens on the coarsest characteristic, not the first one the engine happened to pick",
+);
+ok("the comparison opens on the characteristic most likely to have comparable groups");
 // The engine keeps its formula, and keeps it available to every other caller.
 const withCrosses = computeStudyMetrics(rows);
 const withoutCrosses = computeStudyMetrics(rows, { includeCrosses: false });

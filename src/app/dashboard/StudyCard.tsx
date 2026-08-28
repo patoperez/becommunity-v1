@@ -147,7 +147,7 @@ function AllResults({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Escribe parte del nombre"
-            className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-normal text-strong"
+            className="min-h-11 w-full min-w-0 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-normal text-strong"
           />
         </label>
         <p aria-live="polite" className="mt-2 text-xs text-muted">
@@ -327,13 +327,13 @@ export default function StudyCard({
               </div>
               <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {dashboard.filterOptions.map((option) => (
-                  <label key={option.key} className="flex flex-col gap-1 text-sm font-medium text-strong">
+                  <label key={option.key} className="flex min-w-0 flex-col gap-1 text-sm font-medium text-strong">
                     {characteristicLabel(option.key)}
                     <select
                       aria-label={`Filtrar por ${label(option.key)}`}
                       value={filters[option.key] ?? ""}
                       onChange={(event) => applyFilters({ ...filters, [option.key]: event.target.value })}
-                      className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-strong"
+                      className="min-h-11 w-full min-w-0 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-strong"
                     >
                       <option value="">Todas las personas</option>
                       {option.values.map((value) => (
@@ -455,7 +455,7 @@ export default function StudyCard({
               studyId={study.id}
               filters={filters}
               allowlist={dashboard.pivotAllowlist}
-              defaultDimension={view.crossSegment}
+              defaultDimension={view.comparisonDimension}
               featuredKeys={view.featuredKeys}
               labels={view.resultLabels}
             />

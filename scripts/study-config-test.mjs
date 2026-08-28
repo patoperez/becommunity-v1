@@ -32,7 +32,7 @@ assert.deepEqual(hidden.view.averages, []);
 // `segments: false` no longer suppresses a pre-rendered matrix — there is no
 // matrix. It suppresses the characteristic the comparison would open on,
 // which is the same section switch observed at its new surface.
-assert.equal(hidden.view.crossSegment, null);
+assert.equal(hidden.view.comparisonDimension, null);
 assert.deepEqual(hidden.view.featuredKeys, []);
 assert.equal(hidden.view.canPivot, false);
 assert.equal(hidden.sections.report, false);
