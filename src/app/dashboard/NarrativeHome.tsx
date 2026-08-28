@@ -9,6 +9,7 @@ import {
   characteristicLabel,
   movementLabel,
   resultLanguage,
+  resultName,
   unitLabel,
   humanize,
 } from "@/lib/language/results";
@@ -68,6 +69,8 @@ export default function NarrativeHome({
   // FIRST is the lead; the rest become secondary findings in the same order.
   for (const metric of view.metrics.slice(0, 3)) {
     const language = resultLanguage(metric.key, metric.title);
+    // The name a person wrote beats the one derived from an imported column.
+    const name = resultName(metric.key, metric.title, metric.authored);
     // Only the two measures with a real, defined domain get an absolute track.
     // A plain average lives on the client's own instrument, whose range the
     // sanitized aggregate does not carry.
@@ -83,10 +86,10 @@ export default function NarrativeHome({
     findings.push({
       id: metric.key,
       kind: "result",
-      label: language.name,
+      label: name,
       question: language.question,
       value: metric.value,
-      caption: language.name,
+      caption: name,
       unit,
       numeric: numeric != null && Number.isFinite(numeric) ? numeric : null,
       peer: null,

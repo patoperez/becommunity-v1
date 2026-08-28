@@ -37,6 +37,7 @@ import {
   viewKeyForMetric,
 } from "../src/lib/dashboard/results.ts";
 import { computeStudyMetrics } from "../src/lib/calc/engine.ts";
+import { buildNarrativeHome } from "../src/lib/dashboard/narrative.ts";
 import { DEFAULT_SAMPLE_SIZE_POLICY, sampleVisibility } from "../src/lib/calc/disclosure.ts";
 import { hasAuthoredName, resultName } from "../src/lib/language/results.ts";
 import { studyBaseSentence } from "../src/lib/language/sample.ts";
@@ -173,7 +174,31 @@ assert.doesNotMatch(
 );
 ok("no result is given a unit its metadata does not carry");
 
-console.log("\n[5] A small study is unchanged: nothing is hidden that was never a wall");
+console.log("\n[5] The panorama's key findings come from the configuration too");
+const panorama = buildNarrativeHome(
+  { id: "s", name: "Estudio", period: null },
+  dashboard,
+  { periods: 0, series: [] },
+);
+assert.ok(panorama.metrics.length > 0, "the panorama still has findings");
+for (const metric of panorama.metrics) {
+  assert.ok(featuredKeys.includes(metric.key), `a headline finding must be one the study names, not ${metric.key}`);
+}
+ok(`the ${panorama.metrics.length} headline findings are all named by the study's own configuration`);
+assert.equal(
+  panorama.metrics.some((metric) => metric.key.startsWith("average:tdp_")),
+  false,
+  "an imported column name is never presented as something the study found",
+);
+ok("no technical-only key is promoted to a key client finding");
+assert.equal(
+  panorama.metrics.find((metric) => metric.key === "average:csat_rendicion_de_cuentas_dar_referencias").authored,
+  "Dar referencias",
+  "a headline finding carries the name the recorrido gave it",
+);
+ok("a headline finding is shown under the name a person wrote for it");
+
+console.log("\n[6] A small study is unchanged: nothing is hidden that was never a wall");
 const smallRows = Array.from({ length: 30 }, (_, index) => ([
   { respondent_id: `s-${index}`, metric_key: "nps", value: 9, area: "General" },
   { respondent_id: `s-${index}`, metric_key: "sat_servicio", value: 4, area: "General" },
@@ -185,7 +210,7 @@ assert.equal(smallInventory.needsDisclosure, false, "and gets no disclosure at a
 assert.deepEqual(smallInventory.featured, smallInventory.all, "every result stays on screen");
 ok("a study small enough to read at a glance is rendered exactly as it was");
 
-console.log("\n[6] The disclosure rule is untouched and withheld values do not leak");
+console.log("\n[7] The disclosure rule is untouched and withheld values do not leak");
 assert.equal(DEFAULT_SAMPLE_SIZE_POLICY.minimum, 5, "the minimum sample size is unchanged");
 assert.equal(DEFAULT_SAMPLE_SIZE_POLICY.cautionBelow, 30, "the caution threshold is unchanged");
 assert.equal(sampleVisibility(4), "suppressed");
@@ -208,7 +233,7 @@ for (const item of inventory.all) {
 }
 ok("every withheld result in the inventory carries neither its value nor its base");
 
-console.log("\n[7] What the study base counts is said out loud");
+console.log("\n[8] What the study base counts is said out loud");
 assert.match(
   studyBaseSentence("standard", 54, "voices"),
   /54 personas y comentarios[\s\S]*al menos una respuesta/,
@@ -234,7 +259,7 @@ const [card, pivot, viewSource, insights, preview, sharedPreview, pkg] = await P
   read("package.json"),
 ]);
 
-console.log("\n[8] The study page defers the inventory instead of opening it");
+console.log("\n[9] The study page defers the inventory instead of opening it");
 has(card, /<details/, "the inventory is a native disclosure");
 has(card, /Explorar todos los resultados/, "and it says what opening it gives you");
 has(card, /\$\{items\.length\} resultados/, "the summary carries the count before it is opened");
@@ -249,7 +274,7 @@ lacks(card, /<table/, "the study card renders no table, so the pivot grid stays 
 has(card, /min-h-11/, "the disclosure control keeps a real touch target");
 has(card, /audience === "preview"/, "the unnamed-result note is internal only");
 
-console.log("\n[9] One comparison, chosen, with its suppression summarised once");
+console.log("\n[10] One comparison, chosen, with its suppression summarised once");
 has(pivot, /Comparar por segmento/, "the comparison says what it is in plain Spanish");
 has(pivot, /computeStudyPivot\(studyId, filters, intent\)/, "it still computes on the server");
 has(pivot, /validatePivotIntent\(intent, allowlist\)/, "and still through the allowlist");
@@ -269,11 +294,11 @@ has(pivot, /Explorador de cruces/, "the frozen sr-only heading Suite C asserts o
 has(pivot, /Preparando la comparación\.\.\./, "the frozen pending signal is intact");
 has(pivot, /Intentar de nuevo/, "a failed comparison still offers a recovery action");
 
-console.log("\n[10] The exhaustive product is not computed either");
+console.log("\n[11] The exhaustive product is not computed either");
 has(viewSource, /includeCrosses: false/, "the dashboard asks the engine not to build it");
 lacks(viewSource, /SafeCross/, "and the DTO for it is gone");
 
-console.log("\n[11] Everything else on these routes is where it was");
+console.log("\n[12] Everything else on these routes is where it was");
 has(insights, /<PeriodSeries points=\{periodSeries\}/, "the retention series still renders");
 has(insights, /<LongitudinalTrends view=\{longitudinal\}/, "the period history still renders");
 has(insights, /<StudyCard/, "the study surface still renders");
@@ -290,5 +315,10 @@ has(sharedPreview, /candidate\.status === "published" \|\| candidate\.id === stu
 has(preview, /profile\?\.role !== "internal"/, "the internal-only guard on the preview is intact");
 has(preview, /studioStudyPublish\(studyId\)/, "publication is still reached only from the preview");
 has(pkg, /test:executive-preview/, "the focused gate is registered");
+const narrativeSource = await read("src/lib/dashboard/narrative.ts");
+has(narrativeSource, /SMALL_STUDY_RESULTS/, "the panorama uses the same size rule as the inventory");
+const panoramaSource = await read("src/app/dashboard/NarrativeHome.tsx");
+has(panoramaSource, /resultName\(metric\.key, metric\.title, metric\.authored\)/,
+  "the panorama renders a finding under its authored name");
 
 console.log(`\nExecutive preview gate: PASS (${checks} checks)`);

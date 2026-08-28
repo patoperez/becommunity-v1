@@ -3,10 +3,13 @@ import { DECIMALS, roundTo } from "@/lib/calc/metrics";
 import type { SampleVisibility } from "@/lib/calc/disclosure";
 import type { SafeJourneyStage, StageUnit, StudyDashboardPayload } from "@/lib/dashboard/view";
 import type { LongitudinalSeries, LongitudinalView } from "@/lib/dashboard/longitudinal";
+import { SMALL_STUDY_RESULTS } from "@/lib/dashboard/results";
 
 export type NarrativeMetric = {
   key: string;
   title: string;
+  /** The name the study's own configuration gave this result, when it gave one. */
+  authored: string | null;
   value: string | null;
   delta: string | null;
   movement: "up" | "down" | "flat" | "unavailable";
@@ -126,8 +129,23 @@ export function buildNarrativeHome(
   longitudinal: LongitudinalView,
 ): NarrativeHomeView {
   const seriesByKey = new Map(longitudinal.series.map((series) => [series.key, series]));
-  const metricSources = [...dashboard.view.tiles, ...dashboard.view.averages]
-    .filter((metric) => metric.key !== "respondents")
+  const labels = dashboard.view.resultLabels ?? {};
+
+  // WHAT A CLIENT IS SHOWN FIRST IS NOT DECIDED ALPHABETICALLY.
+  //
+  // Ranking every result the instrument produced and taking the first four put
+  // `Cri` and `Cultura bni equipo de liderazgo actitud positiva` on the real
+  // study's opening screen as headline findings — column names an import
+  // happened to carry, presented as things the study found. When a study is
+  // large enough for that to happen, the panorama draws only from the results
+  // its own configuration names. A study small enough that every result is
+  // already readable keeps the previous behaviour exactly.
+  const available = [...dashboard.view.tiles, ...dashboard.view.averages]
+    .filter((metric) => metric.key !== "respondents");
+  const featured = new Set(dashboard.view.featuredKeys ?? []);
+  const configured = available.filter((metric) => featured.has(metric.key));
+  const large = dashboard.view.tiles.length + dashboard.view.averages.length > SMALL_STUDY_RESULTS;
+  const metricSources = (large && configured.length > 0 ? configured : available)
     .sort((a, b) => priority(a.key) - priority(b.key) || a.title.localeCompare(b.title, "es"))
     .slice(0, 4);
 
@@ -141,6 +159,7 @@ export function buildNarrativeHome(
     metrics: metricSources.map((metric) => ({
       key: metric.key,
       title: metric.title,
+      authored: labels[metric.key] ?? null,
       value: metric.value,
       ...deltaFor(seriesByKey.get(metric.key)),
     })),
