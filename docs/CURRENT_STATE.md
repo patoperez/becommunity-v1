@@ -5,6 +5,53 @@
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
 
+## Experience Composer — foundation only, not persisted and not deployed
+
+Standing reference: `docs/EXPERIENCE_COMPOSER.md`. Read it before touching
+anything under `src/lib/experience/**`.
+
+- **The product direction is a governed data-experience builder.** Internal
+  users compose pages, sections and blocks over the SAME canonical
+  calculations, tenant authorization, approved qualitative evidence and
+  immutable publication snapshots. It is not an unrestricted query tool, and no
+  client-specific behaviour may be hardcoded: a client's configuration is
+  registry DATA and becomes a reusable starting template.
+- **Three layers.** Truth (imported data, canonical calculations, tenant
+  access) is not editable from the composer. Meaning (semantic results and
+  characteristics, categories, qualitative review, journeys, interpretations)
+  is edited only through the governed workflows that already exist.
+  Presentation (pages, blocks, layout, charts, filters, copy) is what the
+  composer edits, and it references the other two only by opaque id.
+- **`ExperienceDefinitionV1` is a strict Zod boundary** enforced server-side:
+  no unknown fields, no SQL/HTML/script/CSS/template syntax, no database key, no
+  respondent, no recursion (blocks do not nest), and an explicit ceiling on
+  every list and on the serialized byte length.
+- ⓘ **The universal minimum-five suppression is now a per-study POLICY, and
+  nothing about current routes changed.** `show_all` / `warn_below` /
+  `hide_below`, versioned, with a per-block override. NEW composed experiences
+  default to `show_all` (results visible from n = 1). EXISTING studies keep
+  today's behaviour: the compatibility adapter stamps the legacy hide-below-five
+  rule onto every definition it derives, a gate asserts the two agree at every
+  base from 0 to 60, and a published snapshot freezes the policy it was
+  published under. `src/lib/calc/disclosure.ts` and every client-facing surface
+  are untouched. Tenant isolation, RLS, authorization and raw-personal-data
+  protection are NOT configurable by any mode.
+- **A filter moves a block only when a connection names it.** Sharing a
+  characteristic is not a connection, and duplicating a block inherits none.
+- **Layout has no coordinates.** A block declares an order and a span on a
+  12-column grid; rows wrap. Overlap and horizontal overflow are impossible by
+  construction, and every block is full width on a phone.
+- **`/studio/e/[studyId]/construccion` is an internal prototype.** It runs
+  `requireInternal()` before any read, loads a real study through the pure
+  compatibility adapter, and SAVES NOTHING — no autosave, no Server Action, no
+  draft, no publication. It does not alter `vista-cliente` or
+  `/insights/e/[studyId]`, and no client-facing route imports the composer.
+- **Nothing is persisted.** No table, no migration, no Server Action, no
+  deployment, no Worker version. Review and publication are MODELLED only.
+- **AI is deliberately out of scope** for the composer: no model call, no SDK,
+  no secret, no table, no interface. The category advisor is untouched.
+- Gate: `npm run test:experience-composer` (81 checks), inside `npm test`.
+
 ## P9 — final hardening and the first real study (read this first)
 
 `docs/P9_HARDENING.md` is the standing reference for everything below and must

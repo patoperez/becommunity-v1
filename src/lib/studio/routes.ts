@@ -32,6 +32,13 @@ export const studioStudyQualitative = (studyId: string) => `/studio/e/${studyId}
 export const studioStudyInterpretation = (studyId: string) => `/studio/e/${studyId}/interpretacion`;
 export const studioStudyPreview = (studyId: string) => `/studio/e/${studyId}/vista-cliente`;
 export const studioStudyPublish = (studyId: string) => `/studio/e/${studyId}/publicar`;
+/**
+ * The Experience Composer prototype. Internal, experimental, and deliberately
+ * NOT one of the study's process steps: it saves nothing and publishes nothing,
+ * so putting it in the row a consultant follows would misdescribe it. It has an
+ * address so it can be linked and tested, and no more than that.
+ */
+export const studioStudyComposer = (studyId: string) => `/studio/e/${studyId}/construccion`;
 
 /** The legacy address each Studio surface continues to answer at. */
 export const ADMIN_ALIASES: { studio: string; admin: string }[] = [

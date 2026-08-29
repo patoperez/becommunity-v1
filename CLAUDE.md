@@ -317,6 +317,27 @@ production Supabase and operational prerequisites.
   real-data environment, or enable irreversible controls during synthetic P7
   work. Do not redirect the roadmap toward retention UI, new role tiers or an
   incidental feature question.
+- **The Experience Composer foundation exists and is NOT persisted or
+  deployed.** Standing reference: `docs/EXPERIENCE_COMPOSER.md`. The product
+  direction is a governed data-experience builder over the same canonical
+  calculations, authorization, approved evidence and immutable snapshots — not
+  an unrestricted query tool. `src/lib/experience/**` holds
+  `ExperienceDefinitionV1` (strict Zod, server-side, no unknown fields, no
+  SQL/HTML/script/CSS, no database key, no respondent, no nesting), the
+  semantic/block/chart registries, a pure compatibility adapter, and one
+  internal prototype at `/studio/e/[studyId]/construccion` that saves nothing.
+  No table, no migration, no Server Action, no deployment. AI is out of scope.
+  Gate: `npm run test:experience-composer`.
+- ⓘ **Minimum-five suppression is now a per-study, versioned POLICY —
+  `show_all` / `warn_below` / `hide_below` — and no current route changed.**
+  NEWLY COMPOSED experiences default to `show_all` (visible from n = 1); every
+  EXISTING study keeps today's hide-below-five behaviour, which the adapter
+  stamps on and a gate proves equivalent at every base from 0 to 60. A
+  published snapshot freezes the policy it was published under.
+  `src/lib/calc/disclosure.ts` is untouched. This policy governs whether an
+  AGGREGATE is drawn; it never governs who may ask. Tenant isolation, RLS,
+  server-side authorization and raw-personal-data protection stay
+  non-configurable.
 
 ## When unsure
 Ask. Do not guess on security, authorization, or calculations. A stopped task is
