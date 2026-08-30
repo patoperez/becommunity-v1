@@ -220,25 +220,46 @@ export function validateBlockQuery(
         detail: `Con ${shown} categorías, “${spec.label.toLowerCase()}” se va a leer con dificultad. Se puede publicar así.`,
       });
     }
-    if (spec.mobile === "poor") {
-      warnings.push({
-        code: "weak_mobile_fit",
-        target,
-        detail: `“${spec.label}” es difícil de leer en teléfono. Considera una tabla como alternativa.`,
-      });
-    }
-    if (!spec.rendererImplemented) {
-      warnings.push({
-        code: "no_renderer_yet",
-        target,
-        detail: `“${spec.label}” todavía no tiene su propio dibujo; por ahora se muestra como ${
-          spec.fallback ? CHART_SPECS[spec.fallback].label.toLowerCase() : "tabla"
-        }.`,
-      });
-    }
+    warnings.push(...variantWarnings(context.variant, target));
   }
 
   return { errors, warnings };
+}
+
+/**
+ * What is worth saying about a DRAWING, independently of any query.
+ *
+ * Four block kinds carry a visualization and no query at all — the recorrido,
+ * the confirmed themes, the theme cloud and the complete results table. Keeping
+ * these two warnings inside the query check meant those four could be switched
+ * to a variant with no renderer, or to one that is unreadable on a phone, and
+ * the composer said nothing. The drawing is a property of the block, so the
+ * warnings about the drawing belong to the block.
+ */
+function variantWarnings(
+  variant: ChartVariant | null,
+  target: Issue<SoftCode>["target"],
+): Issue<SoftCode>[] {
+  if (!variant) return [];
+  const spec = CHART_SPECS[variant];
+  const warnings: Issue<SoftCode>[] = [];
+  if (spec.mobile === "poor") {
+    warnings.push({
+      code: "weak_mobile_fit",
+      target,
+      detail: `“${spec.label}” es difícil de leer en teléfono. Considera una tabla como alternativa.`,
+    });
+  }
+  if (!spec.rendererImplemented) {
+    warnings.push({
+      code: "no_renderer_yet",
+      target,
+      detail: `“${spec.label}” todavía no tiene su propio dibujo; por ahora se muestra como ${
+        spec.fallback ? CHART_SPECS[spec.fallback].label.toLowerCase() : "tabla"
+      }.`,
+    });
+  }
+  return warnings;
 }
 
 function validateBlock(
@@ -294,6 +315,10 @@ function validateBlock(
     });
     errors.push(...report.errors);
     warnings.push(...report.warnings);
+  } else if (block.visualization) {
+    // A drawing with no query behind it — the recorrido, the themes, the cloud,
+    // the complete results table. It still has a renderer, or it still does not.
+    warnings.push(...variantWarnings(block.visualization.variant, target));
   }
 
   const invisibleEverywhere = BREAKPOINTS.every(

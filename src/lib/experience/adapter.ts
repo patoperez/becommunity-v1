@@ -28,6 +28,27 @@
  *  - IT SAYS WHAT IT COULD NOT CARRY. Anything the current product does that
  *    V1 of the model cannot yet express comes back as a warning. Warnings are
  *    internal: they are for the team building the composer, never for a client.
+ *
+ * WHAT THE FIRST ROUND OF WARNINGS TURNED OUT TO BE. Three of the four were
+ * real limitations; two were defects in this file and in the model, and are
+ * fixed rather than announced:
+ *
+ *    the pivot explorer          a genuine gap. V1 has no equivalent block, so
+ *                                the warning stands and the prototype shows it.
+ *    a configured ideal range    was a MODELLING gap: `comparison` carried one
+ *                                number and the product ships a labelled range.
+ *                                The model now carries the range, and this
+ *                                adapter places it on the block that shows the
+ *                                result. It warns only when no block does.
+ *    a 72-value characteristic   was an ADAPTER defect: a chart's legibility
+ *                                ceiling was applied to a filter control, and
+ *                                the adapter dropped a filter the deployed
+ *                                dashboard offers. Controls have their own,
+ *                                much larger ceiling now.
+ *    a moment with no result     invalid legacy configuration, not a model
+ *                                limitation. The moment is kept, visible and
+ *                                without a number, and the warning names it.
+ *                                The study's own data is never repaired here.
  */
 
 import { parseDashboardConfig, type DashboardSections } from "@/lib/dashboard/config";
@@ -55,6 +76,7 @@ import {
 } from "./registry";
 import { registrySignature } from "./registry";
 import { EXPERIENCE_LIMITS } from "./limits";
+import { isSafeAuthoredText } from "./text";
 
 // ---------------------------------------------------------------------------
 // What the adapter is given
@@ -265,6 +287,51 @@ function featuredMetricIds(
   return ordered.filter((id) => registry.metrics.some((metric) => metric.id === id)).slice(0, 6);
 }
 
+/**
+ * Put the study's configured ideal range on every block that shows that result.
+ *
+ * The deployed product stores one threshold per study — a metric key, a
+ * minimum, a maximum and a label — and renders it as the single alert on the
+ * client's first screen. The model expresses the same thing as a `target`
+ * comparison on the query, which is strictly more precise: the range belongs to
+ * the result it is about, not to the study.
+ *
+ * The label is authored prose from a person and is held to the same standard as
+ * any other authored string. A label that is too long is trimmed to the
+ * declared ceiling; one that carries markup or query syntax is dropped and the
+ * range is kept, because the range is the number and the label is the wording.
+ */
+function applyConfiguredThreshold(
+  pages: ExperiencePage[],
+  metricId: string,
+  threshold: { minimum: number | null; maximum: number | null; label: string },
+): { pages: ExperiencePage[]; applied: number } {
+  if (threshold.minimum === null && threshold.maximum === null) return { pages, applied: 0 };
+  const trimmed = threshold.label.trim().slice(0, EXPERIENCE_LIMITS.titleLength);
+  const label = trimmed !== "" && isSafeAuthoredText(trimmed) ? trimmed : null;
+  let applied = 0;
+  const next = pages.map((page) => ({
+    ...page,
+    blocks: page.blocks.map((block) => {
+      if (!block.query || block.query.metricId !== metricId) return block;
+      applied += 1;
+      return {
+        ...block,
+        query: {
+          ...block.query,
+          comparison: {
+            kind: "target" as const,
+            target: threshold.minimum,
+            targetMaximum: threshold.maximum,
+            targetLabel: label,
+          },
+        },
+      };
+    }),
+  }));
+  return applied > 0 ? { pages: next, applied } : { pages, applied: 0 };
+}
+
 export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
   const warnings: AdapterWarning[] = [];
   const registry = buildLegacyRegistry(snapshot);
@@ -283,10 +350,16 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
   if (sections.filters) {
     for (const dimension of registry.dimensions) {
       if (dimension.values.length === 0) continue;
-      if (dimension.values.length > EXPERIENCE_LIMITS.dimensionCardinality) {
+      // A CONTROL IS NOT A CHART. Sixty is the number of bars a person can
+      // compare; it is not the number of options a select can hold, and the
+      // deployed dashboard already offers one over every imported `seg_`
+      // column however many distinct values it found. Applying the chart's
+      // ceiling here dropped a filter the product ships, which is precisely
+      // what a compatibility adapter exists not to do.
+      if (dimension.values.length > EXPERIENCE_LIMITS.filterOptions) {
         warnings.push({
           code: "dimension_too_wide",
-          detail: `“${dimension.label}” tiene ${dimension.values.length} valores y no se ofrece como filtro.`,
+          detail: `“${dimension.label}” tiene ${dimension.values.length} valores, más de los ${EXPERIENCE_LIMITS.filterOptions} que admite un control, y no se ofrece como filtro.`,
         });
         continue;
       }
@@ -557,19 +630,32 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
       .map((block) => block.id),
   }));
 
+  // --- The study's configured ideal range ---------------------------------
+  // The deployed product carries exactly one of these: a result, a minimum, a
+  // maximum and the words to use when the value falls outside them. It is a
+  // statement ABOUT ONE RESULT, so it becomes the comparison on the block that
+  // shows that result rather than a property of the study as a whole.
+  const thresholdPages = presentation.threshold
+    ? applyConfiguredThreshold(pages, handle("r", snapshot.studyId, presentation.threshold.metric), {
+        minimum: presentation.threshold.minimum,
+        maximum: presentation.threshold.maximum,
+        label: presentation.threshold.label,
+      })
+    : { pages, applied: 0 };
+  if (presentation.threshold && thresholdPages.applied === 0) {
+    warnings.push({
+      code: "threshold_not_representable",
+      detail:
+        "El estudio tiene un rango ideal configurado sobre un resultado que esta experiencia no muestra en ningún bloque, así que la alerta no se pudo colocar.",
+    });
+  }
+
   // --- What could not be carried -----------------------------------------
   if (sections.pivot) {
     warnings.push({
       code: "section_not_representable",
       detail:
         "El explorador cruzado del panel actual no tiene todavía un bloque equivalente en el modelo.",
-    });
-  }
-  if (presentation.threshold) {
-    warnings.push({
-      code: "threshold_not_representable",
-      detail:
-        "La alerta por umbral configurada en el estudio no se representa aún como propiedad de un bloque.",
     });
   }
 
@@ -592,7 +678,7 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
         ? { source: "custom", hex: presentation.primaryColor }
         : { source: "client_brand" },
     },
-    pages,
+    pages: thresholdPages.pages,
     filterDefinitions,
     filterConnections,
     journeyReferences,

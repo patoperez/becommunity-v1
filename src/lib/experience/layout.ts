@@ -198,3 +198,35 @@ const SPAN_CLASS: Record<number, string> = {
 export function spanClass(span: number): string {
   return SPAN_CLASS[Math.min(GRID_COLUMNS, Math.max(1, Math.round(span)))] ?? "col-span-12";
 }
+
+/** The same mapping, applied only from 640 px up. Written out for the same reason. */
+const SM_SPAN_CLASS: Record<number, string> = {
+  1: "sm:col-span-1",
+  2: "sm:col-span-2",
+  3: "sm:col-span-3",
+  4: "sm:col-span-4",
+  5: "sm:col-span-5",
+  6: "sm:col-span-6",
+  7: "sm:col-span-7",
+  8: "sm:col-span-8",
+  9: "sm:col-span-9",
+  10: "sm:col-span-10",
+  11: "sm:col-span-11",
+  12: "sm:col-span-12",
+};
+
+/**
+ * The span a composing surface applies ONLY when the screen it is drawn on has
+ * room for it.
+ *
+ * A preview of the 1280 px arrangement, shown on a 390 px phone, cannot honour
+ * a three-column block: three columns of a 390 px screen is 85 px, which is not
+ * a preview of anything. The composer therefore stacks below 640 px and applies
+ * the previewed placement above it, and says which width it is previewing. The
+ * DEFINITION is untouched by this: what a block spans at each breakpoint is
+ * still exactly what the document says.
+ */
+export function responsiveSpanClass(span: number): string {
+  const clamped = Math.min(GRID_COLUMNS, Math.max(1, Math.round(span)));
+  return `${spanClass(GRID_COLUMNS)} ${SM_SPAN_CLASS[clamped] ?? "sm:col-span-12"}`;
+}

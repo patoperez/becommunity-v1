@@ -53,6 +53,7 @@ import {
   moveBlock,
   removeBlock,
   resetPrototype,
+  setBlockSamplePolicy,
   setBlockTitle,
   setBlockVisibility,
   setChartVariant,
@@ -723,17 +724,70 @@ assert.ok(
   runA.warnings.some((warning) => warning.code === "section_not_representable"),
   "the adapter must say what it could not carry",
 );
-assert.ok(runA.warnings.some((warning) => warning.code === "dimension_too_wide"));
 assert.ok(runA.warnings.some((warning) => warning.code === "metric_not_available"));
-assert.ok(runA.warnings.some((warning) => warning.code === "threshold_not_representable"));
-ok("the adapter reports the pivot explorer, the wide characteristic, the missing result and the threshold");
+ok("the adapter reports the pivot explorer it cannot carry and the moment whose result has gone");
 
+// THE TWO WARNINGS THAT TURNED OUT TO BE DEFECTS.
+//
+// A control is not a chart. Sixty is how many bars a person can compare; it is
+// not how many options a select may hold, and the deployed dashboard already
+// offers one over every imported `seg_` column. Refusing the 72-value
+// characteristic dropped a filter the product ships.
 const wideDimension = runA.definition.filterDefinitions.find((filter) => {
   const dimension = findDimension(runA.registry, filter.dimensionId);
   return dimension && dimension.values.length > EXPERIENCE_LIMITS.dimensionCardinality;
 });
-assert.equal(wideDimension, undefined, "a characteristic with 72 values is never offered as a filter");
-ok("a characteristic too wide to read is left out of the filters rather than shipped");
+assert.ok(wideDimension, "a characteristic with 72 values is still offered as a filter control");
+assert.ok(
+  EXPERIENCE_LIMITS.filterOptions > EXPERIENCE_LIMITS.dimensionCardinality,
+  "a control and a chart must not share one ceiling",
+);
+assert.ok(
+  !runA.warnings.some((warning) => warning.code === "dimension_too_wide"),
+  "a characteristic a control can hold is not reported as too wide",
+);
+ok("a characteristic too wide to draw is still offered as a filter, as the deployed dashboard offers it");
+
+// The configured ideal range is a labelled band, and the model now carries one.
+const thresholdBlocks = allBlocks(runA.definition).filter(
+  (block) => block.query && block.query.comparison.kind === "target",
+);
+assert.ok(thresholdBlocks.length > 0, "the study's configured ideal range must land on a block");
+for (const block of thresholdBlocks) {
+  assert.equal(block.query.comparison.target, 70);
+  assert.equal(block.query.comparison.targetMaximum, null);
+  assert.equal(block.query.comparison.targetLabel, "Meta");
+  assert.equal(
+    block.query.metricId,
+    findMetric(runA.registry, block.query.metricId).id,
+    "the range sits on the block that shows that result",
+  );
+}
+assert.ok(
+  !runA.warnings.some((warning) => warning.code === "threshold_not_representable"),
+  "a range the model can express is not reported as unrepresentable",
+);
+ok("the study's configured ideal range is carried as a target comparison on the result it is about");
+
+// It still SAYS SO when it genuinely cannot place one.
+const orphanThreshold = structuredClone(snapshot);
+orphanThreshold.dashboardConfig.presentation.threshold = {
+  metric: "no_such_result",
+  minimum: 1,
+  maximum: null,
+  label: "Meta",
+};
+const orphanRun = adaptLegacyStudy(orphanThreshold);
+assert.ok(
+  orphanRun.warnings.some((warning) => warning.code === "threshold_not_representable"),
+  "a range over a result no block shows is reported rather than dropped",
+);
+assert.deepEqual(
+  validateExperienceDefinition(orphanRun.definition, orphanRun.registry).errors,
+  [],
+  "and the document stays valid",
+);
+ok("a configured range the experience cannot place is reported, not silently discarded");
 
 // No canonical metric key ever appears in the document itself.
 const serializedAdapted = serializeExperienceDefinition(runA.definition);
@@ -1163,5 +1217,363 @@ for (const group of blockCatalogue()) {
   }
 }
 ok("every block the catalogue offers builds a valid, semantically correct document");
+
+// ===========================================================================
+console.log("\n[17] The defects the acceptance review found stay fixed");
+// ===========================================================================
+
+// Scoped as one block so these fixtures cannot collide with the names the
+// earlier sections already used at module level.
+{
+  // --- A new block never points at a characteristic the composer will not draw.
+  const wideOnly = {
+    scope: { tenantId: TENANT, studyId: STUDY },
+    registryVersion: "wide-only",
+    metrics: runA.registry.metrics,
+    dimensions: [
+      {
+        id: "too_wide",
+        label: "Giro",
+        description: "Setenta y dos valores.",
+        source: "Importación.",
+        kind: "segment",
+        values: wideValues.map((value) => ({ value, label: value })),
+        filterEligible: true,
+        journeyEligible: false,
+        publicationReady: true,
+      },
+    ],
+  };
+  for (const group of blockCatalogue()) {
+    for (const spec of group.blocks) {
+      if (!canAddBlock(spec.id, wideOnly, true)) continue;
+      const created = newBlock({
+        type: spec.id,
+        seed: `wide/${spec.id}`,
+        order: 0,
+        registry: wideOnly,
+        journeyId: runA.definition.journeyReferences[0].id,
+      });
+      assert.ok(created, `${spec.id} was offered against a wide-only study and could not be built`);
+      if (created.query && created.query.primaryDimensionId) {
+        assert.ok(
+          findDimension(wideOnly, created.query.primaryDimensionId).values.length
+            <= EXPERIENCE_LIMITS.dimensionCardinality,
+          `${spec.id} broke a result down by a characteristic beyond the legibility ceiling`,
+        );
+      }
+    }
+  }
+  ok("a study whose only characteristic is unreadably wide never produces a block that breaks on it");
+
+  // The offered/valid agreement holds against that hostile registry too.
+  const wideProbe = {
+    ...newExperience({ seed: "wide", title: "Wide", studyId: STUDY, tenantId: TENANT }),
+    pages: [newPage("wide/page", "Página", 0)],
+    journeyReferences: runA.definition.journeyReferences,
+  };
+  for (const group of blockCatalogue()) {
+    for (const spec of group.blocks) {
+      if (!canAddBlock(spec.id, wideOnly, true)) continue;
+      const created = newBlock({
+        type: spec.id,
+        seed: `wide-valid/${spec.id}`,
+        order: 0,
+        registry: wideOnly,
+        journeyId: runA.definition.journeyReferences[0].id,
+      });
+      const probe = structuredClone(wideProbe);
+      probe.pages[0].blocks = [created];
+      assert.ok(parseExperienceDefinition(probe).ok, `${spec.id} produced an invalid document`);
+      assert.deepEqual(
+        validateExperienceDefinition(probe, wideOnly).errors,
+        [],
+        `${spec.id} produced semantic errors against a wide-only study`,
+      );
+    }
+  }
+  ok("the catalogue and the factory agree about what is possible, whatever the study looks like");
+
+  // --- Removing a block cannot orphan a filter, wherever the filter is named.
+  const hosting = structuredClone(runA.definition);
+  const hostBlock = hosting.pages[0].blocks[1];
+  const readerBlock = hosting.pages[0].blocks.find(
+    (block) => block.id !== hostBlock.id && block.query,
+  );
+  const blockFilterId = mintId("filter", "orphan/test");
+  hosting.filterDefinitions = [
+    ...hosting.filterDefinitions,
+    {
+      id: blockFilterId,
+      dimensionId: hosting.filterDefinitions[0].dimensionId,
+      label: "Filtro de un bloque",
+      control: "single_select",
+      defaultValues: [],
+      clientVisible: true,
+      scope: "block",
+      pageId: null,
+      dependsOn: null,
+    },
+  ];
+  hostBlock.filterRefs = [blockFilterId];
+  readerBlock.query.filterRefs = [blockFilterId];
+  hosting.filterConnections = [
+    ...hosting.filterConnections,
+    { id: mintId("connection", "orphan/test"), filterId: blockFilterId, blockIds: [readerBlock.id] },
+  ];
+  assert.ok(parseExperienceDefinition(hosting).ok, "the orphan fixture must itself be valid");
+  assert.deepEqual(validateExperienceDefinition(hosting, runA.registry).errors, []);
+
+  const afterHostRemoved = removeBlock(initialState(hosting), hostBlock.id);
+  assert.equal(afterHostRemoved.refusal, null, "removing a block that exists is not a refusal");
+  assert.ok(
+    parseExperienceDefinition(afterHostRemoved.definition).ok,
+    "the document stays well-formed after a removal",
+  );
+  assert.deepEqual(
+    validateExperienceDefinition(afterHostRemoved.definition, runA.registry).errors,
+    [],
+    "removing the only block hosting a filter must not leave a dangling reference behind",
+  );
+  // STILL USED, SO IT STAYS. Another block's query narrows by this filter, and
+  // an author-fixed narrowing needs no control to be meaningful. What must
+  // never happen — and did — is the filter being deleted while that narrowing
+  // keeps naming it.
+  const survivingReader = allBlocks(afterHostRemoved.definition).find(
+    (block) => block.id === readerBlock.id,
+  );
+  assert.deepEqual(
+    survivingReader.query.filterRefs,
+    [blockFilterId],
+    "a filter another block's query still narrows by is not deleted out from under it",
+  );
+  assert.ok(
+    afterHostRemoved.definition.filterDefinitions.some((filter) => filter.id === blockFilterId),
+    "the filter something still references survives the block that hosted its control",
+  );
+  ok("removing a block never deletes a filter another block is still narrowed by");
+
+  // NOTHING LEFT USING IT, SO IT GOES — and every mention of it goes too.
+  const soleHost = structuredClone(hosting);
+  for (const page of soleHost.pages) {
+    for (const block of page.blocks) {
+      if (block.id !== hostBlock.id && block.query) block.query.filterRefs = [];
+    }
+  }
+  const afterSoleHostRemoved = removeBlock(initialState(soleHost), hostBlock.id);
+  assert.ok(
+    !afterSoleHostRemoved.definition.filterDefinitions.some(
+      (filter) => filter.id === blockFilterId,
+    ),
+    "a block-scoped filter nothing still references leaves with its host",
+  );
+  assert.ok(
+    !afterSoleHostRemoved.definition.filterConnections.some(
+      (connection) => connection.filterId === blockFilterId,
+    ),
+    "and so does its connection",
+  );
+  assert.ok(parseExperienceDefinition(afterSoleHostRemoved.definition).ok);
+  assert.deepEqual(
+    validateExperienceDefinition(afterSoleHostRemoved.definition, runA.registry).errors,
+    [],
+    "and no mention of it is left behind to dangle",
+  );
+  ok("a filter with nothing left referencing it leaves, taking every mention with it");
+
+  // A connection left naming nothing is dropped rather than kept as a statement
+  // about blocks that no longer exist.
+  const singleTarget = structuredClone(runA.definition);
+  const lonely = singleTarget.pages[0].blocks[1];
+  singleTarget.filterConnections = [
+    {
+      id: mintId("connection", "lonely"),
+      filterId: singleTarget.filterDefinitions[0].id,
+      blockIds: [lonely.id],
+    },
+  ];
+  const afterLonelyRemoved = removeBlock(initialState(singleTarget), lonely.id);
+  assert.deepEqual(
+    afterLonelyRemoved.definition.filterConnections,
+    [],
+    "a connection that now names nothing is removed",
+  );
+  ok("an emptied connection does not survive the block it named");
+
+  // --- Duplicating obeys the same ceilings as adding, and inherits no control.
+  const withHostedFilter = structuredClone(runA.definition);
+  const hostedSource = withHostedFilter.pages[0].blocks[1];
+  hostedSource.filterRefs = [withHostedFilter.filterDefinitions[0].id];
+  const copiedState = duplicateBlock(initialState(withHostedFilter), hostedSource.id);
+  const copiedBlock = allBlocks(copiedState.definition).find(
+    (block) => block.id === copiedState.selectedBlockId,
+  );
+  assert.deepEqual(copiedBlock.filterRefs, [], "a duplicate hosts no filter control of its own");
+  assert.deepEqual(
+    filtersAffecting(copiedState.definition, copiedBlock.id),
+    [],
+    "and answers to no connection",
+  );
+  ok("a duplicate inherits neither a connection nor a hosted control");
+
+  let crowded = initialState(runA.definition);
+  const crowdedPageId = crowded.definition.pages[0].id;
+  let guard = 0;
+  while (
+    crowded.definition.pages[0].blocks.length < EXPERIENCE_LIMITS.blocksPerPage
+    && guard < EXPERIENCE_LIMITS.blocksPerPage * 2
+  ) {
+    crowded = addBlock(crowded, crowdedPageId, "rich_text", runA.registry);
+    guard += 1;
+  }
+  assert.equal(crowded.definition.pages[0].blocks.length, EXPERIENCE_LIMITS.blocksPerPage);
+  const refusedAdd = addBlock(crowded, crowdedPageId, "rich_text", runA.registry);
+  assert.equal(refusedAdd.definition, crowded.definition, "a refused add changes nothing");
+  assert.ok(refusedAdd.refusal, "and says why");
+  const refusedDuplicate = duplicateBlock(crowded, crowded.definition.pages[0].blocks[0].id);
+  assert.equal(refusedDuplicate.definition, crowded.definition, "a refused duplicate changes nothing");
+  assert.ok(refusedDuplicate.refusal, "and says why");
+  assert.ok(
+    parseExperienceDefinition(crowded.definition).ok,
+    "the full page is still a document the schema accepts",
+  );
+  ok("duplicating is bounded by the same ceilings as adding, and both refuse out loud");
+
+  // --- Every refusal is a sentence, and editing continues after one.
+  const refusals = [
+    moveBlock(initialState(runA.definition), runA.definition.pages[0].blocks[0].id, "up"),
+    setChartVariant(initialState(runA.definition), runA.definition.pages[0].blocks[0].id, "pie"),
+    removeBlock(initialState(runA.definition), mintId("block", "not-here")),
+    setBlockSamplePolicy(initialState(runA.definition), runA.definition.pages[0].blocks[0].id, {
+      kind: "override",
+      policy: { ...DEFAULT_SAMPLE_POLICY },
+    }),
+  ];
+  for (const refused of refusals) {
+    assert.equal(typeof refused.refusal, "string", "a refusal must carry a reason");
+    assert.ok(refused.refusal.length > 0);
+    assert.equal(
+      serializeExperienceDefinition(refused.definition),
+      serializeExperienceDefinition(runA.definition),
+      "a refusal changes nothing",
+    );
+    const afterwards = setBlockTitle(refused, runA.definition.pages[0].blocks[0].id, "Sigue editable");
+    assert.equal(afterwards.refusal, null, "the next action clears the refusal");
+  }
+  ok("every refused action says why, changes nothing, and leaves the prototype editable");
+
+  // --- A per-block override is reachable and behaves.
+  const overridable = allBlocks(runA.definition).find(
+    (block) => blockSpec(block.type).allowsSamplePolicyOverride,
+  );
+  const blockOverridden = setBlockSamplePolicy(initialState(runA.definition), overridable.id, {
+    kind: "override",
+    policy: { ...DEFAULT_SAMPLE_POLICY },
+  });
+  assert.equal(blockOverridden.refusal, null);
+  const overriddenBlock = allBlocks(blockOverridden.definition).find(
+    (block) => block.samplePolicy.kind === "override",
+  );
+  assert.ok(overriddenBlock, "the override is on the block");
+  assert.equal(
+    resolveSamplePolicy(blockOverridden.definition.sampleVisibilityPolicy, overriddenBlock.samplePolicy)
+      .mode,
+    "show_all",
+    "and the block's own rule wins over the study's",
+  );
+  assert.ok(parseExperienceDefinition(blockOverridden.definition).ok);
+  ok("a block can state its own disclosure rule, and it overrides the study's");
+
+  // --- A drawing with no query behind it is still checked.
+  const cloudBlock = allBlocks(runA.definition).find((block) => block.type === "theme_cloud");
+  assert.ok(cloudBlock, "the adapted study has a theme cloud");
+  assert.equal(cloudBlock.query, null, "and it carries no query");
+  const asBubbles = setChartVariant(initialState(runA.definition), cloudBlock.id, "bubble");
+  assert.equal(asBubbles.refusal, null, "a theme cloud may become bubbles");
+  const bubbleReport = validateExperienceDefinition(asBubbles.definition, runA.registry);
+  assert.ok(
+    bubbleReport.warnings.some(
+      (issue) => issue.code === "no_renderer_yet" && issue.target.id === cloudBlock.id,
+    ),
+    "a variant with no renderer is announced even when no query sits behind it",
+  );
+  assert.ok(
+    bubbleReport.warnings.some(
+      (issue) => issue.code === "weak_mobile_fit" && issue.target.id === cloudBlock.id,
+    ),
+    "and so is one that reads badly on a phone",
+  );
+  assert.deepEqual(bubbleReport.errors, [], "neither of those blocks anything");
+  ok("a block that draws without a query is still told what its drawing costs");
+
+  // --- The target comparison carries a range, and refuses an impossible one.
+  const targetBlock = allBlocks(runA.definition).find(
+    (block) => block.query && block.query.comparison.kind === "target",
+  );
+  const withComparison = (comparison) => {
+    const next = structuredClone(runA.definition);
+    for (const page of next.pages) {
+      for (const block of page.blocks) {
+        if (block.id === targetBlock.id) block.query.comparison = comparison;
+      }
+    }
+    return next;
+  };
+  assert.ok(
+    !parseExperienceDefinition(
+      withComparison({ kind: "target", target: 90, targetMaximum: 10, targetLabel: "Meta" }),
+    ).ok,
+    "an ideal range that ends before it starts is refused",
+  );
+  assert.ok(
+    !parseExperienceDefinition(
+      withComparison({ kind: "target", target: null, targetMaximum: null, targetLabel: "Meta" }),
+    ).ok,
+    "a target with neither bound is refused",
+  );
+  assert.ok(
+    !parseExperienceDefinition(
+      withComparison({ kind: "none", target: null, targetMaximum: 5, targetLabel: null }),
+    ).ok,
+    "only a target comparison carries a range",
+  );
+  assert.ok(
+    parseExperienceDefinition(
+      withComparison({ kind: "target", target: null, targetMaximum: 3, targetLabel: "Tope" }),
+    ).ok,
+    "an open-ended maximum is a real target",
+  );
+  ok("the ideal range is bounded, ordered and exclusive to the comparison that owns it");
+
+  // --- The prototype interface offers what the acceptance list asks for.
+  for (const [pattern, message] of [
+    [/aria-label="Páginas de la experiencia"/, "the pages are a named navigation region"],
+    [/aria-current=\{entry\.id === page\?\.id \? "page" : undefined\}/, "the open page is announced"],
+    [/aria-pressed=\{preview === breakpoint\}/, "the width preview exposes which width is shown"],
+    [/setBlockSamplePolicy/, "a block's own disclosure rule is reachable from the interface"],
+    [/compatibleVariants/, "the chart choices are grouped by what the result can honestly become"],
+    [/No compatibles con este resultado/, "and the incompatible ones are named as such"],
+    [/renderableVariant/, "a variant with no renderer shows its declared stand-in"],
+    [/todavía no tiene su propio dibujo/, "and says so rather than pretending"],
+    [/setTimeout\(\(\) => URL\.revokeObjectURL/, "the export handle outlives the click that uses it"],
+    [/state\.refusal/, "a refused action is announced to the person who attempted it"],
+    [/no calcula/, "the preview states that it carries no real numbers"],
+    [/El cliente no ve esta pantalla/, "the prototype states that the client cannot see it"],
+  ]) {
+    assert.match(composerSource, pattern, message);
+  }
+  assert.doesNotMatch(
+    composerSource,
+    /localStorage|sessionStorage|indexedDB/i,
+    "the prototype persists nothing, anywhere",
+  );
+  assert.doesNotMatch(
+    composerSource,
+    /fetch\(|useEffect/,
+    "the prototype neither calls out nor runs an effect that could",
+  );
+  ok("the prototype offers pages, a width preview, per-block rules and honest chart substitution");
+}
+
 
 console.log(`\nOK — ${checks} Experience Composer checks passed.`);

@@ -328,6 +328,13 @@ production Supabase and operational prerequisites.
   internal prototype at `/studio/e/[studyId]/construccion` that saves nothing.
   No table, no migration, no Server Action, no deployment. AI is out of scope.
   Gate: `npm run test:experience-composer`.
+- ⓘ **The prototype refuses out loud and never pretends.** Every composer
+  operation that declines returns the state unchanged WITH a reason a person
+  reads, and the screen announces it — a silent no-op is an edit somebody
+  believes worked. A chart variant with no renderer says so and shows the
+  stand-in the registry declares. The composition preview states that it
+  carries none of the study's numbers. Do not reintroduce a silent refusal, and
+  do not draw a variant the registry says has no renderer.
 - ⓘ **Minimum-five suppression is now a per-study, versioned POLICY —
   `show_all` / `warn_below` / `hide_below` — and no current route changed.**
   NEWLY COMPOSED experiences default to `show_all` (visible from n = 1); every

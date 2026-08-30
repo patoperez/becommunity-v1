@@ -59,6 +59,19 @@ export const EXPERIENCE_LIMITS = {
    * drawing 128 bars nobody can compare.
    */
   dimensionCardinality: 60,
+  /**
+   * Distinct values a dimension may carry into one FILTER CONTROL, which is a
+   * different question and deserves a different number.
+   *
+   * A chart with 72 bars is unreadable; a select with 72 options is an
+   * ordinary control, and the deployed dashboard already offers exactly that
+   * over every `seg_` column a study imported. Holding a filter to the chart's
+   * legibility ceiling made the adapter drop a filter the product ships, which
+   * is the one thing a compatibility layer may not do. The ceiling that
+   * actually binds a control is how long a list a person can scan, and it is
+   * far above sixty.
+   */
+  filterOptions: 500,
   /** The serialized definition, in bytes. */
   serializedBytes: 512 * 1024,
 } as const;

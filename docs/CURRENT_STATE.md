@@ -46,11 +46,31 @@ anything under `src/lib/experience/**`.
   compatibility adapter, and SAVES NOTHING — no autosave, no Server Action, no
   draft, no publication. It does not alter `vista-cliente` or
   `/insights/e/[studyId]`, and no client-facing route imports the composer.
+  It is laid out the way the real builder will be — pages and catalogue on the
+  left, the composition in the middle, the selected block's properties on the
+  right, the prototype's status and a width preview across the top — so what is
+  judged there is the thing that gets built. The middle column draws the
+  page's STRUCTURE and states that it carries none of the study's numbers,
+  because this slice reads no aggregation and a preview with numbers in it
+  would be a preview with invented numbers in it.
 - **Nothing is persisted.** No table, no migration, no Server Action, no
   deployment, no Worker version. Review and publication are MODELLED only.
 - **AI is deliberately out of scope** for the composer: no model call, no SDK,
   no secret, no table, no interface. The category advisor is untouched.
-- Gate: `npm run test:experience-composer` (81 checks), inside `npm test`.
+- ⓘ **Two of the adapter's four "cannot carry" warnings were defects, and are
+  fixed rather than announced.** A configured ideal range was a MODEL gap —
+  `comparison` carried one number where the product ships a labelled band, so
+  the query now carries `target`, `targetMaximum` and `targetLabel`, and the
+  adapter places the study's configured range on the block that shows that
+  result. A characteristic with more values than a chart can draw was an
+  ADAPTER defect — a chart's legibility ceiling was being applied to a filter
+  CONTROL, so the adapter dropped a filter the deployed dashboard offers;
+  controls now have their own, much larger ceiling
+  (`EXPERIENCE_LIMITS.filterOptions`). The pivot explorer remains a genuine
+  model gap and is still reported; a recorrido moment whose result the data no
+  longer produces is invalid legacy configuration, is preserved visibly without
+  a number, and is never repaired from this screen.
+- Gate: `npm run test:experience-composer` (95 checks), inside `npm test`.
 
 ## P9 — final hardening and the first real study (read this first)
 

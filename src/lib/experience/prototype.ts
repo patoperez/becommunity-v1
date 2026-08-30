@@ -24,9 +24,15 @@
  *   coupling the connection model exists to prevent.
  *
  *   REMOVING A BLOCK CLEANS UP AFTER ITSELF. Its id leaves every connection,
- *   and a block-scoped filter that only it hosted leaves with it. A dangling
- *   reference is a validation error, and the composer should not be able to
- *   produce one by accident.
+ *   a connection left naming nothing goes with it, and a block-scoped filter
+ *   nothing still references leaves too — along with every mention of it, in
+ *   all six places a filter id can appear. A dangling reference is a validation
+ *   error, and the composer should not be able to produce one by accident.
+ *
+ *   A REFUSAL IS A SENTENCE. Every operation that declines returns the state
+ *   unchanged WITH a reason a person can read, because an edit that silently
+ *   does nothing is an edit somebody believes worked. The composer announces
+ *   the reason and carries on; nothing here is ever a dead end.
  */
 
 import { blockSpec, type BlockType } from "./blocks";
@@ -58,10 +64,25 @@ export type ComposerState = {
    * removed can never be given an identifier React has already seen.
    */
   sequence: number;
+  /**
+   * Why the last action changed nothing, in the words a person reads, or null
+   * when the last action landed.
+   *
+   * An operation that quietly returns its input is an operation the person
+   * believes worked. Every refusal below therefore SAYS SO, the composer
+   * announces it, and editing continues — a refusal is a sentence, never a
+   * dead end.
+   */
+  refusal: string | null;
 };
 
 export function initialState(definition: ExperienceDefinitionV1): ComposerState {
-  return { definition, selectedBlockId: null, sequence: 0 };
+  return { definition, selectedBlockId: null, sequence: 0, refusal: null };
+}
+
+/** The state unchanged, with the reason it did not change. */
+function refuse(state: ComposerState, reason: string): ComposerState {
+  return { ...state, refusal: reason };
 }
 
 function mapPages(
@@ -99,7 +120,7 @@ function renumber(page: ExperiencePage): ExperiencePage {
 }
 
 export function selectBlock(state: ComposerState, blockId: string | null): ComposerState {
-  return { ...state, selectedBlockId: blockId };
+  return { ...state, selectedBlockId: blockId, refusal: null };
 }
 
 export function setBlockTitle(
@@ -110,6 +131,7 @@ export function setBlockTitle(
   const trimmed = title.slice(0, EXPERIENCE_LIMITS.titleLength);
   return {
     ...state,
+    refusal: null,
     definition: mapBlock(state.definition, blockId, (block) => ({
       ...block,
       title: trimmed.trim() === "" ? null : trimmed,
@@ -124,6 +146,7 @@ export function setBlockVisibility(
 ): ComposerState {
   return {
     ...state,
+    refusal: null,
     definition: mapBlock(state.definition, blockId, (block) => ({ ...block, visible })),
   };
 }
@@ -133,16 +156,25 @@ export function setChartVariant(
   blockId: string,
   variant: ChartVariant,
 ): ComposerState {
+  const found = findBlock(state.definition, blockId);
+  if (!found) return refuse(state, "Ese bloque ya no está en el prototipo.");
+  if (!found.block.visualization) {
+    return refuse(state, "Este bloque no se dibuja como gráfica, así que no hay nada que cambiar.");
+  }
+  const spec = blockSpec(found.block.type as BlockType);
+  // The catalogue decides what a block may become. A variant that is not on its
+  // list is refused OUT LOUD rather than applied and rejected later.
+  if (!(spec.variants as readonly string[]).includes(variant)) {
+    return refuse(state, `“${spec.label}” no se puede dibujar de esa manera.`);
+  }
   return {
     ...state,
-    definition: mapBlock(state.definition, blockId, (block) => {
-      if (!block.visualization) return block;
-      const spec = blockSpec(block.type as BlockType);
-      // The catalogue decides what a block may become. A variant that is not on
-      // its list is ignored rather than applied and rejected later.
-      if (!(spec.variants as readonly string[]).includes(variant)) return block;
-      return { ...block, visualization: { ...block.visualization, variant } };
-    }),
+    refusal: null,
+    definition: mapBlock(state.definition, blockId, (block) =>
+      block.visualization
+        ? { ...block, visualization: { ...block.visualization, variant } }
+        : block,
+    ),
   };
 }
 
@@ -151,13 +183,19 @@ export function setBlockSamplePolicy(
   blockId: string,
   override: SamplePolicyOverride,
 ): ComposerState {
+  const found = findBlock(state.definition, blockId);
+  if (!found) return refuse(state, "Ese bloque ya no está en el prototipo.");
+  const spec = blockSpec(found.block.type as BlockType);
+  if (!spec.allowsSamplePolicyOverride && override.kind === "override") {
+    return refuse(state, `“${spec.label}” siempre sigue la regla del estudio.`);
+  }
   return {
     ...state,
-    definition: mapBlock(state.definition, blockId, (block) => {
-      const spec = blockSpec(block.type as BlockType);
-      if (!spec.allowsSamplePolicyOverride && override.kind === "override") return block;
-      return { ...block, samplePolicy: override };
-    }),
+    refusal: null,
+    definition: mapBlock(state.definition, blockId, (block) => ({
+      ...block,
+      samplePolicy: override,
+    })),
   };
 }
 
@@ -169,6 +207,7 @@ export function setStudySamplePolicy(
 ): ComposerState {
   return {
     ...state,
+    refusal: null,
     definition: {
       ...state.definition,
       sampleVisibilityPolicy: {
@@ -180,9 +219,75 @@ export function setStudySamplePolicy(
   };
 }
 
+/** Whether one more block fits, and what to say when it does not. */
+function roomForOneMoreBlock(
+  definition: ExperienceDefinitionV1,
+  page: ExperiencePage,
+): string | null {
+  if (page.blocks.length >= EXPERIENCE_LIMITS.blocksPerPage) {
+    return `“${page.title}” ya tiene los ${EXPERIENCE_LIMITS.blocksPerPage} bloques que admite una página.`;
+  }
+  const total = definition.pages.reduce((sum, candidate) => sum + candidate.blocks.length, 0);
+  if (total >= EXPERIENCE_LIMITS.blocks) {
+    return `Esta experiencia ya tiene los ${EXPERIENCE_LIMITS.blocks} bloques que admite en total.`;
+  }
+  return null;
+}
+
+/**
+ * Strip every mention of a set of filters from the document.
+ *
+ * A filter id can appear in six places: a block's hosted controls, a block
+ * query's author-fixed narrowings, a page's hosted controls, a journey's filter
+ * set, another filter's `dependsOn`, and a connection. Removing the definition
+ * while leaving any of them behind produces a dangling reference — a hard
+ * `unknown_reference` error the person did not ask for and cannot see the cause
+ * of. So all six are pruned together, here, once.
+ */
+function pruneFilterReferences(
+  definition: ExperienceDefinitionV1,
+  removed: ReadonlySet<string>,
+): ExperienceDefinitionV1 {
+  if (removed.size === 0) return definition;
+  const keep = (id: string) => !removed.has(id);
+  return {
+    ...definition,
+    pages: definition.pages.map((page) => ({
+      ...page,
+      filterRefs: page.filterRefs.filter(keep),
+      blocks: page.blocks.map((block) => ({
+        ...block,
+        filterRefs: block.filterRefs.filter(keep),
+        query: block.query
+          ? { ...block.query, filterRefs: block.query.filterRefs.filter(keep) }
+          : null,
+      })),
+    })),
+    filterDefinitions: definition.filterDefinitions
+      .filter((filter) => keep(filter.id))
+      .map((filter) => ({
+        ...filter,
+        dependsOn: filter.dependsOn && removed.has(filter.dependsOn) ? null : filter.dependsOn,
+      })),
+    filterConnections: definition.filterConnections.filter((connection) =>
+      keep(connection.filterId),
+    ),
+    journeyReferences: definition.journeyReferences.map((journey) => ({
+      ...journey,
+      filterRefs: journey.filterRefs.filter(keep),
+    })),
+  };
+}
+
 export function duplicateBlock(state: ComposerState, blockId: string): ComposerState {
   const found = findBlock(state.definition, blockId);
-  if (!found) return state;
+  if (!found) return refuse(state, "Ese bloque ya no está en el prototipo.");
+  // The same ceilings that bound "añadir". A copy is a block; an operation that
+  // creates one without asking is an operation that can build a page the schema
+  // then refuses to save.
+  const full = roomForOneMoreBlock(state.definition, found.page);
+  if (full) return refuse(state, full);
+
   const sequence = state.sequence + 1;
   const copy: ExperienceBlock = {
     ...found.block,
@@ -190,6 +295,10 @@ export function duplicateBlock(state: ComposerState, blockId: string): ComposerS
     title: found.block.title
       ? `${found.block.title} (copia)`.slice(0, EXPERIENCE_LIMITS.titleLength)
       : null,
+    // A duplicate hosts no filter control either. Two blocks presenting the
+    // same control is not a thing anybody wants, and it is what copying
+    // `filterRefs` produced.
+    filterRefs: [],
   };
   const definition = mapPages(state.definition, (page) => {
     if (page.id !== found.page.id) return page;
@@ -199,12 +308,12 @@ export function duplicateBlock(state: ComposerState, blockId: string): ComposerS
     return renumber({ ...page, blocks });
   });
   // Deliberately no connection is copied. See the module header.
-  return { ...state, definition, selectedBlockId: copy.id, sequence };
+  return { ...state, definition, selectedBlockId: copy.id, sequence, refusal: null };
 }
 
 export function removeBlock(state: ComposerState, blockId: string): ComposerState {
   const found = findBlock(state.definition, blockId);
-  if (!found) return state;
+  if (!found) return refuse(state, "Ese bloque ya no está en el prototipo.");
 
   const withoutBlock = mapPages(state.definition, (page) =>
     page.id === found.page.id
@@ -212,30 +321,38 @@ export function removeBlock(state: ComposerState, blockId: string): ComposerStat
       : page,
   );
 
-  const connections = withoutBlock.filterConnections.map((connection) => ({
-    ...connection,
-    blockIds: connection.blockIds.filter((id) => id !== blockId),
-  }));
+  const connections = withoutBlock.filterConnections
+    .map((connection) => ({
+      ...connection,
+      blockIds: connection.blockIds.filter((id) => id !== blockId),
+    }))
+    // A connection that now names nothing is not a connection. Keeping it would
+    // leave a statement about blocks that no longer exist in the document.
+    .filter((connection) => connection.blockIds.length > 0);
 
   // A block-scoped filter exists to be shown on one block. With that block
   // gone it has nowhere to live, so it goes too rather than becoming a
-  // dangling reference.
-  const stillHosted = new Set(
-    withoutBlock.pages.flatMap((page) => page.blocks.flatMap((block) => block.filterRefs)),
+  // dangling reference — UNLESS something else still names it. "Something
+  // else" includes a query's author-fixed narrowing, a page, and a journey,
+  // not only another block's hosted controls.
+  const stillReferenced = new Set([
+    ...withoutBlock.pages.flatMap((page) => [
+      ...page.filterRefs,
+      ...page.blocks.flatMap((block) => [...block.filterRefs, ...(block.query?.filterRefs ?? [])]),
+    ]),
+    ...withoutBlock.journeyReferences.flatMap((journey) => journey.filterRefs),
+  ]);
+  const orphaned = new Set(
+    withoutBlock.filterDefinitions
+      .filter((filter) => filter.scope === "block" && !stillReferenced.has(filter.id))
+      .map((filter) => filter.id),
   );
-  const filterDefinitions = withoutBlock.filterDefinitions.filter(
-    (filter) => filter.scope !== "block" || stillHosted.has(filter.id),
-  );
-  const remaining = new Set(filterDefinitions.map((filter) => filter.id));
 
   return {
     ...state,
-    definition: {
-      ...withoutBlock,
-      filterDefinitions,
-      filterConnections: connections.filter((connection) => remaining.has(connection.filterId)),
-    },
+    definition: pruneFilterReferences({ ...withoutBlock, filterConnections: connections }, orphaned),
     selectedBlockId: state.selectedBlockId === blockId ? null : state.selectedBlockId,
+    refusal: null,
   };
 }
 
@@ -245,17 +362,24 @@ export function moveBlock(
   direction: "up" | "down",
 ): ComposerState {
   const found = findBlock(state.definition, blockId);
-  if (!found) return state;
+  if (!found) return refuse(state, "Ese bloque ya no está en el prototipo.");
+  const index = found.page.blocks.findIndex((block) => block.id === blockId);
+  const target = direction === "up" ? index - 1 : index + 1;
+  if (target < 0 || target >= found.page.blocks.length) {
+    return refuse(
+      state,
+      direction === "up"
+        ? "Ya es el primer bloque de la página."
+        : "Ya es el último bloque de la página.",
+    );
+  }
   const definition = mapPages(state.definition, (page) => {
     if (page.id !== found.page.id) return page;
-    const index = page.blocks.findIndex((block) => block.id === blockId);
-    const target = direction === "up" ? index - 1 : index + 1;
-    if (target < 0 || target >= page.blocks.length) return page;
     const blocks = [...page.blocks];
     [blocks[index], blocks[target]] = [blocks[target], blocks[index]];
     return renumber({ ...page, blocks });
   });
-  return { ...state, definition };
+  return { ...state, definition, refusal: null };
 }
 
 export function addBlock(
@@ -265,13 +389,9 @@ export function addBlock(
   registry: SemanticRegistry | null,
 ): ComposerState {
   const page = state.definition.pages.find((candidate) => candidate.id === pageId);
-  if (!page) return state;
-  if (page.blocks.length >= EXPERIENCE_LIMITS.blocksPerPage) return state;
-  const totalBlocks = state.definition.pages.reduce(
-    (total, candidate) => total + candidate.blocks.length,
-    0,
-  );
-  if (totalBlocks >= EXPERIENCE_LIMITS.blocks) return state;
+  if (!page) return refuse(state, "Esa página ya no está en el prototipo.");
+  const full = roomForOneMoreBlock(state.definition, page);
+  if (full) return refuse(state, full);
 
   const sequence = state.sequence + 1;
   const created = newBlock({
@@ -281,7 +401,12 @@ export function addBlock(
     registry,
     journeyId: state.definition.journeyReferences[0]?.id ?? null,
   });
-  if (!created) return state;
+  if (!created) {
+    return refuse(
+      state,
+      `“${blockSpec(type).label}” necesita algo que este estudio todavía no tiene, así que no se puede armar.`,
+    );
+  }
 
   return {
     ...state,
@@ -292,6 +417,7 @@ export function addBlock(
     ),
     selectedBlockId: created.id,
     sequence,
+    refusal: null,
   };
 }
 
@@ -300,5 +426,5 @@ export function resetPrototype(
   state: ComposerState,
   original: ExperienceDefinitionV1,
 ): ComposerState {
-  return { definition: original, selectedBlockId: null, sequence: state.sequence };
+  return { definition: original, selectedBlockId: null, sequence: state.sequence, refusal: null };
 }

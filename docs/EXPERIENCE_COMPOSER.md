@@ -1,10 +1,14 @@
 # The Experience Composer — foundation
 
 > Standing architecture reference for the governed data-experience builder.
-> Status on 2026-08-29: **foundation slice only**. The model, the schema, the
-> registries, the compatibility adapter and one internal prototype route exist.
-> Nothing is persisted, nothing is published, nothing is deployed, and no part
-> of the deployed client experience has been replaced.
+> Status on 2026-08-29: **foundation slice, reviewed and made evaluable**. The
+> model, the schema, the registries, the compatibility adapter and one internal
+> prototype route exist. Nothing is persisted, nothing is published, nothing is
+> deployed, and no part of the deployed client experience has been replaced.
+>
+> The acceptance pass that followed the foundation is recorded in §16. It fixed
+> defects rather than adding scope, and reclassified two of the adapter's four
+> "cannot carry" warnings as defects in this model and in the adapter.
 
 ---
 
@@ -173,6 +177,14 @@ aggregation, primary and optional second characteristic, author-fixed filter
 narrowings, sort, top-N, period selection, comparison target, number format and
 sample behaviour.
 
+**The comparison target is a RANGE, not a number.** `target`, `targetMaximum`
+and `targetLabel`, with either bound open — "at least eight" and "no more than
+three" are both real targets. It is that shape because the deployed product
+already ships exactly that: one configured result, a minimum, a maximum and the
+words to use when the value falls outside them
+(`presentation.threshold` in `src/lib/dashboard/config.ts`). A model that could
+only hold one number could not represent a study the product already serves.
+
 Validation (`src/lib/experience/validate.ts`) separates two things that are
 usually confused:
 
@@ -231,6 +243,12 @@ that no production module imports it.
 - **Filter definitions** are declared once, scoped `global` / `page` / `block`,
   with a control type (single or multi select), default values, whether the
   client sees the control, and an optional dependency for cascading.
+- **A control is not a chart, and they do not share a ceiling.**
+  `dimensionCardinality` (60) is how many bars a person can compare;
+  `filterOptions` (500) is how long a list a control may offer. The deployed
+  dashboard already builds a filter over every imported `seg_` column whatever
+  its cardinality, so holding a control to the chart's ceiling made the adapter
+  drop a filter the product ships.
 - **A page or a block hosts a filter's control** via its `filterRefs`.
 - **`filterConnections` says which blocks respond**, by naming them.
 
@@ -325,11 +343,19 @@ the confirmed themes, the theme cloud and the team's reading — is representabl
 across five pages and eleven block kinds, with the legacy suppression rule
 preserved, without changing a calculation or a piece of visible evidence.
 
-What it cannot yet carry it **says**, as internal warnings: the pivot explorer
-has no equivalent block, a configured threshold alert is not yet a block
-property, a characteristic with 72 values is too wide to offer as a filter, and
-a recorrido moment whose result the data no longer produces is preserved
-visibly, without a number.
+What it cannot yet carry it **says**, as internal warnings. The acceptance pass
+examined each of the four the first run produced and found that only two were
+limitations:
+
+| Reported | What it actually was | What happens now |
+| --- | --- | --- |
+| The pivot explorer | A genuine model gap. V1 has no equivalent block. | Still reported, and shown in the prototype. |
+| A configured threshold alert | A **modelling defect**: `comparison` held one number where the product ships a labelled range. | The query carries the range; the adapter puts it on the block that shows that result. Reported only when no block shows it. |
+| A characteristic with 72 values | An **adapter defect**: a chart's legibility ceiling applied to a filter control. | Offered as a filter, as the deployed dashboard offers it. Reported only above `filterOptions`. |
+| A recorrido moment with no result | **Invalid legacy configuration**, not a model limitation. | The moment is kept, visible, without a number; the warning names it. The study's own data is never repaired from this screen. |
+
+Warnings are internal. They are for the team building the composer, never for a
+client, and the prototype shows them under a heading that says so.
 
 ### Migration stages (none of them started)
 
@@ -360,14 +386,35 @@ interno"**.
 - Does not alter `/studio/e/[studyId]/vista-cliente` or `/insights/e/[studyId]`,
   and no client-facing route imports anything from `src/lib/experience/**`.
 
-**It can:** show the adapted pages and blocks; select a block; edit its visible
-title; hide, show, duplicate, remove and reorder it; add a block from the typed
-catalogue; change a block's visualization among the ones its type allows;
-inspect its result, characteristics, connected filters, effective sample policy
-and per-breakpoint width; change the study-wide sample policy; show schema
-errors and soft warnings; reset; and download the definition as readable JSON.
-Raw JSON is never displayed in the ordinary interface, and no technical key is
-ever a primary label.
+**It is arranged the way the real builder will be:** pages and the block
+catalogue on the left, the composition in the middle, the selected block's
+properties on the right, and the prototype's status, reset, export and width
+preview across the top. Below `lg` the three columns become one, in reading
+order. There is no drag and drop and no package was added for one.
+
+**It can:** open the adapted pages one at a time; draw the current page at the
+desktop, tablet or phone placement, on the same twelve-column grid the model
+declares; select a block; edit its visible title without losing focus or caret;
+hide, show, duplicate, remove and reorder it; add a block from the typed
+catalogue; change a block's visualization, with the choices grouped into the
+ones the result can honestly become and the ones it cannot; set the study-wide
+disclosure rule and a per-block override; inspect the block's result,
+characteristics, connected filters, effective rule and per-breakpoint width in
+human words; show schema errors, soft warnings and the adapter's own notes;
+reset to the study's real configuration; and download the definition as readable
+JSON. Raw JSON is never displayed in the ordinary interface, and no technical
+key is ever a primary label.
+
+**What the middle column does NOT show is the study's numbers.** This slice
+reads no aggregation, so every result frame says the prototype carries no
+numbers rather than inventing one. A variant whose renderer does not exist yet
+says so and shows the stand-in the registry declares, in the block and in the
+properties panel.
+
+**Every refusal is a sentence.** An operation that declines — a page already at
+its ceiling, a drawing the block type does not allow, a block that is already
+first — returns the state unchanged with a reason, and the screen announces it
+in a polite live region. Editing continues; nothing here is a dead end.
 
 **It cannot, by design:** persist, autosave, drag and drop, migrate, publish, or
 render every chart variant.
@@ -397,7 +444,7 @@ reach them:
 
 ## 15. Gate
 
-`npm run test:experience-composer` — 81 deterministic, credentials-free checks
+`npm run test:experience-composer` — 95 deterministic, credentials-free checks
 covering the strict boundary, opaque and stable identifiers, every ceiling,
 injection refusal, the three sample-policy modes and the legacy equivalence at
 every base from 0 to 60, block overrides, hard-versus-soft validation, explicit
@@ -405,3 +452,57 @@ filter connections, multiple journeys and family eligibility, adapter purity and
 determinism, layout non-overlap at all three widths, review invalidation, schema
 migration, the prototype's server-side authorization and write-freedom, and its
 keyboard operability and accessible naming. It runs inside `npm test`.
+
+Section 17 pins the acceptance pass: that a study whose only characteristic is
+unreadably wide never produces a block that breaks on it; that the catalogue and
+the factory agree about what is possible whatever the study looks like; that
+removing a block neither orphans a filter reference nor deletes a filter
+something still narrows by; that an emptied connection does not survive; that a
+duplicate inherits neither a connection nor a hosted control and obeys the same
+ceilings as adding; that every refused action says why, changes nothing and
+leaves the prototype editable; that a per-block disclosure rule overrides the
+study's; that a drawing with no query behind it is still told what it costs; and
+that the ideal range is bounded, ordered and exclusive to the comparison that
+owns it.
+
+---
+
+## 16. The acceptance pass — what the review found
+
+The foundation was reviewed module by module before the owner was asked to judge
+it. Eleven concrete defects were fixed; no feature area was added.
+
+**In the model.** `comparison` could not express a labelled ideal range (§5).
+
+**In the defaults.** `firstDimension` fell back past the legibility ceiling to
+whatever the registry listed first, so a study whose widest characteristic came
+first produced a block that failed `cardinality_ceiling` the moment it was
+validated — while `canAddBlock` reported the type as offerable. The menu and the
+factory disagreed about what was possible, which is the one thing the probe
+exists to prevent. `newBlock` also chose its drawing before resolving the
+characteristic, so a metric-driven fallback could land on a variant needing two
+characteristics when the query had one.
+
+**In the prototype operations.** Removing a block computed "is this filter still
+hosted?" from block controls alone, ignoring a query's author-fixed narrowings,
+a page and a journey — so a filter could be deleted while another block's query
+still named it. A connection emptied of its last block survived as a statement
+about blocks that no longer existed. Duplicating ignored the block ceilings that
+bound adding, and copied the source's hosted filter controls, so two blocks
+presented the same control. Every operation that declined returned its input
+silently.
+
+**In validation.** The renderer and mobile-fit warnings lived inside the query
+check, so the four block kinds that carry a drawing and no query — the
+recorrido, the confirmed themes, the theme cloud and the complete results table
+— could be switched to a variant with no renderer and nothing was said.
+
+**In the adapter.** A chart's legibility ceiling was applied to a filter control
+(§7, §12).
+
+**In the interface.** `compatibleVariants` and `renderableVariant` existed and
+were never called, so the composer offered drawings a result cannot become
+without saying so and never showed a fallback; the per-block disclosure override
+was implemented and unreachable; the export revoked its object URL in the same
+tick as the click that used it; and a `finding` — which may read a result — was
+described as a block that does not.

@@ -177,7 +177,11 @@ async function discoveredRoutes(session, origin, role) {
       const base = study.match(/^\/studio\/e\/[^/]+/)?.[0];
       if (base) {
         const studyId = base.split("/").at(-1);
-        routes.push(base, `${base}/datos`, `${base}/categorias`, `${base}/indicadores`, `${base}/cualitativo`, `${base}/interpretacion`, `${base}/vista-cliente`, `${base}/publicar`, `/admin/preview/${studyId}`);
+        // `construccion` is the Experience Composer prototype. It is internal,
+        // saves nothing and is not a step in the consultant's process — but it
+        // is a real internal surface, and an internal surface that overflows a
+        // 320 px screen is a defect whether or not it stores anything.
+        routes.push(base, `${base}/datos`, `${base}/categorias`, `${base}/indicadores`, `${base}/cualitativo`, `${base}/interpretacion`, `${base}/vista-cliente`, `${base}/publicar`, `${base}/construccion`, `/admin/preview/${studyId}`);
       }
     }
     await session.load(`${origin}/studio/clientes`);

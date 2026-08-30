@@ -25,6 +25,7 @@ import {
 } from "./definition";
 import { mintId } from "./ids";
 import { defaultLayout } from "./layout";
+import { EXPERIENCE_LIMITS } from "./limits";
 import type { SemanticDimension, SemanticMetric, SemanticRegistry } from "./registry";
 import { NEW_REVIEW, UNPUBLISHED } from "./review";
 import { DEFAULT_SAMPLE_POLICY, INHERIT_SAMPLE_POLICY, type SampleVisibilityPolicy } from "./sample-policy";
@@ -54,7 +55,7 @@ export function defaultQuery(
     sort: { by: dimension ? "value" : "label", direction: "desc" },
     topN: null,
     period: { kind: "latest", periodId: null },
-    comparison: { kind: "none", target: null },
+    comparison: { kind: "none", target: null, targetMaximum: null, targetLabel: null },
     numberFormat: formatForMetric(metric),
     samplePolicy: INHERIT_SAMPLE_POLICY,
   };
@@ -67,18 +68,39 @@ function firstMetric(registry: SemanticRegistry, variant: ChartVariant | null): 
   return usable.find((metric) => metric.publicationReady) ?? usable[0] ?? null;
 }
 
+/**
+ * A characteristic a new block may break its result down by, or null.
+ *
+ * THE FALLBACK MAY NEVER REACH PAST THE LEGIBILITY CEILING. An earlier version
+ * ended `?? registry.dimensions[0]`, which handed back whatever the registry
+ * happened to list first — including a characteristic with seventy-two values.
+ * The block was created, `canAddBlock` reported the type as offerable, and the
+ * document it produced failed `cardinality_ceiling` the moment it was
+ * validated: the menu and the factory disagreed about what was possible, which
+ * is the one thing the probe exists to prevent.
+ *
+ * So the search widens in steps and stops at the ceiling. Comfortable first
+ * (twelve values or fewer, which is what a chart reads well), then anything the
+ * composer will actually draw, then nothing.
+ */
 function firstDimension(
   registry: SemanticRegistry,
   prefer: SemanticDimension["kind"] | null,
 ): SemanticDimension | null {
-  const eligible = registry.dimensions.filter(
-    (dimension) => dimension.values.length > 0 && dimension.values.length <= 12,
+  const drawable = registry.dimensions.filter(
+    (dimension) =>
+      dimension.values.length > 0
+      && dimension.values.length <= EXPERIENCE_LIMITS.dimensionCardinality,
   );
-  if (prefer) {
-    const preferred = eligible.find((dimension) => dimension.kind === prefer);
-    if (preferred) return preferred;
+  const comfortable = drawable.filter((dimension) => dimension.values.length <= 12);
+  for (const pool of [comfortable, drawable]) {
+    if (prefer) {
+      const preferred = pool.find((dimension) => dimension.kind === prefer);
+      if (preferred) return preferred;
+    }
+    if (pool.length > 0) return pool[0];
   }
-  return eligible[0] ?? registry.dimensions[0] ?? null;
+  return null;
 }
 
 export type NewBlockRequest = {
@@ -116,34 +138,33 @@ export function newBlock(request: NewBlockRequest): ExperienceBlock | null {
 
   if (spec.allowsQuery && (spec.requiresQuery || request.metricId)) {
     if (!registry) return null;
-    const needsDimension = variant !== null && CHART_SPECS[variant].dimensions.min >= 1;
     const chosenMetric = request.metricId
       ? registry.metrics.find((metric) => metric.id === request.metricId) ?? null
       : firstMetric(registry, variant);
     if (!chosenMetric) return null;
 
-    let dimension: SemanticDimension | null = null;
-    if (needsDimension) {
-      dimension = request.dimensionId
-        ? registry.dimensions.find((entry) => entry.id === request.dimensionId) ?? null
-        : firstDimension(registry, request.type === "retention" ? "period" : "segment");
-      if (!dimension) {
-        // No characteristic to break the result down by. A single number is
-        // still an honest answer, so the block becomes one instead of failing.
-        if ((spec.variants as readonly ChartVariant[]).includes("kpi")) {
-          variant = "kpi";
-        } else {
-          return null;
-        }
-      }
+    // The characteristic is resolved FIRST, because how many of them exist is
+    // what decides which drawings are possible. Choosing the drawing first and
+    // then discovering the study has nothing to break the result down by is how
+    // a block ends up asking a grouped bar chart for two characteristics it
+    // was never given.
+    const dimension: SemanticDimension | null = request.dimensionId
+      ? registry.dimensions.find((entry) => entry.id === request.dimensionId) ?? null
+      : firstDimension(registry, request.type === "retention" ? "period" : "segment");
+    const available: 0 | 1 = dimension ? 1 : 0;
+
+    if (variant !== null) {
+      // The first drawing this block type allows that the RESULT supports and
+      // that the query can actually satisfy. All three conditions, or none.
+      const usable = (spec.variants as readonly ChartVariant[]).find((candidate) => {
+        if (!(chosenMetric.charts as readonly string[]).includes(candidate)) return false;
+        const chart = CHART_SPECS[candidate];
+        return available >= chart.dimensions.min && available <= chart.dimensions.max;
+      });
+      if (!usable) return null;
+      variant = usable;
     }
-    if (variant && !(chosenMetric.charts as readonly string[]).includes(variant)) {
-      const fallback = (spec.variants as readonly ChartVariant[]).find((candidate) =>
-        (chosenMetric.charts as readonly string[]).includes(candidate),
-      );
-      if (!fallback) return null;
-      variant = fallback;
-    }
+
     query = defaultQuery(
       chosenMetric,
       variant && CHART_SPECS[variant].dimensions.min >= 1 ? dimension : null,

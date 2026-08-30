@@ -173,9 +173,22 @@ export const blockQuerySchema = z
       kind: z.enum(["latest", "all", "named"]),
       periodId: storedValue.nullable(),
     }),
+    /**
+     * What the number is read against.
+     *
+     * `target` carries an IDEAL RANGE rather than a single number, because
+     * that is the shape the product already ships: a study configures one
+     * result with a minimum, a maximum and the words to use when the value
+     * falls outside them (`presentation.threshold` in
+     * `src/lib/dashboard/config.ts`). Either bound may be open — "at least
+     * eight" and "no more than three" are both real targets — and the label is
+     * authored prose held to the same standard as every other authored string.
+     */
     comparison: z.strictObject({
       kind: z.enum(["none", "previous_period", "study_average", "target"]),
       target: z.number().finite().nullable(),
+      targetMaximum: z.number().finite().nullable(),
+      targetLabel: authored(L.titleLength).nullable(),
     }),
     numberFormat: numberFormatSchema,
     samplePolicy: samplePolicyOverrideSchema,
@@ -205,18 +218,38 @@ export const blockQuerySchema = z
         message: "only a named period carries a period name",
       });
     }
-    if (query.comparison.kind === "target" && query.comparison.target === null) {
+    if (
+      query.comparison.kind === "target"
+      && query.comparison.target === null
+      && query.comparison.targetMaximum === null
+    ) {
       context.addIssue({
         code: "custom",
         path: ["comparison", "target"],
-        message: "a target comparison needs a target",
+        message: "a target comparison needs a minimum, a maximum, or both",
       });
     }
-    if (query.comparison.kind !== "target" && query.comparison.target !== null) {
+    if (
+      query.comparison.kind !== "target"
+      && (query.comparison.target !== null
+        || query.comparison.targetMaximum !== null
+        || query.comparison.targetLabel !== null)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["comparison", "target"],
         message: "only a target comparison carries a target",
+      });
+    }
+    if (
+      query.comparison.target !== null
+      && query.comparison.targetMaximum !== null
+      && query.comparison.target > query.comparison.targetMaximum
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["comparison", "targetMaximum"],
+        message: "the ideal range ends before it starts",
       });
     }
     if (new Set(query.filterRefs).size !== query.filterRefs.length) {
