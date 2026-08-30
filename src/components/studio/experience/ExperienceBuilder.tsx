@@ -26,6 +26,8 @@ import {
 } from "@/lib/experience/definition";
 import type { BlockDataSet } from "@/lib/experience/data";
 import {
+  addBand,
+  addBandScheme,
   addBlock,
   addJourney,
   addMoment,
@@ -39,16 +41,20 @@ import {
   duplicateMoment,
   duplicatePage,
   initialState,
+  moveBand,
   moveBlock,
   moveBlockToIndex,
   moveMoment,
   movePage,
   openPage,
   redo,
+  removeBand,
+  removeBandScheme,
   removeBlock,
   removeJourney,
   removeMoment,
   removePage,
+  renameBandScheme,
   renameJourney,
   renamePage,
   resetToAdapted,
@@ -61,6 +67,12 @@ import {
   setBlockSpan,
   setBlockTitle,
   setBlockVisibility,
+  setBand,
+  setBandSchemeDescription,
+  setBandSchemeFilter,
+  setBandSchemeScale,
+  setBandSchemeSource,
+  setBlockBandScheme,
   setBlockJourney,
   setChartVariant,
   setFilterConnection,
@@ -93,6 +105,7 @@ import {
 
 import { FilterPanelCard, IdentityPanel } from "./AuthoringPanels";
 import { JourneyManager } from "./JourneyManager";
+import { SemaforoManager } from "./SemaforoManager";
 import {
   BREAKPOINTS,
   BREAKPOINT_WIDTHS,
@@ -455,6 +468,8 @@ export function ExperienceBuilder({
   const [pendingType, setPendingType] = useState<BlockType>("rich_text");
   /** Which recorrido the manager has open. Editor chrome; never the document. */
   const [openJourney, setOpenJourney] = useState<string | null>(null);
+  /** Which semáforo the manager has open. Editor chrome; never the document. */
+  const [openScheme, setOpenScheme] = useState<string | null>(null);
   const [newPageTitle, setNewPageTitle] = useState("");
 
   const [saving, setSaving] = useState(false);
@@ -1032,6 +1047,65 @@ export function ExperienceBuilder({
             }
           />
 
+          {/*
+            WHAT GOOD LOOKS LIKE, WRITTEN DOWN ONCE.
+
+            Beside the recorridos, because a semáforo is the same kind of thing:
+            a decision the STUDY carries, referenced by whatever reads it. A
+            block, a recorrido and a single moment can all point at one, and
+            editing it here changes all of them.
+          */}
+          <SemaforoManager
+            idPrefix={ids}
+            definition={definition}
+            registry={registry}
+            openSchemeId={openScheme}
+            onOpenScheme={setOpenScheme}
+            onAddScheme={(title) =>
+              act((current) => addBandScheme(current, title), `Se añadió el semáforo “${title.trim()}”.`)
+            }
+            onRenameScheme={(schemeId, title) =>
+              act((current) => renameBandScheme(current, schemeId, title), "")
+            }
+            onSchemeDescription={(schemeId, description) =>
+              act((current) => setBandSchemeDescription(current, schemeId, description), "")
+            }
+            onSchemeSource={(schemeId, source) =>
+              act(
+                (current) => setBandSchemeSource(current, schemeId, source),
+                source === "numeric"
+                  ? "El semáforo clasifica por rangos."
+                  : "El semáforo clasifica por categorías registradas.",
+              )
+            }
+            onSchemeScale={(schemeId, scale) =>
+              act((current) => setBandSchemeScale(current, schemeId, scale), "")
+            }
+            onSchemeFilter={(schemeId, metricId, filterLabel) =>
+              act(
+                (current) => setBandSchemeFilter(current, schemeId, metricId, filterLabel, registry),
+                metricId
+                  ? "Este semáforo se ofrecerá como característica para filtrar."
+                  : "Este semáforo ya no se ofrece como filtro.",
+              )
+            }
+            onRemoveScheme={(schemeId) =>
+              act((current) => removeBandScheme(current, schemeId), "Se quitó el semáforo.")
+            }
+            onAddBand={(schemeId, bandLabel) =>
+              act((current) => addBand(current, schemeId, bandLabel), "Se añadió una banda.")
+            }
+            onBand={(schemeId, bandId, patch) =>
+              act((current) => setBand(current, schemeId, bandId, patch), "")
+            }
+            onMoveBand={(schemeId, bandId, direction) =>
+              act((current) => moveBand(current, schemeId, bandId, direction), "Se movió la banda.")
+            }
+            onRemoveBand={(schemeId, bandId) =>
+              act((current) => removeBand(current, schemeId, bandId), "Se quitó la banda.")
+            }
+          />
+
           <SamplePolicyPanel
             idPrefix={ids}
             mode={policy.mode}
@@ -1214,6 +1288,12 @@ export function ExperienceBuilder({
                 act(
                   (current) => setBlockJourney(current, selected.block.id, journeyId),
                   "Este bloque ahora muestra otro recorrido.",
+                )
+              }
+              onBandScheme={(schemeId) =>
+                act(
+                  (current) => setBlockBandScheme(current, selected.block.id, schemeId),
+                  schemeId ? "Este bloque se lee con ese semáforo." : "Este bloque queda sin semáforo.",
                 )
               }
               onOpenPanel={(pageId, panelId) => {
@@ -2494,6 +2574,7 @@ function Inspector({
   onSpan,
   onSamplePolicy,
   onJourney,
+  onBandScheme,
   onOpenPanel,
   onDisconnectSource,
   panelCard,
@@ -2516,6 +2597,8 @@ function Inspector({
   onSamplePolicy: (override: { kind: "inherit" } | { kind: "override"; policy: { policyVersion: 1; mode: SamplePolicyMode; threshold: number } }) => void;
   /** Which recorrido a journey block is a window onto. */
   onJourney: (journeyId: string) => void;
+  /** Which semáforo this block reads, when it is drawn as one. */
+  onBandScheme: (schemeId: string | null) => void;
   /** Select the panel that governs this block, so it can be edited there. */
   onOpenPanel: (pageId: string, panelId: string) => void;
   /** Stop one source moving this block: a panel target, or a direct connection. */
@@ -2577,6 +2660,36 @@ function Inspector({
         </section>
 
         {panelCard}
+
+        {/* --- The semáforo this block reads, when it is drawn as one -------
+            Offered only on a block that actually chose the drawing, because a
+            picker for a colour scheme on a bar chart is a control with no
+            consequence. Null is a real answer and the canvas says so. ---- */}
+        {block.visualization?.variant === "traffic_light" ? (
+          <section>
+            <h3 className="text-sm font-semibold text-strong">Con qué semáforo se lee</h3>
+            <select
+              id={`${idPrefix}-blockband`}
+              className={`${field} mt-2`}
+              value={block.bandSchemeId ?? ""}
+              onChange={(event) =>
+                onBandScheme(event.target.value === "" ? null : event.target.value)
+              }
+            >
+              <option value="">Sin semáforo configurado</option>
+              {definition.bandSchemes.map((scheme) => (
+                <option key={scheme.id} value={scheme.id}>
+                  {scheme.title}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted">
+              {definition.bandSchemes.length === 0
+                ? "Todavía no hay ningún semáforo. Se configuran en “Semáforos”, en el panel izquierdo: el producto no decide dónde empieza el verde."
+                : "Las bandas, sus rangos y lo que significan se editan en “Semáforos”, en el panel izquierdo."}
+            </p>
+          </section>
+        ) : null}
 
         {/* --- Which recorrido this block is a window onto ------------------
             A `journey` block does not CONTAIN a recorrido; it points at one.

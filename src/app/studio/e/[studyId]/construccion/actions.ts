@@ -10,7 +10,9 @@ import {
   parseExperienceDefinition,
   type ExperienceDefinitionV1,
 } from "@/lib/experience/definition";
-import { resolveDefinitionData, type BlockDataSet } from "@/lib/experience/data";
+import type { BlockDataSet } from "@/lib/experience/data";
+import { resolveExperience } from "@/lib/experience/resolve";
+import { registryWithDerivedBands } from "@/lib/experience/band-filters";
 import { loadExperienceDraft, saveExperienceDraft } from "@/lib/experience/storage";
 import { validateExperienceDefinition } from "@/lib/experience/validate";
 
@@ -138,7 +140,19 @@ export async function saveExperienceDraftAction(
   }
 
   const context = await loadBuilderRegistry(actor.admin, studio);
-  const report = validateExperienceDefinition(parsed.definition, context.registry);
+  /*
+   * VALIDATED AGAINST THE REGISTRY THE DOCUMENT ITSELF WIDENS.
+   *
+   * A configured semáforo that names the result it classifies adds a
+   * filterable characteristic, and a filter over it is legitimate. Validating
+   * against the study's bare registry would refuse the document for naming a
+   * characteristic the document itself declares — a save that fails for a
+   * reason nobody could see. The widening is still DERIVED, not trusted: it is
+   * computed on the server from the parsed document and the study's own
+   * registry, never taken from the request.
+   */
+  const registry = registryWithDerivedBands(parsed.definition, context.registry);
+  const report = validateExperienceDefinition(parsed.definition, registry);
   if (report.errors.length > 0) {
     return {
       ok: false,
@@ -223,15 +237,13 @@ export async function refreshExperienceData(
   try {
     return {
       ok: true,
-      data: resolveDefinitionData(
-        context.rows,
-        context.registry,
-        context.keyIndex,
-        parsed.definition,
-        undefined,
-        undefined,
-        context.confirmed,
-      ),
+      data: resolveExperience({
+        rows: context.rows,
+        registry: context.registry,
+        index: context.keyIndex,
+        definition: parsed.definition,
+        confirmed: context.confirmed,
+      }).data,
     };
   } catch {
     return { ok: false, message: "No se pudieron calcular los resultados." };

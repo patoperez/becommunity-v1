@@ -89,6 +89,15 @@ export type BandScheme = {
   bands: readonly Band[];
   /** What to say when there is no value at all. Never a band, never a colour. */
   noDataLabel: string;
+  /**
+   * The result this scheme classifies when it is ALSO offered as a filterable
+   * characteristic, or null when it only colours. See `band-filters.ts`: the
+   * bands are the only acceptable rule for turning a score into a category,
+   * and the distribution is never one.
+   */
+  filterMetricId: string | null;
+  /** What the derived characteristic is called in a control. */
+  filterLabel: string | null;
 };
 
 export type BandVerdict =
@@ -183,14 +192,24 @@ export function schemeProblems(scheme: BandScheme): string[] {
   }
 
   /*
-   * OVERLAP AND GAPS, CHECKED AT THE EDGES.
+   * OVERLAP AND GAPS, CHECKED AT THE EDGES — IN VALUE ORDER, NOT LIST ORDER.
    *
-   * Two bands that both claim 80 make the colour depend on the order they
-   * happen to be written in. A gap between 79 and 80 makes a real answer
-   * unclassifiable. Both are reported by the exact value that breaks, because
-   * "the bands overlap" is not something somebody can act on.
+   * Two bands that both claim 80 make the colour depend on which happens to be
+   * written first. A gap between 79 and 80 makes a real answer unclassifiable.
+   * Both are reported by the exact value that breaks, because "the bands
+   * overlap" is not something anybody can act on.
+   *
+   * The comparison sorts by lower bound first, because a semáforo is naturally
+   * authored BEST FIRST — verde, amarillo, rojo — which is descending. A check
+   * that assumed the list order was ascending would report no gap on every
+   * scheme a person actually writes, which is worse than not checking: a green
+   * light on a rule that has a hole in it.
    */
-  const ordered = [...scheme.bands];
+  const ordered = [...scheme.bands].sort((a, b) => {
+    const left = a.lower.value ?? Number.NEGATIVE_INFINITY;
+    const right = b.lower.value ?? Number.NEGATIVE_INFINITY;
+    return left - right;
+  });
   for (let index = 0; index + 1 < ordered.length; index += 1) {
     const current = ordered[index];
     const next = ordered[index + 1];

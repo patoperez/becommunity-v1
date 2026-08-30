@@ -29,6 +29,17 @@ import { readFile } from "node:fs/promises";
 import { csatTopBox, mean, npsFromScores } from "../src/lib/calc/metrics.ts";
 
 import {
+  bandColumnKey,
+  derivedBandDimensions,
+  indexWithDerivedBands,
+  withDerivedBandColumns,
+} from "../src/lib/experience/band-filters.ts";
+import {
+  classify,
+  schemeIsUsable,
+  schemeProblems,
+} from "../src/lib/experience/bands.ts";
+import {
   BLOCK_TYPES,
   blockCapabilities,
   blockCatalogue,
@@ -1497,7 +1508,13 @@ assert.doesNotMatch(actionsSource, /getSession\(/, "never getSession for an auth
 assert.match(actionsSource, /role !== "internal"/, "the role is read from the database");
 for (const [pattern, message] of [
   [/parseExperienceDefinition\(rawDefinition\)/, "the submitted document goes through the strict boundary"],
-  [/validateExperienceDefinition\(parsed\.definition, context\.registry\)/, "and through a registry the SERVER rebuilt"],
+  // The registry is the study's, rebuilt on the server, WIDENED by what the
+  // parsed document itself derives — a configured semáforo that names the
+  // result it classifies. Derived from the document and the study's own
+  // registry, never taken from the request, which is what the next assertion
+  // pins down.
+  [/const registry = registryWithDerivedBands\(parsed\.definition, context\.registry\)/, "the registry is the study's, widened by what the document derives"],
+  [/validateExperienceDefinition\(parsed\.definition, registry\)/, "and the document is validated against it"],
   [/metadata\.studyId !== studio\.study\.id/, "a document naming another study is refused"],
   [/metadata\.tenantId !== studio\.study\.tenantId/, "a document naming another client is refused"],
 ]) {
@@ -3465,6 +3482,262 @@ console.log("\n[24] A Top-2-Box is never invented from a scale nobody agreed to"
   assert.equal(outcome.ok, false, "a Top-2-Box with no agreed threshold is refused");
   assert.equal(outcome.reason, "unsupported_aggregation");
   ok("a Top-2-Box is computed from the study's own scale, and refused rather than faked when there is none");
+}
+
+
+// ===========================================================================
+console.log("\n[25] A semáforo is a decision somebody wrote down");
+// ===========================================================================
+
+{
+  const numeric = {
+    id: mintId("band", "sem/one"),
+    title: "Desempeño del capítulo",
+    description: null,
+    source: "numeric",
+    scale: { minimum: 0, maximum: 100 },
+    bands: [
+      {
+        id: mintId("bandpart", "sem/one/a"),
+        label: "Verde",
+        colorRole: "positive",
+        shape: "circle",
+        meaning: "Por encima del estándar acordado.",
+        lower: { value: 80, inclusive: true },
+        upper: { value: null, inclusive: true },
+        values: [],
+      },
+      {
+        id: mintId("bandpart", "sem/one/b"),
+        label: "Amarillo",
+        colorRole: "caution",
+        shape: "triangle",
+        meaning: "Se sostiene, pero no crece.",
+        lower: { value: 60, inclusive: true },
+        upper: { value: 80, inclusive: false },
+        values: [],
+      },
+      {
+        id: mintId("bandpart", "sem/one/c"),
+        label: "Rojo",
+        colorRole: "danger",
+        shape: "square",
+        meaning: "Necesita atención ahora.",
+        lower: { value: null, inclusive: true },
+        upper: { value: 60, inclusive: false },
+        values: [],
+      },
+    ],
+    noDataLabel: "Sin dato",
+    filterMetricId: null,
+    filterLabel: null,
+  };
+
+  // ORDER IS AS WRITTEN, and the bounds decide — not the order.
+  assert.equal(classify(numeric, 95).band.label, "Verde");
+  assert.equal(classify(numeric, 80).band.label, "Verde", "an inclusive lower bound includes its value");
+  assert.equal(classify(numeric, 79.9).band.label, "Amarillo");
+  assert.equal(classify(numeric, 60).band.label, "Amarillo", "and 60 belongs to exactly one band");
+  assert.equal(classify(numeric, 59.9).band.label, "Rojo");
+  assert.equal(classify(numeric, 0).band.label, "Rojo", "an open lower bound catches everything below");
+  assert.equal(classify(numeric, null).kind, "no_data");
+  assert.equal(classify(numeric, "").kind, "no_data");
+  assert.equal(classify(numeric, "no es un número").kind, "unclassified");
+  ok("a numeric semáforo classifies by its bounds, and a boundary value belongs to exactly one band");
+
+  assert.deepEqual(schemeProblems(numeric), [], "a complete scheme reports no problem");
+  assert.ok(schemeIsUsable(numeric));
+
+  // A GAP IS REPORTED BY THE VALUE THAT BREAKS, not as "the bands overlap".
+  const gapped = structuredClone(numeric);
+  gapped.bands[1].lower = { value: 65, inclusive: true };
+  assert.ok(
+    schemeProblems(gapped).some((problem) => problem.includes("60") && problem.includes("65")),
+    `a gap must name the values it is between: ${JSON.stringify(schemeProblems(gapped))}`,
+  );
+  assert.equal(classify(gapped, 62).kind, "unclassified", "and a value in the gap is not rounded into a band");
+
+  const overlapping = structuredClone(numeric);
+  overlapping.bands[1].upper = { value: 85, inclusive: true };
+  assert.ok(
+    schemeProblems(overlapping).some((problem) => problem.includes("enciman")),
+    "an overlap is reported",
+  );
+
+  const wordless = structuredClone(numeric);
+  wordless.bands[0].meaning = "";
+  assert.ok(
+    schemeProblems(wordless).some((problem) => problem.includes("significa")),
+    "a band with a colour and no sentence is incomplete",
+  );
+  ok("a gap, an overlap and a colour with no meaning are each reported by name");
+
+  // CATEGORICAL: no arithmetic at all.
+  const categorical = {
+    ...numeric,
+    id: mintId("band", "sem/two"),
+    source: "category",
+    scale: null,
+    bands: numeric.bands.map((band) => ({
+      ...band,
+      lower: { value: null, inclusive: true },
+      upper: { value: null, inclusive: true },
+      values: [band.label],
+    })),
+  };
+  assert.equal(classify(categorical, "Verde").band.label, "Verde");
+  assert.equal(classify(categorical, "Morado").kind, "unclassified", "a value in no band is not guessed at");
+  const doubled = structuredClone(categorical);
+  doubled.bands[1].values = ["Verde"];
+  assert.ok(
+    schemeProblems(doubled).some((problem) => problem.includes("Verde")),
+    "a value claimed by two bands is reported",
+  );
+  ok("a categorical semáforo maps recorded values straight across, and refuses a value in two bands");
+
+  // COLOUR IS NEVER THE ONLY SIGNAL.
+  for (const band of numeric.bands) {
+    assert.ok(band.shape, "every band carries a shape");
+    assert.ok(band.meaning.trim() !== "", "and a sentence");
+  }
+  assert.equal(new Set(numeric.bands.map((band) => band.shape)).size, numeric.bands.length,
+    "and the shapes are distinct, so the non-colour signal actually distinguishes");
+  ok("every band carries a distinct shape and a plain-language meaning beside its colour");
+}
+
+// ===========================================================================
+console.log("\n[26] A semáforo becomes a characteristic only when somebody says what it means");
+// ===========================================================================
+
+{
+  const base = adaptLegacyStudy(snapshot);
+  const metric = base.registry.metrics[0];
+  assert.ok(metric, "the fixture study produces a result");
+
+  const withScheme = structuredClone(base.definition);
+  const schemeId = mintId("band", "filterable");
+  withScheme.bandSchemes = [
+    {
+      id: schemeId,
+      title: "Desempeño",
+      description: null,
+      source: "numeric",
+      scale: { minimum: 0, maximum: 10 },
+      bands: [
+        {
+          id: mintId("bandpart", "filterable/a"),
+          label: "Alto",
+          colorRole: "positive",
+          shape: "circle",
+          meaning: "Por encima del estándar.",
+          lower: { value: 7, inclusive: true },
+          upper: { value: null, inclusive: true },
+          values: [],
+        },
+        {
+          id: mintId("bandpart", "filterable/b"),
+          label: "Bajo",
+          colorRole: "danger",
+          shape: "square",
+          meaning: "Por debajo del estándar.",
+          lower: { value: null, inclusive: true },
+          upper: { value: 7, inclusive: false },
+          values: [],
+        },
+      ],
+      noDataLabel: "Sin dato",
+      filterMetricId: null,
+      filterLabel: null,
+    },
+  ];
+
+  // NOT OFFERED UNTIL IT NAMES WHAT IT CLASSIFIES.
+  assert.deepEqual(
+    derivedBandDimensions(withScheme, base.registry),
+    [],
+    "a scheme that classifies nothing offers no characteristic",
+  );
+
+  withScheme.bandSchemes[0].filterMetricId = metric.id;
+  withScheme.bandSchemes[0].filterLabel = "Desempeño";
+  const derived = derivedBandDimensions(withScheme, base.registry);
+  assert.equal(derived.length, 1, "naming the result it classifies makes it a characteristic");
+  assert.equal(derived[0].label, "Desempeño");
+  assert.deepEqual(
+    derived[0].values.map((entry) => entry.value),
+    ["Alto", "Bajo"],
+    "whose values are the band labels, in the order the scheme lists them",
+  );
+  assert.equal(derived[0].kind, "category", "and which is a documented classification, not a segment");
+
+  // AN INCOMPLETE SCHEME OFFERS NOTHING. A half-written rule is not a rule.
+  const incomplete = structuredClone(withScheme);
+  incomplete.bandSchemes[0].bands[0].meaning = "";
+  assert.deepEqual(
+    derivedBandDimensions(incomplete, base.registry),
+    [],
+    "a scheme that is not finished is not offered as a filter",
+  );
+  ok("a semáforo becomes a filterable characteristic only when it is complete and names what it classifies");
+
+  // THE ROWS GAIN ONE COLUMN, AND THE CLASSIFICATION IS PER RESPONDENT.
+  const index = registryKeyIndex(snapshot);
+  const widened = indexWithDerivedBands(withScheme, index);
+  assert.equal(
+    widened.dimensions[schemeId],
+    bandColumnKey(schemeId),
+    "the derived characteristic resolves to its own column",
+  );
+  const metricKey = index.metrics[metric.id];
+  const sample = [
+    { respondent_id: "r1", metric_key: metricKey, value: 9 },
+    { respondent_id: "r1", metric_key: "otro", value: 1 },
+    { respondent_id: "r2", metric_key: metricKey, value: 2 },
+    { respondent_id: "r3", metric_key: "otro", value: 5 },
+  ];
+  const carried = withDerivedBandColumns(sample, withScheme, widened);
+  const column = bandColumnKey(schemeId);
+  assert.equal(carried[0][column], "Alto");
+  assert.equal(carried[1][column], "Alto", "the label is on EVERY row of that respondent, not only the classified one");
+  assert.equal(carried[2][column], "Bajo");
+  assert.equal(
+    carried[3][column],
+    "",
+    "somebody who never answered the classified result falls out of a narrowing rather than into a band",
+  );
+  assert.notEqual(carried, sample, "and the rows are copied, never mutated");
+  assert.equal(sample[0][column], undefined, "the caller's rows are untouched");
+  ok("a derived characteristic is written onto every row of the respondent it classifies, and nowhere else");
+
+  /*
+   * AND IT IS NEVER DERIVED FROM THE DISTRIBUTION — asserted as BEHAVIOUR,
+   * not as prose. `readCode` strips comments precisely so a file cannot pass
+   * by describing itself, so the check is: the same value classifies the same
+   * way whatever else is in the study. A percentile rule would move the
+   * boundary as soon as the other answers changed.
+   */
+  const sparse = [{ respondent_id: "r1", metric_key: metricKey, value: 8 }];
+  const crowded = [
+    { respondent_id: "r1", metric_key: metricKey, value: 8 },
+    ...Array.from({ length: 40 }, (_, index) => ({
+      respondent_id: `x${index}`,
+      metric_key: metricKey,
+      value: 9.5,
+    })),
+  ];
+  assert.equal(
+    withDerivedBandColumns(sparse, withScheme, widened)[0][column],
+    withDerivedBandColumns(crowded, withScheme, widened)[0][column],
+    "the same answer lands in the same band however the rest of the study answered",
+  );
+  assert.equal(withDerivedBandColumns(sparse, withScheme, widened)[0][column], "Alto");
+  const bandsSource = await readCode("src/lib/experience/band-filters.ts");
+  assert.doesNotMatch(
+    bandsSource,
+    /quantile|percentile|\.sort\(/,
+    "and the module neither ranks nor sorts the values it classifies",
+  );
+  ok("the classification comes from the written bands, never from the distribution");
 }
 
 console.log(`\nOK — ${checks} Experience Composer checks passed.`);

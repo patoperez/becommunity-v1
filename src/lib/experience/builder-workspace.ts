@@ -12,7 +12,8 @@ import type { StudioStudyWorkspace } from "@/lib/studio/study-workspace";
 
 import { adaptLegacyStudy, registryKeyIndex, type AdapterWarning } from "./adapter";
 import type { ExperienceDefinitionV1 } from "./definition";
-import { resolveDefinitionData, type BlockDataSet, type RegistryKeyIndex } from "./data";
+import { type BlockDataSet, type RegistryKeyIndex } from "./data";
+import { resolveExperience } from "./resolve";
 import type { SemanticRegistry } from "./registry";
 import { loadExperienceDraft, type StoredDraft } from "./storage";
 import { loadLegacyStudySnapshot } from "./study-snapshot";
@@ -149,6 +150,10 @@ export async function loadBuilderWorkspace(
   const draftProblem = stored.ok ? null : stored.reason;
   const definition = draft?.definition ?? adapted;
 
+  // One sequence, in one place: widen the registry and the index with whatever
+  // the document derives, add the derived columns to the rows, then resolve.
+  const resolved = resolveExperience({ rows, registry, index: keyIndex, definition, confirmed });
+
   return {
     study: {
       id: workspace.study.id,
@@ -159,16 +164,27 @@ export async function loadBuilderWorkspace(
       status: workspace.study.status,
     },
     adapted,
-    registry,
+    /*
+     * THE REGISTRY THE BUILDER SEES INCLUDES WHAT THE DOCUMENT DERIVES.
+     *
+     * A configured semáforo that names the result it classifies becomes an
+     * ordinary filterable characteristic — the only honest way to offer
+     * "Desempeño: Verde / Amarillo / Rojo" for a study that records a score and
+     * no category. It is added HERE rather than in the adapter because it is a
+     * property of the DOCUMENT, not of the study: two drafts of one study can
+     * hold different standards, and the study's own registry must not change
+     * because somebody composed a page.
+     */
+    registry: resolved.registry,
     adapterWarnings: warnings,
     draft,
     draftProblem,
     definition,
-    report: validateExperienceDefinition(definition, registry),
-    data: resolveDefinitionData(rows, registry, keyIndex, definition, undefined, undefined, confirmed),
+    report: validateExperienceDefinition(definition, resolved.registry),
+    data: resolved.data,
     evidence: buildEvidence(snapshot, registry, rows, confirmed),
-    keyIndex,
-    rows,
+    keyIndex: resolved.index,
+    rows: resolved.rows,
     confirmed,
   };
 }

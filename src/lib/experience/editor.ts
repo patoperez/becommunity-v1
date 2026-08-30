@@ -60,6 +60,7 @@ import {
   type FilterPanel,
   type FilterPanelLayout,
   type FilterTarget,
+  type BandSchemeDocument,
   type JourneyMoment,
   type JourneyReference,
 } from "./definition";
@@ -2075,4 +2076,348 @@ export function setMomentAwareness(
         }
       : null,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Semáforo schemes — what good looks like, written down once
+// ---------------------------------------------------------------------------
+
+/**
+ * A NEW SCHEME STARTS EMPTY AND SAYS SO.
+ *
+ * Not with green/yellow/red already at 80 and 60. Those numbers are a business
+ * decision about a particular study, and a product that supplies them has
+ * decided for its client — the exact thing "no fabricated classification"
+ * forbids. What it supplies is the SHAPE: three bands, ordered, each with a
+ * colour role, a distinct shape and an empty meaning waiting to be written, and
+ * bounds that are open until somebody sets them.
+ */
+export function addBandScheme(state: EditorState, title: string): EditorState {
+  const clean = title.trim();
+  if (clean === "") return refuse(state, "Un semáforo necesita un nombre para poder elegirlo.");
+  if (state.definition.bandSchemes.length >= EXPERIENCE_LIMITS.bandSchemes) {
+    return refuse(
+      state,
+      `Esta experiencia ya tiene los ${EXPERIENCE_LIMITS.bandSchemes} semáforos que admite.`,
+    );
+  }
+  const id = mintFreeId(
+    "band",
+    `${state.definition.id}/band/${state.sequence}/${clean}`,
+    (candidate) => state.definition.bandSchemes.some((scheme) => scheme.id === candidate),
+  );
+  const part = (suffix: string) => mintId("bandpart", `${id}/${suffix}`);
+  return commit(
+    state,
+    {
+      ...state.definition,
+      bandSchemes: [
+        ...state.definition.bandSchemes,
+        {
+          id,
+          title: clean.slice(0, EXPERIENCE_LIMITS.titleLength),
+          description: null,
+          source: "numeric",
+          scale: null,
+          bands: [
+            {
+              id: part("a"),
+              label: "Verde",
+              colorRole: "positive",
+              shape: "circle",
+              meaning: "",
+              lower: { value: null, inclusive: true },
+              upper: { value: null, inclusive: true },
+              values: [],
+            },
+            {
+              id: part("b"),
+              label: "Amarillo",
+              colorRole: "caution",
+              shape: "triangle",
+              meaning: "",
+              lower: { value: null, inclusive: true },
+              upper: { value: null, inclusive: false },
+              values: [],
+            },
+            {
+              id: part("c"),
+              label: "Rojo",
+              colorRole: "danger",
+              shape: "square",
+              meaning: "",
+              lower: { value: null, inclusive: true },
+              upper: { value: null, inclusive: false },
+              values: [],
+            },
+          ],
+          noDataLabel: "Sin dato",
+          filterMetricId: null,
+          filterLabel: null,
+        },
+      ],
+    },
+    { sequence: state.sequence + 1 },
+  );
+}
+
+function mapScheme(
+  state: EditorState,
+  schemeId: string,
+  change: (scheme: BandSchemeDocument) => BandSchemeDocument,
+): EditorState {
+  if (!state.definition.bandSchemes.some((scheme) => scheme.id === schemeId)) {
+    return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  }
+  return commit(state, {
+    ...state.definition,
+    bandSchemes: state.definition.bandSchemes.map((scheme) =>
+      scheme.id === schemeId ? change(scheme) : scheme,
+    ),
+  });
+}
+
+export function renameBandScheme(state: EditorState, schemeId: string, title: string): EditorState {
+  return mapScheme(state, schemeId, (scheme) => ({
+    ...scheme,
+    title: title.slice(0, EXPERIENCE_LIMITS.titleLength),
+  }));
+}
+
+export function setBandSchemeDescription(
+  state: EditorState,
+  schemeId: string,
+  description: string,
+): EditorState {
+  const clean = description.trim();
+  return mapScheme(state, schemeId, (scheme) => ({
+    ...scheme,
+    description: clean === "" ? null : clean.slice(0, EXPERIENCE_LIMITS.bodyLength),
+  }));
+}
+
+/**
+ * NUMERIC OR CATEGORICAL, and switching clears the half that no longer applies.
+ *
+ * A band cannot carry both bounds and values — the boundary refuses that
+ * outright, because it is two schemes in one object rather than a state
+ * somebody is passing through. So the switch clears rather than leaving the
+ * old half behind to fail a save later.
+ */
+export function setBandSchemeSource(
+  state: EditorState,
+  schemeId: string,
+  source: "numeric" | "category",
+): EditorState {
+  return mapScheme(state, schemeId, (scheme) => ({
+    ...scheme,
+    source,
+    scale: source === "category" ? null : scheme.scale,
+    bands: scheme.bands.map((band) => ({
+      ...band,
+      lower: source === "category" ? { value: null, inclusive: true } : band.lower,
+      upper: source === "category" ? { value: null, inclusive: true } : band.upper,
+      values: source === "numeric" ? [] : band.values,
+    })),
+  }));
+}
+
+export function setBandSchemeScale(
+  state: EditorState,
+  schemeId: string,
+  scale: { minimum: number; maximum: number } | null,
+): EditorState {
+  if (scale && scale.minimum >= scale.maximum) {
+    return refuse(state, "El máximo de la escala tiene que ser mayor que el mínimo.");
+  }
+  return mapScheme(state, schemeId, (scheme) => ({ ...scheme, scale }));
+}
+
+/**
+ * WHICH RESULT THIS SCHEME CLASSIFIES, when it is offered as a filter.
+ *
+ * Setting it turns the scheme into a filterable characteristic whose values are
+ * the band labels — which is the ONLY honest way to get "Desempeño: Verde /
+ * Amarillo / Rojo" out of a study that records a score and no category. The
+ * rule is the one written in the bands, by a person, in this document.
+ */
+export function setBandSchemeFilter(
+  state: EditorState,
+  schemeId: string,
+  metricId: string | null,
+  filterLabel: string | null,
+  registry: SemanticRegistry,
+): EditorState {
+  if (metricId !== null && !registry.metrics.some((metric) => metric.id === metricId)) {
+    return refuse(state, "Ese resultado no existe en este estudio.");
+  }
+  return mapScheme(state, schemeId, (scheme) => ({
+    ...scheme,
+    filterMetricId: metricId,
+    filterLabel:
+      filterLabel && filterLabel.trim() !== ""
+        ? filterLabel.slice(0, EXPERIENCE_LIMITS.titleLength)
+        : null,
+  }));
+}
+
+export function addBand(state: EditorState, schemeId: string, label: string): EditorState {
+  const scheme = state.definition.bandSchemes.find((entry) => entry.id === schemeId);
+  if (!scheme) return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  if (scheme.bands.length >= EXPERIENCE_LIMITS.bandsPerScheme) {
+    return refuse(
+      state,
+      `Un semáforo admite ${EXPERIENCE_LIMITS.bandsPerScheme} bandas como máximo.`,
+    );
+  }
+  const clean = label.trim();
+  if (clean === "") return refuse(state, "Una banda necesita un nombre visible.");
+  const taken = new Set(
+    state.definition.bandSchemes.flatMap((entry) => entry.bands.map((band) => band.id)),
+  );
+  const id = mintFreeId("bandpart", `${schemeId}/band/${state.sequence}/${clean}`, (candidate) =>
+    taken.has(candidate),
+  );
+  const next = mapScheme(state, schemeId, (entry) => ({
+    ...entry,
+    bands: [
+      ...entry.bands,
+      {
+        id,
+        label: clean.slice(0, EXPERIENCE_LIMITS.titleLength),
+        colorRole: "neutral" as const,
+        shape: "diamond" as const,
+        meaning: "",
+        lower: { value: null, inclusive: true },
+        upper: { value: null, inclusive: false },
+        values: [],
+      },
+    ],
+  }));
+  return next.refusal ? next : { ...next, sequence: state.sequence + 1 };
+}
+
+export function setBand(
+  state: EditorState,
+  schemeId: string,
+  bandId: string,
+  // `values` arrives readonly from the UI's own `Band` type; the document's is
+  // mutable. Copied rather than cast, so the stored array is always this
+  // module's own.
+  patch: Partial<Omit<BandSchemeDocument["bands"][number], "id" | "values">> & {
+    values?: readonly string[];
+  },
+): EditorState {
+  const scheme = state.definition.bandSchemes.find((entry) => entry.id === schemeId);
+  if (!scheme) return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  if (!scheme.bands.some((band) => band.id === bandId)) {
+    return refuse(state, "Esa banda ya no está en el semáforo.");
+  }
+  return mapScheme(state, schemeId, (entry) => ({
+    ...entry,
+    bands: entry.bands.map((band) =>
+      band.id === bandId
+        ? { ...band, ...patch, values: patch.values ? [...patch.values] : band.values }
+        : band,
+    ),
+  }));
+}
+
+export function moveBand(
+  state: EditorState,
+  schemeId: string,
+  bandId: string,
+  direction: "up" | "down",
+): EditorState {
+  const scheme = state.definition.bandSchemes.find((entry) => entry.id === schemeId);
+  if (!scheme) return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  const at = scheme.bands.findIndex((band) => band.id === bandId);
+  if (at < 0) return refuse(state, "Esa banda ya no está en el semáforo.");
+  const to = direction === "up" ? at - 1 : at + 1;
+  if (to < 0) return refuse(state, "Esa banda ya es la primera.");
+  if (to >= scheme.bands.length) return refuse(state, "Esa banda ya es la última.");
+  const bands = [...scheme.bands];
+  [bands[at], bands[to]] = [bands[to], bands[at]];
+  return mapScheme(state, schemeId, (entry) => ({ ...entry, bands }));
+}
+
+export function removeBand(state: EditorState, schemeId: string, bandId: string): EditorState {
+  const scheme = state.definition.bandSchemes.find((entry) => entry.id === schemeId);
+  if (!scheme) return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  if (scheme.bands.length <= 1) {
+    return refuse(state, "Un semáforo necesita al menos una banda. Quita el semáforo entero si ya no lo usas.");
+  }
+  return mapScheme(state, schemeId, (entry) => ({
+    ...entry,
+    bands: entry.bands.filter((band) => band.id !== bandId),
+  }));
+}
+
+/** Everything currently reading its colours from one scheme. */
+export function bandSchemeUsage(
+  definition: ExperienceDefinitionV1,
+  schemeId: string,
+): { what: string; where: string }[] {
+  const used: { what: string; where: string }[] = [];
+  for (const page of definition.pages) {
+    for (const block of page.blocks) {
+      if (block.bandSchemeId === schemeId) {
+        used.push({
+          what: block.title ?? blockSpec(block.type as BlockType).label,
+          where: page.title,
+        });
+      }
+    }
+  }
+  for (const journey of definition.journeyReferences) {
+    if (journey.bandSchemeId === schemeId) {
+      used.push({ what: journey.title, where: "recorrido" });
+    }
+    for (const moment of journey.moments) {
+      if (moment.bandSchemeId === schemeId) {
+        used.push({ what: moment.title, where: `momento de ${journey.title}` });
+      }
+    }
+  }
+  return used;
+}
+
+/**
+ * REMOVING A SCHEME IS PROTECTED BY WHAT READS IT, exactly as a recorrido is.
+ * A pointer at a scheme that is gone would fail the boundary and take the save
+ * down for a reason nobody could see.
+ */
+export function removeBandScheme(state: EditorState, schemeId: string): EditorState {
+  const scheme = state.definition.bandSchemes.find((entry) => entry.id === schemeId);
+  if (!scheme) return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  const used = bandSchemeUsage(state.definition, schemeId);
+  if (used.length > 0) {
+    const where = used.slice(0, 3).map((entry) => `“${entry.what}” (${entry.where})`).join(", ");
+    return refuse(
+      state,
+      `“${scheme.title}” todavía colorea ${used.length === 1 ? "1 cosa" : `${used.length} cosas`}: ${where}. Quítalo de ahí antes de borrarlo.`,
+    );
+  }
+  return commit(state, {
+    ...state.definition,
+    bandSchemes: state.definition.bandSchemes.filter((entry) => entry.id !== schemeId),
+  });
+}
+
+/** Which semáforo one block reads. Null is "not configured", and it shows. */
+export function setBlockBandScheme(
+  state: EditorState,
+  blockId: string,
+  schemeId: string | null,
+): EditorState {
+  if (!findBlock(state.definition, blockId)) {
+    return refuse(state, "Ese bloque ya no está en la experiencia.");
+  }
+  if (schemeId && !state.definition.bandSchemes.some((scheme) => scheme.id === schemeId)) {
+    return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  }
+  return commit(
+    state,
+    mapBlock(state.definition, blockId, (block) => ({ ...block, bandSchemeId: schemeId })),
+  );
 }

@@ -191,6 +191,25 @@ export const bandSchemeSchema = z
       .nullable(),
     bands: z.array(bandSchema).max(L.bandsPerScheme),
     noDataLabel: authored(L.titleLength),
+    /**
+     * THE RESULT THIS SCHEME CLASSIFIES, when it is also offered as a filter.
+     *
+     * A study can record a performance SCORE and no performance CATEGORY —
+     * the real one records `desempeño` as a number from 25 to 93 and has no
+     * "Verde" anywhere. Offering "Desempeño: Verde / Amarillo / Rojo" as a
+     * filter therefore needs a rule for turning the number into a category,
+     * and the ONLY acceptable rule is the one a person already wrote down here.
+     *
+     * WHAT THIS IS NOT: percentiles of the study's own distribution. "The
+     * worst third of this chapter" is a different statement from "below the
+     * standard", and deriving one from the other would put a verdict on a
+     * client's screen that nobody agreed to. Null means the scheme colours
+     * results and offers no filter, which is the honest state until somebody
+     * says what the bands mean.
+     */
+    filterMetricId: semanticId.nullable(),
+    /** What the derived characteristic is called in a filter control. */
+    filterLabel: authored(L.titleLength).nullable(),
   })
   .superRefine((scheme, context) => {
     const ids = scheme.bands.map((band) => band.id);

@@ -6,9 +6,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
 import { loadBuilderRegistry } from "@/lib/experience/builder-workspace";
-import { effectiveFilterTargets, filterDimensionKinds } from "@/lib/experience/filters";
+import { resolveExperience } from "@/lib/experience/resolve";
+import { registryWithDerivedBands } from "@/lib/experience/band-filters";
 import { loadExperienceDraft } from "@/lib/experience/storage";
-import { resolveDefinitionData, type BlockDataSet } from "@/lib/experience/data";
+import type { BlockDataSet } from "@/lib/experience/data";
 import { EXPERIENCE_LIMITS } from "@/lib/experience/limits";
 
 /**
@@ -94,8 +95,12 @@ export async function previewDraftData(
   // so a crafted request narrows to nothing rather than to somebody else's
   // rows.
   const declared = new Map(definition.filterDefinitions.map((filter) => [filter.id, filter]));
+  // The allowlist reads the WIDENED registry, so a reader choosing "Rojo" on a
+  // characteristic the document derives is checked against the band labels
+  // rather than dropped as unknown.
+  const registry = registryWithDerivedBands(definition, context.registry);
   const allowed = new Map(
-    context.registry.dimensions.map((dimension) => [
+    registry.dimensions.map((dimension) => [
       dimension.id,
       new Set(dimension.values.map((entry) => entry.value)),
     ]),
@@ -114,15 +119,14 @@ export async function previewDraftData(
   try {
     return {
       ok: true,
-      data: resolveDefinitionData(
-        context.rows,
-        context.registry,
-        context.keyIndex,
+      data: resolveExperience({
+        rows: context.rows,
+        registry: context.registry,
+        index: context.keyIndex,
         definition,
         selection,
-        effectiveFilterTargets(definition, filterDimensionKinds(definition, context.registry)),
-        context.confirmed,
-      ),
+        confirmed: context.confirmed,
+      }).data,
     };
   } catch {
     return { ok: false, message: "No se pudieron calcular los resultados con esos filtros." };

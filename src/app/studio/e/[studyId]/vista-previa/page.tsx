@@ -6,8 +6,7 @@ import { StudioShell } from "@/components/shell/StudioShell";
 import { studyParent } from "@/components/shell/BackLink";
 import { DraftPreview } from "@/components/studio/experience/DraftPreview";
 import { loadBuilderWorkspace } from "@/lib/experience/builder-workspace";
-import { resolveDefinitionData } from "@/lib/experience/data";
-import { effectiveFilterTargets, filterDimensionKinds } from "@/lib/experience/filters";
+import { resolveExperience } from "@/lib/experience/resolve";
 import { parseViewerSelection } from "@/lib/experience/viewer-params";
 import { requireInternal } from "@/lib/studio/guard";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
@@ -61,22 +60,26 @@ export default async function StudioDraftPreviewPage({
   // the preview writes them with, and kept only where this document and this
   // study can account for them.
   const selection = parseViewerSelection(await searchParams, definition, workspace.registry);
-  const movedBy = effectiveFilterTargets(
-    definition,
-    filterDimensionKinds(definition, workspace.registry),
-  );
+  /*
+   * ONE SEQUENCE, THROUGH THE ONE FUNCTION THAT KNOWS IT.
+   *
+   * The registry has to be widened with whatever the document derives, the
+   * index has to match, and the derived columns have to be on the rows BEFORE
+   * anything is aggregated over them. A surface that did two of those three
+   * would narrow to nothing when a reader chose "Rojo" — a wrong answer
+   * wearing an honest empty state.
+   */
   const data =
     Object.keys(selection).length === 0
       ? workspace.data
-      : resolveDefinitionData(
-          workspace.rows,
-          workspace.registry,
-          workspace.keyIndex,
+      : resolveExperience({
+          rows: workspace.rows,
+          registry: workspace.registry,
+          index: workspace.keyIndex,
           definition,
           selection,
-          movedBy,
-          workspace.confirmed,
-        );
+          confirmed: workspace.confirmed,
+        }).data;
 
   const savedAt = workspace.draft
     ? new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" }).format(
