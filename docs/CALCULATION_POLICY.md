@@ -116,6 +116,42 @@ Anything kept raw is rounded once at the **presentation boundary**,
   function serves a 1–5 scale (Top-2-Box = `min 4`) and a 0–10 scale
   (`min 9`). The scale is never guessed — configuration over code.
 
+### 5.1 Where the explicit input comes from
+
+`satisfiedMin` being an explicit input only helps if somebody supplies it.
+`DEFAULT_CSAT_MIN` is 9, and three client-facing paths — the dashboard view, the
+server PDF and the longitudinal series — called `computeStudyMetrics` with no
+`csatMin` at all, so a study answered 1–5 reported a confident, wrong **0 %** on
+every satisfaction result. The composer had already been corrected by deriving
+the scale itself, which is the defect exactly: **one fact, derived twice, and
+only one of the two right.**
+
+`src/lib/calc/scale.ts` is now the single derivation, and all four read it.
+
+| | |
+| --- | --- |
+| `observedScales(rows)` | the span of each result's own answers |
+| `documentedTopBoxMinimum(scale)` | `4` for 1–5, `9` for 0–10, **`null`** for anything else |
+| `topBoxMinimums(rows)` | the map, per metric key |
+| `resolveTopBoxMinimum(key, { explicit, declared })` | an explicit caller wins; otherwise the documented one |
+
+Three rules follow from it, and each is asserted by
+`scripts/calculation-parity-test.mjs` (`npm run test:calc-parity`, inside
+`npm test`):
+
+1. **`null` means do not compute it.** A result on a scale the catalogue does
+   not document has no honest Top-2-Box, so every surface OMITS it and keeps
+   the result's average. A missing Top-2-Box and a `0 %` are different
+   statements and only one of them is true.
+2. **The threshold comes from the whole study; the numbers come from the
+   selection.** A filter leaving only middling answers of a 0–10 result would
+   otherwise make it read as a 1–5 one and move its threshold from 9 to 4 — a
+   wrong number produced by the act of filtering. Callers derive the map once
+   from the unfiltered rows and pass it down; `/api/studies/[id]/report` passes
+   `allRows` beside the narrowed `rows` for exactly this reason.
+3. **An explicit `csatMin` still wins**, so every caller that stated one keeps
+   the result it always had.
+
 ## 6. NPS band definition (canonical, V1-validated)
 
 ```
@@ -169,3 +205,12 @@ has rows. See `AUDIT`-style note in §[5] of the calculation gate.
 against **hand-computed** expectations. It is a **gate**: nothing is built on the
 engine until it passes. Expectations are computed by hand in the comments so a
 reviewer can verify them without running the code.
+
+`scripts/calculation-parity-test.mjs` (`npm run test:calc-parity`) is the second
+gate, and it asks a different question: not "is this formula right" but **"does
+every surface produce the same number from the same rows"**. One study, a 1–5
+result, a 0–10 result and one on a scale nobody documented; the expected
+Top-2-Box computed by hand; and then the engine, the client dashboard, the
+server PDF — read out of the produced BYTES, not out of its layout — and the
+longitudinal series all asserted to agree with it and with each other. A formula
+can be right in one place and absent in three, which is what §5.1 is about.

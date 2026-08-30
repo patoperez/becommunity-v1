@@ -5,10 +5,47 @@
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
 
-## Experience Composer — schema version 2: stable editor, visible draft, real filters
+## Experience Composer — filter capability, focus mode, and one Top-2-Box
 
-Standing reference: `docs/EXPERIENCE_COMPOSER.md`, sections 23–31 for this
-milestone. Branch `claude/experience-builder-preview-filters`.
+Standing reference: `docs/EXPERIENCE_COMPOSER.md`, **sections 33–37** for this
+milestone. Branch `claude/experience-builder-filter-ux-focus`, from
+`claude/experience-builder-preview-filters` at `0f67320`.
+
+- ⓘ **A block DECLARES what a filter can do to it.** `BlockSpec.allowsFilters`
+  answered two unrelated questions — may this block host a reader's controls,
+  and does a reader's choice change what it says — so the selected-block card
+  printed the whole characteristic registry as checkboxes on paragraphs,
+  headings, the approved team reading, the study's cover and the download
+  button. `BlockSpec.capabilities` replaces it with nine declared facts.
+  Ineligible for a viewer filter, by declaration: `rich_text`, `section`,
+  `cover`, `image`, `divider`, `spacer`, `interpretation`, `report_download`,
+  `all_results_disclosure`, `filter_panel`. **Hosting is byte-identical to what
+  `allowsFilters` permitted**, so no stored document became invalid; a gate
+  asserts that equivalence type by type.
+- ⓘ **The panel is the connection editor, not the block.** Which blocks a
+  filter moves is one decision and was being asked once per block. A
+  data-backed block's card carries a compact "Este bloque responde a" summary
+  with *Ir al panel* and *Desconectar*; a static block's card carries **no
+  filter section at all**.
+- ⓘ **A connection that cannot do anything is never honoured and never a hard
+  error.** `effectiveFilterTargets` drops it, the validator warns once
+  (`inert_connection`), and the draft still saves. An older document is never
+  stranded.
+- ⓘ **The editor's chrome is not the document.** Which panels are open, focus
+  mode and the canvas scale live in `sessionStorage` under one key and are read
+  through `useSyncExternalStore`. Toggling a panel cannot mint a revision, mark
+  the draft dirty or wake the autosave.
+- ⓘ **Canvas scaling is a desktop affordance and is not the default.** At 40 %
+  a 44 px drag handle measures 18 px. The canvas opens at full size and pans;
+  the scale control is not offered below 1 024 px and a remembered scale is
+  ignored there.
+- ⓘ **THE CLIENT DASHBOARD'S Top-2-Box IS FIXED** — see the corrected entry
+  below. It is the only client-facing change in this milestone.
+- **The real BNI draft was not touched.** Before and after the live gate:
+  revision **72**, canonical `sha256`
+  `f4063b7c89dde25ced80ac3ac15ca9b2ae6d7e4a6bd86fb275c8a56f3b40829b`. Every
+  mutation in `npm run test:filter-ux-live` happens on a disposable study it
+  creates and deletes; the real study is read, looked at and photographed only.
 
 - ⓘ **No Server Action on the builder or the draft preview may call
   `revalidatePath`.** It makes Next re-render the route INSIDE the action's
@@ -27,16 +64,25 @@ milestone. Branch `claude/experience-builder-preview-filters`.
   block in a later session minted an id that already existed; the document then
   held two blocks with one id, was refused as `repeated block`, and EVERY later
   save failed. `mintFreeId` salts until free, without giving up determinism.
-- ⓘ **A Top-2-Box is computed from the study's OWN scale.** `DEFAULT_CSAT_MIN`
-  is 9, a 0–10 threshold; every `csat_*` result in the BNI study is answered
-  1–5, so all 55 satisfaction results read a confident, wrong **0.0 %**. The
-  registry now carries `scale` and `topBoxMinimum` per result, read from the
-  study's answers, applying the thresholds `docs/CALCULATION_CATALOG.md` §4 and
-  `docs/CALCULATION_POLICY.md` §5 document (4 on 1–5, 9 on 0–10). An
-  undocumented scale is not offered the aggregation at all and is refused if a
-  document asks for it. **The client dashboard was deliberately NOT changed** —
-  `src/lib/dashboard/view.ts` calls `computeStudyMetrics` without a `csatMin`,
-  and changing client-facing numbers is a separate, human-reviewed decision.
+- ⓘ **A Top-2-Box is computed from the study's OWN scale, on EVERY surface.**
+  `DEFAULT_CSAT_MIN` is 9, a 0–10 threshold; every `csat_*` result in the BNI
+  study is answered 1–5, so all 55 satisfaction results read a confident, wrong
+  **0.0 %**. The composer was corrected first, by deriving the scale in its own
+  adapter — and `src/lib/dashboard/view.ts`, `src/lib/reporting/pdf.ts` and
+  `src/lib/dashboard/longitudinal.ts` still called `computeStudyMetrics` with
+  no `csatMin` at all. One fact, derived twice, and only one of the two right.
+  **`src/lib/calc/scale.ts` is now the single derivation and all four read
+  it.** The threshold is documented (4 on 1–5, 9 on 0–10, per
+  `docs/CALCULATION_CATALOG.md` §4 and `docs/CALCULATION_POLICY.md` §5.1);
+  `null` means the result keeps its average and its Top-2-Box is **omitted**
+  rather than printed as 0 %; the threshold is derived from the WHOLE study and
+  the numbers from the selection, so a filter can never change which rule a
+  result is measured against; and an explicit `csatMin` still wins. Averages,
+  rounding, stored responses, imports and the dashboard's layout, navigation
+  and publication state are all unchanged. `npm run test:calc-parity` — 19
+  checks — asserts the engine, the dashboard, the PDF (read out of the produced
+  bytes) and the longitudinal series produce the same number from the same
+  rows, on both documented scales, and all refuse the undocumented one.
 - **`EXPERIENCE_SCHEMA_VERSION` is 2**, and the migration is in code only — no
   database change, `0023`/`0024` unchanged, nothing new applied. `oneToTwo`
   moves the first cover block's words into the global `identity` and removes
@@ -82,11 +128,16 @@ milestone. Branch `claude/experience-builder-preview-filters`.
   scrolls sideways inside its own box; the page never does. A scale control
   (100/75/50 %) shows the whole arrangement. The semáforo's missing-range
   warning is a short chip on the block and the full sentence in its card.
-- Gates: `npm run test:experience-composer` (**140**, inside `npm test`);
-  `npm run test:experience-editor-regression` (**35**) inside
-  `npm run gates:live`, which drives thirty editable operations consecutively
-  against a production build and asserts after EACH that the editor is still
-  interactive and that no Server Action response carried a re-rendered tree.
+- Gates: `npm run test:experience-composer` (**143**, inside `npm test`) and
+  `npm run test:calc-parity` (**19**, inside `npm test`);
+  `npm run test:experience-editor-regression` (**35**) and
+  `npm run test:filter-ux-live` (**51**) inside `npm run gates:live`. The
+  regression gate drives thirty editable operations consecutively against a
+  production build and asserts after EACH that the editor is still interactive
+  and that no Server Action response carried a re-rendered tree. The filter-UX
+  gate composes a disposable study, drives the eighteen filter-panel acceptance
+  items on it, reads the real study without writing to it, and writes fifteen
+  screenshots to `artifacts/filter-ux/` (gitignored).
   `npm run test:p8-acceptance-live` now visits the draft preview too — 21
   routes × 6 widths = 126 views.
 - **A zero-traffic Cloudflare version exists and was NOT promoted.** Version

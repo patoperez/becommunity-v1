@@ -7,19 +7,20 @@
 > fifteen renderers, one internal builder route and one internal draft-preview
 > route exist. Drafts are saved and reload. **Nothing is published**, no
 > client-facing route reads a composed definition, and the deployed client
-> experience is unchanged.
+> experience is unchanged except for one calculation correction (§35).
 >
 > Sections 1–10 describe the model, which the foundation established.
-> Sections 11–22 describe the persistent slice built on it. **Sections 23–31
-> describe this milestone**: the defect that replaced the editor with an error
-> page, the two previews, the study identity layer, viewer-facing filter
-> panels, the satisfaction results that were reading zero, and schema
-> version 2.
+> Sections 11–22 describe the persistent slice built on it. Sections 23–31
+> describe the milestone that made the editor stable. **Sections 33–36
+> describe this one**: the block capability model that stopped offering filter
+> controls on paragraphs, the reversed connection workflow, the collapsible
+> panels and focus mode, and the client-facing Top-2-Box threshold.
 >
-> Where sections 1–22 and 23–31 disagree, the later sections are current. In
+> Where earlier and later sections disagree, the later ones are current. In
 > particular: the schema version is **2**, not 1; there are **twenty** block
 > types, not nineteen; the study's identity is a **global layer**, not a
-> `cover` block; and `query.filterRefs` is now `query.fixedFilters`.
+> `cover` block; `query.filterRefs` is now `query.fixedFilters`; and
+> `BlockSpec.allowsFilters` no longer exists — §33 replaced it.
 
 ---
 
@@ -267,6 +268,10 @@ can both be broken down by generation and only one of them be meant to follow
 the reader's choice. Connections are explicit, validated against the blocks that
 actually exist, and a dangling one is a hard error. Duplicating a block
 deliberately inherits **no** connection.
+
+**And a filter never affects a block that cannot recompute.** A connection
+naming a paragraph or a download button is not honoured, is reported as a soft
+warning, and is refused outright when somebody tries to make one. §33.
 
 ---
 
@@ -952,9 +957,9 @@ Cuicuilco), then its address:
 - **The real theme cloud.** The current one is registered as a filter target
   and moves with a panel like everything else; the drawing itself is next.
 - **Import.** Export exists; loading a file back does not.
-- **The client dashboard's own Top-2-Box.** It has the same 0–10 default in it
-  (§29). It was deliberately not changed, because that changes client-facing
-  numbers and needs its own review.
+- **Publication.** Still nothing composed here reaches a client.
+  (The client dashboard's own Top-2-Box, which used to be listed here as
+  deliberately unfixed, is fixed — §35.)
 
 ---
 
@@ -1143,13 +1148,16 @@ id**: renaming a section or a block never changes what a panel moves, and an id
 naming nothing is a hard validation error rather than a silently dropped
 connection.
 
-**Compatibility is declared, not special-cased.** A block is a legal filter
-target when its catalogue entry says `allowsFilters` — so KPIs, charts,
-comparisons, tables, journeys, qualitative theme summaries and the theme cloud
-are all targets today, and a block type added later becomes one by declaring it
-in the one table that already governs everything else about it. The real
-theme-cloud visualization, when it arrives, inherits this rather than needing an
-exception carved for it.
+**Compatibility is declared, not special-cased** — and since §33 it is declared
+by a capability rather than by one overloaded boolean. A block is a legal filter
+target when its catalogue entry says `capabilities.supportsViewerFilters`, which
+is a different question from whether it may HOST a control. KPIs, charts,
+comparisons, findings, tables, journeys, the comparison explorer, qualitative
+theme summaries and the theme cloud are targets; paragraphs, headings, the
+approved team reading, the study's cover, the download action, the complete
+inventory and the panel itself are not. A block type added later becomes a
+target by declaring itself in the one table that already governs everything
+else about it.
 
 **A block responds when *either* an explicit `filterConnection` names it *or* a
 panel hosting that filter resolves to it.** That union is computed in exactly
@@ -1246,13 +1254,13 @@ On BNI the 55 satisfaction results now read their real values — 78.6 %, 89.3 %
 82.1 %, 61.5 % and so on — computed by the canonical `csatTopBox` with the
 threshold the catalogue documents.
 
-> ⓘ **The client dashboard was deliberately not changed.**
-> `src/lib/dashboard/view.ts` calls `computeStudyMetrics` without a `csatMin`,
-> so the same 0–10 default is in that path. For the BNI study the client view
-> renders averages rather than CSAT tiles, so no wrong zero is visible there
-> today — but the code path is reachable for a study whose configuration
-> surfaces them. Changing it changes client-facing numbers, which is a
-> human-review zone and a separate, explicitly-approved decision.
+> ⓘ **The client dashboard carried the same defect, and §35 fixes it.**
+> `src/lib/dashboard/view.ts`, `src/lib/reporting/pdf.ts` and
+> `src/lib/dashboard/longitudinal.ts` all called `computeStudyMetrics` without
+> a `csatMin`, so the 0–10 default was in all three. The derivation now lives
+> in `src/lib/calc/scale.ts` and every one of them reads it. It is the only
+> client-facing change in this milestone, it is a calculation correction and
+> nothing else, and `scripts/calculation-parity-test.mjs` is the evidence.
 
 ### The warning, once
 
@@ -1344,3 +1352,312 @@ In order, and none of it is started:
 Until 1 and 2 exist, the builder is an internal tool that changes what the team
 can arrange and nothing about what a client receives. That is the honest
 description of this milestone, and the gates enforce it.
+
+---
+
+## 33. What a filter can do to a block, declared
+
+The selected-block card printed a heading — **Qué filtros lo mueven** —
+followed by every filterable characteristic the study had, as checkboxes, on
+almost every block. On a paragraph, on a heading, on the approved team reading,
+on the study's cover and on the download-report button, that was thirteen tick
+boxes that did nothing at all. Ticking one wrote a `filterConnection` naming a
+block with no number in it, which no surface ever honoured.
+
+The cause was one boolean answering two unrelated questions.
+
+`BlockSpec.allowsFilters` meant both *"may this block host a reader's
+controls?"* — which is `block.filterRefs`, the thing a page also does — and
+*"does a reader's choice change what this block says?"* — which is
+`filterConnections` and a panel's target. They have never been the same
+question in this model, and collapsing them had two visible consequences: the
+checklist above, and a hardcoded `block.type !== "filter_panel"` written into
+the resolver, which is an inference in code about a fact the catalogue was the
+right place to state.
+
+### The capabilities
+
+Each block type declares them, as data, in `src/lib/experience/blocks.ts`.
+
+| capability | what it asserts |
+| --- | --- |
+| `consumesStudyData` | it reads an aggregate and recomputes when the row set narrows |
+| `supportsViewerFilters` | a READER's filter changes what it shows |
+| `supportsFixedFilters` | the AUTHOR may narrow it permanently, through `query.fixedFilters` |
+| `supportsQualitativeFilters` | its evidence is the confirmed qualitative review |
+| `supportsJourneyFilters` | its shape is a journey: ordered moments, one number each |
+| `presentational` | words, rules, spacing, images, identity — it measures nothing |
+| `actionableNonData` | it does something when operated and shows no aggregate |
+| `hostsFilterControls` | it OFFERS a reader's controls, the way a page does |
+| `filterableDimensionKinds` | the characteristic kinds it can honestly recompute under, or `null` for all |
+
+**Nothing is inferred.** Not from a label, not from whether a block happens to
+carry a query-shaped property, not from a list kept somewhere else. A block
+type added later becomes a legal target by declaring itself.
+
+### Who is eligible, and who is not
+
+| eligible for a viewer filter | ineligible |
+| --- | --- |
+| `metric`, `chart`, `comparison`, `finding` | `rich_text`, `section`, `cover`, `image`, `divider`, `spacer` |
+| `retention`, `journey` | `interpretation` — the approved team reading |
+| `qualitative_themes`, `theme_cloud` | `report_download` — an action, not a result |
+| `pivot_explorer` | `all_results_disclosure` — an inventory, not an aggregate |
+| | `filter_panel` — it offers the controls; it is not moved by them |
+
+**Hosting is byte-identical to what `allowsFilters` permitted.** Hosting was
+not what was wrong; conflating it with responding was. Every type that could
+offer a control before can offer one still, so no stored document became
+invalid because the model learned to tell the two apart — and a gate asserts
+that equivalence type by type.
+
+**A dimension-kind restriction is declared only where one genuinely exists.**
+A permanencia series already has period on its own axis; a recorrido and the
+qualitative evidence are not one-answer-per-respondent-per-period shapes. A
+control over a `period` characteristic would move nothing while appearing to,
+so those four declare `segment` / `category` / `status` and the rest take
+every kind.
+
+### The declaration is true, not aspirational
+
+Two things were declared and are now the case.
+
+- **Connecting an ineligible block is refused, with a sentence** naming the
+  block and the reason — in the block's card, in the panel's target list and in
+  the operation itself, because a connection can arrive from any of the three.
+- **"Lo que dijeron" and the theme cloud actually recompute.** They were
+  declared filter targets and read a study-wide theme count that never moved.
+  `resolveThemeData` narrows the confirmed observations through the people who
+  said them and recomputes with `summarizeConfirmedQualitative` — the same
+  function the client dashboard uses, so a builder preview and a client's
+  screen cannot disagree about a theme's count. Only confirmed observations
+  cross; `quote` is not selected by any caller and is not read.
+
+### An older document is never stranded
+
+A definition written before this, or edited by a hand that knew the
+identifiers, can name a paragraph as a filter target.
+`effectiveFilterTargets` does not honour it, so nothing lies on screen; the
+validator reports it once as the soft warning `inert_connection`, naming the
+block and the reason; and the document still saves. Refusing to save a draft
+somebody already has would be worse than the inert reference.
+
+---
+
+## 34. The panel is the connection editor
+
+The interaction is reversed, and the reason is one sentence: **choosing which
+blocks a filter moves is one decision, and it was being asked once per block.**
+
+**The panel's card is where it is made.** Its visible title and explanation,
+which characteristics it offers and in what order, how the controls are laid
+out, what it changes, and — when the scope is "solo los bloques que elija" —
+exactly which ones. Compatible targets are the list; incompatible ones are
+folded away under a heading that says they are not offered, each with its own
+reason, so a person who wonders why they cannot tick the interpretation gets an
+answer without the answer being in their way.
+
+**A data-backed block's card carries a summary, not a registry.**
+
+> **Este bloque responde a**
+> "Explora los resultados": Antigüedad empresa, Generación
+> *Ir al panel* · *Desconectar*
+
+Two verbs, and the first one is one click from the place the decision actually
+lives. Disconnecting from a panel whose scope is "exactly these blocks" removes
+this one; disconnecting from a panel that governs the whole experience, the
+whole page or chosen sections is **refused with a sentence saying where the
+decision lives**, because those govern by position rather than by name, and
+inventing a per-block exception list would make "every compatible block" mean
+something different on every panel.
+
+**A static block's card has no filter section at all.** Not an empty one, not a
+disabled one, not an explanation of why: an absent control is the clearest
+statement that there is no decision to make here. If conditional visibility for
+static content is ever wanted, it is a separately named advanced feature and
+not this.
+
+### The four scopes, and what each resolves to
+
+| | |
+| --- | --- |
+| **Toda la experiencia** | every compatible block in the experience, resolved at render time |
+| **Página actual** | every compatible block on the panel's own page, resolved at render time |
+| **Secciones seleccionadas** | the blocks under each chosen heading, by id |
+| **Bloques seleccionados** | exactly the blocks named, by id |
+
+The first two resolve dynamically, so a block added afterwards joins what the
+panel already governs — which is what "every compatible block" has to mean if
+the phrase is not to go quietly stale. The last two are by identifier and stay
+by identifier, so renaming a section or a block never changes what a panel
+moves. **Static blocks are excluded from all four automatically**, and the
+panel says so under its own count.
+
+Connections survive renaming a target and renaming the panel; removing a target
+drops it from the panel and leaves no invalid identifier; removing the panel
+takes its connections with it and the draft still saves. All three are driven
+in a real browser by `npm run test:filter-ux-live`.
+
+---
+
+## 35. Collapsible panels, focus mode, and a canvas that reflows
+
+### Hiding a panel gives the canvas the room
+
+A hidden `aside` inside an `[auto_…]` grid track left a zero-width column and
+its gap behind, so hiding a panel gained the canvas a little space rather than
+all of it. The template is now written from what is actually on screen, as four
+complete literal class strings — assembling one at run time produces a class
+the stylesheet does not contain, and the canvas would silently fail to reflow
+with every gate still green.
+
+Measured at 1 280 px on the gate's own fixture:
+
+| | canvas width |
+| --- | --- |
+| both panels | 464 px |
+| pages hidden | 768 px |
+| inspector hidden | 800 px |
+| **modo enfoque** | **1 104 px** |
+
+### Modo enfoque
+
+One act for one intention: hiding two panels one at a time and putting them
+both back is four decisions. It keeps the editing toolbar on screen, offers
+**Salir de modo enfoque** in words, and answers `Escape` — but only when there
+is nothing nearer to leave, so an open drawer, an open dialog and a text field
+all keep `Escape` first. A mode you can only leave by guessing a key is a trap.
+
+**It hides; it does not forget.** Leaving restores exactly the panels that were
+open before, because it never wrote to them. The selected page, the selected
+block, the scale, the scroll position and anything half-typed are all in state
+it does not touch.
+
+### The chrome is not the document
+
+Which panels are open, whether focus mode is on and how far the canvas is
+scaled are preferences of a person at a screen. They live in `sessionStorage`
+under one key, carry four fields, and carry nothing about what is being
+composed. Toggling a panel cannot mint a revision, cannot mark the draft dirty
+and cannot wake the autosave: `dirty` is derived from the document's signature
+alone, and the live gate reads the save chip after a focus-mode round trip and
+finds it unchanged.
+
+It is read through `useSyncExternalStore`. Reading storage while rendering
+breaks hydration; restoring it afterwards with `setState` in an effect is a
+cascading render the project's own lint refuses. The server and the hydration
+pass see the defaults — which is what the HTML was rendered with, so there is
+nothing to mismatch — and the stored preference arrives in the same commit.
+
+### The canvas measures the room it has
+
+A `ResizeObserver` on the canvas frame feeds an **Ajustar al espacio** scale,
+because the room is a function of which panels are open rather than of the
+viewport, and only measuring answers that. The scaled drawing now occupies the
+size it actually takes: `transform` does not change layout, so the previous
+single box left the scroll container claiming the unscaled width and a stripe
+of empty space below it.
+
+**Scaling is a desktop affordance and is not the default.** At 40 % a 44 px
+drag handle measures 18 px, and an 18 px target is not a target — so the canvas
+opens at full size and pans inside its own box, the scale control is not
+offered below 1 024 px, and a remembered scale is ignored there. What hiding a
+panel buys is **less panning, not a smaller picture**. The page itself never
+scrolls sideways at any width.
+
+Drag and drop is unaffected by any scale: `getBoundingClientRect()` and a
+pointer's `clientY` are in the same transformed viewport space, so the
+comparison that decides a drop position never needs to know the scale. The gate
+reorders a block with the keyboard alone while the canvas is drawn at 75 %.
+
+### On a phone
+
+The panels are drawers over the canvas rather than columns beside it, one at a
+time, from ONE element with responsive classes — rendering the panel twice
+would give the same controls two sets of identifiers. The canvas stays the
+primary view, every control is at least 44 × 44, and nothing scrolls sideways
+at 320, 360, 390, 768, 1 024 or 1 280.
+
+---
+
+## 36. The client's own Top-2-Box
+
+`DEFAULT_CSAT_MIN` is 9 — the threshold for a **0–10** scale.
+`src/lib/dashboard/view.ts`, `src/lib/reporting/pdf.ts` and
+`src/lib/dashboard/longitudinal.ts` all called `computeStudyMetrics` with no
+`csatMin` at all. For a study answered **1–5** nothing ever clears 9, so every
+satisfaction result on the client's own screen, in the report they keep and in
+the longitudinal series was a confident, wrong **0 %**.
+
+§29 fixed this for the composer by deriving the scale in its own adapter, and
+recorded the client path as deliberately unchanged. That was the defect stated
+precisely: **one fact, derived twice, and only one of the two right.**
+
+`src/lib/calc/scale.ts` is the single derivation now, and all four read it —
+the composer's registry, the dashboard, the PDF and the series.
+`docs/CALCULATION_POLICY.md` §5.1 is the authority; the short version:
+
+- the scale is **read** from the study's own answers, never assumed;
+- the threshold is **documented** — 4 on 1–5, 9 on 0–10 — and `null` for
+  anything else;
+- `null` means **do not compute it**: the result keeps its average and its
+  Top-2-Box is omitted, because a missing Top-2-Box and a `0 %` are different
+  statements and only one of them is true;
+- the threshold comes from the **whole study** and the numbers from the
+  selection, so a filter can never change which documented rule a result is
+  measured against;
+- an explicit `csatMin` still wins, so every caller that stated one keeps
+  exactly the result it had.
+
+**What did not change.** No stored response, no import, no rounding, no
+average, and nothing about the client dashboard's layout, navigation or
+publication state. This is a calculation correction and nothing else.
+
+`npm run test:calc-parity` — 19 checks — builds a study with a 1–5 result, a
+0–10 result and one on a scale nobody documented, computes the expected
+Top-2-Box by hand, and asserts the engine, the dashboard, the PDF (read out of
+the produced bytes, not out of its layout) and the series all agree with it and
+with each other.
+
+---
+
+## 37. The gates this milestone adds
+
+**Offline, inside `npm test`:**
+
+```
+npm run test:calc-parity            # 19 checks — one study, four surfaces, one number
+npm run test:experience-composer    # 143 checks (was 140)
+```
+
+The composer gate gained: that every static and actionable block type is
+ineligible by declaration and can say why in words; that every data-backed one
+is eligible and declares that it reads study data; that connecting a filter to
+a paragraph, the team reading, the download action or a panel is refused and
+leaves the document untouched; that hiding a panel removes its grid track; that
+focus mode hides both without forgetting either; that `Escape` belongs to an
+open drawer and an open dialog before it belongs to focus mode; and that the
+editor's chrome is read through `useSyncExternalStore` and can never reach the
+reducer that owns the document.
+
+**Live, inside `npm run gates:live`:**
+
+```
+npm run test:filter-ux-live         # 51 checks in a real browser
+```
+
+It composes a **disposable** study and drives all eighteen filter-panel
+acceptance items on it — add a panel from the catalogue, retitle it, add,
+remove and reorder its characteristics, set its scope, confirm the static
+blocks show no filter section, apply a filter and watch a metric, a chart and a
+comparison move while an unconnected block does not, combine two, clear them,
+rename both ends, remove a target, remove the panel. Then it reads the **real**
+study **without writing to it**: the recommendation result reads 30.8, "Más de
+5 años" moves it to 41.4, "Generación X" to 33.3, clearing returns it to 30.8,
+and the satisfaction percentages are not zero. Finally it asserts that the real
+study's stored draft is at the same revision with the same `sha256` as before
+the run, because a gate that demonstrates a filter by editing somebody's work
+is not a gate.
+
+It writes fifteen screenshots to `artifacts/filter-ux/`, with captions in
+`captions.json`.
