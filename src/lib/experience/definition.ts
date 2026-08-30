@@ -30,7 +30,8 @@
 import { z } from "zod";
 
 import { BLOCK_SPECS, BLOCK_TYPES, type BlockType } from "./blocks";
-import { CHART_VARIANTS, type ChartVariant } from "./charts";
+import { CHART_PALETTES, CHART_VARIANTS, type ChartVariant } from "./charts";
+import { BAND_COLOR_ROLES, BAND_SHAPES, BAND_SOURCES } from "./bands";
 import { isExperienceId, type IdKind } from "./ids";
 import { BREAKPOINTS, type ResponsiveLayout } from "./layout";
 import { EXPERIENCE_LIMITS } from "./limits";
@@ -50,7 +51,7 @@ import {
 import { isSafeAuthoredText, isSafeStoredValue } from "./text";
 
 /** The only schema version this build writes. See `migrate.ts` for the rest. */
-export const EXPERIENCE_SCHEMA_VERSION = 2;
+export const EXPERIENCE_SCHEMA_VERSION = 3;
 
 const L = EXPERIENCE_LIMITS;
 
@@ -144,8 +145,145 @@ export const visualizationSchema = z.strictObject({
   legend: z.enum(["auto", "hidden", "below", "right"]),
   showValueLabels: z.boolean(),
   axisLabel: authored(L.titleLength).nullable(),
+  /**
+   * The palette a scaled drawing reads its colours from — a heat map's ramp, a
+   * treemap's fill, a bubble's series. A ROLE from a closed set, never a hex an
+   * operator typed: the brand resolves it, and a palette nobody can author
+   * cannot become a contrast failure somebody has to discover on a client's
+   * screen. `auto` lets the block type choose the one that suits it.
+   */
+  palette: z.enum(CHART_PALETTES),
 });
 export type BlockVisualization = z.infer<typeof visualizationSchema>;
+
+// ---------------------------------------------------------------------------
+// Semáforo — reusable band schemes, declared once and referenced by id
+// ---------------------------------------------------------------------------
+
+const bandBoundSchema = z.strictObject({
+  value: z.number().finite().min(-1_000_000).max(1_000_000).nullable(),
+  inclusive: z.boolean(),
+});
+
+export const bandSchema = z.strictObject({
+  id: identifier("bandpart"),
+  label: authored(L.titleLength),
+  colorRole: z.enum(BAND_COLOR_ROLES),
+  shape: z.enum(BAND_SHAPES),
+  /** What being in this band MEANS. Required: a colour with no sentence is a mood. */
+  meaning: authored(L.titleLength),
+  lower: bandBoundSchema,
+  upper: bandBoundSchema,
+  values: z.array(storedValue).max(L.defaultValuesPerFilter),
+});
+
+export const bandSchemeSchema = z
+  .strictObject({
+    id: identifier("band"),
+    title: authored(L.titleLength),
+    description: authored(L.bodyLength).nullable(),
+    source: z.enum(BAND_SOURCES),
+    scale: z
+      .strictObject({
+        minimum: z.number().finite().min(-1_000_000).max(1_000_000),
+        maximum: z.number().finite().min(-1_000_000).max(1_000_000),
+      })
+      .nullable(),
+    bands: z.array(bandSchema).max(L.bandsPerScheme),
+    noDataLabel: authored(L.titleLength),
+  })
+  .superRefine((scheme, context) => {
+    const ids = scheme.bands.map((band) => band.id);
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({ code: "custom", path: ["bands"], message: "repeated band" });
+    }
+    if (scheme.scale && scheme.scale.minimum >= scheme.scale.maximum) {
+      context.addIssue({ code: "custom", path: ["scale"], message: "empty scale" });
+    }
+    /*
+     * A HALF-BUILT SCHEME IS SAVEABLE; A DISHONEST ONE IS NOT.
+     *
+     * Overlaps, gaps and missing meanings are SOFT — a person passes through
+     * every one of them while building a scheme, and refusing the save in
+     * between is how a tool stops being usable (`validate.ts` says them next to
+     * the controls). What the boundary refuses is a document that could not be
+     * read at all: a categorical band carrying numeric bounds, or a numeric one
+     * carrying category values. Those are not states somebody is passing
+     * through; they are two schemes in one object.
+     */
+    for (const band of scheme.bands) {
+      if (scheme.source === "category" && (band.lower.value !== null || band.upper.value !== null)) {
+        context.addIssue({
+          code: "custom",
+          path: ["bands"],
+          message: "a categorical band carries values, not bounds",
+        });
+        break;
+      }
+      if (scheme.source === "numeric" && band.values.length > 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["bands"],
+          message: "a numeric band carries bounds, not values",
+        });
+        break;
+      }
+    }
+  });
+
+export type BandSchemeDocument = z.infer<typeof bandSchemeSchema>;
+
+// ---------------------------------------------------------------------------
+// The thematic cloud — what it counts, and how it is drawn
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH NUMBER THE WORDS ARE SIZED BY, said out loud on the drawing.
+ *
+ * `mentions` is how many confirmed observations carry the theme. `people` is
+ * how many distinct voices are behind it. They are different numbers — one
+ * person saying the same thing three times is 3 and 1 — and a cloud that
+ * silently used one while its caption implied the other would be a wrong
+ * number with a font size. So the basis is a choice, it is stored, and the
+ * renderer prints which one it used.
+ */
+export const THEME_COUNT_BASIS = ["mentions", "people"] as const;
+export type ThemeCountBasis = (typeof THEME_COUNT_BASIS)[number];
+
+/** How words are turned to fill a box. Deterministic in every case. */
+export const THEME_ORIENTATIONS = ["horizontal", "mostly_horizontal", "mixed"] as const;
+export type ThemeOrientation = (typeof THEME_ORIENTATIONS)[number];
+
+export const themeCloudConfigSchema = z
+  .strictObject({
+    basis: z.enum(THEME_COUNT_BASIS),
+    /** Words beyond this are summarized rather than dropped in silence. */
+    maximumThemes: z.number().int().min(3).max(L.themesPerCloud),
+    minimumFontSize: z.number().int().min(8).max(48),
+    maximumFontSize: z.number().int().min(12).max(96),
+    orientation: z.enum(THEME_ORIENTATIONS),
+    palette: z.enum(CHART_PALETTES),
+    /** Whether the count is written beside the word as well as encoded in its size. */
+    showCounts: z.boolean(),
+    /**
+     * Which qualitative source this cloud reads, or null for all of them. It is
+     * how two clouds on one page can say different things — "lo que dijeron en
+     * la encuesta" beside "lo que dijeron en el focus group" — without either
+     * of them being a filter of the other.
+     */
+    source: storedValue.nullable(),
+  })
+  .superRefine((config, context) => {
+    if (config.minimumFontSize >= config.maximumFontSize) {
+      context.addIssue({
+        code: "custom",
+        path: ["maximumFontSize"],
+        message: "the largest word must be larger than the smallest",
+      });
+    }
+  });
+
+export type ThemeCloudConfig = z.infer<typeof themeCloudConfigSchema>;
 
 // ---------------------------------------------------------------------------
 // The two kinds of filter, kept apart on purpose
@@ -400,6 +538,14 @@ export const experienceBlockSchema = z
     /** Present exactly on a `filter_panel`, absent everywhere else. */
     filterPanel: filterPanelSchema.nullable(),
     /**
+     * The semáforo this block reads its colours from, when it is drawn as one.
+     * Null means "not configured", which the renderer says out loud rather than
+     * colouring the number anyway.
+     */
+    bandSchemeId: identifier("band").nullable(),
+    /** Present exactly on a `theme_cloud`, absent everywhere else. */
+    themeCloud: themeCloudConfigSchema.nullable(),
+    /**
      * Filters whose CONTROL this block hosts — the "block filters" of the
      * design. Which blocks a filter DRIVES is a separate, explicit statement in
      * `filterConnections`; hosting a control and answering to it are two
@@ -486,6 +632,20 @@ export const experienceBlockSchema = z
     }
     if (new Set(block.filterRefs).size !== block.filterRefs.length) {
       context.addIssue({ code: "custom", path: ["filterRefs"], message: "repeated filter" });
+    }
+    // A cloud's configuration belongs to a cloud. The same rule `filterPanel`
+    // and `image` already live under: the field is present on exactly the type
+    // it means something for, so a document can never carry two answers to
+    // "how is this drawn".
+    if (block.type === "theme_cloud" && !block.themeCloud) {
+      context.addIssue({ code: "custom", path: ["themeCloud"], message: "a cloud needs its settings" });
+    }
+    if (block.type !== "theme_cloud" && block.themeCloud) {
+      context.addIssue({
+        code: "custom",
+        path: ["themeCloud"],
+        message: "only a theme cloud carries cloud settings",
+      });
     }
     if (!spec.allowsSamplePolicyOverride && block.samplePolicy.kind === "override") {
       context.addIssue({
@@ -599,19 +759,52 @@ export type FilterConnection = z.infer<typeof filterConnectionSchema>;
 
 export const JOURNEY_VARIANTS = ["stepped", "linear", "grid"] as const;
 
+/**
+ * "NO SABÍA QUE EXISTÍA ESTE MOMENTO", CONFIGURED RATHER THAN INFERRED.
+ *
+ * A separate result, because it is a separate question: how many people did
+ * not know the touchpoint was there. Modelled explicitly so it can never be
+ * confused with a low score — a moment nobody knew about and a moment everybody
+ * disliked are opposite findings.
+ *
+ * `values` is the part that matters and the part that used to be missing. A
+ * blank answer, a skipped question and an invalid entry are NOT "did not know
+ * it": they are an absence, and counting an absence as an answer is how a
+ * percentage gets a numerator nobody supplied. So the exact recorded values
+ * that mean "did not know" are named here, by a person, and nothing else counts.
+ *
+ * `base` says which people are the denominator: everyone who answered the
+ * awareness question at all. Somebody who skipped it is in neither half.
+ */
+export const journeyAwarenessSchema = z
+  .strictObject({
+    metricId: semanticId,
+    label: authored(L.titleLength).nullable(),
+    /** The exact recorded values that mean "no lo conocía". Never inferred. */
+    values: z.array(storedValue).min(1).max(L.defaultValuesPerFilter),
+  })
+  .superRefine((awareness, context) => {
+    if (new Set(awareness.values).size !== awareness.values.length) {
+      context.addIssue({ code: "custom", path: ["values"], message: "repeated value" });
+    }
+  });
+
+export type JourneyAwareness = z.infer<typeof journeyAwarenessSchema>;
+
 export const journeyMomentSchema = z.strictObject({
   id: identifier("moment"),
   title: authored(L.titleLength),
   description: authored(L.bodyLength).nullable(),
   /** The result this moment shows. Null while it is still being built. */
   metricId: semanticId.nullable(),
-  /**
-   * "No sabía que existía este momento." A separate result, because it is a
-   * separate question: how many people did not know the touchpoint was there.
-   * Modelled explicitly so it is never confused with a low score.
-   */
-  unawareMetricId: semanticId.nullable(),
-  unawareLabel: authored(L.titleLength).nullable(),
+  /** How many people did not know this moment existed. Null when not asked. */
+  awareness: journeyAwarenessSchema.nullable(),
+  /** Prose for this moment alone, beside the number. */
+  body: authored(L.bodyLength).nullable(),
+  /** A drawing for this moment alone, or null to follow the journey's own. */
+  variant: z.enum(CHART_VARIANTS).nullable(),
+  /** A semáforo for this moment alone, or null to inherit the journey's. */
+  bandSchemeId: identifier("band").nullable(),
   visible: z.boolean(),
 });
 
@@ -636,6 +829,8 @@ export const journeyReferenceSchema = z
     moments: z.array(journeyMomentSchema).max(L.momentsPerJourney),
     filterRefs: z.array(identifier("filter")).max(L.filterRefsPerBlock),
     variant: z.enum(JOURNEY_VARIANTS),
+    /** The semáforo every moment inherits unless it states its own. */
+    bandSchemeId: identifier("band").nullable(),
     visible: z.boolean(),
     /**
      * Where the journey came from. `legacy_journey_definition` marks one
@@ -807,6 +1002,14 @@ export const experienceDefinitionSchema = z
     pages: z.array(experiencePageSchema).max(L.pages),
     filterDefinitions: z.array(filterDefinitionSchema).max(L.filterDefinitions),
     filterConnections: z.array(filterConnectionSchema).max(L.filterConnections),
+    /**
+     * Reusable semáforo schemes, declared once and referenced by id from a
+     * block, a journey or a single moment. Top-level rather than per-block for
+     * the same reason a filter definition is: "the standard we hold a chapter
+     * to" is one decision, and copying it onto every card is how two cards
+     * start disagreeing about what amarillo means.
+     */
+    bandSchemes: z.array(bandSchemeSchema).max(L.bandSchemes),
     journeyReferences: z.array(journeyReferenceSchema).max(L.journeys),
     review: reviewSchema,
     publication: publicationSchema,
@@ -834,6 +1037,45 @@ export const experienceDefinitionSchema = z
     const journeyIds = definition.journeyReferences.map((journey) => journey.id);
     if (new Set(journeyIds).size !== journeyIds.length) {
       context.addIssue({ code: "custom", path: ["journeyReferences"], message: "repeated journey" });
+    }
+
+    /*
+     * A SEMÁFORO REFERENCE NAMES A SCHEME THAT IS THERE.
+     *
+     * The same rule every other reference in this document lives under. A
+     * block, a journey or a single moment may point at a scheme; a pointer to
+     * a scheme somebody deleted would leave a card asking to be coloured by
+     * nothing, and "not configured" and "configured, pointing at a hole" are
+     * different states that would look identical on screen.
+     */
+    const schemeIds = definition.bandSchemes.map((scheme) => scheme.id);
+    if (new Set(schemeIds).size !== schemeIds.length) {
+      context.addIssue({ code: "custom", path: ["bandSchemes"], message: "repeated band scheme" });
+    }
+    const knownSchemes = new Set(schemeIds);
+    const schemeReferences: { id: string | null; path: (string | number)[] }[] = [
+      ...definition.pages.flatMap((page, pageIndex) =>
+        page.blocks.map((block, blockIndex) => ({
+          id: block.bandSchemeId,
+          path: ["pages", pageIndex, "blocks", blockIndex, "bandSchemeId"],
+        })),
+      ),
+      ...definition.journeyReferences.flatMap((journey, journeyIndex) => [
+        { id: journey.bandSchemeId, path: ["journeyReferences", journeyIndex, "bandSchemeId"] },
+        ...journey.moments.map((moment, momentIndex) => ({
+          id: moment.bandSchemeId,
+          path: ["journeyReferences", journeyIndex, "moments", momentIndex, "bandSchemeId"],
+        })),
+      ]),
+    ];
+    for (const reference of schemeReferences) {
+      if (reference.id && !knownSchemes.has(reference.id)) {
+        context.addIssue({
+          code: "custom",
+          path: reference.path,
+          message: "names a semáforo scheme that does not exist",
+        });
+      }
     }
 
     /*
@@ -901,6 +1143,7 @@ export type ExperienceDefinitionV1 = {
   pages: ExperiencePage[];
   filterDefinitions: FilterDefinition[];
   filterConnections: FilterConnection[];
+  bandSchemes: BandSchemeDocument[];
   journeyReferences: JourneyReference[];
   review: ExperienceReview;
   publication: ExperiencePublication;

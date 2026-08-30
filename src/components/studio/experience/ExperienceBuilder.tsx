@@ -27,21 +27,29 @@ import {
 import type { BlockDataSet } from "@/lib/experience/data";
 import {
   addBlock,
+  addJourney,
+  addMoment,
   addPage,
   adoptDefinition,
   canRedo,
   canUndo,
   detachBlockFromPanel,
   duplicateBlock,
+  duplicateJourney,
+  duplicateMoment,
   duplicatePage,
   initialState,
   moveBlock,
   moveBlockToIndex,
+  moveMoment,
   movePage,
   openPage,
   redo,
   removeBlock,
+  removeJourney,
+  removeMoment,
   removePage,
+  renameJourney,
   renamePage,
   resetToAdapted,
   selectBlock,
@@ -53,8 +61,19 @@ import {
   setBlockSpan,
   setBlockTitle,
   setBlockVisibility,
+  setBlockJourney,
   setChartVariant,
   setFilterConnection,
+  setJourneyBandScheme,
+  setJourneyDescription,
+  setJourneyVariant,
+  setMomentAwareness,
+  setMomentBandScheme,
+  setMomentBody,
+  setMomentMetric,
+  setMomentTitle,
+  setMomentVariant,
+  setMomentVisible,
   setPageVisibility,
   setStudySamplePolicy,
   undo,
@@ -73,6 +92,7 @@ import {
 } from "@/lib/experience/editor";
 
 import { FilterPanelCard, IdentityPanel } from "./AuthoringPanels";
+import { JourneyManager } from "./JourneyManager";
 import {
   BREAKPOINTS,
   BREAKPOINT_WIDTHS,
@@ -433,6 +453,8 @@ export function ExperienceBuilder({
   const showLeft = leftOpen && !focusMode;
   const showRight = rightOpen && !focusMode;
   const [pendingType, setPendingType] = useState<BlockType>("rich_text");
+  /** Which recorrido the manager has open. Editor chrome; never the document. */
+  const [openJourney, setOpenJourney] = useState<string | null>(null);
   const [newPageTitle, setNewPageTitle] = useState("");
 
   const [saving, setSaving] = useState(false);
@@ -920,6 +942,96 @@ export function ExperienceBuilder({
             }
           />
 
+          {/*
+            RECORRIDOS ARE DEFINED HERE, NOT ON THE CANVAS.
+
+            Beside the pages and the identity, because a recorrido is a thing
+            the STUDY has rather than a thing a page has: several blocks on
+            several pages can be windows onto one of them, and editing it in
+            one of those windows is what made the second one a fork.
+          */}
+          <JourneyManager
+            idPrefix={ids}
+            definition={definition}
+            registry={registry}
+            openJourneyId={openJourney}
+            onOpenJourney={setOpenJourney}
+            onAddJourney={(title) => {
+              act(
+                (current) => addJourney(current, title, registry),
+                `Se añadió el recorrido “${title.trim()}”.`,
+              );
+            }}
+            onDuplicateJourney={(journeyId) =>
+              act(
+                (current) => duplicateJourney(current, journeyId),
+                "Se duplicó el recorrido. Es uno nuevo: editarlo no cambia el original.",
+              )
+            }
+            onRenameJourney={(journeyId, title) =>
+              act((current) => renameJourney(current, journeyId, title), "")
+            }
+            onJourneyDescription={(journeyId, description) =>
+              act((current) => setJourneyDescription(current, journeyId, description), "")
+            }
+            onJourneyVariant={(journeyId, variant) =>
+              act((current) => setJourneyVariant(current, journeyId, variant), "Cambió cómo se dibuja el recorrido.")
+            }
+            onJourneyBandScheme={(journeyId, bandSchemeId) =>
+              act(
+                (current) => setJourneyBandScheme(current, journeyId, bandSchemeId),
+                "Cambió el semáforo del recorrido.",
+              )
+            }
+            onRemoveJourney={(journeyId) =>
+              act((current) => removeJourney(current, journeyId), "Se quitó el recorrido.")
+            }
+            onAddMoment={(journeyId, title) =>
+              act((current) => addMoment(current, journeyId, title), `Se añadió el momento “${title.trim()}”.`)
+            }
+            onDuplicateMoment={(journeyId, momentId) =>
+              act((current) => duplicateMoment(current, journeyId, momentId), "Se duplicó el momento.")
+            }
+            onMoveMoment={(journeyId, momentId, direction) =>
+              act((current) => moveMoment(current, journeyId, momentId, direction), "Se movió el momento.")
+            }
+            onRemoveMoment={(journeyId, momentId) =>
+              act((current) => removeMoment(current, journeyId, momentId), "Se quitó el momento.")
+            }
+            onMomentTitle={(journeyId, momentId, title) =>
+              act((current) => setMomentTitle(current, journeyId, momentId, title), "")
+            }
+            onMomentBody={(journeyId, momentId, body) =>
+              act((current) => setMomentBody(current, journeyId, momentId, body), "")
+            }
+            onMomentMetric={(journeyId, momentId, metricId) =>
+              act(
+                (current) => setMomentMetric(current, journeyId, momentId, metricId, registry),
+                "Se cambió el resultado del momento.",
+              )
+            }
+            onMomentVariant={(journeyId, momentId, variant) =>
+              act((current) => setMomentVariant(current, journeyId, momentId, variant), "")
+            }
+            onMomentBandScheme={(journeyId, momentId, bandSchemeId) =>
+              act((current) => setMomentBandScheme(current, journeyId, momentId, bandSchemeId), "")
+            }
+            onMomentAwareness={(journeyId, momentId, awareness) =>
+              act(
+                (current) => setMomentAwareness(current, journeyId, momentId, awareness, registry),
+                awareness
+                  ? "Se configuró quién no conocía este momento."
+                  : "Este momento ya no mide el desconocimiento.",
+              )
+            }
+            onMomentVisible={(journeyId, momentId, visible) =>
+              act(
+                (current) => setMomentVisible(current, journeyId, momentId, visible),
+                visible ? "El momento vuelve a mostrarse." : "El momento queda oculto.",
+              )
+            }
+          />
+
           <SamplePolicyPanel
             idPrefix={ids}
             mode={policy.mode}
@@ -1096,6 +1208,12 @@ export function ExperienceBuilder({
                 act(
                   (current) => setBlockSamplePolicy(current, selected.block.id, override),
                   "Se cambió la regla de este bloque.",
+                )
+              }
+              onJourney={(journeyId) =>
+                act(
+                  (current) => setBlockJourney(current, selected.block.id, journeyId),
+                  "Este bloque ahora muestra otro recorrido.",
                 )
               }
               onOpenPanel={(pageId, panelId) => {
@@ -2375,6 +2493,7 @@ function Inspector({
   onDimension,
   onSpan,
   onSamplePolicy,
+  onJourney,
   onOpenPanel,
   onDisconnectSource,
   panelCard,
@@ -2395,6 +2514,8 @@ function Inspector({
   onDimension: (slot: "primary" | "secondary", dimensionId: string | null) => void;
   onSpan: (breakpoint: Breakpoint, span: number) => void;
   onSamplePolicy: (override: { kind: "inherit" } | { kind: "override"; policy: { policyVersion: 1; mode: SamplePolicyMode; threshold: number } }) => void;
+  /** Which recorrido a journey block is a window onto. */
+  onJourney: (journeyId: string) => void;
   /** Select the panel that governs this block, so it can be edited there. */
   onOpenPanel: (pageId: string, panelId: string) => void;
   /** Stop one source moving this block: a panel target, or a direct connection. */
@@ -2456,6 +2577,34 @@ function Inspector({
         </section>
 
         {panelCard}
+
+        {/* --- Which recorrido this block is a window onto ------------------
+            A `journey` block does not CONTAIN a recorrido; it points at one.
+            Changing the choice here moves the window, and the definition it
+            was showing is untouched — which is the difference the two
+            "Duplicar" verbs exist to keep visible. ----------------------- */}
+        {spec.requiresJourney ? (
+          <section>
+            <h3 className="text-sm font-semibold text-strong">Qué recorrido muestra</h3>
+            <select
+              id={`${idPrefix}-journeyref`}
+              className={`${field} mt-2`}
+              value={block.journeyRef ?? ""}
+              onChange={(event) => onJourney(event.target.value)}
+            >
+              {definition.journeyReferences.map((journey) => (
+                <option key={journey.id} value={journey.id}>
+                  {journey.title}
+                  {journey.moments.length === 0 ? " (sin momentos)" : ""}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted">
+              Se define en “Recorridos”, en el panel izquierdo. Duplicar este bloque abre otra
+              ventana al mismo recorrido; para tener uno distinto, duplica el recorrido allí.
+            </p>
+          </section>
+        ) : null}
 
         {/* --- Where its number comes from -------------------------------- */}
         {block.query ? (

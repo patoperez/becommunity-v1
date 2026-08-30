@@ -43,6 +43,9 @@ export const ID_KINDS = {
   connection: "cn",
   journey: "jr",
   moment: "jm",
+  /** A reusable semáforo scheme, and one band inside one. */
+  band: "bs",
+  bandpart: "bp",
 } as const;
 
 export type IdKind = keyof typeof ID_KINDS;

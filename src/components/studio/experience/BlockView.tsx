@@ -6,6 +6,7 @@ import type { BlockType } from "@/lib/experience/blocks";
 import { CHART_SPECS, isRendererImplemented, alternativeVariant, type ChartVariant } from "@/lib/experience/charts";
 import {
   dataKeyForBlock,
+  dataKeyForAwareness,
   dataKeyForMoment,
   dataKeyForPivot,
   dataKeyForThemes,
@@ -17,6 +18,7 @@ import type {
   ExperienceDefinitionV1,
 } from "@/lib/experience/definition";
 import { findMetric, type SemanticRegistry } from "@/lib/experience/registry";
+import type { BandScheme } from "@/lib/experience/bands";
 import {
   resolveSamplePolicy,
   type SampleVisibilityPolicy,
@@ -38,6 +40,9 @@ import {
   StackedBars,
   ThemeCloud,
   TrafficLightChart,
+  HeatMap,
+  BubbleChart,
+  TreemapChart,
   UnavailableRenderer,
   VerticalBars,
   type JourneyMomentView,
@@ -281,11 +286,35 @@ function JourneyBlock({ block, definition, registry, data, policy }: BlockViewPr
   const moments: JourneyMomentView[] = journey.moments
     .filter((moment) => moment.visible)
     .map((moment) => {
+      // A MOMENT'S SEMÁFORO IS ITS OWN, OR THE RECORRIDO'S, OR NONE. Resolved
+      // here so a scheme somebody deleted leaves the moment uncoloured rather
+      // than pointing at a hole.
+      const schemeId = moment.bandSchemeId ?? journey.bandSchemeId;
+      const scheme =
+        definition.bandSchemes.find((candidate) => candidate.id === schemeId) ?? null;
+
+      // The awareness share, when a mapping is configured. Absent is absent:
+      // a moment where the question was never asked shows nothing here.
+      const awarenessEntry = moment.awareness
+        ? data[dataKeyForAwareness(journey.id, moment.id)]
+        : undefined;
+      const awareness = awarenessEntry?.ok ? awarenessEntry.data : null;
+      const awarenessMissing =
+        awarenessEntry && !awarenessEntry.ok ? awarenessEntry.reason : null;
+
+      const shared = {
+        id: moment.id,
+        title: moment.title,
+        description: moment.description,
+        body: moment.body,
+        awareness,
+        awarenessMissing,
+        scheme,
+      };
+
       if (!moment.metricId) {
         return {
-          id: moment.id,
-          title: moment.title,
-          description: moment.description,
+          ...shared,
           data: null,
           missing: "Este momento todavía no tiene un resultado asignado.",
         };
@@ -293,31 +322,15 @@ function JourneyBlock({ block, definition, registry, data, policy }: BlockViewPr
       const entry = data[dataKeyForMoment(journey.id, moment.id)];
       if (!entry) {
         return {
-          id: moment.id,
-          title: moment.title,
-          description: moment.description,
+          ...shared,
           data: null,
           missing: findMetric(registry, moment.metricId)
             ? "Todavía sin respuestas."
             : "El resultado de este momento ya no existe en el estudio.",
         };
       }
-      if (!entry.ok) {
-        return {
-          id: moment.id,
-          title: moment.title,
-          description: moment.description,
-          data: null,
-          missing: entry.reason,
-        };
-      }
-      return {
-        id: moment.id,
-        title: moment.title,
-        description: moment.description,
-        data: entry.data,
-        missing: null,
-      };
+      if (!entry.ok) return { ...shared, data: null, missing: entry.reason };
+      return { ...shared, data: entry.data, missing: null };
     });
   return <JourneyChart moments={moments} policy={policy} />;
 }
@@ -443,7 +456,7 @@ function QualitativeBlock({ block, data, evidence, policy }: BlockViewProps & { 
 }
 
 function EvidenceBlock(props: BlockViewProps & { policy: SampleVisibilityPolicy }) {
-  const { block, data, policy } = props;
+  const { block, data, definition, policy } = props;
   const entry = blockData(block, data);
   if (!block.query) {
     return <EmptyChart title="Este bloque todavía no apunta a un resultado" />;
@@ -463,15 +476,21 @@ function EvidenceBlock(props: BlockViewProps & { policy: SampleVisibilityPolicy 
         }
       : null;
 
+  // The semáforo this block is read against, when a person configured one.
+  // Resolved HERE rather than inside the renderer so the reference is checked
+  // against the document that is actually on screen.
+  const scheme =
+    definition.bandSchemes.find((candidate) => candidate.id === block.bandSchemeId) ?? null;
+
   if (!isRendererImplemented(variant)) {
     const alternative = alternativeVariant(variant) ?? "table";
     return (
       <UnavailableRenderer variant={variant}>
-        {drawVariant(alternative, entry.data, policy, target, block)}
+        {drawVariant(alternative, entry.data, policy, target, block, scheme)}
       </UnavailableRenderer>
     );
   }
-  return drawVariant(variant, entry.data, policy, target, block);
+  return drawVariant(variant, entry.data, policy, target, block, scheme);
 }
 
 function drawVariant(
@@ -480,13 +499,23 @@ function drawVariant(
   policy: SampleVisibilityPolicy,
   target: TargetRange | null,
   block: ExperienceBlock,
+  scheme: BandScheme | null = null,
 ) {
   const showValueLabels = block.visualization?.showValueLabels ?? true;
+  const palette = block.visualization?.palette ?? "auto";
   switch (variant) {
     case "kpi":
       return <KpiChart data={data} policy={policy} />;
     case "traffic_light":
-      return <TrafficLightChart data={data} policy={policy} target={target} />;
+      return <TrafficLightChart data={data} policy={policy} target={target} scheme={scheme} />;
+    case "heatmap":
+      return (
+        <HeatMap data={data} policy={policy} palette={palette} showValueLabels={showValueLabels} />
+      );
+    case "bubble":
+      return <BubbleChart data={data} policy={policy} palette={palette} />;
+    case "treemap":
+      return <TreemapChart data={data} policy={policy} palette={palette} />;
     case "bar_horizontal":
     case "bar_grouped":
       return <HorizontalBars data={data} policy={policy} showValueLabels={showValueLabels} />;

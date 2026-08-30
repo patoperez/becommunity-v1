@@ -568,10 +568,21 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
         title: stage.label,
         description: stage.description ?? null,
         metricId: known ? metricId : null,
-        // Legacy studies do not record this measure separately. The contract
-        // exists; the value is null until somebody configures one.
-        unawareMetricId: null,
-        unawareLabel: null,
+        /*
+         * ADAPTING NEVER INVENTS AN AWARENESS MAPPING.
+         *
+         * A study may well record "no sabía que existía este momento"
+         * somewhere — the real one has a whole family of results that look
+         * like it. But WHICH result carries it, and WHICH of its recorded
+         * values mean "did not know", are two decisions, and guessing either
+         * puts a percentage on a client's screen that nobody configured. The
+         * contract exists; the value stays null until a person fills it in,
+         * and the builder shows them where.
+         */
+        awareness: null,
+        body: null,
+        variant: null,
+        bandSchemeId: null,
         visible: true,
       };
     });
@@ -593,6 +604,7 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
       moments,
       filterRefs: [],
       variant: "stepped",
+      bandSchemeId: null,
       visible: true,
       origin: "legacy_journey_definition",
       revision: 1,
@@ -927,6 +939,9 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
     pages: thresholdPages.pages,
     filterDefinitions,
     filterConnections,
+    // ADAPTING DECLARES NO SEMÁFORO. A study's existing configuration says
+    // nothing about what verde means, and the composer does not decide it.
+    bandSchemes: [],
     journeyReferences,
     review: { ...NEW_REVIEW },
     publication: { ...UNPUBLISHED },

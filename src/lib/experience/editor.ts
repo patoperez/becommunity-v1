@@ -60,11 +60,13 @@ import {
   type FilterPanel,
   type FilterPanelLayout,
   type FilterTarget,
+  type JourneyMoment,
+  type JourneyReference,
 } from "./definition";
 import { filterTargetRefusal } from "./filters";
 import { mintFreeId, mintId, type IdKind } from "./ids";
 import { BREAKPOINTS, GRID_COLUMNS, type Breakpoint } from "./layout";
-import type { Aggregation, SemanticRegistry } from "./registry";
+import type { Aggregation, MetricFamily, SemanticRegistry } from "./registry";
 import { findDimension, findMetric } from "./registry";
 import {
   SAMPLE_POLICY_VERSION,
@@ -1545,5 +1547,532 @@ export function togglePanelTargetBlock(
   return mapPanel(state, panelId, (config) => ({
     ...config,
     target: { kind: "blocks", blockIds: next },
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Journeys — many of them, edited as definitions rather than as drawings
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY A JOURNEY IS A DEFINITION AND A BLOCK IS A REFERENCE TO ONE.
+ *
+ * The obvious way to put a second recorrido on a page is to copy the first
+ * block. It is also the way that makes the second one a FORK: renaming a
+ * moment in one leaves the other saying the old thing, and a year later nobody
+ * can say which of the two the client actually read. So a journey is a
+ * DEFINITION with a stable id, edited in one place, and a `journey` block is a
+ * pointer at one. Two blocks can show the same recorrido on two pages and both
+ * change together; two recorridos can sit on one page and neither knows about
+ * the other.
+ *
+ * That is also why there are two verbs in the UI, worded so they cannot be
+ * confused: **Duplicar bloque** puts a second window onto the same recorrido;
+ * **Duplicar recorrido** makes a second recorrido, with fresh identifiers,
+ * which can then be edited apart from the first.
+ */
+
+function findJourney(definition: ExperienceDefinitionV1, journeyId: string) {
+  return definition.journeyReferences.find((journey) => journey.id === journeyId) ?? null;
+}
+
+function mapJourney(
+  state: EditorState,
+  journeyId: string,
+  change: (journey: JourneyReference) => JourneyReference,
+): EditorState {
+  const found = findJourney(state.definition, journeyId);
+  if (!found) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  return commit(state, {
+    ...state.definition,
+    journeyReferences: state.definition.journeyReferences.map((journey) =>
+      journey.id === journeyId
+        ? // A recorrido's own revision counts the edits made to IT, so a block
+          // showing it can say "this changed since you approved it" without
+          // diffing two whole documents.
+          { ...change(journey), revision: Math.min(journey.revision + 1, 1_000_000) }
+        : journey,
+    ),
+  });
+}
+
+function mapMoment(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  change: (moment: JourneyMoment) => JourneyMoment,
+): EditorState {
+  const journey = findJourney(state.definition, journeyId);
+  if (!journey) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  if (!journey.moments.some((moment) => moment.id === momentId)) {
+    return refuse(state, "Ese momento ya no está en el recorrido.");
+  }
+  return mapJourney(state, journeyId, (current) => ({
+    ...current,
+    moments: current.moments.map((moment) => (moment.id === momentId ? change(moment) : moment)),
+  }));
+}
+
+/** A new, empty recorrido. It carries no moments until somebody adds one. */
+export function addJourney(
+  state: EditorState,
+  title: string,
+  registry: SemanticRegistry | null = null,
+): EditorState {
+  const clean = title.trim();
+  if (clean === "") return refuse(state, "Un recorrido necesita un nombre para poder elegirlo.");
+  if (state.definition.journeyReferences.length >= EXPERIENCE_LIMITS.journeys) {
+    return refuse(
+      state,
+      `Esta experiencia ya tiene los ${EXPERIENCE_LIMITS.journeys} recorridos que admite.`,
+    );
+  }
+  /*
+   * THE FAMILIES A NEW RECORRIDO MAY CARRY.
+   *
+   * `satisfaction` when the study has any, because that is what a recorrido
+   * measures in this product and it is the arrangement the real study uses at
+   * every moment. It is a DEFAULT, not an engine rule: the recorrido declares
+   * its families and a person can widen them. A study with no satisfaction
+   * results declares what it actually has, so this can never invent a
+   * constraint the study fails.
+   */
+  const families = registry ? [...new Set(registry.metrics.map((metric) => metric.family))] : [];
+  const eligible: MetricFamily[] = families.includes("satisfaction")
+    ? ["satisfaction"]
+    : families.length > 0
+      ? [families[0]]
+      : ["other"];
+
+  const id = mintFreeId(
+    "journey",
+    `${state.definition.id}/journey/${state.sequence}/${clean}`,
+    (candidate) => state.definition.journeyReferences.some((journey) => journey.id === candidate),
+  );
+  return commit(
+    state,
+    {
+      ...state.definition,
+      journeyReferences: [
+        ...state.definition.journeyReferences,
+        {
+          id,
+          title: clean.slice(0, EXPERIENCE_LIMITS.titleLength),
+          description: null,
+          eligibleFamilies: eligible,
+          moments: [],
+          filterRefs: [],
+          variant: "stepped",
+          bandSchemeId: null,
+          visible: true,
+          origin: "composed",
+          revision: 1,
+        },
+      ],
+    },
+    { sequence: state.sequence + 1 },
+  );
+}
+
+/**
+ * A SECOND RECORRIDO, not a second window onto the first.
+ *
+ * Every identifier is fresh — the recorrido's and every moment's — so editing
+ * the copy cannot reach the original. What is deliberately NOT copied is
+ * `filterRefs`: which controls a recorrido hosts is a statement about one
+ * page's arrangement, and inheriting it silently is how a duplicate starts
+ * answering to a panel nobody pointed at it. No block is created either:
+ * duplicating a definition does not put it on a page, because where it goes is
+ * a separate decision.
+ */
+export function duplicateJourney(state: EditorState, journeyId: string): EditorState {
+  const source = findJourney(state.definition, journeyId);
+  if (!source) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  if (state.definition.journeyReferences.length >= EXPERIENCE_LIMITS.journeys) {
+    return refuse(
+      state,
+      `Esta experiencia ya tiene los ${EXPERIENCE_LIMITS.journeys} recorridos que admite.`,
+    );
+  }
+  const takenJourneys = new Set(state.definition.journeyReferences.map((journey) => journey.id));
+  const takenMoments = new Set(
+    state.definition.journeyReferences.flatMap((journey) =>
+      journey.moments.map((moment) => moment.id),
+    ),
+  );
+  const id = mintFreeId("journey", `${source.id}/copy/${state.sequence}`, (candidate) =>
+    takenJourneys.has(candidate),
+  );
+  const moments = source.moments.map((moment, index) => {
+    const momentId = mintFreeId(
+      "moment",
+      `${id}/moment/${index}/${state.sequence}`,
+      (candidate) => takenMoments.has(candidate),
+    );
+    takenMoments.add(momentId);
+    return { ...moment, id: momentId };
+  });
+  return commit(
+    state,
+    {
+      ...state.definition,
+      journeyReferences: [
+        ...state.definition.journeyReferences,
+        {
+          ...source,
+          id,
+          title: `${source.title} (copia)`.slice(0, EXPERIENCE_LIMITS.titleLength),
+          moments,
+          filterRefs: [],
+          origin: "composed",
+          revision: 1,
+        },
+      ],
+    },
+    { sequence: state.sequence + 1 },
+  );
+}
+
+export function renameJourney(state: EditorState, journeyId: string, title: string): EditorState {
+  return mapJourney(state, journeyId, (journey) => ({
+    ...journey,
+    title: title.slice(0, EXPERIENCE_LIMITS.titleLength),
+  }));
+}
+
+export function setJourneyDescription(
+  state: EditorState,
+  journeyId: string,
+  description: string,
+): EditorState {
+  const clean = description.trim();
+  return mapJourney(state, journeyId, (journey) => ({
+    ...journey,
+    description: clean === "" ? null : clean.slice(0, EXPERIENCE_LIMITS.bodyLength),
+  }));
+}
+
+export function setJourneyVariant(
+  state: EditorState,
+  journeyId: string,
+  variant: JourneyReference["variant"],
+): EditorState {
+  return mapJourney(state, journeyId, (journey) => ({ ...journey, variant }));
+}
+
+export function setJourneyBandScheme(
+  state: EditorState,
+  journeyId: string,
+  bandSchemeId: string | null,
+): EditorState {
+  if (bandSchemeId && !state.definition.bandSchemes.some((scheme) => scheme.id === bandSchemeId)) {
+    return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  }
+  return mapJourney(state, journeyId, (journey) => ({ ...journey, bandSchemeId }));
+}
+
+/** Every block currently showing one recorrido, and where it sits. */
+export function journeyUsage(
+  definition: ExperienceDefinitionV1,
+  journeyId: string,
+): { pageId: string; pageTitle: string; blockId: string; blockTitle: string }[] {
+  return definition.pages.flatMap((page) =>
+    page.blocks
+      .filter((block) => block.journeyRef === journeyId)
+      .map((block) => ({
+        pageId: page.id,
+        pageTitle: page.title,
+        blockId: block.id,
+        blockTitle: block.title ?? blockSpec(block.type as BlockType).label,
+      })),
+  );
+}
+
+/**
+ * REMOVING A RECORRIDO IS PROTECTED BY WHAT POINTS AT IT.
+ *
+ * A `journey` block whose definition disappeared can never draw anything, and
+ * the strict boundary would refuse the whole document for the dangling
+ * reference — so the SAVE would start failing for a reason nobody could see on
+ * screen. The removal therefore refuses while a block still shows it and NAMES
+ * those blocks, so the person knows exactly what to remove or repoint first.
+ */
+export function removeJourney(state: EditorState, journeyId: string): EditorState {
+  const journey = findJourney(state.definition, journeyId);
+  if (!journey) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  const used = journeyUsage(state.definition, journeyId);
+  if (used.length > 0) {
+    const where = used
+      .slice(0, 3)
+      .map((entry) => `“${entry.blockTitle}” en ${entry.pageTitle}`)
+      .join(", ");
+    return refuse(
+      state,
+      `“${journey.title}” todavía se muestra en ${
+        used.length === 1 ? "1 bloque" : `${used.length} bloques`
+      }: ${where}. Quítalos o apúntalos a otro recorrido antes de borrarlo.`,
+    );
+  }
+  return commit(state, {
+    ...state.definition,
+    journeyReferences: state.definition.journeyReferences.filter(
+      (candidate) => candidate.id !== journeyId,
+    ),
+  });
+}
+
+/** Which recorrido one block shows. The block moves; the definition does not. */
+export function setBlockJourney(
+  state: EditorState,
+  blockId: string,
+  journeyId: string,
+): EditorState {
+  const found = findBlock(state.definition, blockId);
+  if (!found) return refuse(state, "Ese bloque ya no está en la experiencia.");
+  if (!blockSpec(found.block.type as BlockType).requiresJourney) {
+    return refuse(state, "Ese bloque no muestra un recorrido.");
+  }
+  if (!findJourney(state.definition, journeyId)) {
+    return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  }
+  return commit(
+    state,
+    mapBlock(state.definition, blockId, (block) => ({ ...block, journeyRef: journeyId })),
+  );
+}
+
+// --- Moments ---------------------------------------------------------------
+
+export function addMoment(state: EditorState, journeyId: string, title: string): EditorState {
+  const journey = findJourney(state.definition, journeyId);
+  if (!journey) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  const clean = title.trim();
+  if (clean === "") return refuse(state, "Un momento necesita un nombre.");
+  if (journey.moments.length >= EXPERIENCE_LIMITS.momentsPerJourney) {
+    return refuse(
+      state,
+      `Este recorrido ya tiene los ${EXPERIENCE_LIMITS.momentsPerJourney} momentos que admite.`,
+    );
+  }
+  const taken = new Set(
+    state.definition.journeyReferences.flatMap((entry) => entry.moments.map((moment) => moment.id)),
+  );
+  const id = mintFreeId(
+    "moment",
+    `${journeyId}/moment/${state.sequence}/${clean}`,
+    (candidate) => taken.has(candidate),
+  );
+  const next = mapJourney(state, journeyId, (current) => ({
+    ...current,
+    moments: [
+      ...current.moments,
+      {
+        id,
+        title: clean.slice(0, EXPERIENCE_LIMITS.titleLength),
+        description: null,
+        metricId: null,
+        awareness: null,
+        body: null,
+        variant: null,
+        bandSchemeId: null,
+        visible: true,
+      },
+    ],
+  }));
+  return next.refusal ? next : { ...next, sequence: state.sequence + 1 };
+}
+
+export function duplicateMoment(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+): EditorState {
+  const journey = findJourney(state.definition, journeyId);
+  if (!journey) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  const source = journey.moments.find((moment) => moment.id === momentId);
+  if (!source) return refuse(state, "Ese momento ya no está en el recorrido.");
+  if (journey.moments.length >= EXPERIENCE_LIMITS.momentsPerJourney) {
+    return refuse(
+      state,
+      `Este recorrido ya tiene los ${EXPERIENCE_LIMITS.momentsPerJourney} momentos que admite.`,
+    );
+  }
+  const taken = new Set(
+    state.definition.journeyReferences.flatMap((entry) => entry.moments.map((moment) => moment.id)),
+  );
+  const id = mintFreeId("moment", `${momentId}/copy/${state.sequence}`, (candidate) =>
+    taken.has(candidate),
+  );
+  const at = journey.moments.findIndex((moment) => moment.id === momentId);
+  const copy: JourneyMoment = {
+    ...source,
+    id,
+    title: `${source.title} (copia)`.slice(0, EXPERIENCE_LIMITS.titleLength),
+  };
+  const next = mapJourney(state, journeyId, (current) => ({
+    ...current,
+    // Beside the one it was copied from, which is where somebody looking at it
+    // expects it to appear.
+    moments: [...current.moments.slice(0, at + 1), copy, ...current.moments.slice(at + 1)],
+  }));
+  return next.refusal ? next : { ...next, sequence: state.sequence + 1 };
+}
+
+export function moveMoment(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  direction: "up" | "down",
+): EditorState {
+  const journey = findJourney(state.definition, journeyId);
+  if (!journey) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  const at = journey.moments.findIndex((moment) => moment.id === momentId);
+  if (at < 0) return refuse(state, "Ese momento ya no está en el recorrido.");
+  const to = direction === "up" ? at - 1 : at + 1;
+  if (to < 0) return refuse(state, "Ese momento ya es el primero.");
+  if (to >= journey.moments.length) return refuse(state, "Ese momento ya es el último.");
+  const moments = [...journey.moments];
+  [moments[at], moments[to]] = [moments[to], moments[at]];
+  return mapJourney(state, journeyId, (current) => ({ ...current, moments }));
+}
+
+export function removeMoment(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+): EditorState {
+  const journey = findJourney(state.definition, journeyId);
+  if (!journey) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  if (!journey.moments.some((moment) => moment.id === momentId)) {
+    return refuse(state, "Ese momento ya no está en el recorrido.");
+  }
+  return mapJourney(state, journeyId, (current) => ({
+    ...current,
+    moments: current.moments.filter((moment) => moment.id !== momentId),
+  }));
+}
+
+export function setMomentTitle(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  title: string,
+): EditorState {
+  return mapMoment(state, journeyId, momentId, (moment) => ({
+    ...moment,
+    title: title.slice(0, EXPERIENCE_LIMITS.titleLength),
+  }));
+}
+
+export function setMomentBody(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  body: string,
+): EditorState {
+  const clean = body.trim();
+  return mapMoment(state, journeyId, momentId, (moment) => ({
+    ...moment,
+    body: clean === "" ? null : clean.slice(0, EXPERIENCE_LIMITS.bodyLength),
+  }));
+}
+
+export function setMomentVisible(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  visible: boolean,
+): EditorState {
+  return mapMoment(state, journeyId, momentId, (moment) => ({ ...moment, visible }));
+}
+
+/**
+ * WHICH RESULT A MOMENT SHOWS — refused in words when the recorrido does not
+ * carry that family, before the document becomes invalid rather than after.
+ */
+export function setMomentMetric(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  metricId: string | null,
+  registry: SemanticRegistry,
+): EditorState {
+  const journey = findJourney(state.definition, journeyId);
+  if (!journey) return refuse(state, "Ese recorrido ya no está en la experiencia.");
+  if (metricId !== null) {
+    const metric = registry.metrics.find((entry) => entry.id === metricId);
+    if (!metric) return refuse(state, "Ese resultado no existe en este estudio.");
+    if (!metric.journeyEligible) {
+      return refuse(state, `“${metric.label}” no está habilitado para un recorrido.`);
+    }
+    if (!journey.eligibleFamilies.includes(metric.family)) {
+      return refuse(
+        state,
+        `“${metric.label}” no es de las familias que este recorrido declara. Cambia las familias del recorrido si es lo que quieres medir.`,
+      );
+    }
+  }
+  return mapMoment(state, journeyId, momentId, (moment) => ({ ...moment, metricId }));
+}
+
+export function setMomentVariant(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  variant: ChartVariant | null,
+): EditorState {
+  return mapMoment(state, journeyId, momentId, (moment) => ({ ...moment, variant }));
+}
+
+export function setMomentBandScheme(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  bandSchemeId: string | null,
+): EditorState {
+  if (bandSchemeId && !state.definition.bandSchemes.some((scheme) => scheme.id === bandSchemeId)) {
+    return refuse(state, "Ese semáforo ya no está en la experiencia.");
+  }
+  return mapMoment(state, journeyId, momentId, (moment) => ({ ...moment, bandSchemeId }));
+}
+
+/**
+ * "NO SABÍA QUE EXISTÍA ESTE MOMENTO", CONFIGURED IN ONE ACT.
+ *
+ * A result AND the exact recorded values that mean it. Half of that is
+ * refused: a mapping with a result and no values would count nobody, a mapping
+ * with values and no result would count nothing, and both would still print a
+ * confident percentage. Nothing here reads a blank, a skip or an invalid entry
+ * as "did not know" — an absence is not an answer.
+ */
+export function setMomentAwareness(
+  state: EditorState,
+  journeyId: string,
+  momentId: string,
+  awareness: { metricId: string; label: string | null; values: string[] } | null,
+  registry: SemanticRegistry,
+): EditorState {
+  if (awareness !== null) {
+    const metric = registry.metrics.find((entry) => entry.id === awareness.metricId);
+    if (!metric) return refuse(state, "Ese resultado no existe en este estudio.");
+    if (awareness.values.length === 0) {
+      return refuse(
+        state,
+        "Falta decir qué respuestas significan “no lo conocía”. Sin eso el porcentaje no tendría numerador.",
+      );
+    }
+  }
+  return mapMoment(state, journeyId, momentId, (moment) => ({
+    ...moment,
+    awareness: awareness
+      ? {
+          metricId: awareness.metricId,
+          label:
+            awareness.label && awareness.label.trim() !== ""
+              ? awareness.label.slice(0, EXPERIENCE_LIMITS.titleLength)
+              : null,
+          values: [...new Set(awareness.values)],
+        }
+      : null,
   }));
 }

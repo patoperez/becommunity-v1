@@ -23,6 +23,8 @@
  * sentence that says which drawing is missing.
  */
 
+import type { Aggregation } from "./registry";
+
 export const CHART_VARIANTS = [
   "kpi",
   "bar_horizontal",
@@ -45,6 +47,20 @@ export const CHART_VARIANTS = [
 ] as const;
 
 export type ChartVariant = (typeof CHART_VARIANTS)[number];
+
+/**
+ * THE PALETTES A SCALED DRAWING MAY READ, as roles rather than hex.
+ *
+ * A heat map, a treemap and a bubble field all need a colour SCALE rather than
+ * a colour, and the moment an operator can type one the product acquires a
+ * contrast failure nobody will find until it is on a client's screen. So the
+ * choice is a closed set the brand resolves, `auto` lets the block type pick
+ * the one that suits it, and `mono` exists because a single-hue ramp is the
+ * honest choice for a quantity — a rainbow implies categories where there are
+ * degrees.
+ */
+export const CHART_PALETTES = ["auto", "mono", "cool", "warm", "diverging", "categorical"] as const;
+export type ChartPalette = (typeof CHART_PALETTES)[number];
 
 export type ChartVariantSpec = {
   id: ChartVariant;
@@ -79,6 +95,22 @@ export type ChartVariantSpec = {
    * Never a silent replacement. Null when the variant is drawn for real.
    */
   alternative: ChartVariant | null;
+  /**
+   * THE AGGREGATIONS THIS DRAWING CAN TELL THE TRUTH ABOUT, or null for any.
+   *
+   * A drawing that divides a whole — a pie, a treemap — asserts that its parts
+   * sum to the total. A promedio, an NPS and a Top-2-Box do not sum to
+   * anything, so a treemap of averages is a picture of a claim nobody made.
+   * The validator reads this rather than carrying its own list, which is what
+   * stops the two from drifting.
+   */
+  aggregations: readonly Aggregation[] | null;
+  /**
+   * Whether the drawing needs a COLOUR SCALE rather than a colour. It is what
+   * makes the palette control appear on exactly the blocks it means something
+   * for, instead of on all of them.
+   */
+  usesPalette: boolean;
 };
 
 const SPECS: ChartVariantSpec[] = [
@@ -91,6 +123,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: null,
     mobile: "good",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -102,6 +136,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "good",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -113,6 +149,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 40,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -124,6 +162,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 24,
     mobile: "poor",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -135,6 +175,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 24,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -146,6 +188,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 24,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -157,6 +201,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -168,6 +214,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -179,6 +227,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 12,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -190,6 +240,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 12,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -201,6 +253,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -212,6 +266,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 40,
     mobile: "poor",
     rendererImplemented: false,
+    aggregations: null,
+    usesPalette: false,
     alternative: "table",
   },
   {
@@ -223,6 +279,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "poor",
     rendererImplemented: false,
+    aggregations: null,
+    usesPalette: false,
     alternative: "table",
   },
   {
@@ -234,6 +292,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "poor",
     rendererImplemented: false,
+    aggregations: null,
+    usesPalette: false,
     alternative: "bar_horizontal",
   },
   {
@@ -245,6 +305,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 40,
     mobile: "good",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -256,6 +318,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -267,6 +331,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 24,
     mobile: "good",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
   {
@@ -278,6 +344,8 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
+    aggregations: null,
+    usesPalette: false,
     alternative: null,
   },
 ];

@@ -338,7 +338,10 @@ withUnknownLayout.pages[0].blocks[0].layout.desktop.left = 40;
 assert.equal(parseExperienceDefinition(withUnknownLayout).ok, false, "a pixel coordinate is refused");
 ok("unknown fields are refused at the root, inside a block and inside a layout");
 
-const wrongVersion = { ...adapted.definition, schemaVersion: 3 };
+// A version this build does not write. Derived from the constant rather than
+// typed, so bumping the schema cannot turn this into an assertion about the
+// CURRENT version quietly passing.
+const wrongVersion = { ...adapted.definition, schemaVersion: EXPERIENCE_SCHEMA_VERSION + 1 };
 assert.equal(parseExperienceDefinition(wrongVersion).ok, false, "only the declared schema version parses");
 ok("a document declaring another schema version is refused");
 
@@ -635,13 +638,22 @@ const journeyDefinition = {
           title: "Bienvenida",
           description: null,
           metricId: "satisfaction_onboarding",
-          unawareMetricId: "moment_unknown_share",
-          unawareLabel: "No sabía que existía",
+          // THE MAPPING IS EXPLICIT: a result AND the exact recorded values
+          // that mean "did not know it". A blank answer is neither half.
+          awareness: {
+            metricId: "moment_unknown_share",
+            label: "No sabía que existía",
+            values: ["100"],
+          },
+          body: null,
+          variant: null,
+          bandSchemeId: null,
           visible: true,
         },
       ],
       filterRefs: [],
       variant: "stepped",
+      bandSchemeId: null,
       visible: true,
       origin: "composed",
       revision: 1,
@@ -657,13 +669,16 @@ const journeyDefinition = {
           title: "Última renovación",
           description: null,
           metricId: "satisfaction_overall",
-          unawareMetricId: null,
-          unawareLabel: null,
+          awareness: null,
+          body: null,
+          variant: null,
+          bandSchemeId: null,
           visible: true,
         },
       ],
       filterRefs: [],
       variant: "linear",
+      bandSchemeId: null,
       visible: true,
       origin: "composed",
       revision: 1,
@@ -713,7 +728,8 @@ assert.notEqual(
 ok("the satisfaction-only configuration narrows the permissive one rather than repeating it");
 
 const unawareMoment = journeyDefinition.journeyReferences[0].moments[0];
-assert.equal(unawareMoment.unawareMetricId, "moment_unknown_share");
+assert.equal(unawareMoment.awareness.metricId, "moment_unknown_share");
+assert.deepEqual(unawareMoment.awareness.values, ["100"], "and the values that mean it");
 assert.ok(findMetric(satisfactionOnly, "moment_unknown_share"));
 ok('the "did not know this moment" measure is modelled separately from the moment itself');
 
@@ -1225,13 +1241,16 @@ assert.deepEqual(approvalInvalidations(basis, { ...basis, categorySignature: "c2
 assert.deepEqual(approvalInvalidations(basis, { ...basis, consentSignature: "k2" }), ["consent_changed"]);
 ok("changing the data, the registry, the categories, the consent or the disclosure rule invalidates an approval");
 
-assert.equal(declaredVersion(runA.definition), 2);
+assert.equal(declaredVersion(runA.definition), EXPERIENCE_SCHEMA_VERSION);
 assert.equal(declaredVersion({}), null);
 assert.equal(migrateExperienceDefinition({ schemaVersion: 99 }).reason, "unknown_version");
-assert.equal(migrateExperienceDefinition({ schemaVersion: 2 }).reason, "invalid_document");
+assert.equal(
+  migrateExperienceDefinition({ schemaVersion: EXPERIENCE_SCHEMA_VERSION }).reason,
+  "invalid_document",
+);
 const migrated = migrateExperienceDefinition(JSON.parse(serializeExperienceDefinition(runA.definition)));
 assert.ok(migrated.ok, "a stored definition round-trips through serialization and migration");
-assert.equal(migrated.migratedFrom, 2);
+assert.equal(migrated.migratedFrom, EXPERIENCE_SCHEMA_VERSION);
 ok("an unknown schema version is refused by name, and a stored document round-trips");
 
 // ---------------------------------------------------------------------------
@@ -1290,10 +1309,45 @@ asVersionOne.filterConnections = asVersionOne.filterConnections
   }))
   .filter((connection) => connection.blockIds.length > 0);
 
+/*
+ * A GENUINE VERSION-1 DOCUMENT CARRIES NOTHING VERSION 3 ADDED.
+ *
+ * Stripped rather than left in place, because a fixture that already contains
+ * the fields the migration is supposed to ADD proves nothing about the
+ * migration. Every one of these is asserted below to come back with the value
+ * that means "not configured".
+ */
+delete asVersionOne.bandSchemes;
+asVersionOne.journeyReferences = (asVersionOne.journeyReferences ?? []).map((journey) => {
+  const { bandSchemeId, ...rest } = journey;
+  void bandSchemeId;
+  return {
+    ...rest,
+    moments: (rest.moments ?? []).map((moment) => {
+      const { awareness, body, variant, bandSchemeId: momentScheme, ...momentRest } = moment;
+      void awareness; void body; void variant; void momentScheme;
+      return { ...momentRest, unawareMetricId: null, unawareLabel: null };
+    }),
+  };
+});
+asVersionOne.pages = asVersionOne.pages.map((page) => ({
+  ...page,
+  blocks: page.blocks.map((block) => {
+    const { bandSchemeId, themeCloud, ...rest } = block;
+    void bandSchemeId; void themeCloud;
+    if (rest.visualization) {
+      const { palette, ...visualization } = rest.visualization;
+      void palette;
+      return { ...rest, visualization };
+    }
+    return rest;
+  }),
+}));
+
 const brought = migrateExperienceDefinition(asVersionOne);
 assert.ok(brought.ok, `a version-1 draft must open: ${JSON.stringify(brought.detail ?? "")}`);
 assert.equal(brought.migratedFrom, 1);
-assert.equal(brought.definition.schemaVersion, 2);
+assert.equal(brought.definition.schemaVersion, EXPERIENCE_SCHEMA_VERSION);
 assert.equal(
   brought.definition.identity.title,
   "La voz de la comunidad",
@@ -1318,6 +1372,99 @@ for (const block of allBlocks(brought.definition)) {
   assert.equal(block.filterPanel, null, "no version-1 block becomes a panel");
 }
 ok("a version-1 draft opens as version 2: the cover becomes the identity, and nothing is duplicated or lost");
+
+// ---------------------------------------------------------------------------
+// VERSION 2 -> VERSION 3, against a document written under version 2
+// ---------------------------------------------------------------------------
+// Version 3 is PURELY ADDITIVE, so the whole test is one sentence: every
+// identifier, every connection, every layout and every word comes back
+// unchanged, and everything version 3 added arrives meaning "not configured".
+const asVersionTwo = JSON.parse(serializeExperienceDefinition(runA.definition));
+asVersionTwo.schemaVersion = 2;
+delete asVersionTwo.bandSchemes;
+asVersionTwo.journeyReferences = (asVersionTwo.journeyReferences ?? []).map((journey) => {
+  const { bandSchemeId, ...rest } = journey;
+  void bandSchemeId;
+  return {
+    ...rest,
+    moments: (rest.moments ?? []).map((moment) => {
+      const { awareness, body, variant, bandSchemeId: momentScheme, ...momentRest } = moment;
+      void awareness; void body; void variant; void momentScheme;
+      // Version 2 named a result and could not say which answers meant it.
+      return { ...momentRest, unawareMetricId: momentRest.metricId, unawareLabel: "No lo conocía" };
+    }),
+  };
+});
+asVersionTwo.pages = asVersionTwo.pages.map((page) => ({
+  ...page,
+  blocks: page.blocks.map((block) => {
+    const { bandSchemeId, themeCloud, ...rest } = block;
+    void bandSchemeId; void themeCloud;
+    if (rest.visualization) {
+      const { palette, ...visualization } = rest.visualization;
+      void palette;
+      return { ...rest, visualization };
+    }
+    return rest;
+  }),
+}));
+
+const three = migrateExperienceDefinition(asVersionTwo);
+assert.ok(three.ok, `a version-2 draft must open: ${JSON.stringify(three.detail ?? "")}`);
+assert.equal(three.migratedFrom, 2);
+assert.equal(three.definition.schemaVersion, EXPERIENCE_SCHEMA_VERSION);
+assert.deepEqual(three.definition.bandSchemes, [], "no semáforo scheme is invented");
+
+// NOTHING MOVED. Identifiers, order, connections and words, all byte for byte.
+assert.deepEqual(
+  three.definition.pages.map((page) => [page.id, page.blocks.map((block) => block.id)]),
+  runA.definition.pages.map((page) => [page.id, page.blocks.map((block) => block.id)]),
+  "every page and every block keeps its identifier and its position",
+);
+assert.deepEqual(
+  three.definition.filterConnections,
+  runA.definition.filterConnections,
+  "every filter connection survives untouched",
+);
+assert.deepEqual(
+  three.definition.identity,
+  runA.definition.identity,
+  "and the identity layer is not touched twice",
+);
+assert.equal(
+  allBlocks(three.definition).filter((block) => block.type === "cover").length,
+  0,
+  "no cover block is reintroduced by a second migration",
+);
+
+for (const block of allBlocks(three.definition)) {
+  assert.equal(block.bandSchemeId, null, "no block is coloured by a semáforo nobody chose");
+  if (block.visualization) {
+    assert.equal(block.visualization.palette, "auto", "and every drawing starts on the automatic palette");
+  }
+  assert.equal(
+    block.type === "theme_cloud" ? typeof block.themeCloud : block.themeCloud,
+    block.type === "theme_cloud" ? "object" : null,
+    "cloud settings appear on exactly the clouds",
+  );
+  if (block.type === "theme_cloud") {
+    assert.equal(block.themeCloud.basis, "mentions", "and a migrated cloud keeps counting what it counted");
+  }
+}
+for (const journey of three.definition.journeyReferences) {
+  assert.equal(journey.bandSchemeId, null);
+  for (const moment of journey.moments) {
+    // THE HALF-CONFIGURED MEASURE IS DROPPED RATHER THAN COMPLETED. Version 2
+    // named a result with no values; carrying it forward as an awareness
+    // mapping would invent the missing half and print a percentage nobody set.
+    assert.equal(moment.awareness, null, "a version-2 unaware result does not become a mapping");
+    assert.equal(moment.body, null);
+    assert.equal(moment.variant, null);
+    assert.equal(moment.bandSchemeId, null);
+    assert.ok(!("unawareMetricId" in moment), "and the old field does not survive");
+  }
+}
+ok("a version-2 draft opens as version 3: nothing moves, and every new capability starts unconfigured");
 // ===========================================================================
 console.log("\n[15] The builder route and its Server Actions authorize first");
 // ===========================================================================

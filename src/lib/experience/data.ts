@@ -473,6 +473,72 @@ export const dataKeyForMoment = (journeyId: string, momentId: string) =>
   `moment:${journeyId}:${momentId}`;
 export const dataKeyForPivot = (blockId: string) => `pivot:${blockId}`;
 export const dataKeyForThemes = (blockId: string) => `themes:${blockId}`;
+export const dataKeyForAwareness = (journeyId: string, momentId: string) =>
+  `unaware:${journeyId}:${momentId}`;
+
+/**
+ * HOW MANY PEOPLE DID NOT KNOW THIS MOMENT EXISTED.
+ *
+ * The numerator is the people whose answer to the configured awareness result
+ * is one of the exact values a person marked as meaning "no lo conocía". The
+ * denominator is the people who ANSWERED that question at all.
+ *
+ * WHAT IS NOT IN EITHER HALF. A blank, a skip, a non-numeric cell: an absence
+ * is not an answer, and counting one as "did not know" invents a numerator
+ * while counting it in the base invents a denominator. Both are ways of
+ * printing a percentage nobody supplied. Somebody who answered the question
+ * with a value that is NOT in the list is in the denominator only, which is
+ * what makes the number a share of the people who were asked.
+ *
+ * The comparison is on the STORED value written as text, because the
+ * configured values are what the study records and this module never guesses
+ * how to coerce one shape into another.
+ */
+export function resolveAwareness(
+  rows: readonly LongRow[],
+  index: RegistryKeyIndex,
+  awareness: { metricId: string; values: readonly string[] },
+  restrict: readonly { dimensionId: string; values: readonly string[] }[],
+): { ok: true; share: number | null; unaware: number; answered: number } | { ok: false; reason: string } {
+  const metricKey = index.metrics[awareness.metricId];
+  if (!metricKey) return { ok: false, reason: "unknown_metric" };
+
+  const columns: { key: string; values: Set<string> }[] = [];
+  for (const entry of restrict) {
+    if (entry.values.length === 0) continue;
+    const key = index.dimensions[entry.dimensionId];
+    if (!key) return { ok: false, reason: "unknown_dimension" };
+    columns.push({ key, values: new Set(entry.values) });
+  }
+
+  const marked = new Set(awareness.values.map((value) => value.trim()));
+  let answered = 0;
+  let unaware = 0;
+  for (const row of rows as readonly DataRow[]) {
+    if (row.metric_key !== metricKey) continue;
+    let matches = true;
+    for (const column of columns) {
+      const value = row[column.key];
+      if (typeof value !== "string" || !column.values.has(value)) {
+        matches = false;
+        break;
+      }
+    }
+    if (!matches) continue;
+    const raw = row.value;
+    // An absence is not an answer, so it is in neither half.
+    if (raw === null || raw === undefined || raw === "") continue;
+    answered += 1;
+    if (marked.has(String(raw))) unaware += 1;
+  }
+
+  return {
+    ok: true,
+    share: answered === 0 ? null : percentage(unaware, answered, DECIMALS.percent),
+    unaware,
+    answered,
+  };
+}
 
 /**
  * The characteristic a comparison explorer opens on: the one with the fewest
@@ -645,11 +711,31 @@ export function qualitativeBlockIds(definition: ExperienceDefinitionV1): string[
 }
 
 /**
+ * Every configured awareness measure, with the journey and moment it belongs
+ * to. A moment with no mapping produces nothing at all, which is what "not
+ * configured" has to mean rather than a zero.
+ */
+export function awarenessRequests(definition: ExperienceDefinitionV1): {
+  journeyId: string;
+  momentId: string;
+  awareness: { metricId: string; values: readonly string[] };
+}[] {
+  return definition.journeyReferences.flatMap((journey) =>
+    journey.moments.flatMap((moment) =>
+      moment.awareness
+        ? [{ journeyId: journey.id, momentId: moment.id, awareness: moment.awareness }]
+        : [],
+    ),
+  );
+}
+
+/**
  * EVERY KEY `resolveDefinitionData` PRODUCES, and no other.
  *
- * The numbers a document asks for, plus one theme series per qualitative
- * block. The gate compares the resolved set against exactly this, so a surface
- * cannot start computing something the document never asked for.
+ * The numbers a document asks for, plus one theme series per qualitative block
+ * and one share per configured awareness measure. The gate compares the
+ * resolved set against exactly this, so a surface cannot start computing
+ * something the document never asked for.
  */
 export function definitionDataKeys(
   definition: ExperienceDefinitionV1,
@@ -658,10 +744,43 @@ export function definitionDataKeys(
   return [
     ...blockDataRequests(definition, registry).map((request) => request.key),
     ...qualitativeBlockIds(definition).map(dataKeyForThemes),
+    ...awarenessRequests(definition).map((request) =>
+      dataKeyForAwareness(request.journeyId, request.momentId),
+    ),
   ];
 }
 
 /** The resolved set, keyed the way the surfaces look it up. */
+/**
+ * An awareness share, in the same shape as every other resolved number.
+ *
+ * `overall.value` is the percentage and `overall.n` is the DENOMINATOR — the
+ * people who answered the question — so the disclosure rule reads the base it
+ * should read. The numerator is written out in `detail`, because a percentage
+ * whose numerator a reader cannot see is one they cannot check.
+ */
+function awarenessSeries(
+  momentId: string,
+  outcome: { share: number | null; unaware: number; answered: number },
+): ResolvedBlockData {
+  return {
+    blockId: momentId,
+    metricLabel: "No conocía este momento",
+    unit: "percent",
+    decimals: DECIMALS.percent,
+    categoryLabel: null,
+    seriesLabel: null,
+    categories: [],
+    series: [{ key: "", label: null, cells: [] }],
+    overall: { categoryKey: "", value: outcome.share, n: outcome.answered },
+    omittedCategories: 0,
+    detail: [
+      { label: "No lo conocían", value: String(outcome.unaware) },
+      { label: "Respondieron la pregunta", value: String(outcome.answered) },
+    ],
+  };
+}
+
 export type BlockDataSet = Record<
   string,
   { ok: true; data: ResolvedBlockData } | { ok: false; reason: string }
@@ -817,6 +936,30 @@ export function resolveDefinitionData(
         blockRestriction(definition, blockId, block, selection, movedBy),
       ),
     };
+  }
+
+  /*
+   * THE AWARENESS SHARES, under the same narrowing as the journey carrying
+   * them. A moment's "no lo conocía" has to move with the filter for the same
+   * reason its satisfaction score does: the two sit side by side and a reader
+   * compares them.
+   */
+  for (const request of awarenessRequests(definition)) {
+    const outcome = resolveAwareness(
+      rows,
+      index,
+      request.awareness,
+      journeyRestriction(definition, request.journeyId, selection, movedBy),
+    );
+    set[dataKeyForAwareness(request.journeyId, request.momentId)] = outcome.ok
+      ? { ok: true, data: awarenessSeries(request.momentId, outcome) }
+      : {
+          ok: false,
+          reason:
+            outcome.reason === "unknown_metric"
+              ? "La medida de desconocimiento apunta a un resultado que este estudio ya no produce."
+              : "La medida de desconocimiento se narra por una característica que este estudio ya no tiene.",
+        };
   }
 
   for (const request of blockDataRequests(definition, registry, selection, movedBy)) {

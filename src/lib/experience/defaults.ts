@@ -206,7 +206,7 @@ export function newBlock(request: NewBlockRequest): ExperienceBlock | null {
     copy: { eyebrow: null, body: null, caption: null, items: [] },
     query,
     visualization: variant
-      ? { variant, legend: "auto", showValueLabels: true, axisLabel: null }
+      ? { variant, legend: "auto", showValueLabels: true, axisLabel: null, palette: "auto" }
       : null,
     journeyRef: spec.requiresJourney ? (request.journeyId ?? null) : null,
     image: request.type === "image" ? (request.image ?? null) : null,
@@ -227,6 +227,38 @@ export function newBlock(request: NewBlockRequest): ExperienceBlock | null {
             showClear: true,
             showActive: true,
             target: { kind: "page" },
+          }
+        : null,
+    /*
+     * A NEW BLOCK IS NOT COLOURED BY A SEMÁFORO NOBODY CHOSE.
+     *
+     * Null is the honest starting point even for a block that opens as a
+     * `traffic_light`: the renderer says it is not configured and offers the
+     * controls, which is the whole point of §"a real semáforo". Picking the
+     * first scheme in the document would be the product deciding what good
+     * looks like.
+     */
+    bandSchemeId: null,
+    /**
+     * A NEW CLOUD COUNTS MENTIONS AND SAYS SO.
+     *
+     * `mentions` rather than `people` because it is the count the qualitative
+     * summary has always produced and the one the deployed visualization
+     * showed; changing what a number means as a side effect of adding a block
+     * is how two pages start disagreeing. The reader can switch it, and the
+     * drawing prints which basis it used either way.
+     */
+    themeCloud:
+      request.type === "theme_cloud"
+        ? {
+            basis: "mentions",
+            maximumThemes: 40,
+            minimumFontSize: 14,
+            maximumFontSize: 44,
+            orientation: "mostly_horizontal",
+            palette: "auto",
+            showCounts: true,
+            source: null,
           }
         : null,
     filterRefs: [],
@@ -340,6 +372,7 @@ export function newExperience(options: {
     pages: [],
     filterDefinitions: [],
     filterConnections: [],
+    bandSchemes: [],
     journeyReferences: [],
     review: { ...NEW_REVIEW },
     publication: { ...UNPUBLISHED },

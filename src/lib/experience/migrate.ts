@@ -39,7 +39,7 @@ import {
 } from "./definition";
 
 /** Every version this build can read. Extended, never rewritten. */
-export const SUPPORTED_SCHEMA_VERSIONS = [1, 2] as const;
+export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3] as const;
 
 export type MigrationOutcome =
   | { ok: true; definition: ExperienceDefinitionV1; migratedFrom: number }
@@ -181,6 +181,94 @@ function oneToTwo(value: unknown): unknown {
   };
 }
 
+/**
+ * VERSION 2 -> VERSION 3.
+ *
+ * PURELY ADDITIVE, AND THAT IS THE WHOLE DESIGN. Every field version 3 adds is
+ * a capability version 2 documents did not have, so every one of them starts
+ * at the value that means "not configured": no semáforo scheme, no awareness
+ * mapping, no per-moment prose, no per-moment drawing, `auto` palette. Nothing
+ * is moved, nothing is removed, and no identifier changes — so a filter
+ * connection, a panel target, a page order and a published layout all survive
+ * byte for byte, and reopening a version-2 draft shows exactly what it showed.
+ *
+ * THE ONE THING IT DELIBERATELY DOES NOT DO is guess an awareness mapping. A
+ * study can easily contain a result that looks like "did not know this moment
+ * existed" — the real one contains a whole family of them — but which result
+ * carries it, and which of its recorded values mean it, are two decisions.
+ * Inferring either would put a percentage on a client's screen that nobody
+ * configured, which is the same class of defect as the 0–10 threshold applied
+ * to a 1–5 scale. So `awareness` is null and the builder shows where to set it.
+ */
+function twoToThree(value: unknown): unknown {
+  const document = (value ?? {}) as Record<string, unknown>;
+  const pages = Array.isArray(document.pages) ? (document.pages as unknown[]) : [];
+  const journeys = Array.isArray(document.journeyReferences)
+    ? (document.journeyReferences as unknown[])
+    : [];
+
+  const migratedPages = pages.map((rawPage) => {
+    const page = (rawPage ?? {}) as Record<string, unknown>;
+    const blocks = Array.isArray(page.blocks) ? (page.blocks as unknown[]) : [];
+    return {
+      ...page,
+      blocks: blocks.map((rawBlock) => {
+        const block = { ...((rawBlock ?? {}) as Record<string, unknown>) };
+        block.bandSchemeId = null;
+        block.themeCloud =
+          block.type === "theme_cloud"
+            ? {
+                // The basis the deployed summary has always produced, so a
+                // version-2 cloud keeps showing the number it was showing.
+                basis: "mentions",
+                maximumThemes: 40,
+                minimumFontSize: 14,
+                maximumFontSize: 44,
+                orientation: "mostly_horizontal",
+                palette: "auto",
+                showCounts: true,
+                source: null,
+              }
+            : null;
+        const visualization = block.visualization as Record<string, unknown> | null | undefined;
+        if (visualization && typeof visualization === "object") {
+          block.visualization = { ...visualization, palette: "auto" };
+        }
+        return block;
+      }),
+    };
+  });
+
+  return {
+    ...document,
+    schemaVersion: 3,
+    bandSchemes: [],
+    journeyReferences: journeys.map((rawJourney) => {
+      const journey = { ...((rawJourney ?? {}) as Record<string, unknown>) };
+      journey.bandSchemeId = null;
+      const moments = Array.isArray(journey.moments) ? (journey.moments as unknown[]) : [];
+      journey.moments = moments.map((rawMoment) => {
+        const moment = { ...((rawMoment ?? {}) as Record<string, unknown>) };
+        /*
+         * `unawareMetricId` NAMED A RESULT AND NOTHING ELSE, so it could not
+         * say which answers meant "did not know". Carrying it forward as an
+         * awareness mapping would invent the missing half. It is dropped, and
+         * the moment says the measure is unconfigured — which it always was.
+         */
+        delete moment.unawareMetricId;
+        delete moment.unawareLabel;
+        moment.awareness = null;
+        moment.body = null;
+        moment.variant = null;
+        moment.bandSchemeId = null;
+        return moment;
+      });
+      return journey;
+    }),
+    pages: migratedPages,
+  };
+}
+
 /** The version a stored blob declares, or null when it declares none. */
 export function declaredVersion(value: unknown): number | null {
   if (typeof value !== "object" || value === null) return null;
@@ -209,6 +297,7 @@ export function migrateExperienceDefinition(value: unknown): MigrationOutcome {
   // One step per version, applied in order.
   let current: unknown = value;
   if (version < 2) current = oneToTwo(current);
+  if (version < 3) current = twoToThree(current);
 
   const parsed = parseExperienceDefinition(current);
   if (!parsed.ok) {

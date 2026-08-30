@@ -2,13 +2,21 @@ import type { ReactNode } from "react";
 
 import { formatNumber } from "@/lib/calc/format";
 import type { DataCell, ResolvedBlockData, SeriesUnit } from "@/lib/experience/data";
-import type { ChartVariant } from "@/lib/experience/charts";
+import type { ChartPalette, ChartVariant } from "@/lib/experience/charts";
 import { CHART_SPECS, alternativeVariant } from "@/lib/experience/charts";
 import {
   evaluateSampleVisibility,
   type SampleVisibilityPolicy,
 } from "@/lib/experience/sample-policy";
 import type { PlacedTheme, ThemeCloudLayout } from "@/lib/experience/theme-cloud";
+import {
+  bandRangeText,
+  classify,
+  verdictText,
+  type BandColorRole,
+  type BandScheme,
+  type BandShape,
+} from "@/lib/experience/bands";
 
 /**
  * The drawings, and the two rules they all obey.
@@ -290,15 +298,23 @@ export function TrafficLightChart({
   data,
   policy,
   target,
+  scheme,
 }: {
   data: ResolvedBlockData;
   policy: SampleVisibilityPolicy;
   target: TargetRange | null;
+  /**
+   * The agreed bands, when a person has configured some. A scheme is the real
+   * semáforo and it WINS over a bare range: a range says "inside or outside",
+   * a scheme says which band, what it means, and what the other bands are.
+   */
+  scheme: BandScheme | null;
 }) {
   const cell = applyPolicy(data.overall, policy);
   if (cell.state === "no_data" || cell.state === "suppressed") {
     return <KpiChart data={data} policy={policy} />;
   }
+  if (scheme) return <SemaforoChart data={data} policy={policy} scheme={scheme} />;
   if (!target || (target.minimum === null && target.maximum === null)) {
     /*
      * A SHORT CHIP HERE, THE WHOLE SENTENCE IN THE BLOCK'S CARD.
@@ -867,6 +883,18 @@ export type JourneyMomentView = {
   data: ResolvedBlockData | null;
   /** Why there is no number, when there is none. */
   missing: string | null;
+  /** Prose written for this moment alone, beside the number. */
+  body: string | null;
+  /**
+   * "No sabía que existía este momento", when a mapping is configured. Null
+   * when nobody configured one — which is a DIFFERENT statement from zero
+   * percent, and the card says so rather than printing a 0.
+   */
+  awareness: ResolvedBlockData | null;
+  /** Why the awareness share is absent, when a mapping exists but failed. */
+  awarenessMissing: string | null;
+  /** The semáforo this moment is read against, inherited or its own. */
+  scheme: BandScheme | null;
 };
 
 export function JourneyChart({
@@ -904,6 +932,11 @@ export function JourneyChart({
                 <p className={`text-xs ${cell.state === "warning" ? "text-caution" : "text-muted"}`}>
                   {moment.data.metricLabel} · {cell.disclosedSampleSize} respuestas
                 </p>
+                {moment.scheme ? (
+                  <div className="mt-1.5">
+                    <TrafficLightBadge scheme={moment.scheme} value={cell.value} compact />
+                  </div>
+                ) : null}
               </>
             ) : (
               <p className="mt-1 text-xs text-caution">
@@ -913,10 +946,72 @@ export function JourneyChart({
                     : "Todavía sin respuestas.")}
               </p>
             )}
+            {moment.body ? <p className="mt-1.5 text-xs text-body">{moment.body}</p> : null}
+            <MomentAwareness moment={moment} policy={policy} />
           </li>
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * "NO SABÍA QUE EXISTÍA ESTE MOMENTO", with its own arithmetic on show.
+ *
+ * A percentage, its numerator and its base, all three, because a share of an
+ * unstated denominator is a number nobody can check. It renders NOTHING when
+ * no mapping is configured: a moment where the question was never asked and a
+ * moment where nobody said no are different findings, and printing 0 % for the
+ * first is the more damaging of the two mistakes.
+ */
+function MomentAwareness({
+  moment,
+  policy,
+}: {
+  moment: JourneyMomentView;
+  policy: SampleVisibilityPolicy;
+}) {
+  if (moment.awarenessMissing) {
+    return <p className="mt-1.5 text-xs text-caution">{moment.awarenessMissing}</p>;
+  }
+  if (!moment.awareness) return null;
+  const cell = applyPolicy(moment.awareness.overall, policy);
+  if (cell.state === "suppressed") {
+    return (
+      <p className="mt-1.5 text-xs text-muted">
+        No se muestra quién no lo conocía: muy pocas respuestas.
+      </p>
+    );
+  }
+  if (cell.state === "no_data" || cell.value === null) {
+    return (
+      <p className="mt-1.5 text-xs text-muted">Nadie respondió si conocía este momento.</p>
+    );
+  }
+  const numerator = moment.awareness.detail.find((entry) => entry.label === "No lo conocían")?.value;
+  const base = cell.disclosedSampleSize;
+  const explanation =
+    numerator !== undefined && base !== null
+      ? `${numerator} de ${base} personas que respondieron la pregunta dijeron que no conocían este momento.`
+      : "Porcentaje de quienes respondieron la pregunta y dijeron que no lo conocían.";
+  return (
+    <p
+      className={`mt-1.5 rounded-md px-2 py-1 text-xs ${
+        cell.state === "warning" ? "bg-caution-surface text-caution" : "bg-surface-sunken text-body"
+      }`}
+      title={explanation}
+    >
+      <span className="font-semibold">
+        {formatValue(cell.value, "percent", moment.awareness.decimals)}
+      </span>{" "}
+      no conocía este momento
+      <span className="sr-only"> — {explanation}</span>
+      {numerator !== undefined && base !== null ? (
+        <span className="block text-[0.7rem] text-muted">
+          {numerator} de {base} que respondieron
+        </span>
+      ) : null}
+    </p>
   );
 }
 
@@ -1066,5 +1161,742 @@ export function UnavailableRenderer({
       </p>
       <div className="mt-2 min-w-0">{children}</div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Semáforo — the real one, read against a scheme somebody agreed to
+// ---------------------------------------------------------------------------
+
+/**
+ * COLOUR IS NEVER THE ONLY SIGNAL.
+ *
+ * Every band carries a shape and a sentence as well as a colour role, and all
+ * three are drawn. That is an accessibility floor — roughly one man in twelve
+ * cannot tell this product's verde from its rojo — and it is also what makes a
+ * printed report and a photocopy still say something.
+ */
+const BAND_ROLE_STYLE: Record<
+  BandColorRole,
+  { dot: string; box: string; text: string }
+> = {
+  positive: {
+    dot: "var(--color-green)",
+    box: "border-positive-line bg-positive-surface",
+    text: "text-positive",
+  },
+  caution: {
+    dot: "var(--color-yellow)",
+    box: "border-caution-line bg-caution-surface",
+    text: "text-caution",
+  },
+  danger: {
+    dot: "var(--color-magenta)",
+    box: "border-danger-line bg-danger-surface",
+    text: "text-danger",
+  },
+  evidence: {
+    dot: "var(--color-evidence)",
+    box: "border-evidence-line bg-evidence-surface",
+    text: "text-evidence",
+  },
+  neutral: { dot: "var(--color-line-strong)", box: "border-line bg-surface-sunken", text: "text-body" },
+};
+
+/** The non-colour signal, drawn. A name a reader can say out loud. */
+function BandGlyph({ shape, color, size = 18 }: { shape: BandShape; color: string; size?: number }) {
+  const half = size / 2;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true" focusable="false">
+      {shape === "circle" ? <circle cx={half} cy={half} r={half - 1} fill={color} /> : null}
+      {shape === "square" ? (
+        <rect x={1} y={1} width={size - 2} height={size - 2} rx={2} fill={color} />
+      ) : null}
+      {shape === "triangle" ? (
+        <polygon points={`${half},1 ${size - 1},${size - 1} 1,${size - 1}`} fill={color} />
+      ) : null}
+      {shape === "diamond" ? (
+        <polygon points={`${half},1 ${size - 1},${half} ${half},${size - 1} 1,${half}`} fill={color} />
+      ) : null}
+      {shape === "bar" ? (
+        <rect x={1} y={half - 3} width={size - 2} height={6} rx={2} fill={color} />
+      ) : null}
+    </svg>
+  );
+}
+
+/**
+ * One value's verdict, compact enough to sit inside a journey moment.
+ *
+ * An unclassified value says so rather than borrowing the nearest colour: a
+ * scheme with a gap in it is a scheme somebody has to finish, and this is how
+ * they find out.
+ */
+export function TrafficLightBadge({
+  scheme,
+  value,
+  compact = false,
+}: {
+  scheme: BandScheme;
+  value: number | string | null;
+  compact?: boolean;
+}) {
+  const verdict = classify(scheme, value);
+  if (verdict.kind === "no_data") {
+    return <span className="text-xs text-muted">{scheme.noDataLabel}</span>;
+  }
+  if (verdict.kind === "unclassified") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md border border-caution-line bg-caution-surface px-2 py-0.5 text-xs text-caution">
+        <span aria-hidden="true">▲</span>
+        <span className="min-w-0">{verdict.detail}</span>
+      </span>
+    );
+  }
+  const style = BAND_ROLE_STYLE[verdict.band.colorRole];
+  return (
+    <span
+      className={`inline-flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-0.5 ${style.box} ${style.text}`}
+      title={`${verdict.band.label}: ${verdict.band.meaning}`}
+    >
+      <BandGlyph shape={verdict.band.shape} color={style.dot} size={compact ? 12 : 16} />
+      <span className="min-w-0 truncate text-xs font-semibold">{verdict.band.label}</span>
+      {compact ? null : <span className="min-w-0 truncate text-xs">{verdict.band.meaning}</span>}
+      <span className="sr-only">. {verdict.band.meaning}</span>
+    </span>
+  );
+}
+
+/** Every band, in order, so a reader can see what the colours mean. */
+export function BandLegend({ scheme }: { scheme: BandScheme }) {
+  return (
+    <ul className="m-0 mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-1 p-0">
+      {scheme.bands.map((band) => {
+        const style = BAND_ROLE_STYLE[band.colorRole];
+        return (
+          <li key={band.id} className="flex min-w-0 list-none items-center gap-1.5 text-xs text-body">
+            <BandGlyph shape={band.shape} color={style.dot} size={12} />
+            <span className="min-w-0 truncate">
+              <span className="font-medium text-strong">{band.label}</span>
+              <span className="text-muted"> · {bandRangeText(scheme, band)}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/**
+ * THE SEMÁFORO, drawn against a scheme.
+ *
+ * The value, the band it falls in, the shape, the sentence, and the whole
+ * legend beneath — so the reading is checkable rather than a colour somebody
+ * has to interpret. Every band's range is written out, which is also what
+ * makes the picture printable: the legend survives a photocopy.
+ */
+export function SemaforoChart({
+  data,
+  policy,
+  scheme,
+}: {
+  data: ResolvedBlockData;
+  policy: SampleVisibilityPolicy;
+  scheme: BandScheme;
+}) {
+  const cell = applyPolicy(data.overall, policy);
+  if (cell.state === "no_data" || cell.state === "suppressed") {
+    return <KpiChart data={data} policy={policy} />;
+  }
+  const verdict = classify(scheme, cell.value);
+  const style =
+    verdict.kind === "band" ? BAND_ROLE_STYLE[verdict.band.colorRole] : BAND_ROLE_STYLE.neutral;
+
+  return (
+    <ChartFrame
+      label={`Semáforo “${scheme.title}”: ${data.metricLabel} vale ${formatValue(
+        cell.value,
+        data.unit,
+        data.decimals,
+      )} y queda en ${verdictText(scheme, verdict)}`}
+      table={
+        <table>
+          <caption>
+            {data.metricLabel} · semáforo {scheme.title}
+          </caption>
+          <tbody>
+            <tr>
+              <th scope="row">Valor</th>
+              <td>{formatValue(cell.value, data.unit, data.decimals)}</td>
+            </tr>
+            <tr>
+              <th scope="row">Clasificación</th>
+              <td>{verdictText(scheme, verdict)}</td>
+            </tr>
+            <tr>
+              <th scope="row">Base</th>
+              <td>{cell.disclosedSampleSize ?? "no se revela"}</td>
+            </tr>
+            {scheme.bands.map((band) => (
+              <tr key={band.id}>
+                <th scope="row">{band.label}</th>
+                <td>
+                  {bandRangeText(scheme, band)} — {band.meaning}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      }
+    >
+      <div className={`min-w-0 rounded-lg border px-3 py-2.5 ${style.box}`}>
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <BandGlyph
+            shape={verdict.kind === "band" ? verdict.band.shape : "circle"}
+            color={style.dot}
+            size={26}
+          />
+          <p className={`font-display text-2xl font-semibold ${style.text}`}>
+            {formatValue(cell.value, data.unit, data.decimals)}
+          </p>
+          <div className="min-w-0">
+            <p className={`text-sm font-semibold ${style.text}`}>
+              {verdict.kind === "band" ? verdict.band.label : verdictText(scheme, verdict)}
+            </p>
+            <p className="text-xs text-body">
+              {verdict.kind === "band" ? verdict.band.meaning : ""}
+            </p>
+          </div>
+        </div>
+        <p className={`mt-1 text-xs ${cell.state === "warning" ? "text-caution" : "text-muted"}`}>
+          {data.metricLabel}
+          {cell.disclosedSampleSize === null ? "" : ` · ${cell.disclosedSampleSize} respuestas`}
+        </p>
+        <BandLegend scheme={scheme} />
+      </div>
+    </ChartFrame>
+  );
+}
+
+/**
+ * WHAT A BLOCK SAYS WHEN NOBODY HAS AGREED WHAT GOOD LOOKS LIKE.
+ *
+ * The number, and a chip naming exactly what is missing. Never a colour: the
+ * whole point of the semáforo model is that the product does not decide where
+ * verde begins, and a "sensible default" here would be the product publishing
+ * a verdict nobody made.
+ */
+export function SemaforoUnconfigured({
+  data,
+  policy,
+}: {
+  data: ResolvedBlockData;
+  policy: SampleVisibilityPolicy;
+}) {
+  return (
+    <div className="min-w-0">
+      <KpiChart data={data} policy={policy} showDetail={false} />
+      <p className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-md border border-caution-line bg-caution-surface px-2 py-1 text-xs text-caution">
+        <span aria-hidden="true">▲</span>
+        <span className="min-w-0 truncate">Falta configurar el semáforo</span>
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The three drawings that used to say they were not drawn
+// ---------------------------------------------------------------------------
+
+/**
+ * THE PALETTES, resolved from the role a block declared.
+ *
+ * Ramps rather than lists, because a heat map, a treemap and a bubble field
+ * encode a QUANTITY in colour and a rainbow implies categories where there are
+ * degrees. `categorical` is the exception and exists for the case where the
+ * fill genuinely distinguishes rather than ranks.
+ */
+const PALETTE_RAMP: Record<ChartPalette, readonly string[]> = {
+  auto: ["var(--color-sky)", "var(--color-blue)", "var(--color-evidence)"],
+  mono: ["var(--color-sky)", "var(--color-blue)", "var(--color-evidence)"],
+  cool: ["var(--color-sky)", "var(--color-lavender)", "var(--color-blue)"],
+  warm: ["var(--color-yellow)", "var(--color-magenta)", "var(--color-voice)"],
+  diverging: ["var(--color-magenta)", "var(--color-yellow)", "var(--color-green)"],
+  categorical: SERIES_COLORS,
+};
+
+/**
+ * A cell's fill for a ramp, as an opacity over one hue.
+ *
+ * INTENSITY IS NOT INTERPOLATED BETWEEN NEIGHBOURS. Each cell is coloured from
+ * its OWN value against the whole range, so no colour anywhere on the drawing
+ * stands for a number that was not measured. A smooth gradient across a grid
+ * would invent readings between the ones that exist, which is the specific
+ * dishonesty a heat map is prone to.
+ */
+function rampFill(weight: number, palette: ChartPalette): { color: string; opacity: number } {
+  const ramp = PALETTE_RAMP[palette] ?? PALETTE_RAMP.auto;
+  const color = ramp[Math.min(ramp.length - 1, Math.floor(weight * ramp.length))] ?? ramp[0];
+  // Floored well above zero: a real, measured, low value must never be
+  // indistinguishable from an empty cell.
+  return { color, opacity: 0.25 + weight * 0.75 };
+}
+
+/** Text that stays legible on a filled cell of a given weight. */
+function fillText(weight: number): string {
+  return weight > 0.55 ? "var(--color-paper)" : "var(--color-strong)";
+}
+
+// --- Heat map --------------------------------------------------------------
+
+/**
+ * TWO CHARACTERISTICS CROSSED, with the value as intensity.
+ *
+ * WHAT MAKES IT HONEST RATHER THAN DECORATIVE:
+ *
+ *  - a cell with no answers is drawn as an EMPTY cell with a dash, never as
+ *    the bottom of the colour scale, because "nobody answered" and "everybody
+ *    answered badly" are opposite findings;
+ *  - a cell the disclosure rule withheld says so and shows no colour at all,
+ *    since the intensity would leak the very number that was suppressed;
+ *  - every cell carries its value and its base as text on hover AND in the
+ *    table underneath, so the colour is never the only place the number is;
+ *  - the legend states the range the colours span, in the result's own unit.
+ *
+ * On a narrow screen it scrolls inside its own box: a grid squeezed to 320 px
+ * is a grid nobody can read, and shrinking the cells until the labels collide
+ * would be worse than asking somebody to scroll.
+ */
+export function HeatMap({
+  data,
+  policy,
+  palette = "auto",
+  showValueLabels = true,
+}: {
+  data: ResolvedBlockData;
+  policy: SampleVisibilityPolicy;
+  palette?: ChartPalette;
+  showValueLabels?: boolean;
+}) {
+  if (data.categories.length === 0 || !hasAnyValue(data, policy)) {
+    return (
+      <EmptyChart
+        title="Todavía no hay con qué llenar el mapa"
+        detail="Un mapa de calor necesita dos características cruzadas y al menos un valor."
+      />
+    );
+  }
+  const scale = scaleFor(data, policy);
+  const cells = data.series.map((series) =>
+    series.cells.map((cell) => applyPolicy(cell, policy)),
+  );
+
+  return (
+    <ChartFrame
+      label={chartLabel(data, "Mapa de calor")}
+      table={<ValueTable data={data} policy={policy} caption={data.metricLabel} />}
+    >
+      <div className="min-w-0 overflow-x-auto">
+        <table className="min-w-full border-separate border-spacing-0.5 text-xs">
+          <tbody>
+            <tr>
+              <td className="sticky left-0 z-10 bg-surface px-1 py-1 text-[0.65rem] font-semibold text-muted">
+                {data.categoryLabel ?? ""}
+              </td>
+              {data.series.map((series) => (
+                <th
+                  key={series.key}
+                  scope="col"
+                  className="min-w-16 px-1 py-1 text-center align-bottom text-[0.65rem] font-semibold text-muted"
+                >
+                  <span className="block max-w-24 truncate" title={series.label ?? "Total"}>
+                    {series.label ?? "Total"}
+                  </span>
+                </th>
+              ))}
+            </tr>
+            {data.categories.map((category, row) => (
+              <tr key={category.key}>
+                <th
+                  scope="row"
+                  className="sticky left-0 z-10 max-w-32 truncate bg-surface px-1 py-1 text-left font-medium text-body"
+                  title={category.label}
+                >
+                  {category.label}
+                </th>
+                {data.series.map((series, column) => {
+                  const cell = cells[column]?.[row];
+                  if (!cell || cell.state === "no_data") {
+                    return (
+                      <td
+                        key={series.key}
+                        className="min-w-16 rounded border border-dashed border-line px-1 py-2 text-center text-muted"
+                        title={`${category.label} · ${series.label ?? "Total"}: sin respuestas`}
+                      >
+                        —
+                      </td>
+                    );
+                  }
+                  if (cell.state === "suppressed") {
+                    return (
+                      <td
+                        key={series.key}
+                        className="min-w-16 rounded border border-line bg-surface-sunken px-1 py-2 text-center text-muted"
+                        title={`${category.label} · ${series.label ?? "Total"}: no se muestra, muy pocas respuestas`}
+                      >
+                        ·
+                      </td>
+                    );
+                  }
+                  const weight = ratio(cell.value ?? 0, scale);
+                  const fill = rampFill(weight, palette);
+                  return (
+                    <td
+                      key={series.key}
+                      className="min-w-16 rounded px-1 py-2 text-center font-medium"
+                      style={{
+                        backgroundColor: fill.color,
+                        opacity: undefined,
+                        color: fillText(weight),
+                        boxShadow: `inset 0 0 0 999px color-mix(in srgb, var(--color-paper) ${Math.round(
+                          (1 - fill.opacity) * 100,
+                        )}%, transparent)`,
+                      }}
+                      title={`${category.label} · ${series.label ?? "Total"}: ${formatValue(
+                        cell.value,
+                        data.unit,
+                        data.decimals,
+                      )} sobre ${cell.disclosedSampleSize} respuestas`}
+                    >
+                      {showValueLabels ? formatValue(cell.value, data.unit, data.decimals) : ""}
+                      {cell.state === "warning" ? <span aria-hidden="true"> ▲</span> : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1.5 text-xs text-muted">
+        Más intenso = más alto. De {formatValue(scale.min, data.unit, data.decimals)} a{" "}
+        {formatValue(scale.max, data.unit, data.decimals)}. Una celda vacía (—) es que nadie
+        respondió; un punto (·) es que hubo muy pocas respuestas para mostrarla.
+      </p>
+    </ChartFrame>
+  );
+}
+
+// --- Bubbles ---------------------------------------------------------------
+
+/**
+ * TWO CHARACTERISTICS CROSSED, with the value as AREA.
+ *
+ * AREA, NOT RADIUS. A circle drawn with its radius proportional to the value
+ * exaggerates every difference by the square — a value twice as large looks
+ * four times as big. So the radius is the square root of the weight, which is
+ * what makes the AREA proportional and the reading honest.
+ *
+ * The catalogue restricts this to `count`, `sum`, `share` and `top_box` for a
+ * reason a comment cannot fix: an NPS runs from -100 and a promedio has no
+ * zero point, and neither has an area. A negative bubble is not a small
+ * bubble.
+ *
+ * A cell with no answers draws NOTHING, not a dot. The smallest visible circle
+ * still has to mean a measured value.
+ */
+export function BubbleChart({
+  data,
+  policy,
+  palette = "auto",
+}: {
+  data: ResolvedBlockData;
+  policy: SampleVisibilityPolicy;
+  palette?: ChartPalette;
+}) {
+  if (data.categories.length === 0 || !hasAnyValue(data, policy)) {
+    return (
+      <EmptyChart
+        title="Todavía no hay con qué dibujar las burbujas"
+        detail="Necesita dos características cruzadas y al menos un valor."
+      />
+    );
+  }
+  const scale = scaleFor(data, policy);
+  const columns = data.series.length;
+  const rows = data.categories.length;
+  // A fixed lattice: one bubble per crossing, at the centre of its cell. There
+  // is no packing and no jitter, so the same data always draws the same
+  // picture and two bubbles can never be placed on top of each other.
+  const cellW = 96;
+  const cellH = 56;
+  const left = 120;
+  const top = 28;
+  const width = left + columns * cellW + 12;
+  const height = top + rows * cellH + 12;
+  const maxRadius = Math.min(cellW, cellH) / 2 - 6;
+  const ramp = PALETTE_RAMP[palette] ?? PALETTE_RAMP.auto;
+
+  return (
+    <ChartFrame
+      label={chartLabel(data, "Burbujas")}
+      table={<ValueTable data={data} policy={policy} caption={data.metricLabel} />}
+    >
+      <div className="min-w-0 overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          width={width}
+          height={height}
+          aria-hidden="true"
+          focusable="false"
+          className="max-w-full"
+        >
+          {data.series.map((series, column) => (
+            <text
+              key={series.key}
+              x={left + column * cellW + cellW / 2}
+              y={16}
+              textAnchor="middle"
+              fontSize="10"
+              fill="var(--color-muted)"
+            >
+              {(series.label ?? "Total").slice(0, 14)}
+            </text>
+          ))}
+          {data.categories.map((category, row) => (
+            <text
+              key={category.key}
+              x={left - 8}
+              y={top + row * cellH + cellH / 2 + 3}
+              textAnchor="end"
+              fontSize="10"
+              fill="var(--color-body)"
+            >
+              {category.label.slice(0, 18)}
+            </text>
+          ))}
+          {data.series.map((series, column) =>
+            data.categories.map((category, row) => {
+              const cell = applyPolicy(
+                series.cells[row] ?? { categoryKey: category.key, value: null, n: 0 },
+                policy,
+              );
+              if (cell.state === "no_data" || cell.state === "suppressed" || cell.value === null) {
+                return null;
+              }
+              const weight = ratio(cell.value, scale);
+              // AREA proportional: radius scales with the square root.
+              const radius = Math.max(3, Math.sqrt(weight) * maxRadius);
+              return (
+                <circle
+                  key={`${series.key}-${category.key}`}
+                  cx={left + column * cellW + cellW / 2}
+                  cy={top + row * cellH + cellH / 2}
+                  r={radius}
+                  fill={ramp[column % ramp.length]}
+                  fillOpacity={0.72}
+                  stroke="var(--color-paper)"
+                  strokeWidth={1}
+                />
+              );
+            }),
+          )}
+        </svg>
+      </div>
+      <p className="mt-1.5 text-xs text-muted">
+        El ÁREA de cada burbuja es proporcional al valor, de{" "}
+        {formatValue(scale.min, data.unit, data.decimals)} a{" "}
+        {formatValue(scale.max, data.unit, data.decimals)}. Un cruce sin respuestas no dibuja
+        ninguna burbuja.
+      </p>
+      <VisibleValueList data={data} policy={policy} />
+    </ChartFrame>
+  );
+}
+
+// --- Treemap ---------------------------------------------------------------
+
+/**
+ * PARTS OF A WHOLE, BY AREA.
+ *
+ * The rectangle sizes are shares of the total, which is the entire claim the
+ * drawing makes — and why the catalogue restricts it to `count`, `sum` and
+ * `share`, the aggregations whose parts genuinely add up. A treemap of
+ * averages would be a picture of an assertion nobody made.
+ *
+ * The layout is a deterministic slice-and-dice: largest first, alternating
+ * horizontal and vertical cuts. No randomness, no clock, so a report and a
+ * screen always show the same rectangles in the same places.
+ *
+ * A rectangle too small for its label keeps the rectangle and drops the text
+ * rather than overlapping its neighbour; the ordered list underneath is the
+ * reference and always carries every label and every number.
+ */
+export function TreemapChart({
+  data,
+  policy,
+  palette = "auto",
+}: {
+  data: ResolvedBlockData;
+  policy: SampleVisibilityPolicy;
+  palette?: ChartPalette;
+}) {
+  const series = data.series[0];
+  const entries = (series?.cells ?? [])
+    .map((cell, index) => ({
+      key: data.categories[index]?.key ?? String(index),
+      label: data.categories[index]?.label ?? "",
+      cell: applyPolicy(cell, policy),
+    }))
+    .filter((entry) => entry.cell.state !== "no_data" && (entry.cell.value ?? 0) > 0)
+    // Deterministic: by value, then by label, so ties never reorder.
+    .sort((a, b) => (b.cell.value ?? 0) - (a.cell.value ?? 0) || a.label.localeCompare(b.label, "es-MX"));
+
+  if (entries.length === 0) {
+    return (
+      <EmptyChart
+        title="Todavía no hay partes que repartir"
+        detail="Los rectángulos representan la parte que cada categoría ocupa del total; sin valores positivos no hay reparto que dibujar."
+      />
+    );
+  }
+
+  const suppressed = (series?.cells ?? []).filter(
+    (cell) => applyPolicy(cell, policy).state === "suppressed",
+  ).length;
+  const total = entries.reduce((sum, entry) => sum + (entry.cell.value ?? 0), 0);
+  const width = 640;
+  const height = 320;
+  const ramp = PALETTE_RAMP[palette] ?? PALETTE_RAMP.auto;
+
+  type Rect = { x: number; y: number; w: number; h: number };
+  const placed: (Rect & { label: string; value: number; base: number | null; index: number })[] = [];
+  let box: Rect = { x: 0, y: 0, w: width, h: height };
+  let remaining = total;
+  entries.forEach((entry, index) => {
+    const value = entry.cell.value ?? 0;
+    const share = remaining <= 0 ? 0 : value / remaining;
+    const horizontal = box.w >= box.h;
+    const cut = index === entries.length - 1
+      ? { w: box.w, h: box.h }
+      : horizontal
+        ? { w: box.w * share, h: box.h }
+        : { w: box.w, h: box.h * share };
+    placed.push({
+      x: box.x,
+      y: box.y,
+      w: cut.w,
+      h: cut.h,
+      label: entry.label,
+      value,
+      base: entry.cell.disclosedSampleSize,
+      index,
+    });
+    box = horizontal
+      ? { x: box.x + cut.w, y: box.y, w: box.w - cut.w, h: box.h }
+      : { x: box.x, y: box.y + cut.h, w: box.w, h: box.h - cut.h };
+    remaining -= value;
+  });
+
+  return (
+    <ChartFrame
+      label={chartLabel(data, "Rectángulos proporcionales")}
+      table={<ValueTable data={data} policy={policy} caption={data.metricLabel} />}
+    >
+      <div className="min-w-0 overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-auto w-full min-w-80"
+          aria-hidden="true"
+          focusable="false"
+        >
+          {placed.map((rect) => {
+            const weight = total <= 0 ? 0 : rect.value / total;
+            const fill = ramp[rect.index % ramp.length];
+            // A LABEL THAT WOULD NOT FIT IS DROPPED, NOT SHRUNK TO ILLEGIBILITY
+            // AND NOT ALLOWED TO SPILL. The list underneath carries every one.
+            const roomy = rect.w > 74 && rect.h > 34;
+            return (
+              <g key={rect.label + rect.index}>
+                <rect
+                  x={rect.x + 1}
+                  y={rect.y + 1}
+                  width={Math.max(0, rect.w - 2)}
+                  height={Math.max(0, rect.h - 2)}
+                  fill={fill}
+                  fillOpacity={0.35 + weight * 0.5}
+                  stroke="var(--color-paper)"
+                  strokeWidth={2}
+                  rx={3}
+                />
+                {roomy ? (
+                  <>
+                    <text
+                      x={rect.x + 8}
+                      y={rect.y + 18}
+                      fontSize="11"
+                      fontWeight="600"
+                      fill="var(--color-strong)"
+                    >
+                      {rect.label.slice(0, Math.max(4, Math.floor(rect.w / 7)))}
+                    </text>
+                    <text x={rect.x + 8} y={rect.y + 32} fontSize="10" fill="var(--color-body)">
+                      {formatValue(rect.value, data.unit, data.decimals)}
+                    </text>
+                  </>
+                ) : null}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <p className="mt-1.5 text-xs text-muted">
+        El área de cada rectángulo es su parte del total ({formatValue(total, data.unit, data.decimals)}).
+        {suppressed > 0
+          ? ` ${suppressed === 1 ? "1 categoría no se muestra" : `${suppressed} categorías no se muestran`} por tener muy pocas respuestas.`
+          : ""}
+      </p>
+      <VisibleValueList data={data} policy={policy} />
+    </ChartFrame>
+  );
+}
+
+/**
+ * THE ORDERED LIST BENEATH A DRAWING, VISIBLE RATHER THAN SCREEN-READER-ONLY.
+ *
+ * A bubble field and a treemap both encode magnitude as area, which the eye
+ * reads approximately at best. So the numbers are printed as well as drawn —
+ * for everybody, not only for somebody using a screen reader, and it is the
+ * representation that survives a phone.
+ */
+function VisibleValueList({
+  data,
+  policy,
+}: {
+  data: ResolvedBlockData;
+  policy: SampleVisibilityPolicy;
+}) {
+  const series = data.series[0];
+  if (!series) return null;
+  const rows = data.categories
+    .map((category, index) => ({
+      label: category.label,
+      cell: applyPolicy(series.cells[index] ?? { categoryKey: category.key, value: null, n: 0 }, policy),
+    }))
+    .filter((row) => row.cell.state !== "no_data");
+  if (rows.length === 0) return null;
+  return (
+    <ul className="m-0 mt-2 flex min-w-0 flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
+      {rows.slice(0, 24).map((row) => (
+        <li key={row.label} className="flex min-w-0 list-none items-baseline gap-1">
+          <span className="min-w-0 truncate text-body">{row.label}</span>
+          <span className="font-semibold text-strong">
+            {row.cell.state === "suppressed"
+              ? "—"
+              : formatValue(row.cell.value, data.unit, data.decimals)}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

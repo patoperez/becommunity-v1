@@ -570,7 +570,7 @@ export function validateExperienceDefinition(
     for (const moment of journey.moments) {
       for (const [metricId, what] of [
         [moment.metricId, "el resultado"],
-        [moment.unawareMetricId, "la medida de desconocimiento"],
+        [moment.awareness?.metricId ?? null, "la medida de desconocimiento"],
       ] as const) {
         if (!metricId) continue;
         const metric = findMetric(registry, metricId);

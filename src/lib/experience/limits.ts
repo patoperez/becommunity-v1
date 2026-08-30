@@ -50,6 +50,24 @@ export const EXPERIENCE_LIMITS = {
   defaultValuesPerFilter: 50,
   /** Independent journeys in one experience. */
   journeys: 8,
+  /**
+   * Reusable semáforo schemes in one experience.
+   *
+   * Twelve is generous for "the standards this study holds things to" and small
+   * enough that a picker stays a list rather than a search. A scheme is a
+   * DECISION about what good looks like; a study needing dozens of them is a
+   * study that has not made one.
+   */
+  bandSchemes: 12,
+  /** Bands inside one scheme. Three is the classic; eight is already a legend. */
+  bandsPerScheme: 8,
+  /**
+   * Words one thematic cloud may draw.
+   *
+   * Beyond this the words that did not fit are COUNTED and listed rather than
+   * dropped, so the ceiling never silently loses a theme.
+   */
+  themesPerCloud: 120,
   /** Ordered moments in one journey. */
   momentsPerJourney: 24,
   /**
