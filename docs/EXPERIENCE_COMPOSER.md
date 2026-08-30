@@ -506,3 +506,91 @@ without saying so and never showed a fallback; the per-block disclosure override
 was implemented and unreachable; the export revoked its object URL in the same
 tick as the click that used it; and a `finding` — which may read a result — was
 described as a block that does not.
+
+---
+
+## 17. How to evaluate the prototype
+
+Written for the person judging the model, not for the person who built it.
+
+### Where it runs
+
+There is **no deployed version of this and there must not be one yet**. The
+prototype is not on the Worker, the Worker's live version is untouched, and the
+branch is not merged. Evaluate it against the application running on your own
+machine.
+
+```
+npm run dev
+```
+
+Then sign in with your ordinary internal account at `http://localhost:3000`.
+
+### Finding the study
+
+Studio, then **Estudios**, then **La voz de las y los Nets de Cuicuilco**
+(client: BNI Cuicuilco). The prototype is deliberately **not** one of the tabs
+in the study's process row — a step that saves nothing would misdescribe the
+process — so open it by its address:
+
+```
+/studio/e/<id del estudio>/construccion
+```
+
+The id is the long code already in the address bar once the study is open.
+
+### What to try, in the order that answers the most
+
+1. **Read the yellow banner first.** It says the screen saves nothing and that
+   the client never sees it. Both are true; step 12 proves it.
+2. **Move between the five pages** on the left. The middle column is that page.
+3. **Click a block.** The right-hand panel says where its number comes from,
+   which characteristic breaks it down, which filters move it, which disclosure
+   rule applies to it, and how wide it is on each of the three screens.
+4. **Change its visible title.** Watch the composition follow along, and check
+   that the cursor never jumps.
+5. **Hide it, show it, duplicate it, remove the copy, move it up and down.**
+   Ask whether that is how you would want to rearrange a client's page.
+6. **Add a block** from the catalogue on the left. Only the kinds this study can
+   actually sustain are offered.
+7. **Change how a block is drawn.** The list is split into what the result can
+   honestly become and what it cannot. Pick something from the second group on
+   purpose: the panel at the bottom turns red and says what would stop it being
+   saved. Change it back and carry on — that is the point.
+8. **Switch the width at the top** between computer, tablet and phone, and watch
+   the composition rearrange.
+9. **Change the disclosure rule** on the left, between showing everything,
+   showing with a warning, and hiding. Then give **one block its own rule** in
+   the right-hand panel. This is the decision that matters most: it is the rule
+   that decides whether a study of eleven people can see its own eleven answers.
+10. **Read the notes at the bottom.** "Avisos que no impiden nada" are things
+    you may publish anyway. "Lo que el modelo todavía no sabe representar" is
+    the honest list of what this model cannot yet carry from this study.
+11. **Press "Descargar esta versión"** if you want to keep what you arranged.
+12. **Reload the page.** Everything you did disappears and the study's real
+    configuration comes back. Nothing was ever written.
+
+### What is deliberately fake
+
+- **There are no numbers.** Every result frame shows a dash. This slice reads no
+  calculation, and a preview with numbers in it would be a preview with invented
+  numbers in it.
+- **Several drawings have no renderer yet.** Where that is true the block says
+  so and shows the stand-in the model declares — a traffic light appears as
+  horizontal bars, for instance. Judge the *choice*, not the picture.
+- **Nothing is saved, published, or sent anywhere.** No draft, no snapshot, no
+  autosave. The study's configuration, its data, its publication state and the
+  client's view are all untouched.
+- **The client cannot reach this screen.** A client-role account that opens the
+  address is sent to its own dashboard by the server, not by the interface.
+
+### What to write down
+
+- Is **page → block → property** how you actually think about a client's study?
+- Is the **left / middle / right** arrangement the one you want to work in?
+- Which **block kinds are missing**, and which of the eighteen are noise?
+- Is the **disclosure rule** in the right place, and is per-block the right
+  granularity?
+- Is **"a filter moves a block only when somebody says so"** right, or should
+  sharing a characteristic be enough?
+- What would you need before you would trust this with a real client's page?
