@@ -1611,8 +1611,8 @@ ok("a canvas block shows a drag handle, its name and one menu, not five permanen
 
 // --- Panels collapse on a computer and become drawers on a narrow screen.
 for (const [pattern, message] of [
-  [/setLeftOpen/, "the left panel collapses"],
-  [/setRightOpen/, "the right panel collapses"],
+  [/setChrome\(\{ focus: false, left: !showLeft \}\)/, "the left panel collapses"],
+  [/setChrome\(\{ focus: false, right: !showRight \}\)/, "the right panel collapses"],
   [/setDrawer\(/, "and both become drawers"],
   [/lg:static/, "the same element is a column from lg up"],
   [/event\.key === "Escape"/, "Escape closes an open drawer"],
@@ -1628,6 +1628,81 @@ assert.equal(
   "there is exactly one left panel and one right panel in the tree",
 );
 ok("the panels collapse on a computer and become drawers below it, without duplicating a control");
+
+/*
+ * --- HIDING A PANEL GIVES THE CANVAS THE ROOM, AND FOCUS MODE HIDES BOTH. ---
+ *
+ * The four grid templates are asserted as complete literals, because that is
+ * also what makes Tailwind emit them: a template assembled at run time is a
+ * class that does not exist in the stylesheet, and the canvas would silently
+ * fail to reflow with every gate still green.
+ */
+for (const [pattern, message] of [
+  [
+    /lg:grid-cols-\[minmax\(0,1fr\)\] xl:grid-cols-\[minmax\(0,1fr\)\]/,
+    "with both panels hidden the canvas is the only column there is",
+  ],
+  [
+    /lg:grid-cols-\[minmax\(0,1fr\)\] xl:grid-cols-\[minmax\(0,1fr\)_auto\]/,
+    "hiding the left panel removes its track rather than leaving a zero-width one",
+  ],
+  [
+    /lg:grid-cols-\[auto_minmax\(0,1fr\)\] xl:grid-cols-\[auto_minmax\(0,1fr\)\]/,
+    "and hiding the right panel removes its track too",
+  ],
+  [/const showLeft = leftOpen && !focusMode;/, "focus mode hides the left panel without forgetting it"],
+  [/const showRight = rightOpen && !focusMode;/, "and the right one"],
+  [/Salir de modo enfoque/, "and it says how to leave, in words, on screen"],
+  [/aria-pressed=\{focusMode\}/, "the focus control announces its own state"],
+  [/Mostrar el panel de páginas y catálogo de bloques/, "a hidden left panel has a named way back"],
+  [/Mostrar la ficha del bloque seleccionado/, "and so does a hidden right panel"],
+  [/Ajustar al espacio/, "the canvas can be fitted to the room it actually has"],
+  [/new ResizeObserver/, "which means measuring that room rather than guessing it"],
+  [/MINIMUM_FIT_SCALE/, "with a floor, below which it pans instead of becoming a thumbnail"],
+]) {
+  assert.match(builderSource, pattern, message);
+}
+
+// FOCUS MODE MUST NOT BE A TRAP, AND ESCAPE MUST NOT BE STOLEN.
+assert.match(
+  builderSource,
+  /if \(!focusMode \|\| drawer !== "none"\) return;/,
+  "Escape belongs to an open drawer before it belongs to focus mode",
+);
+assert.match(
+  builderSource,
+  /role='dialog'/,
+  "and to an open dialog before either",
+);
+
+// THE CHROME IS NEVER THE DOCUMENT. Toggling a panel must not be able to reach
+// the reducer that owns the definition, so the save state cannot move.
+const chromeCalls = builderSource.match(/setChrome\([^)]*\)/g) ?? [];
+assert.ok(chromeCalls.length >= 5, "the chrome is changed through one named function");
+for (const call of chromeCalls) {
+  assert.doesNotMatch(
+    call,
+    /act\(|dispatch\(|definition/,
+    `toggling a panel must not touch the document: ${call}`,
+  );
+}
+// And it is read the one way that neither breaks hydration nor cascades.
+assert.match(
+  builderSource,
+  /useSyncExternalStore\(subscribeChrome, readChrome, serverChrome\)/,
+  "the chrome is read through the store React provides for browser-only state",
+);
+assert.match(
+  builderSource,
+  /function serverChrome\(\): ChromePreference \{\s*return DEFAULT_CHROME;/,
+  "and the server renders the defaults, so there is nothing to mismatch",
+);
+assert.match(
+  builderSource,
+  /const dirty = signature !== savedSignature;/,
+  "dirtiness is derived from the document alone, so chrome cannot make a draft dirty",
+);
+ok("hiding a panel expands the canvas, focus mode hides both, and neither is an edit");
 
 // --- Precision layout is a desktop job.
 const inspectorSource = builderSource.slice(builderSource.indexOf("function Inspector"));
@@ -1690,11 +1765,51 @@ assert.doesNotMatch(
   /Nada de lo que hagas aquí se guarda/,
   "the builder must no longer claim that nothing is saved",
 );
+/*
+ * A DRAFT BELONGS TO THE STUDY; THE EDITOR'S CHROME BELONGS TO THE BROWSER.
+ *
+ * `localStorage` and `indexedDB` stay forbidden outright: anything a person
+ * composes is stored server-side, under an optimistic-concurrency check, or it
+ * is not stored. `sessionStorage` is allowed for exactly one thing — which
+ * panels are open, whether focus mode is on and how far the canvas is zoomed —
+ * because those are preferences of a person at a screen and putting them in
+ * the document would mint a revision every time somebody widened the canvas.
+ * The rule is enforced rather than trusted: every use names the chrome key,
+ * and nothing about the document may be written to storage at all.
+ */
 assert.doesNotMatch(
   builderSource,
-  /localStorage|sessionStorage|indexedDB/,
+  /localStorage|indexedDB/,
   "a draft belongs to the study, not to one browser",
 );
+{
+  const uses = builderSource.match(/sessionStorage\.(get|set|remove)Item\([^)]*/g) ?? [];
+  assert.ok(uses.length > 0, "the editor remembers its own chrome for the session");
+  for (const use of uses) {
+    assert.match(
+      use,
+      /CHROME_PREFERENCE_KEY/,
+      `browser storage may only carry the editor's chrome, not: ${use}`,
+    );
+  }
+  assert.doesNotMatch(
+    builderSource,
+    /sessionStorage\.setItem\([^)]*(definition|signature|draft|revision)/i,
+    "nothing about the document is ever written to browser storage",
+  );
+  const preference = builderSource.match(
+    /type ChromePreference = \{[^}]*\}/,
+  );
+  assert.ok(preference, "the stored shape is declared");
+  for (const field of ["left", "right", "focus", "zoom"]) {
+    assert.ok(preference[0].includes(`${field}:`), `it carries ${field}`);
+  }
+  assert.doesNotMatch(
+    preference[0],
+    /definition|block|page|filter/i,
+    "and it carries nothing about what is being composed",
+  );
+}
 ok("the builder states its save state, offers an explicit save and a retry, and keeps undo");
 
 assert.equal(studioStudyComposer("abc"), "/studio/e/abc/construccion");
@@ -2088,9 +2203,11 @@ console.log("\n[17] The defects the acceptance review found stay fixed");
   ]) {
     assert.match(builderSource, pattern, message);
   }
+  // The draft is never in a browser. The chrome preference is, deliberately and
+  // only, and §16 above is where that exception is spelled out and bounded.
   assert.doesNotMatch(
     builderSource,
-    /localStorage|sessionStorage|indexedDB/i,
+    /localStorage|indexedDB/i,
     "a draft lives in the study, never in one browser",
   );
   ok("the builder offers pages, a width preview, per-block rules and honest chart labelling");

@@ -9,6 +9,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   useTransition,
 } from "react";
 
@@ -179,6 +180,131 @@ const menuItem =
 const field =
   "min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-strong";
 
+/**
+ * The canvas scale. "fit" is measured from the room the canvas has; the rest
+ * are fixed steps for reading at a size a person chose.
+ */
+export type CanvasZoom = "fit" | 1 | 0.75 | 0.5;
+
+/** The editor's own chrome, remembered for the browser session and nowhere else. */
+type ChromePreference = { left: boolean; right: boolean; focus: boolean; zoom: CanvasZoom };
+
+const CHROME_PREFERENCE_KEY = "becommunity.composer.chrome";
+
+/**
+ * THE CANVAS OPENS AT FULL SIZE, and that is a decision rather than an
+ * oversight.
+ *
+ * A scaled canvas shrinks the editor's OWN controls with the drawing inside
+ * it: at 40 % a 44 px drag handle measures 18 px, and an 18 px target is not a
+ * target. Full size keeps every control operable and pans inside the canvas's
+ * own box when the previewed width does not fit — which is what the room
+ * freed by hiding a panel then buys: less panning, not a smaller picture.
+ * "Ajustar al espacio" is there for the moment somebody wants the whole
+ * arrangement at once, chosen deliberately, on a screen with room for it.
+ */
+const DEFAULT_CHROME: ChromePreference = { left: true, right: true, focus: false, zoom: 1 };
+
+/**
+ * Below this the canvas is never scaled, whatever is remembered.
+ *
+ * Scaling is a desktop affordance. On a phone the same 44 px rule that governs
+ * every other control governs the ones on the canvas, and there is no scale at
+ * which both "see the whole arrangement" and "the handle is still a handle"
+ * are true. So on a narrow screen the canvas draws at full size and pans, and
+ * the scale control is not offered at all.
+ */
+const SCALING_MIN_WIDTH = 1024;
+
+function subscribeScalable(listener: () => void): () => void {
+  const query = window.matchMedia(`(min-width: ${SCALING_MIN_WIDTH}px)`);
+  query.addEventListener("change", listener);
+  return () => query.removeEventListener("change", listener);
+}
+
+function readScalable(): boolean {
+  return window.matchMedia(`(min-width: ${SCALING_MIN_WIDTH}px)`).matches;
+}
+
+/** The server draws at full size, which is what every snapshot agrees on. */
+function serverScalable(): boolean {
+  return true;
+}
+
+/**
+ * THE EDITOR'S CHROME, KEPT OUTSIDE REACT ON PURPOSE.
+ *
+ * A tiny external store, read through `useSyncExternalStore`. The server and
+ * the hydration pass are handed `DEFAULT_CHROME` — the same values the HTML
+ * was rendered with, so there is nothing to mismatch — and the stored
+ * preference arrives in the same commit rather than as a second render kicked
+ * off from an effect.
+ *
+ * NOTHING ABOUT THE DOCUMENT IS EVER WRITTEN HERE. Four fields, all of them
+ * about where things are on one person's screen. A draft lives in the study.
+ */
+let chromeCache: ChromePreference | null = null;
+const chromeListeners = new Set<() => void>();
+
+/** The snapshot React gets while rendering on the server and while hydrating. */
+function serverChrome(): ChromePreference {
+  return DEFAULT_CHROME;
+}
+
+/** Cached, because `getSnapshot` must return the same object until it changes. */
+function readChrome(): ChromePreference {
+  if (chromeCache) return chromeCache;
+  let value = DEFAULT_CHROME;
+  try {
+    const stored = window.sessionStorage.getItem(CHROME_PREFERENCE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<ChromePreference>;
+      value = {
+        left: typeof parsed.left === "boolean" ? parsed.left : DEFAULT_CHROME.left,
+        right: typeof parsed.right === "boolean" ? parsed.right : DEFAULT_CHROME.right,
+        focus: typeof parsed.focus === "boolean" ? parsed.focus : DEFAULT_CHROME.focus,
+        zoom:
+          parsed.zoom === "fit" || parsed.zoom === 1 || parsed.zoom === 0.75 || parsed.zoom === 0.5
+            ? parsed.zoom
+            : DEFAULT_CHROME.zoom,
+      };
+    }
+  } catch {
+    // A browser that refuses storage is a browser that gets the defaults.
+  }
+  chromeCache = value;
+  return value;
+}
+
+function subscribeChrome(listener: () => void): () => void {
+  chromeListeners.add(listener);
+  return () => {
+    chromeListeners.delete(listener);
+  };
+}
+
+/** Change part of the chrome, remember it, and tell every reader. */
+function setChrome(patch: Partial<ChromePreference>): void {
+  const next = { ...readChrome(), ...patch };
+  chromeCache = next;
+  try {
+    window.sessionStorage.setItem(CHROME_PREFERENCE_KEY, JSON.stringify(next));
+  } catch {
+    // Not being able to remember a preference is not a reason to fail.
+  }
+  for (const listener of chromeListeners) listener();
+}
+
+/**
+ * The floor a fitted canvas will not go below.
+ *
+ * Below roughly this, "the whole arrangement at once" stops being readable and
+ * becomes a thumbnail. At that point the canvas keeps a size somebody can read
+ * and pans inside its own box instead — the page itself still never scrolls
+ * sideways.
+ */
+const MINIMUM_FIT_SCALE = 0.4;
+
 type SaveStatus = "unsaved" | "dirty" | "saving" | "saved" | "error" | "conflict";
 
 /**
@@ -269,11 +395,43 @@ export function ExperienceBuilder({
 
   const [data, setData] = useState<BlockDataSet>(payload.data);
   const [preview, setPreview] = useState<Breakpoint>("desktop");
-  /** How much of the previewed width is shown at once. 1 is full size. */
-  const [zoom, setZoom] = useState(1);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  /*
+   * THE EDITOR'S CHROME IS NOT PART OF THE DOCUMENT, AND NOT PART OF REACT
+   * STATE EITHER.
+   *
+   * Which panels are open, whether focus mode is on and how far the canvas is
+   * zoomed are preferences of the PERSON, in this browser, for this session.
+   * They never touch `state.definition`, so toggling a panel cannot mint a
+   * revision, cannot mark the draft dirty and cannot wake the autosave —
+   * `dirty` is derived from the document's signature alone, which makes that
+   * true by construction rather than by remembering not to.
+   *
+   * It is read through `useSyncExternalStore` rather than restored in an
+   * effect. Reading `sessionStorage` while rendering would make the server's
+   * HTML and the browser's first render disagree, which React reports as a
+   * hydration error; restoring it afterwards with `setState` inside an effect
+   * is a cascading render the project's own lint refuses. This is the shape
+   * React provides for exactly this: the server and the hydration pass see the
+   * defaults, and the stored preference arrives in the same commit.
+   */
+  const chrome = useSyncExternalStore(subscribeChrome, readChrome, serverChrome);
+  const leftOpen = chrome.left;
+  const rightOpen = chrome.right;
+  const focusMode = chrome.focus;
+  const zoom = chrome.zoom;
   const [drawer, setDrawer] = useState<"none" | "left" | "right">("none");
+
+  /**
+   * FOCUS MODE HIDES; IT DOES NOT FORGET.
+   *
+   * Leaving it restores exactly the panels that were open before, because it
+   * never writes `left` or `right` — it is a third fact, read alongside them.
+   * The selected page, the selected block, the zoom, the scroll position and
+   * anything half-typed are all in state focus mode does not touch, so none of
+   * them can be lost by entering or leaving it.
+   */
+  const showLeft = leftOpen && !focusMode;
+  const showRight = rightOpen && !focusMode;
   const [pendingType, setPendingType] = useState<BlockType>("rich_text");
   const [newPageTitle, setNewPageTitle] = useState("");
 
@@ -514,6 +672,30 @@ export function ExperienceBuilder({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [act]);
 
+  /*
+   * ESCAPE LEAVES FOCUS MODE — WHEN THERE IS NOTHING NEARER TO LEAVE.
+   *
+   * A dialog, a menu and a drawer all answer Escape first, and taking it from
+   * them to close a mode two levels out is how a confirmation gets dismissed
+   * by somebody who meant to leave a mode. So: not while a drawer is open, not
+   * from inside a text field where Escape can mean "revert this entry", and
+   * not when something has opened a modal above the editor. Only then, and it
+   * is not the only way out: the toolbar keeps a labelled button.
+   */
+  useEffect(() => {
+    if (!focusMode || drawer !== "none") return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      if (target?.closest("dialog, [role='dialog'], [role='menu']")) return;
+      setChrome({ focus: false });
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [focusMode, drawer]);
+
   function download() {
     const contents = serializeExperienceDefinition(definition, { pretty: true });
     const blob = new Blob([contents], { type: "application/json;charset=utf-8" });
@@ -547,12 +729,14 @@ export function ExperienceBuilder({
         preview={preview}
         zoom={zoom}
         onZoom={(next) => {
-          setZoom(next);
+          setChrome({ zoom: next });
           act(
             (current) => current,
-            next === 1
-              ? "La composición se ve a tamaño real."
-              : `La composición se ve al ${Math.round(next * 100)} %.`,
+            next === "fit"
+              ? "La composición se ajusta al espacio disponible."
+              : next === 1
+                ? "La composición se ve a tamaño real."
+                : `La composición se ve al ${Math.round(next * 100)} %.`,
           );
         }}
         onPreview={(next) => {
@@ -568,11 +752,13 @@ export function ExperienceBuilder({
         onRedo={() => act(redo, "Se rehízo el último cambio.")}
         onSave={() => void save(definition, "manual")}
         onDownload={download}
-        onToggleLeft={() => setLeftOpen((open) => !open)}
-        onToggleRight={() => setRightOpen((open) => !open)}
+        onToggleLeft={() => setChrome({ focus: false, left: !showLeft })}
+        onToggleRight={() => setChrome({ focus: false, right: !showRight })}
+        onToggleFocus={() => setChrome({ focus: !focusMode })}
         onOpenDrawer={setDrawer}
-        leftOpen={leftOpen}
-        rightOpen={rightOpen}
+        leftOpen={showLeft}
+        rightOpen={showRight}
+        focusMode={focusMode}
         exitHref={exitHref}
         previewHref={previewHref}
         draftPreviewHref={draftPreviewHref}
@@ -631,11 +817,29 @@ export function ExperienceBuilder({
         />
       ) : null}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_auto]">
+      {/*
+        THE TRACK GOES AWAY WITH THE PANEL.
+
+        A hidden `aside` inside a `[auto_...]` track left a zero-width column
+        AND its gap behind, so the canvas gained a little room instead of all
+        of it. The template is now written from what is actually on screen, as
+        four complete literal class strings so the stylesheet contains them.
+      */}
+      <div
+        className={`grid min-w-0 gap-4 ${
+          showLeft
+            ? showRight
+              ? "lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_auto]"
+              : "lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)]"
+            : showRight
+              ? "lg:grid-cols-[minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_auto]"
+              : "lg:grid-cols-[minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)]"
+        }`}
+      >
         <Panel
           side="left"
           label="Páginas y catálogo de bloques"
-          open={leftOpen}
+          open={showLeft}
           drawerOpen={drawer === "left"}
           onClose={() => setDrawer("none")}
         >
@@ -729,7 +933,40 @@ export function ExperienceBuilder({
             A region, not a second `<main>`: the shell already provides the
             document's one main landmark, and nesting another inside it gives a
             screen reader two answers to "where does the content start". */}
-        <div role="region" aria-label="Lienzo de la página" className="min-w-0">
+        <div role="region" aria-label="Lienzo de la página" className="relative min-w-0">
+          {/*
+            ALWAYS A WAY BACK, ON THE EDGE IT WENT OUT OF.
+
+            The toolbar keeps its own "Mostrar páginas" / "Mostrar ficha" — in
+            focus mode too, which is why focus mode is never a corner somebody
+            is stuck in. These are the same act, put where the panel used to
+            be, so restoring it is where a hand already is. They exist only at
+            the widths where the panel is a COLUMN; below that it is a drawer
+            with its own opener and a second control would be a second set of
+            identifiers for one thing.
+          */}
+          {!showLeft ? (
+            <button
+              type="button"
+              onClick={() => setChrome({ focus: false, left: true })}
+              aria-label="Mostrar el panel de páginas y catálogo de bloques"
+              title="Mostrar páginas y bloques"
+              className="absolute left-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-r-lg border border-l-0 border-line-strong bg-surface text-sm font-medium text-strong shadow-lifted hover:bg-surface-sunken lg:inline-flex"
+            >
+              ›
+            </button>
+          ) : null}
+          {!showRight ? (
+            <button
+              type="button"
+              onClick={() => setChrome({ focus: false, right: true })}
+              aria-label="Mostrar la ficha del bloque seleccionado"
+              title="Mostrar la ficha del bloque"
+              className="absolute right-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-l-lg border border-r-0 border-line-strong bg-surface text-sm font-medium text-strong shadow-lifted hover:bg-surface-sunken xl:inline-flex"
+            >
+              ‹
+            </button>
+          ) : null}
           {page ? (
             <Canvas
               page={page}
@@ -780,7 +1017,7 @@ export function ExperienceBuilder({
         <Panel
           side="right"
           label="Ficha del bloque seleccionado"
-          open={rightOpen}
+          open={showRight}
           drawerOpen={drawer === "right"}
           onClose={() => setDrawer("none")}
         >
@@ -1017,9 +1254,11 @@ function TopBar({
   onDownload,
   onToggleLeft,
   onToggleRight,
+  onToggleFocus,
   onOpenDrawer,
   leftOpen,
   rightOpen,
+  focusMode,
   exitHref,
   previewHref,
   draftPreviewHref,
@@ -1032,8 +1271,8 @@ function TopBar({
   pages: number;
   blocks: number;
   preview: Breakpoint;
-  zoom: number;
-  onZoom: (zoom: number) => void;
+  zoom: CanvasZoom;
+  onZoom: (zoom: CanvasZoom) => void;
   onPreview: (breakpoint: Breakpoint) => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -1043,9 +1282,11 @@ function TopBar({
   onDownload: () => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
+  onToggleFocus: () => void;
   onOpenDrawer: (drawer: "left" | "right") => void;
   leftOpen: boolean;
   rightOpen: boolean;
+  focusMode: boolean;
   exitHref: string;
   previewHref: string;
   draftPreviewHref: string;
@@ -1128,11 +1369,48 @@ function TopBar({
 
       <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 border-t border-line pt-3">
         {/* Panel controls: a toggle on a computer, a drawer opener below it. */}
-        <button type="button" className={`${button} hidden lg:inline-flex`} onClick={onToggleLeft} aria-pressed={leftOpen}>
+        <button
+          type="button"
+          className={`${button} hidden lg:inline-flex`}
+          onClick={onToggleLeft}
+          aria-pressed={leftOpen}
+          aria-label={
+            leftOpen
+              ? "Ocultar el panel de páginas y catálogo de bloques"
+              : "Mostrar el panel de páginas y catálogo de bloques"
+          }
+        >
           {leftOpen ? "Ocultar páginas" : "Mostrar páginas"}
         </button>
-        <button type="button" className={`${button} hidden xl:inline-flex`} onClick={onToggleRight} aria-pressed={rightOpen}>
+        <button
+          type="button"
+          className={`${button} hidden xl:inline-flex`}
+          onClick={onToggleRight}
+          aria-pressed={rightOpen}
+          aria-label={
+            rightOpen
+              ? "Ocultar la ficha del bloque seleccionado"
+              : "Mostrar la ficha del bloque seleccionado"
+          }
+        >
           {rightOpen ? "Ocultar ficha" : "Mostrar ficha"}
+        </button>
+        {/*
+          MODO ENFOQUE — one act, both panels, and the toolbar stays.
+
+          Hiding two panels one at a time and then putting them both back is
+          four decisions for one intention. This is the intention. The toolbar
+          is deliberately still here while it is on: a mode you can only leave
+          by guessing a key is a trap, so there is a labelled way out on screen
+          AND `Escape` for a hand already on the keyboard.
+        */}
+        <button
+          type="button"
+          className={`${button} hidden lg:inline-flex`}
+          onClick={onToggleFocus}
+          aria-pressed={focusMode}
+        >
+          {focusMode ? "Salir de modo enfoque" : "Modo enfoque"}
         </button>
         <button type="button" className={`${button} lg:hidden`} onClick={() => onOpenDrawer("left")}>
           Páginas y bloques
@@ -1175,13 +1453,16 @@ function TopBar({
           strip — and this is how somebody sees the whole arrangement at once
           when that is the question they have.
         */}
-        <label className="flex min-h-11 items-center gap-1.5 text-xs text-body">
+        <label className="hidden min-h-11 items-center gap-1.5 text-xs text-body lg:flex">
           <span>Escala</span>
           <select
             value={String(zoom)}
-            onChange={(event) => onZoom(Number(event.target.value))}
+            onChange={(event) =>
+              onZoom(event.target.value === "fit" ? "fit" : (Number(event.target.value) as 1 | 0.75 | 0.5))
+            }
             className="min-h-11 rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-strong"
           >
+            <option value="fit">Ajustar al espacio</option>
             <option value="1">100 %</option>
             <option value="0.75">75 %</option>
             <option value="0.5">50 %</option>
@@ -1629,7 +1910,7 @@ function Canvas({
   evidence: BuilderClientPayload["evidence"];
   study: BuilderClientPayload["study"];
   breakpoint: Breakpoint;
-  zoom: number;
+  zoom: CanvasZoom;
   selectedBlockId: string | null;
   onSelect: (blockId: string) => void;
   onMove: (blockId: string, direction: "up" | "down") => void;
@@ -1640,6 +1921,58 @@ function Canvas({
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  /*
+   * THE CANVAS MEASURES THE ROOM IT HAS AND USES IT.
+   *
+   * Before, the grid was laid out at the previewed width and scrolled sideways
+   * whatever the room; hiding a panel therefore revealed gutter rather than
+   * making the composition bigger, and at 1 024 px a "computer" preview was a
+   * long horizontal scroll of something nobody could see the shape of. It now
+   * observes its own container and, at "Ajustar", draws the whole previewed
+   * width inside whatever space it has — which is what makes hiding a panel a
+   * real reflow instead of a wider empty column.
+   *
+   * WHY A ResizeObserver AND NOT A BREAKPOINT. The room the canvas has is not
+   * a function of the viewport: it depends on which panels are open, which is
+   * a preference. Only measuring answers it.
+   */
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [available, setAvailable] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) setAvailable(entry.contentRect.width);
+    });
+    observer.observe(frame);
+    setAvailable(frame.clientWidth);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) setContentHeight(entry.contentRect.height);
+    });
+    observer.observe(content);
+    setContentHeight(content.getBoundingClientRect().height);
+    return () => observer.disconnect();
+  }, [breakpoint, page.id]);
+
+  const canvasWidth = CANVAS_WIDTH[breakpoint];
+  const scalable = useSyncExternalStore(subscribeScalable, readScalable, serverScalable);
+  const scale = !scalable
+    ? 1
+    : zoom === "fit"
+      ? available > 0
+        ? Math.min(1, Math.max(MINIMUM_FIT_SCALE, available / canvasWidth))
+        : 1
+      : zoom;
 
   const ordered = page.blocks
     .map((block, index) => ({ block, index }))
@@ -1680,15 +2013,36 @@ function Canvas({
           checks at every width. The zoom above is for seeing the whole
           arrangement at once; the scroll is for reading it at full size.
         */
-        <div className="mt-3 min-w-0 overflow-x-auto">
+        <div ref={frameRef} className="mt-3 min-w-0 overflow-x-auto">
+          {/*
+            TWO BOXES, AND BOTH ARE NEEDED.
+
+            `transform: scale()` does not change LAYOUT, so a scaled grid used
+            to leave the scroll container claiming the unscaled width and a
+            stripe of empty space below it. The outer box is the SIZE the
+            scaled drawing actually occupies, measured; the inner one is the
+            previewed width, drawn at full size and then scaled into it.
+
+            Drag and drop stays correct under any scale because both
+            `getBoundingClientRect()` and a pointer's `clientY` are in the same
+            transformed viewport space — the comparison that decides a drop
+            position never leaves that space, so it never needs to know the
+            scale at all.
+          */}
           <div
             style={{
-              minWidth: `${CANVAS_WIDTH[breakpoint]}px`,
-              width: zoom === 1 ? undefined : `${100 / zoom}%`,
-              transform: zoom === 1 ? undefined : `scale(${zoom})`,
-              transformOrigin: "top left",
+              width: `${canvasWidth * scale}px`,
+              height: contentHeight > 0 ? `${contentHeight * scale}px` : undefined,
             }}
           >
+            <div
+              ref={contentRef}
+              style={{
+                width: `${canvasWidth}px`,
+                transform: scale === 1 ? undefined : `scale(${scale})`,
+                transformOrigin: "top left",
+              }}
+            >
         <ul className="grid min-w-0 grid-cols-12 gap-3">
           {ordered.map(({ block }, position) => (
             <li
@@ -1745,6 +2099,7 @@ function Canvas({
             </li>
           ))}
         </ul>
+            </div>
           </div>
         </div>
       )}
@@ -1807,6 +2162,12 @@ function CanvasBlock({
 
   return (
     <div
+      // The block's OPAQUE identifier, which is already what the exported
+      // document and every filter connection name. It is not a metric key, a
+      // column or a respondent, and having it on the card is what lets a gate
+      // drive "select THAT block" instead of guessing at a class name.
+      data-block-id={block.id}
+      data-block-type={block.type}
       className={`flex h-full min-w-0 flex-col rounded-lg border bg-surface ${
         selected ? "border-evidence-line ring-2 ring-evidence-line" : "border-line"
       } ${dragging ? "opacity-60" : ""}`}
@@ -1845,6 +2206,7 @@ function CanvasBlock({
 
         <button
           type="button"
+          data-block-select=""
           onClick={onSelect}
           aria-current={selected ? "true" : undefined}
           className="flex min-h-11 min-w-11 flex-1 basis-24 flex-col justify-center rounded-md px-1 text-left"
