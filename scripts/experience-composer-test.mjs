@@ -1434,7 +1434,7 @@ for (const [pattern, message] of [
   [/setDrawer\(/, "and both become drawers"],
   [/lg:static/, "the same element is a column from lg up"],
   [/event\.key === "Escape"/, "Escape closes an open drawer"],
-  [/lg:grid-cols-\[auto_minmax\(0,1fr\)_auto\]/, "the canvas is the flexible column"],
+  [/lg:grid-cols-\[auto_minmax\(0,1fr\)\] xl:grid-cols-\[auto_minmax\(0,1fr\)_auto\]/, "the canvas is the flexible column, and the inspector waits for xl so it stays dominant"],
 ]) {
   assert.match(builderSource, pattern, message);
 }

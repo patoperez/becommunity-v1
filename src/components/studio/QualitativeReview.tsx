@@ -155,7 +155,15 @@ export function QualitativeReview({
                 }`}
               >
                 <div className="flex items-start gap-3">
-                  <label className="flex min-h-11 items-start gap-2.5 pt-0.5 text-sm">
+                  {/*
+                    THE ONLY CHECKBOX IN STUDIO WHOSE LABEL CARRIES NO VISIBLE
+                    TEXT. Everywhere else the words next to the box are what
+                    makes the hit area big enough to hit; here the label holds a
+                    16 px box and an `sr-only` span, so it measured 16 x 44 and
+                    the rendered acceptance matrix refused it at 320 px. The
+                    width is stated explicitly for that reason.
+                  */}
+                  <label className="flex min-h-11 min-w-11 items-start justify-center gap-2.5 pt-0.5 text-sm">
                     <input
                       type="checkbox"
                       name="observation_id"

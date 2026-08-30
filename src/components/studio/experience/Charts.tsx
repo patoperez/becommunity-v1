@@ -103,7 +103,7 @@ export function ChartFrame({
 
 export function EmptyChart({ title, detail }: { title: string; detail?: string }) {
   return (
-    <div className="rounded-lg border border-dashed border-line bg-surface-sunken px-4 py-5 text-sm">
+    <div className="min-w-0 rounded-lg border border-dashed border-line bg-surface-sunken px-4 py-5 text-sm [overflow-wrap:anywhere]">
       <p className="font-medium text-strong">{title}</p>
       {detail ? <p className="mt-1 text-muted">{detail}</p> : null}
     </div>
@@ -250,16 +250,18 @@ export function KpiChart({
   }
   return (
     <div className="min-w-0">
-      <p className="font-display text-3xl font-semibold leading-tight text-strong">
+      <p className="font-display text-2xl font-semibold leading-tight text-strong [overflow-wrap:anywhere] sm:text-3xl">
         {formatValue(cell.value, data.unit, data.decimals)}
       </p>
       <p className="mt-0.5 truncate text-xs text-muted">{data.metricLabel}</p>
       {cell.state === "warning" ? (
-        <p className="mt-1 text-xs text-caution">
+        <p className="mt-1 text-xs text-caution [overflow-wrap:anywhere]">
           Pocas respuestas: {cell.disclosedSampleSize}. Léelo como un indicio.
         </p>
       ) : (
-        <p className="mt-1 text-xs text-muted">{cell.disclosedSampleSize} respuestas</p>
+        <p className="mt-1 text-xs text-muted [overflow-wrap:anywhere]">
+          {cell.disclosedSampleSize} respuestas
+        </p>
       )}
       {showDetail && data.detail.length > 0 ? (
         <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
@@ -301,7 +303,7 @@ export function TrafficLightChart({
     return (
       <div className="min-w-0">
         <KpiChart data={data} policy={policy} showDetail={false} />
-        <p className="mt-2 rounded-lg border border-caution-line bg-caution-surface px-2.5 py-2 text-xs text-caution">
+        <p className="mt-2 rounded-lg border border-caution-line bg-caution-surface px-2.5 py-2 text-xs text-caution [overflow-wrap:anywhere]">
           Un semáforo necesita un rango acordado. Define el rango ideal de este resultado en la
           ficha del bloque; mientras tanto se muestra el número sin color.
         </p>

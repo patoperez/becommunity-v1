@@ -177,10 +177,10 @@ async function discoveredRoutes(session, origin, role) {
       const base = study.match(/^\/studio\/e\/[^/]+/)?.[0];
       if (base) {
         const studyId = base.split("/").at(-1);
-        // `construccion` is the Experience Composer prototype. It is internal,
-        // saves nothing and is not a step in the consultant's process — but it
-        // is a real internal surface, and an internal surface that overflows a
-        // 320 px screen is a defect whether or not it stores anything.
+        // `construccion` is the dashboard builder. It is internal, it is not
+        // one of the study's process steps, and it is visited here because it
+        // is the widest surface in Studio: a three-column editor that has to
+        // collapse to one readable column on a 320 px phone.
         routes.push(base, `${base}/datos`, `${base}/categorias`, `${base}/indicadores`, `${base}/cualitativo`, `${base}/interpretacion`, `${base}/vista-cliente`, `${base}/publicar`, `${base}/construccion`, `/admin/preview/${studyId}`);
       }
     }

@@ -182,7 +182,7 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — P9 hardening and semantic category review; do not skip ahead
+## Current work — the persistent dashboard builder; do not skip ahead
 
 The authoritative state is `docs/CURRENT_STATE.md`.
 
@@ -317,24 +317,47 @@ production Supabase and operational prerequisites.
   real-data environment, or enable irreversible controls during synthetic P7
   work. Do not redirect the roadmap toward retention UI, new role tiers or an
   incidental feature question.
-- **The Experience Composer foundation exists and is NOT persisted or
-  deployed.** Standing reference: `docs/EXPERIENCE_COMPOSER.md`. The product
-  direction is a governed data-experience builder over the same canonical
-  calculations, authorization, approved evidence and immutable snapshots — not
-  an unrestricted query tool. `src/lib/experience/**` holds
-  `ExperienceDefinitionV1` (strict Zod, server-side, no unknown fields, no
-  SQL/HTML/script/CSS, no database key, no respondent, no nesting), the
-  semantic/block/chart registries, a pure compatibility adapter, and one
-  internal prototype at `/studio/e/[studyId]/construccion` that saves nothing.
-  No table, no migration, no Server Action, no deployment. AI is out of scope.
-  Gate: `npm run test:experience-composer`.
-- ⓘ **The prototype refuses out loud and never pretends.** Every composer
-  operation that declines returns the state unchanged WITH a reason a person
-  reads, and the screen announces it — a silent no-op is an edit somebody
-  believes worked. A chart variant with no renderer says so and shows the
-  stand-in the registry declares. The composition preview states that it
-  carries none of the study's numbers. Do not reintroduce a silent refusal, and
-  do not draw a variant the registry says has no renderer.
+- **The Experience Composer PERSISTS A DRAFT and PUBLISHES NOTHING.** Standing
+  reference: `docs/EXPERIENCE_COMPOSER.md`. The product direction is a governed
+  data-experience builder over the same canonical calculations, authorization,
+  approved evidence and immutable snapshots — not an unrestricted query tool.
+  `src/lib/experience/**` holds `ExperienceDefinitionV1` (strict Zod,
+  server-side, no unknown fields, no SQL/HTML/script/CSS, no database key, no
+  respondent, no nesting), the semantic/block/chart registries, a pure
+  compatibility adapter, a canonical data resolver, the editor operations, and
+  the builder at `/studio/e/[studyId]/construccion`. AI is out of scope.
+  Gates: `npm run test:experience-composer`, and the credential-bearing
+  `npm run test:experience-persistence-live` and
+  `npm run test:experience-builder-live`.
+- ⓘ **A draft is not a publication, and nothing bridges the two yet.**
+  Migrations `0023` and `0024` create `study_experience_draft` (one mutable
+  draft per study), `study_experience_revision` (immutable, refused an UPDATE by
+  trigger AND by privilege) and `study_experience_event`. RLS is enabled and
+  forced on all three, `anon` and `authenticated` are denied outright, and even
+  `service_role` holds only SELECT — every write goes through
+  `save_study_experience_draft`, which re-checks the internal role, derives the
+  tenant FROM THE STUDY ROW and refuses a document naming another study or
+  client. NOTHING writes a revision, no client-facing route reads a composed
+  definition, and saving a draft changes nothing a client sees. Do not add a
+  publication path without its own design and authorization review.
+- ⓘ **A lost update is SQLSTATE `55000`, never `40001`.** PostgREST retries a
+  serialization failure, so a deliberate `40001` refusal never reaches the
+  caller: measured at 125 s and an HTTP 504 with no message, against 148 ms for
+  `55000`. Any future refusal that has to reach a browser must use a code the
+  Data API delivers, and the live gate asserts the promptness as well as the
+  code.
+- ⓘ **The builder refuses out loud and never pretends.** Every editor operation
+  that declines returns the state unchanged WITH a reason a person reads, and
+  the screen announces it — a silent no-op is an edit somebody believes worked.
+  Fifteen of the eighteen chart variants are drawn for real; the other three say
+  so BY NAME above the reference representation, never instead of it. A semáforo
+  needs a range somebody agreed to and says so when there is none. Do not
+  reintroduce a silent refusal, and do not substitute one drawing for another
+  without saying which is missing.
+- ⓘ **`test:experience-builder-live` needs `npm run build && npm start`.** React
+  development calls `eval()` and this application's CSP correctly forbids it, so
+  under `next dev` the builder never hydrates and every control is inert. A gate
+  that drives the product drives the build a client would receive.
 - ⓘ **Minimum-five suppression is now a per-study, versioned POLICY —
   `show_all` / `warn_below` / `hide_below` — and no current route changed.**
   NEWLY COMPOSED experiences default to `show_all` (visible from n = 1); every

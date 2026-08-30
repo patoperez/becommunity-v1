@@ -602,7 +602,7 @@ export function ExperienceBuilder({
         />
       ) : null}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[auto_minmax(0,1fr)_auto]">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_auto]">
         <Panel
           side="left"
           label="Páginas y catálogo de bloques"
@@ -673,8 +673,11 @@ export function ExperienceBuilder({
           />
         </Panel>
 
-        {/* ---- The canvas: the dominant area at every width ---------------- */}
-        <main className="min-w-0">
+        {/* ---- The canvas: the dominant area at every width ----------------
+            A region, not a second `<main>`: the shell already provides the
+            document's one main landmark, and nesting another inside it gives a
+            screen reader two answers to "where does the content start". */}
+        <div role="region" aria-label="Lienzo de la página" className="min-w-0">
           {page ? (
             <Canvas
               page={page}
@@ -687,7 +690,7 @@ export function ExperienceBuilder({
               selectedBlockId={state.selectedBlockId}
               onSelect={(blockId) => {
                 act((current) => selectBlock(current, blockId), "");
-                if (window.matchMedia("(max-width: 1023px)").matches) setDrawer("right");
+                if (window.matchMedia("(max-width: 1279px)").matches) setDrawer("right");
               }}
               onMove={(blockId, direction) =>
                 act((current) => moveBlock(current, blockId, direction), "Se movió el bloque.")
@@ -719,7 +722,7 @@ export function ExperienceBuilder({
             report={report}
             adapterWarnings={adapterWarnings}
           />
-        </main>
+        </div>
 
         <Panel
           side="right"
@@ -997,14 +1000,17 @@ function TopBar({
         <button type="button" className={`${button} hidden lg:inline-flex`} onClick={onToggleLeft} aria-pressed={leftOpen}>
           {leftOpen ? "Ocultar páginas" : "Mostrar páginas"}
         </button>
-        <button type="button" className={`${button} hidden lg:inline-flex`} onClick={onToggleRight} aria-pressed={rightOpen}>
+        <button type="button" className={`${button} hidden xl:inline-flex`} onClick={onToggleRight} aria-pressed={rightOpen}>
           {rightOpen ? "Ocultar ficha" : "Mostrar ficha"}
         </button>
         <button type="button" className={`${button} lg:hidden`} onClick={() => onOpenDrawer("left")}>
           Páginas y bloques
         </button>
-        <button type="button" className={`${button} lg:hidden`} onClick={() => onOpenDrawer("right")}>
+        <button type="button" className={`${button} xl:hidden`} onClick={() => onOpenDrawer("right")}>
           Ficha del bloque
+        </button>
+        <button type="button" className={button} onClick={onDownload}>
+          Descargar
         </button>
 
         <fieldset className="ml-auto min-w-0">
@@ -1037,9 +1043,6 @@ function TopBar({
           : "la experiencia es válida tal como está"}
         {" · "}
         el cliente todavía no ve nada de esto
-        <button type="button" onClick={onDownload} className="ml-2 underline">
-          Descargar
-        </button>
       </p>
     </div>
   );
@@ -1073,23 +1076,34 @@ function Panel({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [drawerOpen, onClose]);
 
-  // ONE element, two behaviours. Below `lg` it is a fixed drawer whose
-  // visibility is the drawer state; from `lg` up it is a static column whose
-  // visibility is the collapse state. Rendering it twice would give the same
-  // controls two sets of ids, which is exactly what the responsive acceptance
-  // pass refuses.
+  // ONE element, two behaviours: a fixed drawer while it is narrow, a static
+  // column once there is room. Rendering it twice would give the same controls
+  // two sets of ids, which is exactly what the responsive acceptance pass
+  // refuses.
+  //
+  // THE TWO SIDES DOCK AT DIFFERENT WIDTHS, and that is the whole point. Two
+  // 288 px panels either side of a 1024 px screen leave 400 px of canvas, and a
+  // three-column block inside 400 px is 49 px wide — the acceptance matrix
+  // measured a KPI clipping its own number there. The canvas is the thing being
+  // built, so it keeps the room: the pages dock at `lg`, the inspector waits
+  // until `xl`, and below that each is a drawer over the canvas rather than a
+  // column beside it.
+  const dock = side === "left"
+    ? { column: open ? "lg:flex" : "lg:hidden", header: "lg:hidden", chrome: "lg:static lg:z-auto lg:w-64 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none xl:w-72" }
+    : { column: open ? "xl:flex" : "xl:hidden", header: "xl:hidden", chrome: "xl:static xl:z-auto xl:w-80 xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none" };
+
   return (
     <aside
       aria-label={label}
       className={[
         drawerOpen ? "flex" : "hidden",
-        open ? "lg:flex" : "lg:hidden",
+        dock.column,
         "fixed inset-y-0 z-40 w-[min(22rem,88vw)] flex-col gap-4 overflow-y-auto border-line bg-surface-page p-4 shadow-lifted",
         side === "left" ? "left-0 border-r" : "right-0 border-l",
-        "lg:static lg:z-auto lg:w-72 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none xl:w-80",
+        dock.chrome,
       ].join(" ")}
     >
-      <div className="flex items-center justify-between lg:hidden">
+      <div className={`flex items-center justify-between ${dock.header}`}>
         <p className="font-display text-sm font-semibold text-strong">{label}</p>
         <button type="button" className={iconButton} onClick={onClose} aria-label="Cerrar el panel">
           ✕
@@ -1359,22 +1373,78 @@ function SamplePolicyPanel({
 }
 
 // ---------------------------------------------------------------------------
-// A compact menu — native disclosure, so it is keyboard-operable for free
+// A compact menu
 // ---------------------------------------------------------------------------
 
+/**
+ * The menu that holds everything a block card does not show all the time.
+ *
+ * IT DOES NOT EXIST UNTIL IT IS OPENED. The first version was a `<details>`,
+ * which is keyboard-operable for free — and whose closed contents are still
+ * laid out: the rendered acceptance matrix measured a 224 px panel hanging
+ * 29 px off the left of a 320 px screen, from a menu nobody had opened. A
+ * control that is not on screen should not have a position on screen, so the
+ * panel is conditionally rendered instead.
+ *
+ * What `<details>` gave for free is written out here: the trigger says whether
+ * it is expanded, Escape closes it and returns focus to the trigger, clicking
+ * anywhere else closes it, and choosing an item closes it too — because a menu
+ * that stays open over the thing it just changed hides the result of the
+ * choice.
+ */
 function Menu({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [open]);
+
   return (
-    <details className="relative shrink-0">
-      <summary
+    <div className="relative shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
         aria-label={label}
-        className="flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-lg border border-line bg-surface text-base text-strong marker:content-none hover:bg-surface-sunken [&::-webkit-details-marker]:hidden"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={iconButton}
+        onClick={() => setOpen((current) => !current)}
       >
         <span aria-hidden="true">⋯</span>
-      </summary>
-      <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-line bg-surface p-1 shadow-lifted">
-        {children}
-      </div>
-    </details>
+      </button>
+      {open ? (
+        <div
+          ref={panelRef}
+          role="menu"
+          aria-label={label}
+          // Anchored to the trigger's right edge and never wider than the
+          // screen it is opening on.
+          className="absolute right-0 z-20 mt-1 w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-1 shadow-lifted"
+          onClick={() => setOpen(false)}
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1549,7 +1619,14 @@ function CanvasBlock({
         selected ? "border-evidence-line ring-2 ring-evidence-line" : "border-line"
       } ${dragging ? "opacity-60" : ""}`}
     >
-      <div className="flex min-w-0 items-center gap-1 border-b border-line px-2 py-1.5">
+      {/*
+        The card header wraps rather than crushing its middle. A narrow block —
+        three of twelve columns on a 1 280 px screen — left the name button
+        8 px wide between two 44 px controls, and an 8 px target is not a
+        target. With `flex-wrap` and a real minimum, the name drops to its own
+        line instead.
+      */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1 border-b border-line px-2 py-1.5">
         {/*
           THE DRAG HANDLE, and the keyboard route through the same control. A
           pointer drags it; the arrow keys move the block while it has focus.
@@ -1578,7 +1655,7 @@ function CanvasBlock({
           type="button"
           onClick={onSelect}
           aria-current={selected ? "true" : undefined}
-          className="flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-1 text-left"
+          className="flex min-h-11 min-w-11 flex-1 basis-24 flex-col justify-center rounded-md px-1 text-left"
         >
           <span className="block truncate text-sm font-semibold text-strong">{name}</span>
           <span className="block truncate text-xs text-muted">

@@ -1,11 +1,11 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-28**.
+> Authoritative operational handoff. Last verified: **2026-08-30**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
 
-## Experience Composer — foundation only, not persisted and not deployed
+## Experience Composer — the dashboard builder, persisted and unpublished
 
 Standing reference: `docs/EXPERIENCE_COMPOSER.md`. Read it before touching
 anything under `src/lib/experience/**`.
@@ -17,60 +17,100 @@ anything under `src/lib/experience/**`.
   client-specific behaviour may be hardcoded: a client's configuration is
   registry DATA and becomes a reusable starting template.
 - **Three layers.** Truth (imported data, canonical calculations, tenant
-  access) is not editable from the composer. Meaning (semantic results and
+  access) is not editable from the builder. Meaning (semantic results and
   characteristics, categories, qualitative review, journeys, interpretations)
   is edited only through the governed workflows that already exist.
   Presentation (pages, blocks, layout, charts, filters, copy) is what the
-  composer edits, and it references the other two only by opaque id.
+  builder edits, and it references the other two only by opaque handle.
 - **`ExperienceDefinitionV1` is a strict Zod boundary** enforced server-side:
   no unknown fields, no SQL/HTML/script/CSS/template syntax, no database key, no
   respondent, no recursion (blocks do not nest), and an explicit ceiling on
-  every list and on the serialized byte length.
-- ⓘ **The universal minimum-five suppression is now a per-study POLICY, and
-  nothing about current routes changed.** `show_all` / `warn_below` /
-  `hide_below`, versioned, with a per-block override. NEW composed experiences
-  default to `show_all` (results visible from n = 1). EXISTING studies keep
-  today's behaviour: the compatibility adapter stamps the legacy hide-below-five
-  rule onto every definition it derives, a gate asserts the two agree at every
-  base from 0 to 60, and a published snapshot freezes the policy it was
-  published under. `src/lib/calc/disclosure.ts` and every client-facing surface
-  are untouched. Tenant isolation, RLS, authorization and raw-personal-data
-  protection are NOT configurable by any mode.
+  every list and on the serialized byte length. A document a browser posts back
+  goes through it exactly as a stored blob does.
+- **A DRAFT IS STORED; NOTHING IS PUBLISHED.** Migrations `0023` and `0024`
+  (applied to the provisional synthetic project `ontvqazsqiwisdddblif` on
+  2026-08-30) create `study_experience_draft`, `study_experience_revision` and
+  `study_experience_event`. RLS is enabled AND forced on all three, `anon` and
+  `authenticated` are denied outright, and `service_role` holds only SELECT:
+  every write goes through `save_study_experience_draft`, a `security definer`
+  function that re-checks the internal role, derives `tenant_id` FROM THE STUDY
+  ROW and refuses a document naming another study or client. A published
+  revision is immutable — refused an UPDATE by trigger and by privilege — and
+  **nothing writes one yet**. No client-facing route reads a composed
+  definition; saving a draft leaves the client's own study page character for
+  character identical, which the live gate proves.
+- ⓘ **A lost update is SQLSTATE `55000`, never `40001`.** PostgREST retries a
+  serialization failure, so a `40001` refusal never reaches the caller —
+  measured at 125 098 ms and an HTTP 504 with no message, against 148 ms for
+  `55000`. Any future refusal that must reach a browser needs a code the Data
+  API delivers, and the live gate asserts the promptness as well as the code.
+- ⓘ **The universal minimum-five suppression is a per-study POLICY, and nothing
+  about current routes changed.** `show_all` / `warn_below` / `hide_below`,
+  versioned, with a per-block override, editable in the builder. NEW composed
+  experiences default to `show_all` (results visible from n = 1). EXISTING
+  studies keep today's behaviour: the compatibility adapter stamps the legacy
+  hide-below-five rule onto every definition it derives, a gate asserts the two
+  agree at every base from 0 to 60, and a published snapshot freezes the policy
+  it was published under. `src/lib/calc/disclosure.ts` and every client-facing
+  surface are untouched. Tenant isolation, RLS, authorization and
+  raw-personal-data protection are NOT configurable by any mode.
+- **The canvas shows the study's own numbers.** `src/lib/experience/data.ts`
+  resolves exactly the aggregates the document asks for, through
+  `npsFromScores`, `csatTopBox`, `mean` and `percentage` and nothing else,
+  rounded once at the precision the unit declares. The handle-to-key index
+  never leaves the server. On the real BNI Cuicuilco study the builder renders
+  a recommendation result of **30.8** over 39 answers — the same number the
+  canonical function produces, asserted by the live gate — and none of the
+  study's 123 canonical metric keys, no quote and no respondent identifier
+  appears on the page.
+- **Fifteen of the eighteen chart variants are drawn.** Mapa de calor, burbujas
+  and rectángulos proporcionales are NOT, and each says so by name above the
+  reference representation rather than being substituted silently. The semáforo
+  is implemented and refuses to colour anything without a range somebody agreed
+  to.
+- **The pivot/comparison explorer is a block** (`pivot_explorer`, the
+  nineteenth type), not a warning. It carries no author query: the reader writes
+  it, through the same server-side allowlist P4E established.
 - **A filter moves a block only when a connection names it.** Sharing a
-  characteristic is not a connection, and duplicating a block inherits none.
+  characteristic is not a connection, and duplicating a block or a page inherits
+  none.
 - **Layout has no coordinates.** A block declares an order and a span on a
   12-column grid; rows wrap. Overlap and horizontal overflow are impossible by
   construction, and every block is full width on a phone.
-- **`/studio/e/[studyId]/construccion` is an internal prototype.** It runs
-  `requireInternal()` before any read, loads a real study through the pure
-  compatibility adapter, and SAVES NOTHING — no autosave, no Server Action, no
-  draft, no publication. It does not alter `vista-cliente` or
-  `/insights/e/[studyId]`, and no client-facing route imports the composer.
-  It is laid out the way the real builder will be — pages and catalogue on the
-  left, the composition in the middle, the selected block's properties on the
-  right, the prototype's status and a width preview across the top — so what is
-  judged there is the thing that gets built. The middle column draws the
-  page's STRUCTURE and states that it carries none of the study's numbers,
-  because this slice reads no aggregation and a preview with numbers in it
-  would be a preview with invented numbers in it.
-- **Nothing is persisted.** No table, no migration, no Server Action, no
-  deployment, no Worker version. Review and publication are MODELLED only.
-- **AI is deliberately out of scope** for the composer: no model call, no SDK,
+- **`/studio/e/[studyId]/construccion` is the builder.** It runs
+  `requireInternal()` before any read; both Server Actions revalidate identity
+  and role from scratch. Pages panel left, canvas centre, block card right, save
+  state on top. The panels collapse on a computer and become drawers below their
+  dock width — the pages at `lg`, the card at `xl`, so the canvas stays
+  dominant. A block shows a drag handle and one compact menu, not five buttons;
+  the handle drags with a pointer and moves with the arrow keys. Column widths
+  are editable from 768 px up. It autosaves, says which state it is in, offers
+  an explicit save and a retry, keeps undo and redo, and detects a second
+  editor's save instead of overwriting it.
+- **AI is deliberately out of scope** for the builder: no model call, no SDK,
   no secret, no table, no interface. The category advisor is untouched.
-- ⓘ **Two of the adapter's four "cannot carry" warnings were defects, and are
-  fixed rather than announced.** A configured ideal range was a MODEL gap —
-  `comparison` carried one number where the product ships a labelled band, so
-  the query now carries `target`, `targetMaximum` and `targetLabel`, and the
-  adapter places the study's configured range on the block that shows that
-  result. A characteristic with more values than a chart can draw was an
-  ADAPTER defect — a chart's legibility ceiling was being applied to a filter
-  CONTROL, so the adapter dropped a filter the deployed dashboard offers;
-  controls now have their own, much larger ceiling
-  (`EXPERIENCE_LIMITS.filterOptions`). The pivot explorer remains a genuine
-  model gap and is still reported; a recorrido moment whose result the data no
-  longer produces is invalid legacy configuration, is preserved visibly without
-  a number, and is never repaired from this screen.
-- Gate: `npm run test:experience-composer` (95 checks), inside `npm test`.
+- ⓘ **All four of the adapter's original "cannot carry" warnings were defects,
+  and all four are fixed rather than announced.** The pivot explorer was a MODEL
+  gap and is now a block. A configured ideal range was a MODEL gap — the query
+  carries `target`, `targetMaximum` and `targetLabel`, and the adapter places
+  the study's configured range on the block that shows that result. A
+  characteristic with more values than a chart can draw was an ADAPTER defect —
+  a chart's legibility ceiling applied to a filter CONTROL, so the adapter
+  dropped a filter the deployed dashboard offers; controls have their own,
+  larger ceiling. A recorrido moment whose result the data no longer produces is
+  invalid legacy configuration, is preserved visibly without a number, and is
+  never repaired from this screen.
+- Gates: `npm run test:experience-composer` (123 checks, inside `npm test`);
+  `npm run test:experience-persistence-live` (23) and
+  `npm run test:experience-builder-live` (20) inside `npm run gates:live`. The
+  builder gate needs `npm run build && npm start` — React development calls
+  `eval()` and this application's CSP correctly forbids it, so under `next dev`
+  the builder never hydrates.
+- **Before this may control the client dashboard**: publication (approve →
+  snapshot → serve, on the ONE publication surface), a per-study switch on
+  `/insights/e/[studyId]`, a client-side renderer that is not the builder's
+  canvas, and a decision about the three undrawn variants. None is started.
+  `docs/EXPERIENCE_COMPOSER.md` §22 is the list.
 
 ## P9 — final hardening and the first real study (read this first)
 
