@@ -933,7 +933,19 @@ export function ExperienceBuilder({
             A region, not a second `<main>`: the shell already provides the
             document's one main landmark, and nesting another inside it gives a
             screen reader two answers to "where does the content start". */}
-        <div role="region" aria-label="Lienzo de la página" className="relative min-w-0">
+        {/*
+          THE RESTORE TAB GETS ITS OWN STRIP, rather than sitting on top of the
+          canvas. Floated over the card it covered the page's title and its
+          block count — a control that hides the thing it is next to. The
+          region simply starts a tab's width further in when a panel is hidden,
+          which still leaves the canvas far wider than the 288 px panel it
+          replaced.
+        */}
+        <div
+          role="region"
+          aria-label="Lienzo de la página"
+          className={`relative min-w-0 ${showLeft ? "" : "lg:pl-12"} ${showRight ? "" : "xl:pr-12"}`}
+        >
           {/*
             ALWAYS A WAY BACK, ON THE EDGE IT WENT OUT OF.
 
@@ -951,7 +963,7 @@ export function ExperienceBuilder({
               onClick={() => setChrome({ focus: false, left: true })}
               aria-label="Mostrar el panel de páginas y catálogo de bloques"
               title="Mostrar páginas y bloques"
-              className="absolute left-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-r-lg border border-l-0 border-line-strong bg-surface text-sm font-medium text-strong shadow-lifted hover:bg-surface-sunken lg:inline-flex"
+              className="absolute left-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-lg border border-line-strong bg-surface text-sm font-medium text-strong hover:bg-surface-sunken lg:inline-flex"
             >
               ›
             </button>
@@ -962,7 +974,7 @@ export function ExperienceBuilder({
               onClick={() => setChrome({ focus: false, right: true })}
               aria-label="Mostrar la ficha del bloque seleccionado"
               title="Mostrar la ficha del bloque"
-              className="absolute right-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-l-lg border border-r-0 border-line-strong bg-surface text-sm font-medium text-strong shadow-lifted hover:bg-surface-sunken xl:inline-flex"
+              className="absolute right-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-lg border border-line-strong bg-surface text-sm font-medium text-strong hover:bg-surface-sunken xl:inline-flex"
             >
               ‹
             </button>

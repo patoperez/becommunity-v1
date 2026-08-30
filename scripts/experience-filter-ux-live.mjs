@@ -297,8 +297,25 @@ async function connect() {
   };
 }
 
-async function shoot(session, name, caption) {
+/**
+ * A screenshot, optionally with one thing scrolled into view first.
+ *
+ * A shot that proves "the card shows X" has to contain X. The inspector is a
+ * tall column and the interesting section is frequently below a 1 000 px fold,
+ * so `reveal` names a heading to bring into view before the shutter — the
+ * evidence and the assertion then describe the same pixels.
+ */
+async function shoot(session, name, caption, reveal) {
   mkdirSync(SHOTS, { recursive: true });
+  if (reveal) {
+    await session.evaluate(`(() => {
+      const heading = [...document.querySelectorAll('h2, h3, h4, h5')]
+        .find((el) => el.textContent.trim().startsWith(${q(reveal)}));
+      if (heading) heading.scrollIntoView({ block: "center" });
+      return !!heading;
+    })()`);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
   const file = join(SHOTS, `${name}.png`);
   const shot = await session.send("Page.captureScreenshot", { format: "png" });
   writeFileSync(file, Buffer.from(shot.data, "base64"));
@@ -870,6 +887,7 @@ try {
     session,
     "08-filter-panel-inspector",
     "Filter-panel inspector on the disposable fixture: the characteristics it offers with ↑ ↓ reordering, the scope selector with its plain-language explanation, and the list of the blocks it currently moves.",
+    "Qué cambia este panel",
   );
 
   // 5, 6, 7 — STATIC BLOCKS SHOW NO FILTER CONTROLS AT ALL.
@@ -905,6 +923,7 @@ try {
         session,
         "06-interpretation-inspector-no-filters",
         "“Lectura del equipo” selected: the inspector shows what it says, its width and its actions — and no filter section at all, where a checklist of every characteristic used to be.",
+        "Lo que dice",
       );
     }
   }
@@ -931,6 +950,7 @@ try {
     session,
     "07-data-block-responds-to-summary",
     "A metric block selected: the compact “Este bloque responde a — «Filtros de la prueba»: …” summary, with Ir al panel and Desconectar, replacing the registry-wide checklist.",
+    "Este bloque responde a",
   );
 
   // Save what has been built, so the draft preview can read it.
