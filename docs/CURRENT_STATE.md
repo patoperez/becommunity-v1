@@ -87,6 +87,22 @@ milestone. Branch `claude/experience-builder-preview-filters`.
   `npm run gates:live`, which drives thirty editable operations consecutively
   against a production build and asserts after EACH that the editor is still
   interactive and that no Server Action response carried a re-rendered tree.
+  `npm run test:p8-acceptance-live` now visits the draft preview too — 21
+  routes × 6 widths = 126 views.
+- **A zero-traffic Cloudflare version exists and was NOT promoted.** Version
+  `8ad38467-b6ea-4d4c-920b-4ddb9b612cb3`, tag `builder-9aa7159`, preview URL
+  `https://8ad38467-becommunity-v1.ollinagencyllc.workers.dev`. Its
+  `/api/health` answers 200 with `supabase: true`, `/login` renders, and every
+  internal address — the builder and the new draft preview included —
+  redirects an unauthenticated request to `/login`. The Worker's live version
+  is still `e691ecd8-de9a-4a02-a8e3-13aad7e9e805` at 100 %, and the artifact
+  was built from a checkout with NO `.env` file.
+- **Measured on the Worker, before and after, same study, same platform:** the
+  save action went from ~10 s / 7 788 B / truncated-and-errored / error
+  boundary 4 of 4, to ~2 s / 147 B / clean 4 of 4. On BNI the recommendation
+  result reads 30.8 over 39 unfiltered, 41.4 over 29 filtered to "Más de 5
+  años", and 33.3 over 18 filtered to "Generación X"; the satisfaction results
+  read 64.3 % / 60.7 % / 40.7 % / 37 % where all 55 previously read 0.0 %.
 
 ## Experience Composer — the dashboard builder, persisted and unpublished
 

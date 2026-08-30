@@ -819,86 +819,142 @@ can be looked at, and the Worker's live version is untouched:
 
 | | |
 | --- | --- |
-| preview version | `dcb339cb-044f-4d8e-83a9-597ec76a392d`, tag `builder-f84c512` |
-| preview URL | `https://dcb339cb-becommunity-v1.ollinagencyllc.workers.dev` |
+| preview version | `8ad38467-b6ea-4d4c-920b-4ddb9b612cb3`, tag `builder-9aa7159` |
+| preview URL | `https://8ad38467-becommunity-v1.ollinagencyllc.workers.dev` |
 | live version, unchanged | `e691ecd8-de9a-4a02-a8e3-13aad7e9e805` at 100 % |
 
-On the preview `/api/health` answers 200 with `supabase: true`, `/login` renders,
-and `/studio/e/<id>/construccion` redirects an unauthenticated request to
-`/login` — the route ships and is guarded. **Do not run
-`wrangler versions deploy`.**
+On the preview `/api/health` answers 200 with `supabase: true`, `/login`
+renders, and every internal address — including the new
+`/studio/e/<id>/vista-previa` — redirects an unauthenticated request to
+`/login`. **Do not run `wrangler versions deploy`.**
 
-To actually work in the builder, run it on your own machine — the preview has no
-session of yours and the acceptance below is a hands-on pass:
+You can work in the builder on the preview with your own account, or run it on
+your own machine:
 
 ```
 npm run build && npm start
 ```
 
-Then sign in with your ordinary internal account at `http://localhost:3000`.
+`next dev` will not do: React's development build calls `eval()`, this
+application's CSP correctly forbids it, and under `next dev` the builder never
+hydrates.
 
 ### Finding the study
 
 Studio → **Estudios** → **La voz de las y los Nets de Cuicuilco** (client: BNI
-Cuicuilco). The builder is deliberately not one of the tabs in the study's
-process row; open it by its address:
+Cuicuilco), then its address:
 
 ```
 /studio/e/<id del estudio>/construccion
 ```
 
-### What to try, in the order that answers the most
+### 1. The thing that was broken
 
-1. **Read the chip at the top left.** It says *Sin guardar todavía* the first
-   time. Nothing was created by opening the page.
-2. **Look at the numbers.** They are the study's own, through the same engine
-   as the client's panel. The recommendation result reads **30.8** over 39
-   answers. Nothing on this screen is a placeholder.
-3. **Click a block.** The card on the right says where its number comes from,
-   how it is calculated, which characteristic breaks it down, which filters move
-   it, which disclosure rule applies, and how wide it is on each screen.
-4. **Change its visible title.** Watch the canvas follow, check the cursor never
-   jumps — and watch the chip go *Guardando…* then *Guardado · versión 1*.
-5. **Reload the page.** Your change is still there. This is the sentence the
-   whole milestone is about.
-6. **Drag a block by its handle** (the ⠿ on the left of its header). Then put
-   the focus on a handle and press ↑ or ↓ — the same move, no pointer.
-7. **Open the ⋯ menu** on a block: duplicar, ocultar, subir, bajar, quitar.
-   Quitar asks first and says what it will take with it.
-8. **Add a page**, rename it, duplicate it, move it, then remove it. Everything
-   is saved as you go.
-9. **Change a block's result** and its **desglose** in its card. Try to make a
-   pastel out of a promedio: the panel at the bottom turns red and says the
-   slices would not add up to the total. Change the calculation to *cantidad de
-   respuestas* and it goes green.
-10. **Change the disclosure rule** on the left, then give ONE block its own rule
-    in its card. Watch the canvas redraw. This is the decision that matters
-    most: whether a study of eleven people can see its own eleven answers.
-11. **Switch the width** at the top between computer, tablet and phone.
-12. **Make the window narrow** (or open it on your phone on the LAN). The panels
-    become drawers; you can still read, select, hide and reorder; the width
-    sliders are gone, because a twelve-column grid is not editable through a
-    320 px viewport.
-13. **Open the same study in a second tab**, change something there, save, then
-    change something in the first tab. The first tab says *Hay una versión más
-    nueva* and offers you the stored version or a download of your own. Nothing
-    is overwritten.
-14. **Press "Descargar"** and open the file. Names, layout, words. No metric
+1. **Change something. Then change something else. Then keep going.** Rename a
+   page, add a block, duplicate it, hide it, move it, remove it — a dozen edits
+   in a row without reloading. The chip at the top left cycles through *Cambios
+   sin guardar* → *Guardando…* → *Guardado · versión N*, and **the editor stays
+   an editor**. This is the milestone's first sentence: before, almost any edit
+   eventually replaced the whole screen with *"No pudimos abrir esta parte del
+   trabajo"* while the edit had already been saved.
+2. **Duplicate a block, reload the page, and duplicate the same block again.**
+   It works. Before, the second duplicate minted an identifier that already
+   existed, and from that moment **every** save failed forever with a message
+   about a repeated block.
+3. **Turn your wifi off and press "Guardar ahora".** The chip says *No se pudo
+   guardar* and offers *Reintentar*. Nothing is lost. Turn it back on, press
+   *Reintentar*, and the same edit saves.
+
+### 2. The numbers that were wrong
+
+4. **Look at the satisfaction results on Panorama.** They read real percentages
+   — 64.3 %, 60.7 %, 40.7 %, 37 % — where every one of them used to read
+   **0 %**. The study answers those questions on a 1–5 scale and the composer
+   was applying the 0–10 Top-2-Box threshold to them. All 55 of them were wrong.
+5. **The recommendation result reads 30.8 over 39 answers**, which is what it
+   read before and what the canonical function produces.
+6. **Find a block with a semáforo and no agreed range.** It carries a short
+   chip — *Falta configurar el rango* — instead of the paragraph that used to be
+   printed in full inside every narrow card.
+
+### 3. The identity of the study
+
+7. **Look at the left panel: "Identidad y portada del estudio".** The study's
+   name, the client, the period, the introduction and the mark, each with its
+   own switch, configured here and nowhere else. It renders once, above the
+   pages.
+8. **Go to Panorama and count.** There is no cover block in it any more. Try to
+   move the identity under a chart — you cannot, because it is not in any
+   page's block list. Duplicate Panorama: the study's name is not duplicated
+   with it.
+9. **Empty the "Periodo" field.** The line disappears rather than becoming a
+   blank heading.
+
+### 4. The two previews
+
+10. **Press "Vista previa del borrador".** This is the new one. It shows what
+    you have been building, with the study's real numbers, under a banner that
+    says the client does not see it, and with an obvious way back.
+11. **Press "Ver versión actualmente publicada".** This is the old button under
+    an honest name: it is what the client has today, and it does not contain
+    your draft. It never did — the old label just implied it should.
+
+### 5. The filters your client will use
+
+12. **On Panorama, find "Explora los resultados".** It is a block: select it and
+    it has a card like any other. Move it, widen it, rename it, duplicate it,
+    hide it, remove it.
+13. **In its card, choose which characteristics it offers**, and reorder them
+    with ↑ and ↓. Every filterable characteristic the study has is in that list
+    — the ones it starts with are a suggestion, not a limit. Add one the
+    suggestion did not name.
+14. **In the same card, choose what it changes**: the whole experience, this
+    page, chosen sections, or chosen blocks. Pick "solo los bloques que elija"
+    and tick two of them. Try to tick a divider: it is refused, and it says why.
+15. **Rename one of the blocks it moves.** The connection survives — targets
+    name identifiers, never words.
+16. **Remove a block a panel names.** It is dropped from the panel, the
+    confirmation tells you first, and the draft still saves.
+17. **Go to "Lo que dijeron".** It has its own panel, scoped to that page. The
+    characteristics on it are the findings-oriented ones.
+
+### 6. The filters, working
+
+18. **In the draft preview, choose "Antigüedad empresa = Más de 5 años".** The
+    recommendation result moves from **30.8 over 39** to **41.4 over 29**, and
+    the satisfaction results move with it.
+19. **Add a second choice, "Generación = Generación X", without clearing the
+    first.** Both apply. The panel says *Estás viendo: …* with both, and the
+    address bar carries both.
+20. **Copy the address and paste it into a new tab.** The same view comes back.
+    Nothing private is in that link: a filter identifier and the same words the
+    charts already print.
+21. **Press "Limpiar filtros".** Every block returns to its original value and
+    the address bar empties.
+22. **Change pages while a filter is on.** Panorama's panel governs the whole
+    experience; the one on "Lo que dijeron" governs only that page. Blocks
+    nothing connects to do not move.
+
+### 7. What is still true
+
+23. **Open the client's view** (`Ver versión actualmente publicada`, and
+    `/insights/e/<id>` as a client account). It is exactly what it was before
+    you started. Nothing you did here has reached a client, and nothing can
+    until publication exists.
+24. **Press "Descargar"** and open the file. Names, layout, words. No metric
     key, no answer, nobody's data.
-15. **Open the client's view** (`Vista del cliente`, and `/insights/e/<id>` as a
-    client account). It is exactly what it was before you started. Nothing you
-    did here has reached a client, and nothing can until publication exists.
 
 ### What is deliberately not there
 
 - **Publication.** Nothing you build here reaches a client in this milestone.
 - **Three drawings**: mapa de calor, burbujas, rectángulos proporcionales. Each
   says so where you choose it and where it would be drawn.
-- **Import.** Export exists; loading a file back does not, because doing it
-  safely needs its own design.
-- **Two people editing at once, live.** The second one is *detected*, not merged.
-
----
+- **The real theme cloud.** The current one is registered as a filter target
+  and moves with a panel like everything else; the drawing itself is next.
+- **Import.** Export exists; loading a file back does not.
+- **The client dashboard's own Top-2-Box.** It has the same 0–10 default in it
+  (§29). It was deliberately not changed, because that changes client-facing
+  numbers and needs its own review.
 
 ---
 
