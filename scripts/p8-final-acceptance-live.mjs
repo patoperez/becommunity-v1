@@ -181,7 +181,13 @@ async function discoveredRoutes(session, origin, role) {
         // one of the study's process steps, and it is visited here because it
         // is the widest surface in Studio: a three-column editor that has to
         // collapse to one readable column on a 320 px phone.
-        routes.push(base, `${base}/datos`, `${base}/categorias`, `${base}/indicadores`, `${base}/cualitativo`, `${base}/interpretacion`, `${base}/vista-cliente`, `${base}/publicar`, `${base}/construccion`, `/admin/preview/${studyId}`);
+        //
+        // `vista-previa` is the internal preview of the composed draft. It is
+        // visited for the opposite reason: it is the surface a client-facing
+        // page will one day be built from, it renders every block type with
+        // the study's real numbers, and it now carries the reader's own filter
+        // controls — which are the newest thing on any narrow screen.
+        routes.push(base, `${base}/datos`, `${base}/categorias`, `${base}/indicadores`, `${base}/cualitativo`, `${base}/interpretacion`, `${base}/vista-cliente`, `${base}/vista-previa`, `${base}/publicar`, `${base}/construccion`, `/admin/preview/${studyId}`);
       }
     }
     await session.load(`${origin}/studio/clientes`);

@@ -84,8 +84,14 @@ export function IdentityPanel({
 
       <div className="mt-2 space-y-2">
         <div>
+          {/*
+            "Nombre", not "Título visible" — the block card already has a field
+            called "Título visible", and two fields whose names differ only by a
+            trailing "del estudio" are two fields somebody types into the wrong
+            one of. Naming them apart is cheaper than explaining the difference.
+          */}
           <label className={label} htmlFor={id("title")}>
-            Título visible del estudio
+            Nombre visible del estudio
           </label>
           <input
             id={id("title")}

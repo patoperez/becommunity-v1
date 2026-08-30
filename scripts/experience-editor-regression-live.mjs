@@ -664,9 +664,17 @@ try {
     return String(value);
   });
 
-  await operate("changing the block's visible title", async () =>
-    session.evaluate(setField(byLabel("Título visible"), `Bloque ${Date.now() % 10000}`)),
-  );
+  await operate("changing the block's visible title", async () => {
+    // BY ID, not by a label fragment. The identity panel and the block card are
+    // on screen together, and a substring match on "Título visible" finds
+    // whichever comes first in the DOM — which is how a check can pass while
+    // editing the wrong field entirely.
+    const value = await session.evaluate(
+      setField("document.querySelector('input[id$=\"-title\"]')", `Bloque ${Date.now() % 10000}`),
+    );
+    assert.notEqual(value, "NOFIELD", "the block title field is missing");
+    return value;
+  });
 
   await operate("changing the block's explanatory text", async () => {
     const value = await session.evaluate(
@@ -717,7 +725,7 @@ try {
 
   await operate("editing the study's identity", async () => {
     const value = await session.evaluate(
-      setField(byLabel("Título visible del estudio"), `Estudio ${Date.now() % 10000}`),
+      setField(byLabel("Nombre visible del estudio"), `Estudio ${Date.now() % 10000}`),
     );
     assert.notEqual(value, "NOFIELD", "the identity title field is missing");
     return value;

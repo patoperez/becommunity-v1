@@ -5,6 +5,89 @@
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
 
+## Experience Composer — schema version 2: stable editor, visible draft, real filters
+
+Standing reference: `docs/EXPERIENCE_COMPOSER.md`, sections 23–31 for this
+milestone. Branch `claude/experience-builder-preview-filters`.
+
+- ⓘ **No Server Action on the builder or the draft preview may call
+  `revalidatePath`.** It makes Next re-render the route INSIDE the action's
+  response, which on this route meant a second full workspace load in the same
+  request. On the Worker, against the real 3 282-answer study, the write landed
+  and the re-render then aborted; the truncated payload's errored row reached
+  the browser as React error #441 and the route's error boundary replaced the
+  whole editor. Measured 4/4; an 80-answer study answered in 1.9 s with a
+  complete tree. The action response is now 147 bytes instead of 7 788. The
+  offline gate asserts the absence of `revalidatePath` in both action files.
+- ⓘ **One request reads a study's rows once.** `loadLegacyStudySnapshot` used
+  to read them while `loadBuilderWorkspace` read them again. The save action
+  uses `loadBuilderRegistry`, which stops at the registry it validates against.
+- ⓘ **A minted identifier is checked against the document it is joining.** The
+  editor's `sequence` restarts at zero on every open, so duplicating the same
+  block in a later session minted an id that already existed; the document then
+  held two blocks with one id, was refused as `repeated block`, and EVERY later
+  save failed. `mintFreeId` salts until free, without giving up determinism.
+- ⓘ **A Top-2-Box is computed from the study's OWN scale.** `DEFAULT_CSAT_MIN`
+  is 9, a 0–10 threshold; every `csat_*` result in the BNI study is answered
+  1–5, so all 55 satisfaction results read a confident, wrong **0.0 %**. The
+  registry now carries `scale` and `topBoxMinimum` per result, read from the
+  study's answers, applying the thresholds `docs/CALCULATION_CATALOG.md` §4 and
+  `docs/CALCULATION_POLICY.md` §5 document (4 on 1–5, 9 on 0–10). An
+  undocumented scale is not offered the aggregation at all and is refused if a
+  document asks for it. **The client dashboard was deliberately NOT changed** —
+  `src/lib/dashboard/view.ts` calls `computeStudyMetrics` without a `csatMin`,
+  and changing client-facing numbers is a separate, human-reviewed decision.
+- **`EXPERIENCE_SCHEMA_VERSION` is 2**, and the migration is in code only — no
+  database change, `0023`/`0024` unchanged, nothing new applied. `oneToTwo`
+  moves the first cover block's words into the global `identity` and removes
+  that block, turns `query.filterRefs` into self-contained `query.fixedFilters`,
+  and gives every block `filterPanel: null`. A version-1 draft opens without
+  repair; proved by the gate and confirmed against the real saved BNI draft.
+- **The study's identity is a global layer, not a block.** Title, client,
+  period, introduction, mark and an optional report download, each with its own
+  show switch, configured apart from every page and rendered once above them.
+  It cannot be reordered under a chart or duplicated with a page. Pages keep
+  every ordinary heading and text block they had.
+- **`filter_panel` is the twentieth block type**, in a fifth group,
+  `exploration`, beside `pivot_explorer`. A visible box the client explores
+  with: addable anywhere, movable, duplicable, hideable, removable, width and
+  wording configurable, one or many controls in an author-set order, *Limpiar
+  filtros*, active selections shown, several per experience.
+- ⓘ **What a panel moves is `filterPanel.target`**: `experience`, `page`,
+  `sections` or `blocks`. The first two resolve at render time so later blocks
+  join; the last two are BY ID and stay by id, so renaming never breaks a
+  connection and a dangling id is a hard error. A block responds when EITHER a
+  `filterConnection` names it OR a panel hosting that filter resolves to it —
+  computed in one place, `effectiveFilterTargets`.
+- ⓘ **Two kinds of filter, and they are not the same thing.** `Filtro fijo del
+  bloque` is `block.query.fixedFilters`, carries its own characteristic and
+  values, and is independent of every viewer control. `Panel de filtros para
+  explorar` is the reader's transient view. A reader can never widen past the
+  author: same characteristic, the two are intersected.
+- **A reader's selection is transient.** Held in the preview's state, mirrored
+  into the URL so a view can be refreshed or shared internally, never written
+  anywhere. The URL carries an opaque filter id and segment values already
+  printed as chart labels — no respondent, no answer, no metric key — and the
+  route runs `requireInternal()` first.
+- **Client-specific vocabulary lives only in
+  `src/lib/experience/template-suggestions.ts`.** The gate refuses a client's
+  name in every generic module. Suggestions decide what a freshly adapted panel
+  OPENS WITH and restrict nothing; a study matching none falls back to what it
+  has. **Age range is deliberately not a default.**
+- **Two previews.** `Vista previa del borrador`
+  (`/studio/e/[studyId]/vista-previa`, internal only, saved draft, real
+  aggregates, publishes nothing, banner and a way back) and `Ver versión
+  actualmente publicada` (`/studio/e/[studyId]/vista-cliente`, unchanged).
+- **The canvas is drawn at the previewed width** (1 120 / 720 / 360) and
+  scrolls sideways inside its own box; the page never does. A scale control
+  (100/75/50 %) shows the whole arrangement. The semáforo's missing-range
+  warning is a short chip on the block and the full sentence in its card.
+- Gates: `npm run test:experience-composer` (**140**, inside `npm test`);
+  `npm run test:experience-editor-regression` (**35**) inside
+  `npm run gates:live`, which drives thirty editable operations consecutively
+  against a production build and asserts after EACH that the editor is still
+  interactive and that no Server Action response carried a re-rendered tree.
+
 ## Experience Composer — the dashboard builder, persisted and unpublished
 
 Standing reference: `docs/EXPERIENCE_COMPOSER.md`. Read it before touching

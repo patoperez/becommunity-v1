@@ -79,62 +79,73 @@ export function DraftPreview({
   );
   const page = visiblePages.find((candidate) => candidate.id === openPageId) ?? visiblePages[0] ?? null;
 
-  // The address bar follows the choices, so this view can be refreshed and
-  // pasted to a colleague. `replaceState` rather than a router navigation:
-  // re-running the route on every keystroke of a select is the expensive
-  // re-render this milestone exists to stop doing.
+  /*
+   * ONE EFFECT WATCHES THE SELECTION, AND IT IS THE ONLY THING THAT REACTS TO
+   * IT.
+   *
+   * The first version called the recompute from inside the `setSelection`
+   * updater, which looked tidy and was wrong: a state updater must be pure,
+   * React is free to run it more than once, and a `setState` reached from
+   * inside one is not supported. In practice a second choice made while the
+   * first was still recomputing was silently dropped, and "Limpiar filtros"
+   * did nothing at all — both of which a person would read as the filters
+   * being broken rather than as a race.
+   *
+   * The handlers now do one thing: change the selection. Everything that
+   * follows from a selection — the address bar and the numbers — happens here,
+   * once, after it has actually changed.
+   */
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
       return;
     }
+
+    // The address bar follows the choices, so this view can be refreshed and
+    // pasted to a colleague. `replaceState` rather than a router navigation:
+    // re-running the route on every use of a select is the expensive
+    // re-render this milestone exists to stop doing.
     const query = viewerSelectionToQuery(selection, definition);
     window.history.replaceState(null, "", `${window.location.pathname}${query}`);
-  }, [selection, definition]);
 
-  const recompute = useCallback(
-    (next: ViewerSelection) => {
-      startTransition(async () => {
-        const result = await refresh(studyId, next);
-        if (result.ok) {
-          setData(result.data);
-          setProblem(null);
-        } else {
-          // A failed recomputation leaves the last good numbers on screen and
-          // says so. Blanking the page would make a transient network problem
-          // look like a study with no data.
-          setProblem(result.message);
-        }
-      });
-    },
-    [refresh, studyId],
-  );
+    let current = true;
+    startTransition(async () => {
+      const result = await refresh(studyId, selection);
+      if (!current) return;
+      if (result.ok) {
+        setData(result.data);
+        setProblem(null);
+      } else {
+        // A failed recomputation leaves the last good numbers on screen and
+        // says so. Blanking the page would make a transient network problem
+        // look like a study with no data.
+        setProblem(result.message);
+      }
+    });
+    return () => {
+      // A choice made while an earlier one is still in flight wins: the older
+      // answer is for a selection nobody is looking at any more.
+      current = false;
+    };
+  }, [selection, definition, refresh, studyId]);
 
-  const onChange = useCallback(
-    (filterId: string, values: string[]) => {
-      setSelection((current) => {
-        const next = { ...current };
-        if (values.length === 0) delete next[filterId];
-        else next[filterId] = values;
-        recompute(next);
-        return next;
-      });
-    },
-    [recompute],
-  );
+  const onChange = useCallback((filterId: string, values: string[]) => {
+    setSelection((current) => {
+      const next = { ...current };
+      if (values.length === 0) delete next[filterId];
+      else next[filterId] = values;
+      return next;
+    });
+  }, []);
 
-  const onClear = useCallback(
-    (filterIds: string[]) => {
-      setSelection((current) => {
-        const next = { ...current };
-        for (const filterId of filterIds) delete next[filterId];
-        recompute(next);
-        return next;
-      });
-    },
-    [recompute],
-  );
+  const onClear = useCallback((filterIds: string[]) => {
+    setSelection((current) => {
+      const next = { ...current };
+      for (const filterId of filterIds) delete next[filterId];
+      return next;
+    });
+  }, []);
 
   const viewer = useMemo(() => ({ selection, onChange, onClear }), [selection, onChange, onClear]);
   const activeCount = Object.keys(selection).length;

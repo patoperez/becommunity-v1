@@ -182,9 +182,43 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — the persistent dashboard builder; do not skip ahead
+## Current work — the Experience Composer, schema v2; do not skip ahead
 
-The authoritative state is `docs/CURRENT_STATE.md`.
+The authoritative state is `docs/CURRENT_STATE.md`. Standing architecture
+reference: `docs/EXPERIENCE_COMPOSER.md` (sections 23-31 are the current
+milestone). Branch `claude/experience-builder-preview-filters`.
+
+- ⓘ **A Server Action on the builder or the draft preview must never call
+  `revalidatePath`.** It makes Next re-render the route inside the action's own
+  response, which meant a second full workspace load per save; on the Worker
+  the write landed and the re-render then aborted, and the errored RSC row
+  replaced the whole editor with the Studio error boundary. A successful write
+  must never be followed by a broken render. `npm run test:experience-composer`
+  asserts the absence; `npm run test:experience-editor-regression` drives thirty
+  editable operations consecutively and checks it after each one.
+- ⓘ **One request reads a study's rows once.** Pass already-loaded rows into
+  `loadLegacyStudySnapshot`; use `loadBuilderRegistry` when only a registry is
+  needed. The builder page is the most expensive render in the product and it
+  runs on a Worker with a per-request budget.
+- ⓘ **An identifier is minted against the document it is joining**
+  (`mintFreeId`). The editor's session counter restarts on every open, so a
+  seed alone is not unique; a collision made a draft permanently unsavable.
+- ⓘ **A composite metric is computed from the study's own scale.** Top-2-Box
+  takes an explicit `satisfiedMin` (4 on a 1-5 scale, 9 on a 0-10 scale, per
+  `docs/CALCULATION_CATALOG.md` §4 and `docs/CALCULATION_POLICY.md` §5). An
+  undocumented scale yields a REFUSAL, never a number. Applying the 0-10
+  default to a 1-5 study made all 55 satisfaction results read 0.0 %. Never
+  present missing configuration or an unsupported calculation as a real zero.
+- ⓘ **Client-specific vocabulary lives only in
+  `src/lib/experience/template-suggestions.ts`.** The composer gate refuses a
+  client's name in every generic module. Suggestions decide defaults; they never
+  restrict what the engine offers.
+- **`EXPERIENCE_SCHEMA_VERSION` is 2**, migrated in code, no database change.
+  Identity is a global layer, not a `cover` block; `query.fixedFilters`
+  replaces `query.filterRefs`; `filter_panel` is the twentieth block type.
+- **Two previews, two labels.** `vista-previa` is the internal draft preview;
+  `vista-cliente` is what the client has today and is unchanged. Never reuse a
+  label implying the client dashboard already contains draft changes.
 
 P8 is implementation-complete and owner-accepted on
 `p8f-responsive-accessibility-acceptance` at `b49df5d`. Deliver the closure
