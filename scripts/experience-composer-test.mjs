@@ -1611,8 +1611,8 @@ ok("a canvas block shows a drag handle, its name and one menu, not five permanen
 
 // --- Panels collapse on a computer and become drawers on a narrow screen.
 for (const [pattern, message] of [
-  [/setChrome\(\{ focus: false, left: !showLeft \}\)/, "the left panel collapses"],
-  [/setChrome\(\{ focus: false, right: !showRight \}\)/, "the right panel collapses"],
+  [/setChrome\(\{ focus: false, left: !showLeft, right: showRight \}\)/, "the left panel collapses"],
+  [/setChrome\(\{ focus: false, right: !showRight, left: showLeft \}\)/, "the right panel collapses"],
   [/setDrawer\(/, "and both become drawers"],
   [/lg:static/, "the same element is a column from lg up"],
   [/event\.key === "Escape"/, "Escape closes an open drawer"],
@@ -1703,6 +1703,56 @@ assert.match(
   "dirtiness is derived from the document alone, so chrome cannot make a draft dirty",
 );
 ok("hiding a panel expands the canvas, focus mode hides both, and neither is an edit");
+
+/*
+ * --- THE TWO PANELS ARE INDEPENDENT, AND THE SOURCE HAS TO SAY SO. ----------
+ *
+ * Every control that changes one side pins the other to what is on screen.
+ * Without the pin, restoring the pages panel while focus mode is on drags the
+ * inspector back with it — the panels stop being independent exactly when
+ * somebody most expects them to be. Asserted as source, because the browser
+ * gate can only sample combinations and this covers every writer of `left` or
+ * `right` in the file.
+ */
+for (const [pattern, message] of [
+  [/onCollapse=\{\(\) => setChrome\(\{ left: false \}\)\}/, "the left rail collapses only the left panel"],
+  [/onCollapse=\{\(\) => setChrome\(\{ right: false \}\)\}/, "the right rail collapses only the right panel"],
+  [/setChrome\(\{ focus: false, left: true, right: showRight \}\)/, "restoring the left panel pins the right one"],
+  [/setChrome\(\{ focus: false, right: true, left: showLeft \}\)/, "restoring the right panel pins the left one"],
+  [/setChrome\(\{ focus: false, left: !showLeft, right: showRight \}\)/, "the left toolbar toggle pins the right panel"],
+  [/setChrome\(\{ focus: false, right: !showRight, left: showLeft \}\)/, "the right toolbar toggle pins the left panel"],
+  [/data-collapse-rail=\{side\}/, "each panel carries an inner-edge collapse rail"],
+  [/onDoubleClick=\{onCollapse\}/, "and the rail answers a double-click as an accelerator"],
+  [/select-none/, "which cannot select text instead of collapsing"],
+  [/draggable=\{false\}/, "and cannot be read as the start of a drag"],
+  [/data-restore-tab="left"/, "a hidden left panel keeps a named restore tab"],
+  [/data-restore-tab="right"/, "and so does a hidden right panel"],
+]) {
+  assert.match(builderSource, pattern, message);
+}
+
+// LEAVING FOCUS MODE IS THE ONE ACT THAT RESTORES THE PAIR, and it does it by
+// writing `focus` alone — so the combination it returns to is whatever was
+// there before, never a guess.
+assert.match(
+  builderSource,
+  /onToggleFocus=\{\(\) => setChrome\(\{ focus: !focusMode \}\)\}/,
+  "focus mode is toggled without writing either panel, so the pre-focus pair survives",
+);
+
+// NO WRITER OF ONE SIDE MAY LEAVE THE OTHER UNSAID. Every `setChrome` that
+// names `left` or `right` must name both, except the two rails (which
+// deliberately collapse one and touch nothing else) and the focus toggle.
+for (const call of builderSource.match(/setChrome\(\{[^}]*\}\)/g) ?? []) {
+  const names = { left: /\bleft:/.test(call), right: /\bright:/.test(call) };
+  if (!names.left && !names.right) continue;
+  const collapsingOne = /^setChrome\(\{ (left|right): false \}\)$/.test(call);
+  assert.ok(
+    collapsingOne || (names.left && names.right),
+    `a control that moves one panel must pin the other: ${call}`,
+  );
+}
+ok("the two panels are independent: every control moves one side and pins the other");
 
 // --- Precision layout is a desktop job.
 const inspectorSource = builderSource.slice(builderSource.indexOf("function Inspector"));

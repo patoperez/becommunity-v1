@@ -752,8 +752,11 @@ export function ExperienceBuilder({
         onRedo={() => act(redo, "Se rehízo el último cambio.")}
         onSave={() => void save(definition, "manual")}
         onDownload={download}
-        onToggleLeft={() => setChrome({ focus: false, left: !showLeft })}
-        onToggleRight={() => setChrome({ focus: false, right: !showRight })}
+        // Each toolbar toggle moves ONE side and pins the other to what is on
+        // screen, for the same reason the edge tabs do: leaving focus mode is a
+        // separate, differently-labelled act.
+        onToggleLeft={() => setChrome({ focus: false, left: !showLeft, right: showRight })}
+        onToggleRight={() => setChrome({ focus: false, right: !showRight, left: showLeft })}
         onToggleFocus={() => setChrome({ focus: !focusMode })}
         onOpenDrawer={setDrawer}
         leftOpen={showLeft}
@@ -842,6 +845,10 @@ export function ExperienceBuilder({
           open={showLeft}
           drawerOpen={drawer === "left"}
           onClose={() => setDrawer("none")}
+          // ONLY THIS PANEL. `left: false` and nothing else — the right panel's
+          // state is not read, not written, and cannot move as a side effect.
+          onCollapse={() => setChrome({ left: false })}
+          collapseLabel="Ocultar el panel de páginas y catálogo de bloques"
         >
           <PagesPanel
             idPrefix={ids}
@@ -957,12 +964,23 @@ export function ExperienceBuilder({
             with its own opener and a second control would be a second set of
             identifiers for one thing.
           */}
+          {/*
+            RESTORING ONE PANEL RESTORES ONE PANEL.
+
+            Leaving focus mode is what restores the pair, and it is a different
+            control with a different label. So each tab writes `focus: false`
+            AND pins the other side to what is on screen right now: from focus
+            mode the other stays hidden, and outside it the write is a no-op
+            for that side. Without the pin, restoring the pages panel out of
+            focus mode would drag the inspector back with it.
+          */}
           {!showLeft ? (
             <button
               type="button"
-              onClick={() => setChrome({ focus: false, left: true })}
+              onClick={() => setChrome({ focus: false, left: true, right: showRight })}
               aria-label="Mostrar el panel de páginas y catálogo de bloques"
               title="Mostrar páginas y bloques"
+              data-restore-tab="left"
               className="absolute left-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-lg border border-line-strong bg-surface text-sm font-medium text-strong hover:bg-surface-sunken lg:inline-flex"
             >
               ›
@@ -971,9 +989,10 @@ export function ExperienceBuilder({
           {!showRight ? (
             <button
               type="button"
-              onClick={() => setChrome({ focus: false, right: true })}
+              onClick={() => setChrome({ focus: false, right: true, left: showLeft })}
               aria-label="Mostrar la ficha del bloque seleccionado"
               title="Mostrar la ficha del bloque"
+              data-restore-tab="right"
               className="absolute right-0 top-2 z-10 hidden min-h-11 min-w-11 items-center justify-center rounded-lg border border-line-strong bg-surface text-sm font-medium text-strong hover:bg-surface-sunken xl:inline-flex"
             >
               ‹
@@ -1032,6 +1051,8 @@ export function ExperienceBuilder({
           open={showRight}
           drawerOpen={drawer === "right"}
           onClose={() => setDrawer("none")}
+          onCollapse={() => setChrome({ right: false })}
+          collapseLabel="Ocultar la ficha del bloque seleccionado"
         >
           {selected ? (
             <Inspector
@@ -1504,6 +1525,8 @@ function Panel({
   open,
   drawerOpen,
   onClose,
+  onCollapse,
+  collapseLabel,
   children,
 }: {
   side: "left" | "right";
@@ -1511,6 +1534,9 @@ function Panel({
   open: boolean;
   drawerOpen: boolean;
   onClose: () => void;
+  /** Collapse THIS panel, from its own inner edge. It never touches the other. */
+  onCollapse: () => void;
+  collapseLabel: string;
   children: React.ReactNode;
 }) {
   useEffect(() => {
@@ -1538,6 +1564,53 @@ function Panel({
     ? { column: open ? "lg:flex" : "lg:hidden", header: "lg:hidden", chrome: "lg:static lg:z-auto lg:w-64 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none xl:w-72" }
     : { column: open ? "xl:flex" : "xl:hidden", header: "xl:hidden", chrome: "xl:static xl:z-auto xl:w-80 xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none" };
 
+  /*
+   * THE COLLAPSE RAIL, ON THE PANEL'S OWN INNER EDGE.
+   *
+   * The toolbar can already hide either panel and it stays. This is the same
+   * act put where the hand already is: a slim strip along the edge where the
+   * panel meets the canvas, carrying a real `<button>` so it is reachable by
+   * keyboard, focusable in order and announced by name. A double-click on the
+   * strip does the same thing — an accelerator for people who expect one from
+   * an editor, never the only way in.
+   *
+   * `select-none` on both, because a double-click that selects the label
+   * underneath it instead of collapsing the panel is the classic failure of
+   * this pattern, and `draggable={false}` so the gesture can never be read as
+   * the beginning of a drag.
+   *
+   * IT EXISTS ONLY WHERE THE PANEL IS A COLUMN. Below that width the panel is
+   * a drawer with its own close button and its own toolbar opener; a 6 px edge
+   * strip on a phone is a target nobody can hit, which is why the mobile route
+   * is an explicit button and not this.
+   */
+  const rail = (
+    <div
+      className={`pointer-events-none absolute inset-y-0 z-20 hidden w-6 items-center justify-center ${
+        side === "left" ? "-right-4 lg:flex" : "-left-4 xl:flex"
+      }`}
+    >
+      <div
+        onDoubleClick={onCollapse}
+        draggable={false}
+        data-collapse-rail={side}
+        title={`${collapseLabel} · doble clic en la guía`}
+        className="pointer-events-auto flex h-full w-1.5 select-none items-center justify-center rounded-full bg-line transition-colors duration-[var(--motion-state)] hover:bg-line-strong"
+      >
+        <button
+          type="button"
+          onClick={onCollapse}
+          draggable={false}
+          aria-label={collapseLabel}
+          title={collapseLabel}
+          className="pointer-events-auto flex min-h-11 w-6 select-none items-center justify-center rounded-md border border-line-strong bg-surface text-xs font-semibold text-strong transition-colors duration-[var(--motion-state)] hover:bg-surface-sunken"
+        >
+          <span aria-hidden="true">{side === "left" ? "‹" : "›"}</span>
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <aside
       aria-label={label}
@@ -1547,6 +1620,10 @@ function Panel({
         "fixed inset-y-0 z-40 w-[min(22rem,88vw)] flex-col gap-4 overflow-y-auto border-line bg-surface-page p-4 shadow-lifted",
         side === "left" ? "left-0 border-r" : "right-0 border-l",
         dock.chrome,
+        // The rail is positioned against the panel, so the panel has to be the
+        // containing block — but only once it is a static column. While it is a
+        // fixed drawer it already establishes one, and the rail is hidden.
+        "lg:relative",
       ].join(" ")}
     >
       <div className={`flex items-center justify-between ${dock.header}`}>
@@ -1556,6 +1633,7 @@ function Panel({
         </button>
       </div>
       {children}
+      {rail}
     </aside>
   );
 }
