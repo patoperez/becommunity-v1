@@ -10,6 +10,7 @@ import {
   type SegmentFilters,
 } from "@/lib/calc/filters";
 import { sampleVisibility, type SampleVisibility } from "@/lib/calc/disclosure";
+import { topBoxMinimumsFor } from "@/lib/calc/scale";
 import { formatNumber, formatScore } from "@/lib/calc/format";
 import { DECIMALS, roundTo } from "@/lib/calc/metrics";
 import { buildAllowlist, type PivotAllowlist, type PivotResult } from "@/lib/calc/pivot";
@@ -218,7 +219,23 @@ export function buildStudyDashboard(
   // Every formula, and every cross a reader actually asks for, is unchanged:
   // the comparison explorer computes exactly the one cross it was asked for,
   // through the same allowlisted server path it always used.
-  const metrics = computeStudyMetrics(filteredRows, { includeCrosses: false });
+  /*
+   * THE THRESHOLD COMES FROM THE WHOLE STUDY, AND THE NUMBERS FROM THE
+   * SELECTION.
+   *
+   * `computeStudyMetrics` used to be called here with no `csatMin` at all, so
+   * every satisfaction result on this surface was measured against the 0–10
+   * default of 9. For a study answered 1–5 that is a confident, wrong 0 % —
+   * the same defect the composer was fixed for, on the path a client actually
+   * reads. It is derived from `rows` rather than `filteredRows` on purpose:
+   * a selection that happened to contain only middling answers would otherwise
+   * change which documented rule applies to the result.
+   */
+  const thresholds = topBoxMinimumsFor(rows);
+  const metrics = computeStudyMetrics(filteredRows, {
+    includeCrosses: false,
+    topBoxMinimums: thresholds,
+  });
 
   const tiles: SafeMetric[] = [];
   if (!selectionSuppressed && selectedCount > 0) {
@@ -258,7 +275,7 @@ export function buildStudyDashboard(
   const featured = featuredResultKeys(published, stages, presentation.threshold);
 
   const journey: SafeJourneyStage[] = selectionSuppressed ? [] : stages.map((stage) => {
-    const metric = computeStageMetric(filteredRows, stage.metric);
+    const metric = computeStageMetric(filteredRows, stage.metric, undefined, thresholds);
     const visibility = sampleVisibility(metric.n);
     const stageSummary = summarizeConfirmedQualitative(
       filteredQualitative.filter((row) => row.stage_key === stage.id),

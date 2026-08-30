@@ -3,6 +3,7 @@ import "server-only";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { buildSegmentFilterOptions } from "@/lib/calc/filters";
 import { loadStudyRows } from "@/lib/calc/load";
+import { observedScales } from "@/lib/calc/scale";
 import type { LongRow } from "@/lib/calc/engine";
 import { loadStudyThemeOptions } from "@/lib/studio/theme-inventory";
 import type { StudioStudyWorkspace } from "@/lib/studio/study-workspace";
@@ -70,20 +71,13 @@ export async function loadLegacyStudySnapshot(
    * explicit `satisfiedMin` that `docs/CALCULATION_POLICY.md` §5 requires
    * rather than a 0–10 default. A study answered 1–5 read 0 % on every
    * satisfaction result because that default was applied to it.
+   *
+   * The reading itself lives in `src/lib/calc/scale.ts`, beside the rule that
+   * turns a span into a documented threshold, so the composer and every
+   * client-facing path derive it from the same code rather than from the same
+   * intention.
    */
-  const spans = new Map<string, { minimum: number; maximum: number }>();
-  for (const row of rows) {
-    const value = Number((row as { value?: unknown }).value);
-    if (!Number.isFinite(value)) continue;
-    const key = String((row as { metric_key?: unknown }).metric_key ?? "");
-    if (key === "") continue;
-    const span = spans.get(key);
-    if (!span) spans.set(key, { minimum: value, maximum: value });
-    else {
-      if (value < span.minimum) span.minimum = value;
-      if (value > span.maximum) span.maximum = value;
-    }
-  }
+  const spans = observedScales(rows);
 
   const dimensions = buildSegmentFilterOptions(rows as LongRow[]).map((option) => ({
     key: option.key,

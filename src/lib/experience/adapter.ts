@@ -56,6 +56,7 @@
 
 import { parseDashboardConfig, type DashboardSections } from "@/lib/dashboard/config";
 import { parseJourneyDefinition } from "@/lib/calc/journey";
+import { documentedTopBoxMinimum } from "@/lib/calc/scale";
 
 import { newBlock, newIdentity, newPage, DEFAULT_THEME } from "./defaults";
 import {
@@ -278,11 +279,13 @@ function metricEntry(studyId: string, metric: LegacyMetricInput): SemanticMetric
  * what the project forbids.
  */
 function topBoxMinimumFor(metric: LegacyMetricInput): number | null {
-  if (!metric.scale) return null;
-  const { minimum, maximum } = metric.scale;
-  if (minimum >= 1 && maximum <= 5) return 4;
-  if (maximum > 5 && maximum <= 10) return 9;
-  return null;
+  // ONE RULE, IN ONE PLACE. `src/lib/calc/scale.ts` owns it, and the client
+  // dashboard, the server PDF and the longitudinal series now read the same
+  // function. That is the point: the composer derived the scale correctly
+  // while those three still applied the 0–10 default, and two derivations of
+  // one fact is how a builder preview and a client's screen come to disagree
+  // about a number.
+  return documentedTopBoxMinimum(metric.scale);
 }
 
 function dimensionEntry(studyId: string, dimension: LegacyDimensionInput): SemanticDimension {

@@ -49,6 +49,9 @@ export async function GET(
     brand,
     study,
     rows: filteredRows,
+    // The scale each result is answered on is a property of the STUDY, not of
+    // the reader's current selection.
+    allRows: rows,
     journeyStages: parseJourneyDefinition(study.journey_definition),
     qualitative: filteredQualitative,
     filters,

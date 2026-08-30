@@ -19,6 +19,11 @@ import {
   type CsatResult,
   type NpsResult,
 } from "./metrics";
+import {
+  resolveTopBoxMinimum,
+  topBoxMinimumsFor,
+  type TopBoxMinimums,
+} from "./scale";
 
 /**
  * Calculation engine (§5.2). The relational work — filter, group, average, count,
@@ -149,7 +154,27 @@ export function computeStudyMetrics(
   rows: LongRow[],
   opts: {
     crossSegment?: string;
+    /**
+     * ONE threshold for every satisfaction result. Kept because a caller that
+     * genuinely knows the scale — the calculation gate does — should be able
+     * to say so, and because saying so must keep producing exactly what it
+     * produced before.
+     */
     csatMin?: number;
+    /**
+     * THE DOCUMENTED THRESHOLD PER RESULT, derived from the study's own
+     * answers by `src/lib/calc/scale.ts`.
+     *
+     * Pass it whenever `rows` is a NARROWED set. A selection that happens to
+     * contain only the answers 3, 4 and 5 of a 0–10 result would otherwise
+     * look like a 1–5 one and move its threshold from 9 to 4 — a wrong number
+     * produced by the act of filtering. Derive it once from the whole study
+     * and hand it down.
+     *
+     * A key whose value is `null` has no authoritative Top-2-Box and is
+     * OMITTED from `csat` rather than reported as a zero.
+     */
+    topBoxMinimums?: TopBoxMinimums;
     satMetricPrefix?: string;
     /**
      * Whether to cross EVERY metric key against the chosen segment. Defaults to
@@ -167,7 +192,15 @@ export function computeStudyMetrics(
   const keys = metricKeys(dt);
   const segments = segmentKeys(dt);
   const satPrefix = opts.satMetricPrefix ?? "sat";
-  const csatMin = opts.csatMin ?? DEFAULT_CSAT_MIN;
+  /*
+   * THE SCALE IS READ, NOT ASSUMED.
+   *
+   * When no caller states a threshold and none is handed down, it is derived
+   * from these rows through the one canonical rule — which is right for a
+   * whole-study call and is why every caller with a NARROWED row set passes
+   * `topBoxMinimums` instead.
+   */
+  const declared = opts.topBoxMinimums ?? topBoxMinimumsFor(rows);
 
   const respondents = new Set(rows.map((r) => r.respondent_id)).size;
 
@@ -175,8 +208,16 @@ export function computeStudyMetrics(
 
   const csatList = keys
     .filter((k) => k === "csat" || k.startsWith(satPrefix))
-    .map((k) => ({ metric_key: k, result: csat(dt, k, csatMin) }))
-    .filter((c): c is { metric_key: string; result: CsatResult } => c.result !== null);
+    .flatMap((k) => {
+      const satisfiedMin = resolveTopBoxMinimum(k, { explicit: opts.csatMin, declared });
+      // NO THRESHOLD, NO NUMBER. A result answered on a scale the catalogue
+      // does not document has no honest Top-2-Box, so it is left out rather
+      // than printed as 0 %. "Nobody was satisfied" and "we do not know how to
+      // ask that here" are different sentences.
+      if (satisfiedMin === null) return [];
+      const result = csat(dt, k, satisfiedMin);
+      return result ? [{ metric_key: k, result }] : [];
+    });
 
   // Prefer 'genero' as the cross dimension, else the first available segment.
   const crossSegment =
@@ -210,7 +251,8 @@ export type StageMetric = {
 export function computeStageMetric(
   rows: LongRow[],
   metricKey: string,
-  csatMin = DEFAULT_CSAT_MIN,
+  csatMin?: number,
+  topBoxMinimums?: TopBoxMinimums,
 ): StageMetric {
   const dt = buildTable(rows);
   const values = valuesFor(dt, metricKey);
@@ -241,18 +283,27 @@ export function computeStageMetric(
     // 2 dp here and the JourneyMap re-rounded with toFixed(1) — double rounding,
     // which shifts values (raw 3.445 -> 3.45 -> "3.5", instead of "3.4").
     const avg = mean(values, DECIMALS.journeyHeadline);
-    const c = csatTopBox(values, csatMin);
-    return {
-      metricKey,
-      kind: "csat",
-      value: avg,
-      unit: "score",
-      n,
-      detail: [
-        { label: "CSAT (Top-2-Box)", value: `${c.csat}%` },
-        { label: "Satisfechos", value: `${c.satisfied}/${c.total}` },
-      ],
-    };
+    const satisfiedMin = resolveTopBoxMinimum(metricKey, {
+      explicit: csatMin,
+      declared: topBoxMinimums ?? topBoxMinimumsFor(rows),
+    });
+    /*
+     * THE AVERAGE IS THE HEADLINE EITHER WAY; the Top-2-Box is a detail beside
+     * it. With no documented threshold that detail is simply absent — the
+     * moment keeps its real average and says nothing it cannot support, which
+     * is the difference between a missing line and a printed "0 %".
+     */
+    const detail =
+      satisfiedMin === null
+        ? []
+        : (() => {
+            const c = csatTopBox(values, satisfiedMin);
+            return [
+              { label: "CSAT (Top-2-Box)", value: `${c.csat}%` },
+              { label: "Satisfechos", value: `${c.satisfied}/${c.total}` },
+            ];
+          })();
+    return { metricKey, kind: "csat", value: avg, unit: "score", n, detail };
   }
 
   // Rounded ONCE at the journey headline precision (see note above).

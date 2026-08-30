@@ -1,4 +1,5 @@
 import { computeStudyMetrics, type LongRow } from "@/lib/calc/engine";
+import { topBoxMinimumsFor } from "@/lib/calc/scale";
 import { sampleVisibility, type SampleVisibility } from "@/lib/calc/disclosure";
 
 export type LongitudinalStudyInput = {
@@ -40,7 +41,9 @@ function label(value: string): string {
 }
 
 function valuesForStudy(rows: LongRow[]): Map<string, MetricValue> {
-  const metrics = computeStudyMetrics(rows);
+  // Each study is its own whole row set here, so the documented threshold is
+  // derived from exactly the answers the point is computed over.
+  const metrics = computeStudyMetrics(rows, { topBoxMinimums: topBoxMinimumsFor(rows) });
   const values = new Map<string, MetricValue>();
 
   if (metrics.nps) {

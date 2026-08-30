@@ -5,6 +5,7 @@ import {
   type PDFFont,
   type PDFPage,
 } from "pdf-lib";
+import { topBoxMinimumsFor } from "@/lib/calc/scale";
 import {
   computeStageMetric,
   computeStudyMetrics,
@@ -97,7 +98,18 @@ export type StudyPdfInput = {
     period: string | null;
     status: string;
   };
+  /** The rows the report is computed over — already narrowed by the reader. */
   rows: LongRow[];
+  /**
+   * THE STUDY'S WHOLE ROW SET, for reading the scale each result is answered
+   * on.
+   *
+   * Optional so no existing caller breaks, and passed by the report route
+   * because `rows` above is filtered: deriving a Top-2-Box threshold from a
+   * narrowed selection is how a filter silently changes which documented rule
+   * a result is measured against.
+   */
+  allRows?: LongRow[];
   journeyStages: JourneyStage[];
   qualitative: ConfirmedQualitative[];
   filters: SegmentFilters;
@@ -455,7 +467,17 @@ export async function buildStudyReport(
     0.9 + accentBlue * 0.1,
   );
   const writer = new ReportWriter(pdf, regular, bold, input.study.name, brandColor, brandLight);
-  const metrics = computeStudyMetrics(input.rows);
+  /*
+   * THE SAME NUMBERS THE SCREEN SHOWS.
+   *
+   * `input.rows` is already narrowed by the reader's filters, so the documented
+   * thresholds are taken from the study's whole row set — `input.allRows` when
+   * the caller has it, and the narrowed set only when a caller has not been
+   * updated. A report whose Top-2-Box disagreed with the dashboard's would be
+   * the same wrong number in a file somebody keeps.
+   */
+  const thresholds = topBoxMinimumsFor(input.allRows ?? input.rows);
+  const metrics = computeStudyMetrics(input.rows, { topBoxMinimums: thresholds });
   const units = distinctUnits(input.rows, input.qualitative);
   const selectionVisibility = sampleVisibility(units);
   const selectionSuppressed = selectionVisibility === "suppressed";
@@ -546,7 +568,7 @@ export async function buildStudyReport(
     writer.text("Este estudio no tiene etapas de journey configuradas.", { color: MUTED });
   } else {
     for (const [index, stage] of input.journeyStages.entries()) {
-      const result = computeStageMetric(input.rows, stage.metric);
+      const result = computeStageMetric(input.rows, stage.metric, undefined, thresholds);
       const visibility = sampleVisibility(result.n);
       writer.subheading(`${index + 1}. ${stage.label}`, stageBody(stage));
       if (stage.description) writer.text(stage.description, { size: 9, color: MUTED });

@@ -35,6 +35,7 @@ import {
   csat as engineCsat,
 } from "../src/lib/calc/engine.ts";
 import { computePivot, buildAllowlist, validatePivotIntent } from "../src/lib/calc/pivot.ts";
+import { resolveTopBoxMinimum, topBoxMinimumsFor } from "../src/lib/calc/scale.ts";
 
 let failures = 0;
 function ok(message) {
@@ -150,18 +151,34 @@ const oracle = {
     const keys = this.metricKeys(dt);
     const segments = this.segmentKeys(dt);
     const satPrefix = opts.satMetricPrefix ?? "sat";
-    const csatMin = opts.csatMin ?? 9;
+    /*
+     * THE ORACLE APPLIES THE SAME DOCUMENTED-SCALE RULE, deliberately.
+     *
+     * This file exists to prove that the Workers-safe RELATIONAL rewrite —
+     * filter, group, average, cross — matches Arquero's semantics. It is not
+     * the place where the Top-2-Box threshold policy is decided, and if the
+     * oracle kept the old 0–10 default it would report a difference on every
+     * 1–5 result and say nothing at all about the thing it is for. The
+     * threshold is derived here through the same canonical helper the engine
+     * uses, so any difference that remains is a difference in the relational
+     * work.
+     */
+    const declared = opts.topBoxMinimums ?? topBoxMinimumsFor(rows);
     const respondents = new Set(rows.map((r) => r.respondent_id)).size;
     const averages = this.metricAverages(dt).filter((a) => a.metric_key !== "nps");
     const csatList = keys
       .filter((k) => k === "csat" || k.startsWith(satPrefix))
-      .map((k) => ({ metric_key: k, result: this.csat(dt, k, csatMin) }))
-      .filter((c) => c.result !== null);
+      .flatMap((k) => {
+        const satisfiedMin = resolveTopBoxMinimum(k, { explicit: opts.csatMin, declared });
+        if (satisfiedMin === null) return [];
+        const result = this.csat(dt, k, satisfiedMin);
+        return result ? [{ metric_key: k, result }] : [];
+      });
     const crossSegment = opts.crossSegment ?? (segments.includes("genero") ? "genero" : segments[0] ?? null);
     const crosses = crossSegment ? keys.map((k) => ({ metric_key: k, rows: this.crossAverage(dt, k, crossSegment) })) : [];
     return { respondents, nps: this.nps(dt), averages, csat: csatList, crossSegment, crosses };
   },
-  computeStageMetric(rows, metricKey, csatMin = 9) {
+  computeStageMetric(rows, metricKey, csatMin, topBoxMinimums) {
     const dt = this.buildTable(rows);
     const values = this.valuesFor(dt, metricKey);
     const n = values.length;
@@ -176,11 +193,19 @@ const oracle = {
     }
     if (metricKey.startsWith("sat") || metricKey.startsWith("csat")) {
       const avg = mean(values, DECIMALS.journeyHeadline);
-      const c = csatTopBox(values, csatMin);
-      return { metricKey, kind: "csat", value: avg, unit: "score", n, detail: [
-        { label: "CSAT (Top-2-Box)", value: `${c.csat}%` },
-        { label: "Satisfechos", value: `${c.satisfied}/${c.total}` },
-      ] };
+      const satisfiedMin = resolveTopBoxMinimum(metricKey, {
+        explicit: csatMin,
+        declared: topBoxMinimums ?? topBoxMinimumsFor(rows),
+      });
+      const detail = [];
+      if (satisfiedMin !== null) {
+        const c = csatTopBox(values, satisfiedMin);
+        detail.push(
+          { label: "CSAT (Top-2-Box)", value: `${c.csat}%` },
+          { label: "Satisfechos", value: `${c.satisfied}/${c.total}` },
+        );
+      }
+      return { metricKey, kind: "csat", value: avg, unit: "score", n, detail };
     }
     return { metricKey, kind: "average", value: mean(values, DECIMALS.journeyHeadline), unit: "score", n, detail: [] };
   },
