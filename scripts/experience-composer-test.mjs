@@ -26,12 +26,22 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { csatTopBox, mean, npsFromScores } from "../src/lib/calc/metrics.ts";
+
 import { BLOCK_TYPES, blockCatalogue, blockSpec } from "../src/lib/experience/blocks.ts";
-import { CHART_SPECS, CHART_VARIANTS, compatibleVariants, renderableVariant } from "../src/lib/experience/charts.ts";
+import {
+  CHART_SPECS,
+  CHART_VARIANTS,
+  alternativeVariant,
+  compatibleVariants,
+  implementedVariants,
+  isRendererImplemented,
+} from "../src/lib/experience/charts.ts";
 import {
   adaptLegacyStudy,
   buildLegacyRegistry,
   familyForMetric,
+  registryKeyIndex,
 } from "../src/lib/experience/adapter.ts";
 import { canAddBlock, newBlock, newExperience, newPage } from "../src/lib/experience/defaults.ts";
 import {
@@ -39,6 +49,7 @@ import {
   allBlocks,
   blocksAffectedBy,
   filtersAffecting,
+  findBlock,
   parseExperienceDefinition,
 } from "../src/lib/experience/definition.ts";
 import { fixtureRegistry, satisfactionOnlyJourneyRegistry } from "../src/lib/experience/fixtures.ts";
@@ -48,17 +59,48 @@ import { EXPERIENCE_LIMITS } from "../src/lib/experience/limits.ts";
 import { declaredVersion, migrateExperienceDefinition } from "../src/lib/experience/migrate.ts";
 import {
   addBlock,
+  addPage,
+  adoptDefinition,
+  canRedo,
+  canUndo,
   duplicateBlock,
+  duplicatePage,
   initialState,
   moveBlock,
+  moveBlockToIndex,
+  movePage,
+  openPage,
+  redo,
   removeBlock,
-  resetPrototype,
+  removePage,
+  renamePage,
+  resetToAdapted,
+  selectBlock,
+  setBlockAggregation,
+  setBlockCopy,
+  setBlockDimension,
+  setBlockMetric,
   setBlockSamplePolicy,
+  setBlockSpan,
   setBlockTitle,
   setBlockVisibility,
   setChartVariant,
+  setFilterConnection,
+  setPageVisibility,
   setStudySamplePolicy,
-} from "../src/lib/experience/prototype.ts";
+  undo,
+} from "../src/lib/experience/editor.ts";
+import {
+  blockDataRequests,
+  coarsestDimensionId,
+  dataKeyForBlock,
+  dataKeyForMoment,
+  dataKeyForPivot,
+  decimalsForUnit,
+  resolveBlockData,
+  resolveDefinitionData,
+  unitForAggregation,
+} from "../src/lib/experience/data.ts";
 import { findDimension, findMetric, registrySignature } from "../src/lib/experience/registry.ts";
 import { ADMIN_ALIASES, studioStudyComposer } from "../src/lib/studio/routes.ts";
 import { approvalHolds, approvalInvalidations } from "../src/lib/experience/review.ts";
@@ -720,12 +762,24 @@ assert.equal(
 );
 ok("the existing recorrido is represented, including the moment whose result has gone");
 
+// THE WARNING THAT TURNED OUT TO BE A MODEL GAP. The deployed comparison
+// explorer used to come back as "not representable" and was dropped. It is a
+// `pivot_explorer` block now, so nothing is reported and nothing is lost — a
+// compatibility adapter that silently loses a section the product ships is the
+// one thing it may not be.
 assert.ok(
-  runA.warnings.some((warning) => warning.code === "section_not_representable"),
-  "the adapter must say what it could not carry",
+  !runA.warnings.some((warning) => warning.code === "section_not_representable"),
+  "the comparison explorer is carried rather than reported",
 );
-assert.ok(runA.warnings.some((warning) => warning.code === "metric_not_available"));
-ok("the adapter reports the pivot explorer it cannot carry and the moment whose result has gone");
+assert.ok(
+  allBlocks(runA.definition).some((block) => block.type === "pivot_explorer"),
+  "and it is carried as a block on the panorama page",
+);
+assert.ok(
+  runA.warnings.some((warning) => warning.code === "metric_not_available"),
+  "the moment whose result the data no longer produces is still reported",
+);
+ok("the comparison explorer is now a block, and the moment whose result has gone is still reported");
 
 // THE TWO WARNINGS THAT TURNED OUT TO BE DEFECTS.
 //
@@ -907,21 +961,24 @@ assert.equal(
   "hide_below",
   "and the study it was adapted from is untouched",
 );
-ok("the study-wide rule can be changed in the prototype without touching the adapted original");
+ok("the study-wide rule can be changed without touching the adapted original");
 
-const reset = resetPrototype(addBlock(state, state.definition.pages[0].id, "divider", runA.registry), runA.definition);
+const reset = resetToAdapted(addBlock(state, state.definition.pages[0].id, "divider", runA.registry), runA.definition);
 assert.equal(
   serializeExperienceDefinition(reset.definition),
   serializeExperienceDefinition(runA.definition),
   "resetting returns exactly the study's current configuration",
 );
-ok("resetting the prototype restores the adapted study byte for byte");
+ok("resetting restores the adapted study byte for byte");
 
 // ===========================================================================
 console.log("\n[12] The registries cover what the product needs to express");
 // ===========================================================================
 
-assert.equal(BLOCK_TYPES.length, 18);
+// Nineteen: the eighteen the foundation declared, plus `pivot_explorer`, which
+// closed the one gap the compatibility adapter could not carry.
+assert.equal(BLOCK_TYPES.length, 19);
+assert.ok(BLOCK_TYPES.includes("pivot_explorer"));
 for (const type of BLOCK_TYPES) {
   const spec = blockSpec(type);
   assert.ok(spec.label && spec.description, `${type} must be described in words`);
@@ -937,12 +994,43 @@ for (const variant of CHART_VARIANTS) {
   const spec = CHART_SPECS[variant];
   assert.ok(spec.label && spec.description);
   assert.ok(spec.dimensions.min <= spec.dimensions.max);
-  if (!spec.rendererImplemented) {
-    assert.ok(spec.fallback, `${variant} has no renderer yet and must declare what stands in for it`);
-    assert.ok(CHART_SPECS[renderableVariant(variant)].rendererImplemented);
+  if (spec.rendererImplemented) {
+    assert.equal(spec.alternative, null, `${variant} is drawn, so it names no stand-in`);
+    assert.equal(alternativeVariant(variant), null);
+  } else {
+    assert.ok(spec.alternative, `${variant} has no renderer yet and must name a readable alternative`);
+    // The alternative has to be something that IS drawn, and it is shown beside
+    // the "not drawn yet" notice rather than instead of the variant.
+    assert.ok(CHART_SPECS[alternativeVariant(variant)].rendererImplemented);
   }
 }
-ok(`all ${CHART_VARIANTS.length} chart variants declare their shape, their ceilings and their fallback`);
+// The twelve the milestone promised, plus the semáforo — which is implemented
+// rather than disguised as an ordinary bar chart, and the traffic-light
+// renderer refuses to colour anything without a range somebody agreed to.
+for (const promised of [
+  "kpi",
+  "bar_horizontal",
+  "bar_vertical",
+  "bar_grouped",
+  "bar_stacked",
+  "bar_stacked_100",
+  "line",
+  "area",
+  "pie",
+  "donut",
+  "table",
+  "journey",
+  "traffic_light",
+  "retention_series",
+  "theme_cloud",
+]) {
+  assert.ok(isRendererImplemented(promised), `${promised} must be genuinely implemented`);
+}
+assert.equal(implementedVariants().length, 15);
+for (const missing of ["heatmap", "bubble", "treemap"]) {
+  assert.ok(!isRendererImplemented(missing), `${missing} is not implemented and must say so`);
+}
+ok(`15 of the ${CHART_VARIANTS.length} chart variants are drawn, and the other 3 say they are not`);
 
 assert.deepEqual(
   compatibleVariants(["kpi", "bar_horizontal", "pie"], 1).sort(),
@@ -977,7 +1065,7 @@ const catalogueSource = await readCode("src/lib/experience/registry.ts");
 for (const forbidden of [/\bBNI\b/i, /cuicuilco/i, /\bbni_/]) {
   assert.doesNotMatch(catalogueSource, forbidden, "generic code carries no client-specific key");
 }
-for (const file of ["blocks.ts", "charts.ts", "definition.ts", "validate.ts", "layout.ts", "adapter.ts"]) {
+for (const file of ["blocks.ts", "charts.ts", "definition.ts", "validate.ts", "layout.ts", "adapter.ts", "data.ts", "editor.ts"]) {
   const source = await readCode(`src/lib/experience/${file}`);
   assert.doesNotMatch(source, /\bBNI\b/i, `${file} must stay client-agnostic`);
 }
@@ -989,12 +1077,18 @@ for (const path of [
   "src/lib/experience/adapter.ts",
   "src/lib/experience/defaults.ts",
   "src/lib/experience/definition.ts",
-  "src/lib/experience/prototype.ts",
+  "src/lib/experience/editor.ts",
+  "src/lib/experience/data.ts",
   "src/lib/experience/registry.ts",
   "src/lib/experience/validate.ts",
   "src/lib/experience/study-snapshot.ts",
-  "src/components/studio/ExperienceComposer.tsx",
+  "src/lib/experience/storage.ts",
+  "src/lib/experience/builder-workspace.ts",
+  "src/components/studio/experience/ExperienceBuilder.tsx",
+  "src/components/studio/experience/BlockView.tsx",
+  "src/components/studio/experience/Charts.tsx",
   "src/app/studio/e/[studyId]/construccion/page.tsx",
+  "src/app/studio/e/[studyId]/construccion/actions.ts",
 ]) {
   const source = await read(path);
   if (/from "[^"]*experience\/fixtures"/.test(source)) importers.push(path);
@@ -1075,23 +1169,22 @@ const migrated = migrateExperienceDefinition(JSON.parse(serializeExperienceDefin
 assert.ok(migrated.ok, "a stored definition round-trips through serialization and migration");
 assert.equal(migrated.migratedFrom, 1);
 ok("an unknown schema version is refused by name, and a stored document round-trips");
-
 // ===========================================================================
-console.log("\n[15] The prototype route authorizes first and writes nothing");
+console.log("\n[15] The builder route and its Server Actions authorize first");
 // ===========================================================================
 
 const routePath = "src/app/studio/e/[studyId]/construccion/page.tsx";
 const routeSource = await readCode(routePath);
 assert.match(routeSource, /await requireInternal\(\)/, "the route must run the internal gate");
 const gateAt = routeSource.indexOf("await requireInternal()");
-for (const reader of ["loadStudioStudy(", "loadLegacyStudySnapshot(", "admin.from("]) {
+for (const reader of ["loadStudioStudy(", "loadBuilderWorkspace(", "admin.from("]) {
   const at = routeSource.indexOf(reader);
   if (at >= 0) assert.ok(gateAt < at, `the route must authorize before ${reader}`);
 }
 assert.doesNotMatch(routeSource, /return null\s*;/, "a blank page is not a state");
 assert.doesNotMatch(routeSource, /history\.back|router\.back/);
 assert.match(routeSource, /z\.string\(\)\.uuid\(\)/, "the study identifier is validated");
-ok("the composer route authorizes server-side before it reads anything");
+ok("the builder route authorizes server-side before it reads anything");
 
 const guardSource = await readCode("src/lib/studio/guard.ts");
 assert.match(guardSource, /auth\.getUser\(\)/);
@@ -1100,26 +1193,128 @@ assert.match(guardSource, /profile\?\.role !== "internal"/);
 assert.match(guardSource, /redirect\("\/dashboard"\)/);
 ok("a client-role caller is redirected by the same gate every Studio surface uses");
 
-const composerSource = await readCode("src/components/studio/ExperienceComposer.tsx");
-const snapshotSource = await readCode("src/lib/experience/study-snapshot.ts");
-for (const source of [routeSource, composerSource]) {
-  for (const forbidden of [/\.insert\(/, /\.update\(/, /\.upsert\(/, /\.delete\(/, /"use server"/, /fetch\(/]) {
-    assert.doesNotMatch(source, forbidden, "the prototype writes nothing and calls nothing");
-  }
+// --- The Server Actions re-authorize from scratch, and trust nothing sent.
+const actionsSource = await readCode("src/app/studio/e/[studyId]/construccion/actions.ts");
+assert.match(actionsSource, /^"use server";/m, "the actions are server actions");
+assert.match(actionsSource, /auth\.getUser\(\)/, "identity is revalidated, not read from a claim");
+assert.doesNotMatch(actionsSource, /getSession\(/, "never getSession for an authorization decision");
+assert.match(actionsSource, /role !== "internal"/, "the role is read from the database");
+for (const [pattern, message] of [
+  [/parseExperienceDefinition\(rawDefinition\)/, "the submitted document goes through the strict boundary"],
+  [/validateExperienceDefinition\(parsed\.definition, workspace\.registry\)/, "and through a registry the SERVER rebuilt"],
+  [/metadata\.studyId !== studio\.study\.id/, "a document naming another study is refused"],
+  [/metadata\.tenantId !== studio\.study\.tenantId/, "a document naming another client is refused"],
+]) {
+  assert.match(actionsSource, pattern, message);
 }
+// The tenant is never a parameter. It is derived from the study row, in the
+// database function, where nothing the caller sent can reach it.
+assert.doesNotMatch(
+  actionsSource,
+  /p_tenant|tenantId:\s*raw/,
+  "the tenant is never taken from the request",
+);
+// The privileged client is created inside the role check, so a request that
+// was never authorized never has one.
+const actorAt = actionsSource.indexOf("function internalActor");
+const adminAt = actionsSource.indexOf("createAdminClient()");
+assert.ok(actorAt >= 0 && adminAt > actorAt, "the privileged client is created inside the role check");
+ok("both Server Actions revalidate identity and role and re-validate the document server-side");
+
+// --- Saving goes through one function, and that function is the only writer.
+const storageSource = await readCode("src/lib/experience/storage.ts");
+assert.match(storageSource, /^import "server-only";/m, "the storage layer is server-only");
+assert.match(storageSource, /rpc\("save_study_experience_draft"/, "saving goes through the definer function");
+for (const forbidden of [/\.insert\(/, /\.update\(/, /\.upsert\(/, /\.delete\(/]) {
+  assert.doesNotMatch(storageSource, forbidden, "no direct write to the draft table");
+}
+assert.match(storageSource, /error\.code === "40001"/, "a lost update is reported as a conflict");
+ok("the application never writes the draft table directly; one definer function does");
+
+const workspaceSource = await readCode("src/lib/experience/builder-workspace.ts");
+assert.match(workspaceSource, /^import "server-only";/m, "the workspace loader is server-only");
+for (const forbidden of [/\.insert\(/, /\.update\(/, /\.upsert\(/, /\.delete\(/, /\.rpc\(/]) {
+  assert.doesNotMatch(workspaceSource, forbidden, "the workspace loader only reads");
+}
+assert.doesNotMatch(workspaceSource, /quote_approved|"quote"/, "the builder never reads a quote");
+// The projection that crosses to the browser is written out by hand, so adding
+// a field to the workspace cannot ship the study's rows or the handle index.
+const payloadAt = workspaceSource.indexOf("export function builderClientPayload");
+assert.ok(payloadAt >= 0, "the client projection exists");
+const payloadBody = workspaceSource.slice(payloadAt, workspaceSource.indexOf("export type BuilderClientPayload"));
+assert.doesNotMatch(payloadBody, /\brows\b/, "the study rows never cross to the browser");
+assert.doesNotMatch(payloadBody, /keyIndex/, "the handle-to-key index never crosses to the browser");
+assert.doesNotMatch(payloadBody, /\.\.\.workspace\b/, "the projection is named, never a spread");
+ok("what reaches the browser is a named projection with no rows and no handle index");
+
+const snapshotSource = await readCode("src/lib/experience/study-snapshot.ts");
 for (const forbidden of [/\.insert\(/, /\.update\(/, /\.upsert\(/, /\.delete\(/, /\.rpc\(/]) {
   assert.doesNotMatch(snapshotSource, forbidden, "the snapshot loader only reads");
 }
 assert.match(snapshotSource, /^import "server-only";/m, "the loader is server-only");
-ok("nothing in the prototype path can write to a study, and the loader is server-only");
+ok("the study snapshot loader is server-only and reads without writing");
 
-for (const file of ["adapter.ts", "definition.ts", "prototype.ts", "validate.ts", "defaults.ts"]) {
+for (const file of ["adapter.ts", "definition.ts", "editor.ts", "validate.ts", "defaults.ts", "data.ts"]) {
   const source = await readCode(`src/lib/experience/${file}`);
   assert.doesNotMatch(source, /server-only/, `${file} stays usable by an offline gate`);
 }
 ok("the model modules are pure enough to be driven by a credentials-free gate");
 
-// The client-facing renderers stay exactly where they were.
+// --- The migration is additive, reversible, and denies the browser roles.
+const migrationSource = await read("supabase/migrations/0023_experience_definition_persistence.sql");
+for (const [pattern, message] of [
+  [/create table if not exists public\.study_experience_draft/, "the draft table is created"],
+  [/create table if not exists public\.study_experience_revision/, "the revision table is created"],
+  [/create table if not exists public\.study_experience_event/, "the audit table is created"],
+  [/alter table public\.study_experience_draft enable row level security/, "RLS is enabled on the draft"],
+  [/alter table public\.study_experience_draft force row level security/, "and forced"],
+  [/alter table public\.study_experience_revision force row level security/, "forced on revisions"],
+  [/alter table public\.study_experience_event force row level security/, "forced on events"],
+  [/create policy "deny_browser_roles" on public\.study_experience_draft[\s\S]{0,140}using \(false\) with check \(false\)/, "browser roles are denied outright"],
+  [/revoke all privileges on table public\.study_experience_draft from anon, authenticated/, "browser grants revoked"],
+  [/grant select on table public\.study_experience_draft to service_role/, "service_role may only read the draft"],
+  [/before update on public\.study_experience_revision/, "a published revision refuses an update"],
+  [/errcode = '40001'/, "a lost update raises a distinguishable code"],
+  [/errcode = '42501', message = 'internal actor required'/, "a non-internal actor is refused in the database"],
+  [/metadata,studyId/, "the document must name the study it is stored against"],
+  [/metadata,tenantId/, "and the client"],
+  [/revoke execute on function public\.save_study_experience_draft[\s\S]{0,160}from public, anon, authenticated/, "the browser roles cannot execute the writer"],
+]) {
+  assert.match(migrationSource, pattern, message);
+}
+// Additive: it creates, it does not destroy or rewrite anything that existed.
+for (const forbidden of [
+  /\bdelete from\b/i,
+  /\btruncate\b/i,
+  /alter table public\.(study|tenant|respondent|quant_response|qual_observation|profiles)\b/,
+]) {
+  assert.doesNotMatch(migrationSource, forbidden, "the migration must be additive only");
+}
+assert.doesNotMatch(
+  migrationSource,
+  /grant (?:insert|update|delete)[^\n]*study_experience/,
+  "no role may write these tables directly",
+);
+ok("migration 0023 is additive, RLS-forced, browser-denied and writable only through its function");
+
+const rollbackSource = await read("supabase/rollbacks/0023_drop_experience_persistence.sql");
+for (const object of [
+  "public.save_study_experience_draft",
+  "public.study_experience_event",
+  "public.study_experience_revision",
+  "public.study_experience_draft",
+  "public.refuse_experience_revision_update",
+]) {
+  assert.ok(rollbackSource.includes(object), `the rollback drops ${object}`);
+}
+assert.doesNotMatch(
+  rollbackSource,
+  /alter table public\.(study|tenant|respondent)\b/,
+  "the rollback touches nothing else",
+);
+ok("the migration has a rollback that drops exactly what it created and nothing else");
+
+// --- The client-facing renderers stay exactly where they were.
 for (const path of [
   "src/app/insights/e/[studyId]/page.tsx",
   "src/app/studio/e/[studyId]/vista-cliente/page.tsx",
@@ -1130,10 +1325,10 @@ for (const path of [
   assert.doesNotMatch(
     source,
     /lib\/experience/,
-    `${path} must not depend on the composer while it is a prototype`,
+    `${path} must not read a composed experience while nothing is published`,
   );
 }
-ok("the deployed client preview, the insights route and the dashboard view do not import the composer");
+ok("the deployed client preview, the insights route and the dashboard view do not import the builder");
 
 // The recorrido editor keeps the focus fix it was given.
 const stageFields = await readCode("src/components/studio/JourneyStagesFields.tsx");
@@ -1142,55 +1337,168 @@ assert.doesNotMatch(stageFields, /Math\.random|randomUUID|Date\.now/);
 ok("the recorrido editor's focus behaviour is untouched");
 
 // ===========================================================================
-console.log("\n[16] The prototype is operable by keyboard and its controls are named");
+console.log("\n[16] The builder is operable by keyboard, named, and does not overflow");
 // ===========================================================================
 
+const builderSource = await readCode("src/components/studio/experience/ExperienceBuilder.tsx");
+const blockViewSource = await readCode("src/components/studio/experience/BlockView.tsx");
+const chartsSource = await readCode("src/components/studio/experience/Charts.tsx");
+
 for (const [pattern, message] of [
-  [/aria-live="polite"/, "validation results are announced"],
+  [/aria-live="polite"/, "what the last action did is announced"],
   [/aria-current=\{selected \? "true" : undefined\}/, "the selected block is announced as current"],
-  [/aria-label=\{`Subir “\$\{name\}”`\}/, "the reorder controls are named with the block they move"],
+  [/aria-label=\{`Mover “\$\{name\}”\./, "the drag handle is named with the block it moves"],
+  [/Usa las flechas arriba y abajo/, "and says that the arrow keys move it"],
+  [/event\.key === "ArrowUp"/, "the handle actually moves the block with the keyboard"],
+  [/event\.key === "ArrowDown"/, "in both directions"],
   [/aria-pressed=\{!block\.visible\}/, "the visibility toggle exposes its state"],
   [/<legend className="sr-only">/, "the disclosure choice is a named group"],
-  [/htmlFor=\{`\$\{ids\}-threshold`\}/, "the threshold input has a label"],
+  [/htmlFor=\{`\$\{idPrefix\}-threshold`\}/, "the threshold input has a label"],
   [/htmlFor=\{`\$\{idPrefix\}-title`\}/, "the title input has a label"],
   [/htmlFor=\{`\$\{idPrefix\}-variant`\}/, "the visualization select has a label"],
-  [/htmlFor=\{`\$\{ids\}-add-\$\{page\.id\}`\}/, "the add-a-block select has a label"],
+  [/htmlFor=\{`\$\{idPrefix\}-metric`\}/, "the result select has a label"],
+  [/htmlFor=\{`\$\{idPrefix\}-dim1`\}/, "the breakdown select has a label"],
+  [/htmlFor=\{`\$\{idPrefix\}-add`\}/, "the add-a-block select has a label"],
   [/useId\(\)/, "identifiers for labels are unique per instance"],
 ]) {
-  assert.match(composerSource, pattern, message);
+  assert.match(builderSource, pattern, message);
 }
-ok("every control in the prototype is labelled, named and announced");
+ok("every control in the builder is labelled, named and announced");
 
-const interactive = composerSource.match(/<(?:button|input|select)\b/g) ?? [];
-assert.ok(interactive.length >= 10, "the prototype has a real set of controls");
-assert.equal(
-  (composerSource.match(/min-h-11/g) ?? []).length >= 6,
-  true,
-  "controls meet the minimum target height the acceptance matrix requires",
+// --- Drag and drop exists, and it is not the only way to reorder.
+for (const [pattern, message] of [
+  [/draggable\b/, "blocks can be dragged"],
+  [/onDragStart=/, "a drag starts"],
+  [/onDragOver=/, "a drop target is computed while dragging"],
+  [/onDrop=/, "and a drop lands"],
+  [/moveBlockToIndex/, "the drop is an ordinary editor operation"],
+  [/cursor-grab/, "the handle looks draggable"],
+]) {
+  assert.match(builderSource, pattern, message);
+}
+ok("drag and drop is implemented, with a visible handle and a keyboard equivalent");
+
+// --- The canvas carries two controls per block, not five.
+const canvasBlockSource = builderSource.slice(builderSource.indexOf("function CanvasBlock"));
+const canvasHeader = canvasBlockSource.slice(0, canvasBlockSource.indexOf("<BlockView"));
+// Everything before the compact menu is a control the card shows all the time.
+// What lives INSIDE the menu is behind a disclosure and does not crowd a
+// quarter-width block, which is the whole point of moving it there.
+const alwaysVisible = canvasHeader.slice(0, canvasHeader.indexOf("<Menu label="));
+const permanentButtons = alwaysVisible.split("<button").length - 1;
+assert.ok(
+  permanentButtons <= 2,
+  `a block on the canvas may show a drag handle and its name; found ${permanentButtons} permanent controls`,
 );
-assert.doesNotMatch(composerSource, /min-w-\[\d/, "nothing forces a width wider than a phone");
-assert.doesNotMatch(composerSource, /dangerouslySetInnerHTML/);
-assert.doesNotMatch(composerSource, /JSON\.stringify/, "the raw document is never rendered on screen");
-assert.match(composerSource, /serializeExperienceDefinition\(definition, \{ pretty: true \}\)/,
-  "the document leaves only through a download");
-assert.match(composerSource, /min-w-0/, "grid children may shrink instead of widening the page");
-ok("the prototype forces no horizontal overflow and never renders the serialized document");
+const menuRegion = canvasHeader.slice(canvasHeader.indexOf("<Menu label="));
+assert.ok(
+  menuRegion.split("<button").length - 1 + menuRegion.split("<ConfirmAction").length - 1 >= 5,
+  "and the menu is where duplicar, ocultar, subir, bajar and quitar actually live",
+);
+assert.match(canvasHeader, /<Menu label=/, "everything else lives in a compact menu");
+assert.match(builderSource, /<ConfirmAction/, "a destructive action asks first");
+assert.doesNotMatch(builderSource, /window\.confirm/, "and never through window.confirm");
+ok("a canvas block shows a drag handle, its name and one menu, not five permanent buttons");
+
+// --- Panels collapse on a computer and become drawers on a narrow screen.
+for (const [pattern, message] of [
+  [/setLeftOpen/, "the left panel collapses"],
+  [/setRightOpen/, "the right panel collapses"],
+  [/setDrawer\(/, "and both become drawers"],
+  [/lg:static/, "the same element is a column from lg up"],
+  [/event\.key === "Escape"/, "Escape closes an open drawer"],
+  [/lg:grid-cols-\[auto_minmax\(0,1fr\)_auto\]/, "the canvas is the flexible column"],
+]) {
+  assert.match(builderSource, pattern, message);
+}
+// One element, two behaviours: rendering the panel twice would give the same
+// controls two sets of ids, which the responsive acceptance pass refuses.
+assert.equal(
+  (builderSource.match(/<Panel\b/g) ?? []).length,
+  2,
+  "there is exactly one left panel and one right panel in the tree",
+);
+ok("the panels collapse on a computer and become drawers below it, without duplicating a control");
+
+// --- Precision layout is a desktop job.
+const inspectorSource = builderSource.slice(builderSource.indexOf("function Inspector"));
+assert.match(
+  inspectorSource,
+  /className="hidden md:block"[\s\S]{0,400}Qué tan ancho se ve/,
+  "the width control only appears from 768 px up",
+);
+assert.match(
+  inspectorSource,
+  /En teléfono cada bloque ocupa el ancho completo/,
+  "and the phone rule is stated rather than silently enforced",
+);
+ok("column-width editing is offered on a computer and a tablet, and explained on a phone");
+
+// --- Nothing forces the page sideways, and the document is never on screen.
+for (const source of [builderSource, blockViewSource, chartsSource]) {
+  assert.doesNotMatch(source, /dangerouslySetInnerHTML/);
+  assert.match(source, /min-w-0/, "grid and flex children may shrink instead of widening the page");
+}
+assert.doesNotMatch(builderSource, /JSON\.stringify\(definition/, "the raw document is never rendered on screen");
+assert.match(
+  builderSource,
+  /serializeExperienceDefinition\(definition, \{ pretty: true \}\)/,
+  "the document leaves only through a download",
+);
+assert.match(
+  builderSource,
+  /setTimeout\(\(\) => URL\.revokeObjectURL/,
+  "the export handle outlives the click that uses it",
+);
+assert.doesNotMatch(
+  builderSource,
+  /\bw-screen\b|\bmin-w-\[\s*\d{3,}px\]/,
+  "nothing forces a width wider than a phone",
+);
+// Every wide thing scrolls inside its own box rather than pushing the page.
+assert.ok(
+  (chartsSource.match(/overflow-x-auto/g) ?? []).length >= 3,
+  "the charts that can be wide carry their own scroller",
+);
+ok("wide content scrolls inside its own box and the serialized document is never rendered");
+
+// --- Saving is real, visible, and says so.
+for (const [pattern, message] of [
+  [/Guardando…/, "the saving state has words"],
+  [/"Guardado"/, "and so does the saved state"],
+  [/No se pudo guardar/, "and so does the failure"],
+  [/Guardar ahora/, "an explicit save is always available"],
+  [/Reintentar/, "and a retry after a failure"],
+  [/beforeunload/, "closing the tab mid-edit warns"],
+  [/canUndo\(state\)/, "undo is offered"],
+  [/canRedo\(state\)/, "and redo"],
+  [/Ctrl\+Z/, "with the shortcut everybody already has"],
+]) {
+  assert.match(builderSource, pattern, message);
+}
+assert.doesNotMatch(
+  builderSource,
+  /Nada de lo que hagas aquí se guarda/,
+  "the builder must no longer claim that nothing is saved",
+);
+assert.doesNotMatch(
+  builderSource,
+  /localStorage|sessionStorage|indexedDB/,
+  "a draft belongs to the study, not to one browser",
+);
+ok("the builder states its save state, offers an explicit save and a retry, and keeps undo");
 
 assert.equal(studioStudyComposer("abc"), "/studio/e/abc/construccion");
-// It has an address, and it is deliberately NOT one of the study's process
-// steps: a step that saves nothing would misdescribe the consultant's process.
-const tabsSource = await readCode("src/components/studio/StudyTabs.tsx");
-assert.doesNotMatch(tabsSource, /construccion/, "the prototype is not a step in the consultant's process");
 assert.ok(
   !ADMIN_ALIASES.some((alias) => alias.studio.includes("construccion")),
-  "the prototype renames no legacy address away",
+  "the builder renames no legacy address away",
 );
-ok("the prototype is addressable but is not part of the study's process row");
+ok("the builder keeps its address and renames none away");
 
-assert.match(routeSource, /Construcción del dashboard — prototipo interno/, "the route names itself");
-assert.match(composerSource, /Nada de lo que hagas aquí se guarda ni se publica/,
-  "the prototype states that it saves nothing");
-ok("the prototype is labelled as an internal prototype and says that it saves nothing");
+assert.match(routeSource, /Construcción del dashboard/, "the route names itself");
+assert.match(routeSource, /el cliente no ve nada de esto/i, "and says the client cannot see it");
+assert.doesNotMatch(routeSource, /prototipo/i, "it is no longer described as a prototype");
+ok("the builder says what it is and what the client can see of it");
 
 // The catalogue never offers a block this study cannot support.
 for (const group of blockCatalogue()) {
@@ -1545,35 +1853,651 @@ console.log("\n[17] The defects the acceptance review found stay fixed");
   );
   ok("the ideal range is bounded, ordered and exclusive to the comparison that owns it");
 
-  // --- The prototype interface offers what the acceptance list asks for.
+  // --- The builder interface offers what the acceptance list asks for.
   for (const [pattern, message] of [
     [/aria-label="Páginas de la experiencia"/, "the pages are a named navigation region"],
-    [/aria-current=\{entry\.id === page\?\.id \? "page" : undefined\}/, "the open page is announced"],
+    [/aria-current=\{entry\.id === openPageId \? "page" : undefined\}/, "the open page is announced"],
     [/aria-pressed=\{preview === breakpoint\}/, "the width preview exposes which width is shown"],
     [/setBlockSamplePolicy/, "a block's own disclosure rule is reachable from the interface"],
     [/compatibleVariants/, "the chart choices are grouped by what the result can honestly become"],
     [/No compatibles con este resultado/, "and the incompatible ones are named as such"],
-    [/renderableVariant/, "a variant with no renderer shows its declared stand-in"],
-    [/todavía no tiene su propio dibujo/, "and says so rather than pretending"],
+    [/isRendererImplemented/, "a variant with no renderer is named as such rather than swapped"],
+    [/todavía no se dibuja/, "and says so rather than pretending"],
     [/setTimeout\(\(\) => URL\.revokeObjectURL/, "the export handle outlives the click that uses it"],
-    [/state\.refusal/, "a refused action is announced to the person who attempted it"],
-    [/no calcula/, "the preview states that it carries no real numbers"],
-    [/El cliente no ve esta pantalla/, "the prototype states that the client cannot see it"],
+    [/editor\.refusal \?\?/, "a refused action is announced to the person who attempted it"],
+    [/\{ui\.notice \?\? ""\}/, "and the announcement has a live region to land in"],
+    [/setFilterConnection/, "a filter is connected to a block deliberately"],
+    [/setBlockMetric/, "the block's result can be reassigned"],
+    [/setBlockDimension/, "and so can its breakdown"],
+    [/addPage|duplicatePage|removePage/, "pages can be added, copied and removed"],
   ]) {
-    assert.match(composerSource, pattern, message);
+    assert.match(builderSource, pattern, message);
   }
   assert.doesNotMatch(
-    composerSource,
+    builderSource,
     /localStorage|sessionStorage|indexedDB/i,
-    "the prototype persists nothing, anywhere",
+    "a draft lives in the study, never in one browser",
   );
-  assert.doesNotMatch(
-    composerSource,
-    /fetch\(|useEffect/,
-    "the prototype neither calls out nor runs an effect that could",
-  );
-  ok("the prototype offers pages, a width preview, per-block rules and honest chart substitution");
+  ok("the builder offers pages, a width preview, per-block rules and honest chart labelling");
 }
 
+
+
+// ===========================================================================
+console.log("\n[18] The editor persists a real workflow: pages, history, data");
+// ===========================================================================
+
+{
+  const base = adaptLegacyStudy(snapshot);
+  const registry = base.registry;
+
+  // --- Undo and redo are documents, bounded, and survive a selection. -------
+  let session = initialState(base.definition);
+  assert.equal(canUndo(session), false, "a fresh session has nothing to undo");
+  assert.equal(canRedo(session), false);
+  assert.ok(undo(session).refusal, "and says so rather than doing nothing quietly");
+
+  const firstBlock = base.definition.pages[0].blocks[0];
+  session = setBlockTitle(session, firstBlock.id, "Un título nuevo");
+  assert.equal(canUndo(session), true);
+  const titled = serializeExperienceDefinition(session.definition);
+  session = undo(session);
+  assert.equal(
+    serializeExperienceDefinition(session.definition),
+    serializeExperienceDefinition(base.definition),
+    "undo restores the previous document byte for byte",
+  );
+  assert.equal(canRedo(session), true);
+  session = redo(session);
+  assert.equal(serializeExperienceDefinition(session.definition), titled, "and redo puts it back");
+
+  // A new edit after an undo abandons the redo branch — the ordinary rule
+  // every editor has, stated rather than assumed.
+  session = undo(session);
+  session = setBlockTitle(session, firstBlock.id, "Otro título");
+  assert.equal(canRedo(session), false, "editing after an undo drops what was undone");
+
+  // Selecting and opening a page change nothing, so they push no history step.
+  const before = session.past.length;
+  session = selectBlock(session, firstBlock.id);
+  session = openPage(session, base.definition.pages[0].id);
+  assert.equal(session.past.length, before, "navigating is not an edit");
+
+  // Taking the version somebody else saved CLEARS the history. "Undo" after
+  // adopting a stranger's document would restore a document whose revision no
+  // longer exists, and the next save would conflict again with no explanation.
+  let conflicted = setBlockTitle(initialState(base.definition), firstBlock.id, "Lo mío");
+  assert.equal(canUndo(conflicted), true);
+  const theirs = adaptLegacyStudy({ ...snapshot, studyName: "Lo que guardó la otra persona" }).definition;
+  conflicted = adoptDefinition(conflicted, theirs);
+  assert.equal(
+    serializeExperienceDefinition(conflicted.definition),
+    serializeExperienceDefinition(theirs),
+    "the stored version replaces what was on screen",
+  );
+  assert.equal(canUndo(conflicted), false, "and the history goes with it");
+  assert.equal(canRedo(conflicted), false);
+  ok("taking the version somebody else saved replaces the document and clears the history");
+
+  // Undo past a removal restores the block AND everything that referenced it.
+  const removable = base.definition.pages[0].blocks[1];
+  let removing = initialState(base.definition);
+  removing = removeBlock(removing, removable.id);
+  assert.ok(!findBlock(removing.definition, removable.id));
+  removing = undo(removing);
+  assert.ok(findBlock(removing.definition, removable.id), "undo brings the block back");
+  assert.equal(
+    serializeExperienceDefinition(removing.definition),
+    serializeExperienceDefinition(base.definition),
+    "with every connection it had",
+  );
+  ok("undo and redo restore whole documents, and navigating is not an edit");
+
+  // --- Dropping a block lands it exactly where the line was. ---------------
+  const page = base.definition.pages[0];
+  assert.ok(page.blocks.length >= 4, "the fixture page is long enough to reorder");
+  const moved = page.blocks[0];
+  const dropped = moveBlockToIndex(initialState(base.definition), moved.id, 2);
+  assert.equal(dropped.definition.pages[0].blocks[2].id, moved.id, "the block lands at the index");
+  assert.equal(
+    dropped.definition.pages[0].blocks.length,
+    page.blocks.length,
+    "and nothing is lost on the way",
+  );
+  for (const [position, block] of dropped.definition.pages[0].blocks.entries()) {
+    for (const breakpoint of BREAKPOINTS) {
+      assert.equal(block.layout[breakpoint].order, position, "order is re-derived at every width");
+    }
+  }
+  const noop = moveBlockToIndex(initialState(base.definition), moved.id, 0);
+  assert.equal(noop.definition, base.definition, "dropping a block where it already is changes nothing");
+  assert.ok(parseExperienceDefinition(dropped.definition).ok);
+  ok("a drop lands a block at an exact position and renumbers every width");
+
+  // --- Pages: add, rename, reorder, duplicate, hide, remove. ---------------
+  let pages = initialState(base.definition);
+  const originalPageCount = pages.definition.pages.length;
+
+  pages = addPage(pages, "  Una página nueva  ");
+  assert.equal(pages.definition.pages.length, originalPageCount + 1);
+  assert.equal(pages.definition.pages[originalPageCount].title, "Una página nueva", "the title is trimmed");
+  assert.equal(pages.openPageId, pages.definition.pages[originalPageCount].id, "and it opens");
+  assert.ok(addPage(pages, "   ").refusal, "a page with no name is refused out loud");
+
+  const addedId = pages.definition.pages[originalPageCount].id;
+  pages = renamePage(pages, addedId, "Renombrada");
+  assert.equal(pages.definition.pages[originalPageCount].title, "Renombrada");
+  assert.ok(renamePage(pages, addedId, "   ").refusal, "a page cannot be left nameless");
+  // The identifier never moves when the label does — the defect the recorrido
+  // editor was rescued from, prevented here by construction.
+  assert.equal(pages.definition.pages[originalPageCount].id, addedId, "renaming never moves an id");
+
+  pages = movePage(pages, addedId, "up");
+  assert.equal(pages.definition.pages[originalPageCount - 1].id, addedId);
+  assert.equal(pages.definition.pages[originalPageCount - 1].order, originalPageCount - 1);
+  assert.ok(movePage(pages, pages.definition.pages[0].id, "up").refusal, "the first page cannot go up");
+
+  pages = setPageVisibility(pages, addedId, false);
+  assert.equal(pages.definition.pages.find((entry) => entry.id === addedId).visible, false);
+
+  // Duplicating a page mints a fresh id for the page AND for every block on it.
+  const source = base.definition.pages[0];
+  let duplicated = duplicatePage(initialState(base.definition), source.id);
+  const copy = duplicated.definition.pages[1];
+  assert.notEqual(copy.id, source.id, "the copy is a different page");
+  assert.equal(copy.blocks.length, source.blocks.length);
+  const sourceIds = new Set(source.blocks.map((block) => block.id));
+  for (const block of copy.blocks) {
+    assert.ok(!sourceIds.has(block.id), "no block id is reused across pages");
+    assert.deepEqual(block.filterRefs, [], "a copied page hosts no control of its own");
+    assert.deepEqual(
+      filtersAffecting(duplicated.definition, block.id),
+      [],
+      "and answers to no connection",
+    );
+  }
+  assert.ok(parseExperienceDefinition(duplicated.definition).ok, "the copy is a document the schema accepts");
+  assert.deepEqual(
+    validateExperienceDefinition(duplicated.definition, registry).errors,
+    [],
+    "and one the registry accepts",
+  );
+  ok("pages can be added, renamed, reordered, hidden and duplicated without moving an identifier");
+
+  // --- Removing a page cleans up after itself, exactly like removing a block.
+  const withPageFilter = structuredClone(base.definition);
+  const targetPage = withPageFilter.pages[1] ?? withPageFilter.pages[0];
+  withPageFilter.filterDefinitions.push({
+    id: mintId("filter", "page-scoped"),
+    dimensionId: registry.dimensions[0].id,
+    label: "Solo de esta página",
+    control: "single_select",
+    defaultValues: [],
+    clientVisible: true,
+    scope: "page",
+    pageId: targetPage.id,
+    dependsOn: null,
+  });
+  const pageFilterId = withPageFilter.filterDefinitions[withPageFilter.filterDefinitions.length - 1].id;
+  targetPage.filterRefs = [pageFilterId];
+  assert.ok(parseExperienceDefinition(withPageFilter).ok, "the fixture with a page filter is valid");
+
+  const removedPage = removePage(initialState(withPageFilter), targetPage.id);
+  assert.ok(
+    !removedPage.definition.pages.some((entry) => entry.id === targetPage.id),
+    "the page is gone",
+  );
+  assert.ok(
+    !removedPage.definition.filterDefinitions.some((filter) => filter.id === pageFilterId),
+    "and the filter that could only live on it went with it",
+  );
+  const serializedAfter = serializeExperienceDefinition(removedPage.definition);
+  assert.ok(!serializedAfter.includes(pageFilterId), "with no mention left behind to dangle");
+  for (const block of targetPage.blocks) {
+    assert.ok(!serializedAfter.includes(block.id), "and no connection still names a removed block");
+  }
+  assert.ok(parseExperienceDefinition(removedPage.definition).ok);
+  assert.deepEqual(validateExperienceDefinition(removedPage.definition, registry).errors, []);
+
+  // The last page cannot be removed: an experience with no page is not a thing.
+  let single = initialState(base.definition);
+  while (single.definition.pages.length > 1) {
+    single = removePage(single, single.definition.pages[single.definition.pages.length - 1].id);
+  }
+  const refusedLast = removePage(single, single.definition.pages[0].id);
+  assert.equal(refusedLast.definition, single.definition, "removing the last page changes nothing");
+  assert.ok(refusedLast.refusal, "and says why");
+  ok("removing a page takes its filters with it and never leaves a dangling reference");
+
+  // --- Reassigning a result, a breakdown and an aggregation. ---------------
+  const chartBlock = allBlocks(base.definition).find(
+    (block) => block.query && block.visualization && block.type === "chart",
+  ) ?? allBlocks(base.definition).find((block) => block.query && block.visualization);
+  assert.ok(chartBlock, "the adapted study has a block that reads a result");
+
+  let editing = initialState(base.definition);
+  const otherMetric = registry.metrics.find((metric) => metric.id !== chartBlock.query.metricId);
+  editing = setBlockMetric(editing, chartBlock.id, otherMetric.id, registry);
+  assert.equal(editing.refusal, null, "a known result is accepted");
+  const edited = findBlock(editing.definition, chartBlock.id).block;
+  assert.equal(edited.query.metricId, otherMetric.id);
+  assert.deepEqual(
+    edited.query.numberFormat,
+    otherMetric.format,
+    "the result decides how its own number is written down",
+  );
+  assert.ok(
+    otherMetric.aggregations.includes(edited.query.aggregation),
+    "and the aggregation is one it supports",
+  );
+  assert.ok(
+    setBlockMetric(editing, chartBlock.id, "r_not_a_handle", registry).refusal,
+    "an unknown result is refused out loud",
+  );
+  assert.ok(
+    setBlockAggregation(editing, chartBlock.id, "sum", registry).refusal
+      || otherMetric.aggregations.includes("sum"),
+    "an aggregation the result does not support is refused",
+  );
+
+  const narrow = registry.dimensions.find(
+    (dimension) => dimension.values.length > 0 && dimension.values.length <= 12,
+  );
+  const wide = registry.dimensions.find(
+    (dimension) => dimension.values.length > EXPERIENCE_LIMITS.dimensionCardinality,
+  );
+  editing = setBlockDimension(editing, chartBlock.id, "primary", narrow.id, registry);
+  assert.equal(editing.refusal, null);
+  assert.equal(findBlock(editing.definition, chartBlock.id).block.query.primaryDimensionId, narrow.id);
+  if (wide) {
+    const refusedWide = setBlockDimension(editing, chartBlock.id, "primary", wide.id, registry);
+    assert.equal(refusedWide.definition, editing.definition, "an unreadable breakdown changes nothing");
+    assert.ok(refusedWide.refusal, "and says how many values it has");
+  }
+  const refusedSame = setBlockDimension(editing, chartBlock.id, "secondary", narrow.id, registry);
+  assert.ok(refusedSame.refusal, "the same characteristic twice is refused");
+
+  // Clearing the first characteristic promotes the second rather than leaving a
+  // document the schema refuses.
+  const second = registry.dimensions.find(
+    (dimension) => dimension.id !== narrow.id && dimension.values.length > 0
+      && dimension.values.length <= EXPERIENCE_LIMITS.dimensionCardinality,
+  );
+  if (second) {
+    let crossed = setBlockDimension(editing, chartBlock.id, "secondary", second.id, registry);
+    if (crossed.refusal === null) {
+      crossed = setBlockDimension(crossed, chartBlock.id, "primary", null, registry);
+      const query = findBlock(crossed.definition, chartBlock.id).block.query;
+      assert.equal(query.primaryDimensionId, second.id, "the second characteristic is promoted");
+      assert.equal(query.secondaryDimensionId, null);
+      assert.ok(parseExperienceDefinition(crossed.definition).ok);
+    }
+  }
+  assert.ok(parseExperienceDefinition(editing.definition).ok);
+  assert.deepEqual(validateExperienceDefinition(editing.definition, registry).errors, []);
+  ok("a block's result, aggregation and breakdown can be reassigned, and an impossible one is refused");
+
+  // --- A pie divides a whole, so it refuses an aggregation that does not. ---
+  const pieProbe = structuredClone(base.definition);
+  const pieBlock = pieProbe.pages
+    .flatMap((entry) => entry.blocks)
+    .find((block) => block.id === chartBlock.id);
+  pieBlock.visualization = { ...pieBlock.visualization, variant: "pie" };
+  pieBlock.query = {
+    ...pieBlock.query,
+    aggregation: "average",
+    primaryDimensionId: narrow.id,
+    secondaryDimensionId: null,
+  };
+  const pieAverage = validateExperienceDefinition(pieProbe, registry);
+  assert.ok(
+    pieAverage.errors.some((issue) => issue.code === "impossible_schema"),
+    "a pastel of averages is refused: the slices do not add up to the total",
+  );
+  pieBlock.query = { ...pieBlock.query, aggregation: "count" };
+  const pieCount = validateExperienceDefinition(pieProbe, registry);
+  assert.deepEqual(pieCount.errors, [], "counting answers does divide a whole, so the pastel is allowed");
+  ok("a drawing that divides a whole accepts only an aggregation whose parts add up to one");
+
+  // --- Filter connections are made and broken deliberately. ----------------
+  const filterId = base.definition.filterDefinitions[0]?.id;
+  if (filterId) {
+    const lonely = allBlocks(base.definition).find(
+      (block) => !filtersAffecting(base.definition, block.id).includes(filterId),
+    );
+    let wiring = initialState(base.definition);
+    if (lonely) {
+      wiring = setFilterConnection(wiring, filterId, lonely.id, true);
+      assert.equal(wiring.refusal, null);
+      assert.ok(filtersAffecting(wiring.definition, lonely.id).includes(filterId));
+      assert.ok(
+        setFilterConnection(wiring, filterId, lonely.id, true).refusal,
+        "connecting twice says it is already connected",
+      );
+    }
+    const connectedBlock = allBlocks(wiring.definition).find((block) =>
+      filtersAffecting(wiring.definition, block.id).includes(filterId),
+    );
+    wiring = setFilterConnection(wiring, filterId, connectedBlock.id, false);
+    assert.ok(!filtersAffecting(wiring.definition, connectedBlock.id).includes(filterId));
+    assert.ok(
+      setFilterConnection(wiring, filterId, mintId("block", "gone"), true).refusal,
+      "a connection to a block that does not exist is refused",
+    );
+    assert.ok(parseExperienceDefinition(wiring.definition).ok);
+    ok("a filter is connected to a block, and disconnected from it, one deliberate act at a time");
+  }
+
+  // --- Widths: bounded on a computer, and never editable on a phone. -------
+  const spanBlock = allBlocks(base.definition).find(
+    (block) => blockSpec(block.type).span.min < blockSpec(block.type).span.max,
+  );
+  let spanning = initialState(base.definition);
+  const spanSpec = blockSpec(spanBlock.type);
+  spanning = setBlockSpan(spanning, spanBlock.id, "desktop", spanSpec.span.max);
+  assert.equal(findBlock(spanning.definition, spanBlock.id).block.layout.desktop.span, spanSpec.span.max);
+  assert.ok(
+    setBlockSpan(spanning, spanBlock.id, "desktop", spanSpec.span.max + 1).refusal,
+    "a width beyond what the block admits is refused",
+  );
+  const phone = setBlockSpan(spanning, spanBlock.id, "mobile", 6);
+  assert.equal(phone.definition, spanning.definition, "a phone width cannot be edited at all");
+  assert.ok(phone.refusal, "and the refusal says why");
+  assert.deepEqual(validateExperienceDefinition(spanning.definition, registry).errors, []);
+  ok("column widths are bounded by the block type, and a phone is always full width");
+
+  // --- Authored text stays text. -------------------------------------------
+  let writing = initialState(base.definition);
+  const prose = allBlocks(base.definition).find((block) => blockSpec(block.type).copy === "long")
+    ?? allBlocks(base.definition).find((block) => blockSpec(block.type).copy === "short");
+  if (prose) {
+    writing = setBlockCopy(writing, prose.id, "body", "El 40 % de las <100 respuestas fue positiva.");
+    assert.equal(writing.refusal, null, "ordinary prose with a less-than sign is ordinary prose");
+    assert.ok(parseExperienceDefinition(writing.definition).ok);
+    const injected = setBlockCopy(writing, prose.id, "body", '<script>alert(1)</script>');
+    assert.ok(!parseExperienceDefinition(injected.definition).ok, "markup never reaches a stored document");
+  }
+  const noProse = allBlocks(base.definition).find((block) => blockSpec(block.type).copy === "none");
+  if (noProse) {
+    assert.ok(setBlockCopy(writing, noProse.id, "body", "hola").refusal, "a divider carries no text");
+  }
+  ok("authored text is held to the same standard here as at the stored boundary");
+}
+
+// ===========================================================================
+console.log("\n[19] The numbers are the study's own, computed once, by the canonical engine");
+// ===========================================================================
+
+{
+  const base = adaptLegacyStudy(snapshot);
+  const registry = base.registry;
+  const index = registryKeyIndex(snapshot);
+
+  // A synthetic study, shaped like the real one and containing nobody's
+  // answers: eight people, two characteristics, one 0-10 recommendation
+  // question and one satisfaction question.
+  const GENERATIONS = ["Millennial", "Generación X", "Baby boomer"];
+  const STATUS = ["Activa", "Por renovar", "Ya no participa"];
+  const scores = [10, 9, 8, 7, 6, 5, 10, 9];
+  const rows = scores.flatMap((score, person) => [
+    {
+      respondent_id: `p${person}`,
+      metric_key: "nps_general",
+      value: score,
+      seg_generacion: GENERATIONS[person % GENERATIONS.length],
+      seg_estatus: STATUS[person % STATUS.length],
+      seg_giro: wideValues[person % wideValues.length],
+    },
+    {
+      respondent_id: `p${person}`,
+      metric_key: "sat_bienvenida",
+      value: score,
+      seg_generacion: GENERATIONS[person % GENERATIONS.length],
+      seg_estatus: STATUS[person % STATUS.length],
+      seg_giro: wideValues[person % wideValues.length],
+    },
+  ]);
+
+  const npsHandle = Object.entries(index.metrics).find(([, key]) => key === "nps_general")[0];
+  const satHandle = Object.entries(index.metrics).find(([, key]) => key === "sat_bienvenida")[0];
+  const generationHandle = Object.entries(index.dimensions).find(([, key]) => key === "seg_generacion")[0];
+  const statusHandle = Object.entries(index.dimensions).find(([, key]) => key === "seg_estatus")[0];
+
+  const ask = (overrides) =>
+    resolveBlockData(rows, registry, index, {
+      blockId: "probe",
+      metricId: npsHandle,
+      aggregation: "net_score",
+      primaryDimensionId: null,
+      secondaryDimensionId: null,
+      topN: null,
+      sort: { by: "value", direction: "desc" },
+      ...overrides,
+    });
+
+  // --- The composite results agree with the canonical functions, exactly. ---
+  const overallNps = ask({});
+  assert.ok(overallNps.ok);
+  assert.equal(
+    overallNps.data.overall.value,
+    npsFromScores(scores).nps,
+    "a composed NPS is the canonical NPS, not an arithmetic lookalike",
+  );
+  assert.equal(overallNps.data.overall.n, scores.length);
+  assert.equal(overallNps.data.unit, "nps");
+  assert.equal(overallNps.data.decimals, decimalsForUnit("nps"));
+  assert.deepEqual(
+    overallNps.data.detail.map((item) => item.label),
+    ["Promotores", "Pasivos", "Detractores"],
+    "and it carries the canonical breakdown",
+  );
+
+  const overallCsat = resolveBlockData(rows, registry, index, {
+    blockId: "probe",
+    metricId: satHandle,
+    aggregation: "top_box",
+    primaryDimensionId: null,
+    secondaryDimensionId: null,
+    topN: null,
+    sort: { by: "value", direction: "desc" },
+  });
+  assert.ok(overallCsat.ok);
+  assert.equal(
+    overallCsat.data.overall.value,
+    csatTopBox(scores, 9).csat,
+    "a composed Top-2-Box is the canonical Top-2-Box",
+  );
+
+  const averaged = ask({ aggregation: "value" });
+  assert.equal(averaged.data.overall.value, mean(scores), "and an average is the canonical mean");
+  ok("every composed aggregate is produced by the canonical metric function, never re-derived");
+
+  // --- A breakdown groups by the study's own characteristic. ---------------
+  const byGeneration = ask({ primaryDimensionId: generationHandle });
+  assert.ok(byGeneration.ok);
+  assert.equal(byGeneration.data.categoryLabel, "Generacion");
+  assert.equal(byGeneration.data.categories.length, GENERATIONS.length);
+  assert.equal(byGeneration.data.series.length, 1, "one characteristic makes one series");
+  for (const [position, category] of byGeneration.data.categories.entries()) {
+    const own = scores.filter((_, person) => GENERATIONS[person % GENERATIONS.length] === category.label);
+    assert.equal(
+      byGeneration.data.series[0].cells[position].value,
+      npsFromScores(own).nps,
+      `${category.label} is computed from its own answers`,
+    );
+    assert.equal(byGeneration.data.series[0].cells[position].n, own.length);
+  }
+  // Ordering by value puts the highest first and never invents a position for a
+  // category with nothing behind it.
+  const values = byGeneration.data.series[0].cells.map((cell) => cell.value);
+  assert.deepEqual(values, [...values].sort((a, b) => b - a), "descending by value means descending");
+
+  const crossed = ask({
+    primaryDimensionId: generationHandle,
+    secondaryDimensionId: statusHandle,
+  });
+  assert.ok(crossed.ok);
+  assert.equal(crossed.data.seriesLabel, "Estatus");
+  assert.ok(crossed.data.series.length > 1, "two characteristics make a series each");
+  for (const series of crossed.data.series) {
+    assert.equal(
+      series.cells.length,
+      crossed.data.categories.length,
+      "every series covers every category, with a hole where there is no data",
+    );
+  }
+  ok("a breakdown is grouped by the study's own characteristic, and a cross produces a series each");
+
+  // --- topN counts what it leaves out rather than dropping it silently. ----
+  const topTwo = ask({ primaryDimensionId: generationHandle, topN: 2 });
+  assert.equal(topTwo.data.categories.length, 2);
+  assert.equal(topTwo.data.omittedCategories, GENERATIONS.length - 2, "the rest are counted, not hidden");
+
+  // --- An unknown handle is a refusal, never an empty chart. ---------------
+  const unknownMetric = ask({ metricId: "r_does_not_exist" });
+  assert.equal(unknownMetric.ok, false);
+  assert.equal(unknownMetric.reason, "unknown_metric");
+  const unknownDimension = ask({ primaryDimensionId: "c_does_not_exist" });
+  assert.equal(unknownDimension.ok, false);
+  assert.equal(unknownDimension.reason, "unknown_dimension");
+  const badAggregation = ask({ aggregation: "top_box" });
+  assert.equal(badAggregation.ok, false);
+  assert.equal(badAggregation.reason, "unsupported_aggregation");
+  // "Nobody answered" and "this points at nothing" are different sentences.
+  const emptyStudy = resolveBlockData([], registry, index, {
+    blockId: "probe",
+    metricId: npsHandle,
+    aggregation: "net_score",
+    primaryDimensionId: null,
+    secondaryDimensionId: null,
+    topN: null,
+    sort: { by: "value", direction: "desc" },
+  });
+  assert.ok(emptyStudy.ok, "a study with no answers still resolves");
+  assert.equal(emptyStudy.data.overall.value, null, "with no value");
+  assert.equal(emptyStudy.data.overall.n, 0, "and no base");
+  ok("a request naming something the study does not have is refused, not answered with an empty chart");
+
+  // --- A handle only resolves inside its own study. ------------------------
+  const otherStudy = { ...snapshot, studyId: "99999999-9999-4999-8999-999999999999" };
+  const otherIndex = registryKeyIndex(otherStudy);
+  assert.notDeepEqual(Object.keys(otherIndex.metrics), Object.keys(index.metrics));
+  const crossTenant = resolveBlockData(rows, buildLegacyRegistry(otherStudy), otherIndex, {
+    blockId: "probe",
+    metricId: npsHandle,
+    aggregation: "net_score",
+    primaryDimensionId: null,
+    secondaryDimensionId: null,
+    topN: null,
+    sort: { by: "value", direction: "desc" },
+  });
+  assert.equal(crossTenant.ok, false, "another study's handle resolves to nothing here");
+  ok("a registry handle only means anything inside the study it was minted for");
+
+  // --- The document decides what is computed, and nothing else is. ---------
+  const requests = blockDataRequests(base.definition, registry);
+  const keys = requests.map((request) => request.key);
+  assert.equal(new Set(keys).size, keys.length, "no aggregate is asked for twice");
+  for (const block of allBlocks(base.definition)) {
+    if (block.query) {
+      assert.ok(keys.includes(dataKeyForBlock(block.id)), "every block with a query is computed");
+    }
+  }
+  for (const journey of base.definition.journeyReferences) {
+    for (const moment of journey.moments) {
+      if (!moment.metricId) continue;
+      assert.ok(
+        keys.includes(dataKeyForMoment(journey.id, moment.id)),
+        "every recorrido moment with a result is computed",
+      );
+    }
+  }
+  const pivotBlock = allBlocks(base.definition).find((block) => block.type === "pivot_explorer");
+  assert.ok(pivotBlock, "the adapted study carries the comparison explorer as a block");
+  assert.ok(keys.includes(dataKeyForPivot(pivotBlock.id)), "and the cross it opens on is computed");
+  // It opens on the coarsest characteristic, for the same reason the deployed
+  // dashboard does: it is the grouping most likely to have something to show.
+  const opensOn = requests.find((request) => request.key === dataKeyForPivot(pivotBlock.id));
+  assert.equal(opensOn.primaryDimensionId, coarsestDimensionId(registry));
+
+  const set = resolveDefinitionData(rows, registry, index, base.definition);
+  assert.deepEqual(Object.keys(set).sort(), keys.slice().sort(), "the resolved set is exactly the requests");
+  for (const [key, entry] of Object.entries(set)) {
+    if (entry.ok) continue;
+    assert.equal(typeof entry.reason, "string", `${key} explains why it has no number`);
+    assert.ok(entry.reason.length > 0);
+  }
+  ok("exactly the aggregates the document needs are computed, once each, and every refusal is a sentence");
+
+  // --- Units and precision follow the aggregation, not the appearance. -----
+  assert.equal(unitForAggregation("net_score", "score"), "nps");
+  assert.equal(unitForAggregation("top_box", "score"), "percent");
+  assert.equal(unitForAggregation("share", "score"), "percent");
+  assert.equal(unitForAggregation("count", "percent"), "count");
+  assert.equal(unitForAggregation("average", "percent"), "percent");
+  assert.equal(decimalsForUnit("count"), 0, "a count has no decimals");
+  const shares = ask({ aggregation: "share", primaryDimensionId: generationHandle });
+  const total = shares.data.series[0].cells.reduce((sum, cell) => sum + (cell.value ?? 0), 0);
+  assert.ok(Math.abs(total - 100) < 0.5, "shares of a whole add up to the whole");
+  ok("the unit and the precision come from the aggregation, and a share adds up to one hundred");
+}
+
+// ===========================================================================
+console.log("\n[20] An exported definition carries nothing that must stay inside");
+// ===========================================================================
+
+{
+  const base = adaptLegacyStudy(snapshot);
+  const exported = serializeExperienceDefinition(base.definition, { pretty: true });
+
+  // No canonical metric key, no imported column name. A definition references
+  // meaning by opaque handle, so a document can be read, copied or handed to
+  // another consultant without carrying the database's vocabulary with it.
+  for (const metric of snapshot.metrics) {
+    assert.ok(!exported.includes(metric.key), `the export must not carry the metric key ${metric.key}`);
+  }
+  for (const dimension of snapshot.dimensions) {
+    assert.ok(
+      !exported.includes(dimension.key),
+      `the export must not carry the column name ${dimension.key}`,
+    );
+  }
+  // No respondent, no answer, no quote, no count. A definition says how to ASK
+  // for numbers; it never carries them.
+  for (const forbidden of ["respondent_id", "quant_response", "qual_observation", "quote"]) {
+    assert.ok(!exported.includes(forbidden), `the export must not mention ${forbidden}`);
+  }
+  // NO EVIDENCE. A definition says how to ASK for numbers; it never carries
+  // one. Walking the keys is stricter than searching for a value, because a
+  // count that happens to equal a page order would slip past a text search.
+  const evidenceKeys = ["count", "confirmed", "responses", "n", "quote", "respondent", "value"];
+  const walk = (node, path) => {
+    if (Array.isArray(node)) {
+      node.forEach((entry, position) => walk(entry, `${path}[${position}]`));
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    for (const [key, entry] of Object.entries(node)) {
+      assert.ok(
+        !evidenceKeys.includes(key),
+        `the export carries an evidence field "${key}" at ${path}`,
+      );
+      walk(entry, `${path}.${key}`);
+    }
+  };
+  walk(JSON.parse(exported), "definition");
+  // No secret, in any shape. Asserted rather than assumed, because "obviously
+  // there is no key in there" is exactly the sentence that precedes one.
+  for (const forbidden of [/sb_secret_/, /service_role/, /SUPABASE_/, /eyJ[A-Za-z0-9_-]{8,}\./]) {
+    assert.doesNotMatch(exported, forbidden, "an export can never carry a credential");
+  }
+  // What it DOES carry: the study and client it belongs to, which is what makes
+  // it possible to tell whether an exported file may be loaded back.
+  assert.ok(exported.includes(snapshot.studyId));
+  assert.ok(exported.includes(snapshot.tenantId));
+  // And it is deterministic: the same document always produces the same bytes.
+  assert.equal(exported, serializeExperienceDefinition(adaptLegacyStudy(snapshot).definition, { pretty: true }));
+  ok("an exported definition carries handles, layout and words — no key, no answer, no secret");
+}
 
 console.log(`\nOK — ${checks} Experience Composer checks passed.`);

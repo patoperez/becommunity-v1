@@ -25,7 +25,7 @@
  */
 
 import { blockSpec, type BlockType } from "./blocks";
-import { CHART_SPECS, type ChartVariant } from "./charts";
+import { CHART_SPECS, alternativeVariant, type ChartVariant } from "./charts";
 import {
   allBlocks,
   type ExperienceBlock,
@@ -81,6 +81,13 @@ export type ValidationReport = {
   errors: Issue<HardCode>[];
   warnings: Issue<SoftCode>[];
 };
+
+/**
+ * The drawings whose geometry ASSERTS that the parts add up to the whole, and
+ * the aggregations for which that assertion is true.
+ */
+const PART_OF_WHOLE_VARIANTS: ReadonlySet<string> = new Set(["pie", "donut", "treemap"]);
+const PART_OF_WHOLE_AGGREGATIONS: ReadonlySet<string> = new Set(["count", "sum", "share"]);
 
 const EMPTY: ValidationReport = { errors: [], warnings: [] };
 
@@ -206,6 +213,25 @@ export function validateBlockQuery(
         detail: `“${metric.label}” no se puede representar como ${spec.label.toLowerCase()}.`,
       });
     }
+    // A DRAWING THAT DIVIDES A WHOLE NEEDS PARTS THAT ADD UP TO ONE.
+    //
+    // A pie, a dona and a treemap all say "this is how the total splits". A
+    // promedio, un NPS o un Top-2-Box por característica do not add up to
+    // anything: three slices reading 8.4, 7.9 and 9.1 make a picture whose
+    // angles mean nothing at all. Counting answers, adding them up, or taking
+    // the share of the total does divide a whole, so those three aggregations
+    // are exactly the ones these drawings accept. It is a hard error because
+    // the alternative is a graphic that misrepresents the data.
+    if (PART_OF_WHOLE_VARIANTS.has(context.variant) && !PART_OF_WHOLE_AGGREGATIONS.has(query.aggregation)) {
+      errors.push({
+        code: "impossible_schema",
+        target,
+        detail:
+          `“${spec.label}” reparte un total entre sus partes, y “${metric.label}” está calculado como `
+          + "un promedio, así que las partes no suman el total. Cambia el cálculo a cantidad, suma o "
+          + "porcentaje del total, o elige otra gráfica.",
+      });
+    }
     const shown = query.topN ? Math.min(query.topN, cardinality || query.topN) : cardinality;
     if (spec.maximumCategories !== null && shown > spec.maximumCategories) {
       errors.push({
@@ -251,12 +277,14 @@ function variantWarnings(
     });
   }
   if (!spec.rendererImplemented) {
+    const alternative = alternativeVariant(variant);
     warnings.push({
       code: "no_renderer_yet",
       target,
-      detail: `“${spec.label}” todavía no tiene su propio dibujo; por ahora se muestra como ${
-        spec.fallback ? CHART_SPECS[spec.fallback].label.toLowerCase() : "tabla"
-      }.`,
+      detail:
+        `“${spec.label}” todavía no se dibuja. El bloque lo dice con todas sus letras y muestra `
+        + `${alternative ? CHART_SPECS[alternative].label.toLowerCase() : "la tabla"} debajo, `
+        + "como referencia; no es la misma gráfica y no se hace pasar por ella.",
     });
   }
   return warnings;

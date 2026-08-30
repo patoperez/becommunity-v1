@@ -4,47 +4,51 @@ import { z } from "zod";
 import { logout } from "@/app/dashboard/actions";
 import { StudioShell } from "@/components/shell/StudioShell";
 import { studyParent } from "@/components/shell/BackLink";
-import { ExperienceComposer } from "@/components/studio/ExperienceComposer";
-import { adaptLegacyStudy } from "@/lib/experience/adapter";
-import { loadLegacyStudySnapshot } from "@/lib/experience/study-snapshot";
+import { ExperienceBuilder } from "@/components/studio/experience/ExperienceBuilder";
+import {
+  builderClientPayload,
+  loadBuilderWorkspace,
+} from "@/lib/experience/builder-workspace";
 import { requireInternal } from "@/lib/studio/guard";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
+import { studioStudy, studioStudyPreview } from "@/lib/studio/routes";
+
+import { refreshExperienceData, saveExperienceDraftAction } from "./actions";
 
 export const metadata = { title: "Construcción del dashboard · Be Community" };
 
 type Params = Promise<{ studyId: string }>;
 
 /**
- * "Construcción del dashboard — prototipo interno".
+ * "Construcción del dashboard" — the internal builder.
  *
- * An EXPERIMENTAL, INTERNAL-ONLY surface. It reads one real study, puts it
- * through the compatibility adapter, and lets a member of the team rearrange
- * the result to find out whether the composer's model is the right one. It
- * saves nothing, publishes nothing and changes nothing about the study.
+ * AUTHORIZATION IS THE SAME GATE AS EVERY OTHER STUDIO SURFACE, and it runs
+ * FIRST. `requireInternal()` revalidates the session with `getUser()`, reads
+ * the role from the database, redirects a client-role caller to `/dashboard`,
+ * and only then creates the privileged client. Nothing on this page is
+ * reachable without an internal role, and nothing on it is reachable from any
+ * client-facing route.
  *
- * AUTHORIZATION IS THE SAME GATE AS EVERY OTHER STUDIO SURFACE. `requireInternal()`
- * runs first, before a single read: it revalidates the session with `getUser()`,
- * reads the role from the database, redirects a client-role caller to
- * `/dashboard`, and only then creates the privileged client. Nothing on this
- * page is reachable without an internal role, and nothing on it is reachable
- * from any client-facing route.
+ * IT SAVES A DRAFT, AND IT PUBLISHES NOTHING. The study's `dashboard_config`,
+ * `journey_definition` and publication state are read and never written; a
+ * draft lives in its own table (migration 0023) and no client-facing surface
+ * reads it. `/studio/e/[studyId]/vista-cliente` and `/insights/e/[studyId]`
+ * are unchanged and are not imported here.
  *
- * IT DOES NOT TOUCH WHAT THE CLIENT SEES. `/studio/e/[studyId]/vista-cliente`
- * and `/insights/e/[studyId]` are unchanged and are not imported here. The
- * study's `dashboard_config` and `journey_definition` are read and never
- * written.
+ * WHAT CROSSES TO THE BROWSER is `builderClientPayload` and nothing else — a
+ * named projection, so adding a field to the workspace cannot accidentally ship
+ * the study's rows or the handle-to-key index to a client component.
  */
-export default async function StudioStudyComposerPage({ params }: { params: Params }) {
+export default async function StudioStudyBuilderPage({ params }: { params: Params }) {
   const { user, admin } = await requireInternal();
   const { studyId } = await params;
   if (!z.string().uuid().safeParse(studyId).success) notFound();
 
-  const workspace = await loadStudioStudy(admin, studyId);
-  if (!workspace) notFound();
+  const studio = await loadStudioStudy(admin, studyId);
+  if (!studio) notFound();
 
-  const snapshot = await loadLegacyStudySnapshot(admin, workspace);
-  const { definition, registry, warnings } = adaptLegacyStudy(snapshot);
-  const back = studyParent(studyId, workspace.study.name);
+  const workspace = await loadBuilderWorkspace(admin, studio);
+  const back = studyParent(studyId, studio.study.name);
 
   return (
     <StudioShell
@@ -54,12 +58,12 @@ export default async function StudioStudyComposerPage({ params }: { params: Para
       breadcrumb={[
         "Studio",
         "Estudios",
-        workspace.study.clientName,
-        workspace.study.name,
+        studio.study.clientName,
+        studio.study.name,
         "Construcción",
       ]}
-      title="Construcción del dashboard — prototipo interno"
-      lead="Así se vería este estudio armado con el modelo nuevo de páginas y bloques. Sirve para decidir la forma de trabajar; todavía no guarda ni publica nada."
+      title="Construcción del dashboard"
+      lead="Arma el estudio con páginas y bloques, con sus números reales. El borrador se guarda solo; el cliente no ve nada de esto hasta que exista la publicación."
       utility={
         <form action={logout}>
           <button
@@ -71,13 +75,12 @@ export default async function StudioStudyComposerPage({ params }: { params: Para
         </form>
       }
     >
-      <ExperienceComposer
-        original={definition}
-        registry={registry}
-        adapterWarnings={warnings.map((warning) => ({
-          code: warning.code,
-          detail: warning.detail,
-        }))}
+      <ExperienceBuilder
+        payload={builderClientPayload(workspace)}
+        exitHref={studioStudy(studyId)}
+        previewHref={studioStudyPreview(studyId)}
+        saveDraft={saveExperienceDraftAction}
+        refreshData={refreshExperienceData}
       />
     </StudioShell>
   );

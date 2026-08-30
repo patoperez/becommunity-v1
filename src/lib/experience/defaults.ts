@@ -172,6 +172,17 @@ export function newBlock(request: NewBlockRequest): ExperienceBlock | null {
   }
 
   if (spec.requiresJourney && !request.journeyId) return null;
+  // A comparison explorer with nothing to cross is a control that opens onto
+  // an empty screen. It needs at least one result and one characteristic the
+  // reader may group by, which is the same pair `buildAllowlist` requires
+  // before the deployed explorer offers itself at all.
+  if (request.type === "pivot_explorer") {
+    if (!registry) return null;
+    const crossable = registry.dimensions.some(
+      (dimension) => dimension.filterEligible && dimension.values.length > 0,
+    );
+    if (!crossable || registry.metrics.length === 0) return null;
+  }
   // An image block without a picture cannot be built. This slice has no asset
   // picker, so the catalogue simply does not offer one rather than creating a
   // block the schema would then refuse.

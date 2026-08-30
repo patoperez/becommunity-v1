@@ -1,14 +1,26 @@
 /**
  * The visualizations a block may become, and what each one can honestly carry.
  *
- * This slice implements the CONTRACT, not eighteen renderers. Every variant is
- * declared here with the shape of query it needs, the reading it starts to fail
- * at, and — stated plainly, because pretending otherwise would be the easiest
- * way to ship a broken page — whether a renderer exists for it yet.
- *
  * The compatibility rules are data, not `if` statements scattered through the
  * UI, so the same table answers "may this block become a pie?" in the composer,
  * in the server validation and in a gate.
+ *
+ * WHAT CHANGED WHEN THE RENDERERS ARRIVED, AND WHY IT MATTERS MORE THAN THE
+ * PICTURES.
+ *
+ * The foundation slice declared a `fallback` and drew it INSTEAD of the variant
+ * that had no renderer. A traffic light appeared as horizontal bars, which is
+ * not a traffic light: green, amber and red against an agreed range is a
+ * different statement from "this bar is longer than that one", and quietly
+ * swapping one for the other is how a consultant publishes a page they did not
+ * choose. Fifteen of the eighteen variants now have their own renderer. The
+ * three that do not — heat map, bubbles, proportional rectangles — say so, by
+ * name, in the catalogue and on the canvas, and offer the reference
+ * representation BESIDE that statement rather than in place of it.
+ *
+ * `alternative` is therefore not a substitution. It is the representation a
+ * person can read while the real one does not exist, always shown under a
+ * sentence that says which drawing is missing.
  */
 
 export const CHART_VARIANTS = [
@@ -56,13 +68,17 @@ export type ChartVariantSpec = {
   /** How it survives a 360 px phone. */
   mobile: "good" | "acceptable" | "poor";
   /**
-   * Whether this slice can draw it. False means the contract exists, the
-   * composer offers it, and the prototype falls back to the reusable
-   * representation named in `fallback`.
+   * Whether a renderer for this exact drawing exists. False means the composer
+   * still offers the choice — the model can express it and a later slice will
+   * draw it — but every surface says the drawing is missing, by name, and
+   * nothing pretends the `alternative` below is the same picture.
    */
   rendererImplemented: boolean;
-  /** What the prototype shows instead, while a renderer does not exist. */
-  fallback: ChartVariant | null;
+  /**
+   * The readable representation offered ALONGSIDE the "not drawn yet" notice.
+   * Never a silent replacement. Null when the variant is drawn for real.
+   */
+  alternative: ChartVariant | null;
 };
 
 const SPECS: ChartVariantSpec[] = [
@@ -75,7 +91,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: null,
     mobile: "good",
     rendererImplemented: true,
-    fallback: null,
+    alternative: null,
   },
   {
     id: "bar_horizontal",
@@ -86,7 +102,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "good",
     rendererImplemented: true,
-    fallback: null,
+    alternative: null,
   },
   {
     id: "bar_vertical",
@@ -96,8 +112,8 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 8,
     maximumCategories: 40,
     mobile: "acceptable",
-    rendererImplemented: false,
-    fallback: "bar_horizontal",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "bar_grouped",
@@ -107,8 +123,8 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 6,
     maximumCategories: 24,
     mobile: "poor",
-    rendererImplemented: false,
-    fallback: "table",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "bar_stacked",
@@ -118,8 +134,8 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 6,
     maximumCategories: 24,
     mobile: "acceptable",
-    rendererImplemented: false,
-    fallback: "table",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "bar_stacked_100",
@@ -129,8 +145,8 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 6,
     maximumCategories: 24,
     mobile: "acceptable",
-    rendererImplemented: false,
-    fallback: "table",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "line",
@@ -141,7 +157,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
-    fallback: null,
+    alternative: null,
   },
   {
     id: "area",
@@ -151,8 +167,8 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 24,
     maximumCategories: 60,
     mobile: "acceptable",
-    rendererImplemented: false,
-    fallback: "line",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "pie",
@@ -162,8 +178,8 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 5,
     maximumCategories: 12,
     mobile: "acceptable",
-    rendererImplemented: false,
-    fallback: "bar_horizontal",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "donut",
@@ -173,8 +189,8 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 5,
     maximumCategories: 12,
     mobile: "acceptable",
-    rendererImplemented: false,
-    fallback: "bar_horizontal",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "table",
@@ -185,7 +201,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
-    fallback: null,
+    alternative: null,
   },
   {
     id: "heatmap",
@@ -196,7 +212,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 40,
     mobile: "poor",
     rendererImplemented: false,
-    fallback: "table",
+    alternative: "table",
   },
   {
     id: "bubble",
@@ -207,7 +223,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "poor",
     rendererImplemented: false,
-    fallback: "table",
+    alternative: "table",
   },
   {
     id: "treemap",
@@ -218,18 +234,18 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "poor",
     rendererImplemented: false,
-    fallback: "bar_horizontal",
+    alternative: "bar_horizontal",
   },
   {
     id: "traffic_light",
     label: "Semáforo",
-    description: "Verde, amarillo y rojo sobre un umbral acordado.",
+    description: "Verde, amarillo y rojo sobre un rango acordado.",
     dimensions: { min: 0, max: 1 },
     comfortableCategories: 12,
     maximumCategories: 40,
     mobile: "good",
-    rendererImplemented: false,
-    fallback: "bar_horizontal",
+    rendererImplemented: true,
+    alternative: null,
   },
   {
     id: "retention_series",
@@ -240,7 +256,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
-    fallback: null,
+    alternative: null,
   },
   {
     id: "journey",
@@ -251,7 +267,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 24,
     mobile: "good",
     rendererImplemented: true,
-    fallback: null,
+    alternative: null,
   },
   {
     id: "theme_cloud",
@@ -262,7 +278,7 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 60,
     mobile: "acceptable",
     rendererImplemented: true,
-    fallback: null,
+    alternative: null,
   },
 ];
 
@@ -278,19 +294,30 @@ export function isChartVariant(value: unknown): value is ChartVariant {
   return typeof value === "string" && (CHART_VARIANTS as readonly string[]).includes(value);
 }
 
+/** Whether this exact drawing exists. The one question every renderer asks. */
+export function isRendererImplemented(variant: ChartVariant): boolean {
+  return CHART_SPECS[variant].rendererImplemented;
+}
+
 /**
- * What the prototype actually draws for a variant, following the fallback chain
- * until it reaches something with a renderer. Bounded so a mis-declared table
- * cannot loop.
+ * The representation shown beside the "not drawn yet" notice, following the
+ * declared chain until it reaches something that is genuinely drawn. Bounded so
+ * a mis-declared pair cannot loop. Null when the variant itself is drawn.
  */
-export function renderableVariant(variant: ChartVariant): ChartVariant {
-  let current = variant;
-  for (let step = 0; step < CHART_VARIANTS.length; step += 1) {
+export function alternativeVariant(variant: ChartVariant): ChartVariant | null {
+  if (CHART_SPECS[variant].rendererImplemented) return null;
+  let current = CHART_SPECS[variant].alternative;
+  for (let step = 0; step < CHART_VARIANTS.length && current; step += 1) {
     const spec = CHART_SPECS[current];
-    if (spec.rendererImplemented || !spec.fallback) return current;
-    current = spec.fallback;
+    if (spec.rendererImplemented) return current;
+    current = spec.alternative;
   }
   return "table";
+}
+
+/** Every variant this build can actually draw. */
+export function implementedVariants(): ChartVariant[] {
+  return CHART_VARIANTS.filter((variant) => CHART_SPECS[variant].rendererImplemented);
 }
 
 /**

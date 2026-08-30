@@ -29,12 +29,15 @@
  *    V1 of the model cannot yet express comes back as a warning. Warnings are
  *    internal: they are for the team building the composer, never for a client.
  *
- * WHAT THE FIRST ROUND OF WARNINGS TURNED OUT TO BE. Three of the four were
- * real limitations; two were defects in this file and in the model, and are
- * fixed rather than announced:
+ * WHAT THE FIRST ROUND OF WARNINGS TURNED OUT TO BE. Every one of the four is
+ * now a defect that has been fixed rather than a limitation that is announced:
  *
- *    the pivot explorer          a genuine gap. V1 has no equivalent block, so
- *                                the warning stands and the prototype shows it.
+ *    the pivot explorer          was a MODEL gap, and the model closed it. The
+ *                                deployed comparison explorer is a
+ *                                `pivot_explorer` block placed on the panorama
+ *                                page, connected to the study's filters like
+ *                                every other piece of evidence. Adapting no
+ *                                longer loses a section the product ships.
  *    a configured ideal range    was a MODELLING gap: `comparison` carried one
  *                                number and the product ships a labelled range.
  *                                The model now carries the range, and this
@@ -127,6 +130,12 @@ export type LegacyStudySnapshot = {
 
 export type AdapterWarning = {
   code:
+    /**
+     * Retained in the vocabulary although nothing raises it today: the pivot
+     * explorer — the one section that ever produced it — is a block now. Kept
+     * so a future section that genuinely cannot be carried has a code to use
+     * rather than inventing one.
+     */
     | "section_not_representable"
     | "threshold_not_representable"
     | "metric_not_available"
@@ -190,20 +199,41 @@ function metricEntry(studyId: string, metric: LegacyMetricInput): SemanticMetric
     // What the deployed product already computes for a result of this shape.
     // Nothing new is offered: a composer cannot ask for an aggregation the
     // canonical engine does not implement.
+    //
+    // `count` and `share` are added to every result because counting the
+    // answers behind one is always available and always honest, and because a
+    // drawing that divides a whole — a pastel, a dona, unos rectángulos — needs
+    // an aggregation whose parts actually add up to the total. Without them the
+    // composer could offer those three drawings and the validator would refuse
+    // every one, which is a menu that lies about what is possible.
     aggregations:
       metric.unit === "nps"
-        ? (["net_score", "value"] as const)
+        ? (["net_score", "value", "count", "share"] as const)
         : metric.unit === "percent"
-          ? (["top_box", "value", "average"] as const)
-          : (["average", "value", "min", "max", "count"] as const),
+          ? (["top_box", "value", "average", "count", "share"] as const)
+          : (["average", "value", "min", "max", "count", "share"] as const),
     defaultAggregation:
       metric.unit === "nps" ? "net_score" : metric.unit === "percent" ? "top_box" : "average",
+    // Every drawing the model can express. Which of them is HONEST for a given
+    // block is decided by `validateExperienceDefinition` against the query that
+    // block actually carries — how many characteristics it supplies, how many
+    // values those carry, and whether the aggregation divides a whole. Encoding
+    // that here instead would put the same rule in two places.
     charts: [
       "kpi",
       "bar_horizontal",
       "bar_vertical",
-      "table",
+      "bar_grouped",
+      "bar_stacked",
+      "bar_stacked_100",
       "line",
+      "area",
+      "pie",
+      "donut",
+      "table",
+      "heatmap",
+      "bubble",
+      "treemap",
       "traffic_light",
       "retention_series",
     ],
@@ -233,6 +263,30 @@ function dimensionEntry(studyId: string, dimension: LegacyDimensionInput): Seman
     journeyEligible: false,
     publicationReady: dimension.values.length > 0,
   };
+}
+
+/**
+ * The server's private map from opaque handle back to the canonical key.
+ *
+ * It is built from the SAME `handle()` the registry is built with, so the two
+ * can never drift, and it is deliberately a separate value rather than a field
+ * on the registry: the registry crosses to the browser and this must not. A
+ * definition carries handles; only this index turns one into a metric key, and
+ * only on the server, in the one module that reads the study's rows.
+ */
+export function registryKeyIndex(snapshot: LegacyStudySnapshot): {
+  metrics: Record<string, string>;
+  dimensions: Record<string, string>;
+} {
+  const metrics: Record<string, string> = {};
+  for (const metric of snapshot.metrics) {
+    metrics[handle("r", snapshot.studyId, metric.key)] = metric.key;
+  }
+  const dimensions: Record<string, string> = {};
+  for (const dimension of snapshot.dimensions) {
+    dimensions[handle("c", snapshot.studyId, dimension.key)] = dimension.key;
+  }
+  return { metrics, dimensions };
 }
 
 /** The registry one legacy study produces. Pure, ordered, reproducible. */
@@ -521,6 +575,23 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
     );
   }
 
+  // The comparison explorer the deployed dashboard ships. It is a block now
+  // rather than a warning: see the note on `pivot_explorer` in blocks.ts.
+  if (sections.pivot) {
+    panoramaBlocks.push(
+      ...record(
+        newBlock({
+          type: "pivot_explorer",
+          seed: blockSeed(snapshot, "panorama", "pivot"),
+          order: panoramaBlocks.length,
+          registry,
+          title: "Explorar los cruces",
+        }),
+        "el explorador de cruces",
+      ),
+    );
+  }
+
   if (sections.report) {
     panoramaBlocks.push(
       ...record(
@@ -626,7 +697,14 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
     filterId: filter.id,
     blockIds: pages
       .flatMap((page) => page.blocks)
-      .filter((block) => block.query !== null || block.type === "journey" || block.type === "qualitative_themes" || block.type === "theme_cloud")
+      .filter(
+        (block) =>
+          block.query !== null
+          || block.type === "journey"
+          || block.type === "qualitative_themes"
+          || block.type === "theme_cloud"
+          || block.type === "pivot_explorer",
+      )
       .map((block) => block.id),
   }));
 
@@ -647,15 +725,6 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
       code: "threshold_not_representable",
       detail:
         "El estudio tiene un rango ideal configurado sobre un resultado que esta experiencia no muestra en ningún bloque, así que la alerta no se pudo colocar.",
-    });
-  }
-
-  // --- What could not be carried -----------------------------------------
-  if (sections.pivot) {
-    warnings.push({
-      code: "section_not_representable",
-      detail:
-        "El explorador cruzado del panel actual no tiene todavía un bloque equivalente en el modelo.",
     });
   }
 

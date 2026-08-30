@@ -40,6 +40,7 @@ export const BLOCK_TYPES = [
   "spacer",
   "report_download",
   "all_results_disclosure",
+  "pivot_explorer",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -390,6 +391,43 @@ const SPECS: BlockSpec[] = [
     copy: "short",
     requiresJourney: false,
     span: { min: 4, max: 12, default: 6 },
+    clientFacing: true,
+  },
+  {
+    id: "pivot_explorer",
+    label: "Explorador de cruces",
+    description:
+      "El lector elige un resultado y hasta dos características, y el servidor calcula ese cruce.",
+    group: "evidence",
+    /*
+     * THE ONE BLOCK WHOSE QUERY THE READER WRITES.
+     *
+     * Every other evidence block carries a `BlockQuerySpec` the AUTHOR fixed.
+     * This one carries none, on purpose: the deployed comparison explorer is a
+     * control the client drives, and the thing being composed is its presence,
+     * its wording, its width and which filters narrow it — not the cross
+     * itself. Storing an author's cross here would describe a different
+     * product from the one that ships.
+     *
+     * That does not make it unbounded. The reader's choice is still validated
+     * against `buildAllowlist`'s server-side allowlist on every request
+     * (`src/lib/calc/pivot.ts`), which is the boundary P4E established and
+     * which nothing here relaxes.
+     *
+     * It exists because the compatibility adapter used to report the explorer
+     * as "not representable" and drop it. A model that silently loses a
+     * section the product ships is not a compatible model.
+     */
+    requiresQuery: false,
+    allowsQuery: false,
+    allowsVisualization: true,
+    variants: ["table"],
+    defaultVariant: "table",
+    allowsFilters: true,
+    allowsSamplePolicyOverride: true,
+    copy: "short",
+    requiresJourney: false,
+    span: { min: 8, max: 12, default: 12 },
     clientFacing: true,
   },
   {
