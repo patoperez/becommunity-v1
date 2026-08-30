@@ -770,8 +770,23 @@ are run from WSL as an ordinary user with the distribution's own browser.
 
 ## 21. How to accept this, step by step
 
-Written for the person judging it. **There is no deployed version and there must
-not be one yet.** Evaluate it against the application running on your machine.
+Written for the person judging it. **Nothing here serves live traffic and
+nothing may be promoted.** A zero-traffic Cloudflare version exists so the build
+can be looked at, and the Worker's live version is untouched:
+
+| | |
+| --- | --- |
+| preview version | `dcb339cb-044f-4d8e-83a9-597ec76a392d`, tag `builder-f84c512` |
+| preview URL | `https://dcb339cb-becommunity-v1.ollinagencyllc.workers.dev` |
+| live version, unchanged | `e691ecd8-de9a-4a02-a8e3-13aad7e9e805` at 100 % |
+
+On the preview `/api/health` answers 200 with `supabase: true`, `/login` renders,
+and `/studio/e/<id>/construccion` redirects an unauthenticated request to
+`/login` — the route ships and is guarded. **Do not run
+`wrangler versions deploy`.**
+
+To actually work in the builder, run it on your own machine — the preview has no
+session of yours and the acceptance below is a hands-on pass:
 
 ```
 npm run build && npm start

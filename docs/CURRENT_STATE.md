@@ -106,6 +106,14 @@ anything under `src/lib/experience/**`.
   builder gate needs `npm run build && npm start` — React development calls
   `eval()` and this application's CSP correctly forbids it, so under `next dev`
   the builder never hydrates.
+- **A zero-traffic Cloudflare version exists and was NOT promoted.** Version
+  `dcb339cb-044f-4d8e-83a9-597ec76a392d`, tag `builder-f84c512`, preview URL
+  `https://dcb339cb-becommunity-v1.ollinagencyllc.workers.dev`. Its
+  `/api/health` answers 200 with `supabase: true`, `/login` renders, and the
+  builder route redirects an unauthenticated request to `/login`. The Worker's
+  live version is still `e691ecd8-de9a-4a02-a8e3-13aad7e9e805` at 100 %, and
+  the artifact was built from a checkout with NO `.env` file, with credentials
+  in the shell — Suite D is green on that build.
 - **Before this may control the client dashboard**: publication (approve →
   snapshot → serve, on the ONE publication surface), a per-study switch on
   `/insights/e/[studyId]`, a client-side renderer that is not the builder's
