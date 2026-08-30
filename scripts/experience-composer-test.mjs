@@ -1228,7 +1228,7 @@ assert.match(storageSource, /rpc\("save_study_experience_draft"/, "saving goes t
 for (const forbidden of [/\.insert\(/, /\.update\(/, /\.upsert\(/, /\.delete\(/]) {
   assert.doesNotMatch(storageSource, forbidden, "no direct write to the draft table");
 }
-assert.match(storageSource, /error\.code === "40001"/, "a lost update is reported as a conflict");
+assert.match(storageSource, /error\.code === "55000"/, "a lost update is reported as a conflict");
 ok("the application never writes the draft table directly; one definer function does");
 
 const workspaceSource = await readCode("src/lib/experience/builder-workspace.ts");
@@ -1274,7 +1274,6 @@ for (const [pattern, message] of [
   [/revoke all privileges on table public\.study_experience_draft from anon, authenticated/, "browser grants revoked"],
   [/grant select on table public\.study_experience_draft to service_role/, "service_role may only read the draft"],
   [/before update on public\.study_experience_revision/, "a published revision refuses an update"],
-  [/errcode = '40001'/, "a lost update raises a distinguishable code"],
   [/errcode = '42501', message = 'internal actor required'/, "a non-internal actor is refused in the database"],
   [/metadata,studyId/, "the document must name the study it is stored against"],
   [/metadata,tenantId/, "and the client"],
@@ -1296,6 +1295,34 @@ assert.doesNotMatch(
   "no role may write these tables directly",
 );
 ok("migration 0023 is additive, RLS-forced, browser-denied and writable only through its function");
+
+// --- 0024 replaces one function body and nothing else.
+const conflictSource = await read("supabase/migrations/0024_experience_draft_conflict_code.sql");
+assert.match(
+  conflictSource,
+  /create or replace function public\.save_study_experience_draft/,
+  "0024 replaces the writer",
+);
+assert.match(conflictSource, /errcode = '55000'/, "and raises a code the Data API delivers");
+assert.doesNotMatch(conflictSource, /errcode = '40001'/, "40001 is gone: it is retried, not delivered");
+// The three concurrency refusals, and only those, carry the conflict code.
+assert.equal(
+  (conflictSource.match(/errcode = '55000'/g) ?? []).length,
+  3,
+  "exactly the three concurrency refusals raise it",
+);
+for (const forbidden of [/create table/i, /alter table/i, /drop /i, /create policy/i, /delete from/i]) {
+  assert.doesNotMatch(conflictSource, forbidden, "0024 touches nothing but the function body");
+}
+assert.match(
+  conflictSource,
+  /revoke execute on function public\.save_study_experience_draft[\s\S]{0,160}from public, anon, authenticated/,
+  "and restates the privilege model rather than assuming it",
+);
+const conflictRollback = await read("supabase/rollbacks/0024_restore_experience_draft_conflict_code.sql");
+assert.match(conflictRollback, /0023_experience_definition_persistence\.sql/, "0024 has a stated reverse");
+assert.match(conflictRollback, /125 s|125 seconds|HTTP 504/, "and the reverse says what it costs");
+ok("migration 0024 replaces one function body, and its reverse says what going back would cost");
 
 const rollbackSource = await read("supabase/rollbacks/0023_drop_experience_persistence.sql");
 for (const object of [

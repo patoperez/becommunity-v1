@@ -141,7 +141,12 @@ export async function saveExperienceDraft(
   });
 
   if (error) {
-    if (error.code === "40001") {
+    // `55000` — object_not_in_prerequisite_state. Within
+    // `save_study_experience_draft` it means exactly one thing: the revision
+    // this edit was based on is not the revision that is stored. It is NOT
+    // `40001`, which says the same thing in SQL but is retried by the Data API
+    // and so never reaches a caller (migration 0024).
+    if (error.code === "55000") {
       return {
         ok: false,
         kind: "conflict",

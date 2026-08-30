@@ -12,7 +12,10 @@
 //   4  that function refuses a non-internal actor, a document that names
 //      another study or client, an oversized document, and a blind write;
 //   5  optimistic concurrency actually works: a stale revision is refused with
-//      SQLSTATE 40001 and the stored draft is unchanged afterwards;
+//      SQLSTATE 55000, PROMPTLY, and the stored draft is unchanged afterwards.
+//      The promptness is asserted rather than assumed: 0023 raised 40001, which
+//      the Data API retries until the gateway times out, so a refusal that
+//      takes a minute is a refusal nobody receives;
 //   6  a saved draft reloads byte for byte;
 //   7  every save writes exactly one audit record.
 //
@@ -295,7 +298,7 @@ try {
     p_schema_version: EXPERIENCE_SCHEMA_VERSION,
   });
   assert.equal(blind.ok, false, "a save that does not say what it replaces must be refused");
-  assert.equal(blind.body?.code, "40001");
+  assert.equal(blind.body?.code, "55000");
   ok("a blind write over an existing draft is refused as a conflict");
 
   const second = { ...definition, title: "Borrador de prueba, segunda versión" };
@@ -312,6 +315,7 @@ try {
   assert.equal(updated.body.created, false);
   ok("saving with the revision you were editing moves the draft to the next one");
 
+  const startedAt = Date.now();
   const stale = await rpc("save_study_experience_draft", {
     p_study_id: studyId,
     p_actor: internalActor,
@@ -319,8 +323,13 @@ try {
     p_schema_version: EXPERIENCE_SCHEMA_VERSION,
     p_expected_revision: 1,
   });
+  const staleMs = Date.now() - startedAt;
   assert.equal(stale.ok, false, "a stale revision must be refused");
-  assert.equal(stale.body?.code, "40001", "with the code the application reads as a conflict");
+  assert.equal(stale.body?.code, "55000", "with the code the application reads as a conflict");
+  // PROMPTLY. 0023 raised 40001 here, which the Data API retries: the refusal
+  // took 125 seconds and arrived as a gateway timeout with no message in it.
+  // A refusal nobody receives is not a refusal, so the time is asserted.
+  assert.ok(staleMs < 15_000, `the refusal took ${staleMs} ms; it must arrive promptly`);
   const afterConflict = await rest(
     `study_experience_draft?study_id=eq.${studyId}&select=revision,definition`,
   );
@@ -330,7 +339,7 @@ try {
     second.title,
     "the newer version survives the refused overwrite",
   );
-  ok("a second editor's stale save is refused and overwrites nothing");
+  ok(`a second editor's stale save is refused in ${staleMs} ms and overwrites nothing`);
 
   // =========================================================================
   console.log("\n[7] Every save left exactly one record of itself");
