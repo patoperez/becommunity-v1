@@ -57,7 +57,20 @@ import {
   setStudySamplePolicy,
   undo,
   type EditorState,
+  setIdentityText,
+  toggleIdentityPart,
+  setIdentityVisible,
+  setIdentityReportDownload,
+  setPanelIntro,
+  setPanelLayout,
+  setPanelOption,
+  togglePanelFilter,
+  movePanelFilter,
+  setPanelTarget,
+  togglePanelTargetBlock,
 } from "@/lib/experience/editor";
+
+import { FilterPanelCard, IdentityPanel } from "./AuthoringPanels";
 import {
   BREAKPOINTS,
   BREAKPOINT_WIDTHS,
@@ -223,12 +236,14 @@ export function ExperienceBuilder({
   payload,
   exitHref,
   previewHref,
+  draftPreviewHref,
   saveDraft,
   refreshData,
 }: {
   payload: BuilderClientPayload;
   exitHref: string;
   previewHref: string;
+  draftPreviewHref: string;
   saveDraft: SaveDraftAction;
   refreshData: RefreshDataAction;
 }) {
@@ -253,6 +268,8 @@ export function ExperienceBuilder({
 
   const [data, setData] = useState<BlockDataSet>(payload.data);
   const [preview, setPreview] = useState<Breakpoint>("desktop");
+  /** How much of the previewed width is shown at once. 1 is full size. */
+  const [zoom, setZoom] = useState(1);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [drawer, setDrawer] = useState<"none" | "left" | "right">("none");
@@ -527,6 +544,16 @@ export function ExperienceBuilder({
         pages={definition.pages.length}
         blocks={totalBlocks}
         preview={preview}
+        zoom={zoom}
+        onZoom={(next) => {
+          setZoom(next);
+          act(
+            (current) => current,
+            next === 1
+              ? "La composición se ve a tamaño real."
+              : `La composición se ve al ${Math.round(next * 100)} %.`,
+          );
+        }}
         onPreview={(next) => {
           setPreview(next);
           act(
@@ -547,6 +574,7 @@ export function ExperienceBuilder({
         rightOpen={rightOpen}
         exitHref={exitHref}
         previewHref={previewHref}
+        draftPreviewHref={draftPreviewHref}
       />
 
       {payload.draftProblem ? (
@@ -657,6 +685,29 @@ export function ExperienceBuilder({
             />
           ) : null}
 
+          <IdentityPanel
+            idPrefix={ids}
+            identity={definition.identity}
+            onText={(field, value) =>
+              act((current) => setIdentityText(current, field, value), "")
+            }
+            onToggle={(part, shown) =>
+              act(
+                (current) => toggleIdentityPart(current, part, shown),
+                shown ? "Se muestra en la portada." : "Se oculta de la portada.",
+              )
+            }
+            onVisible={(visible) =>
+              act(
+                (current) => setIdentityVisible(current, visible),
+                visible ? "La portada vuelve a mostrarse." : "La portada queda oculta.",
+              )
+            }
+            onReportDownload={(offered) =>
+              act((current) => setIdentityReportDownload(current, offered), "")
+            }
+          />
+
           <SamplePolicyPanel
             idPrefix={ids}
             mode={policy.mode}
@@ -687,6 +738,7 @@ export function ExperienceBuilder({
               evidence={evidence}
               study={study}
               breakpoint={preview}
+              zoom={zoom}
               selectedBlockId={state.selectedBlockId}
               onSelect={(blockId) => {
                 act((current) => selectBlock(current, blockId), "");
@@ -780,6 +832,53 @@ export function ExperienceBuilder({
                   (current) => setFilterConnection(current, filterId, selected.block.id, connected),
                   connected ? "El filtro ahora mueve este bloque." : "El filtro ya no mueve este bloque.",
                 )
+              }
+              panelCard={
+                selected.block.type === "filter_panel" ? (
+                  <FilterPanelCard
+                    idPrefix={ids}
+                    block={selected.block}
+                    definition={definition}
+                    onIntro={(value) =>
+                      act((current) => setPanelIntro(current, selected.block.id, value), "")
+                    }
+                    onLayout={(layout) =>
+                      act((current) => setPanelLayout(current, selected.block.id, layout), "")
+                    }
+                    onOption={(option, on) =>
+                      act((current) => setPanelOption(current, selected.block.id, option, on), "")
+                    }
+                    onToggleFilter={(filterId, offered) =>
+                      act(
+                        (current) => togglePanelFilter(current, selected.block.id, filterId, offered),
+                        offered
+                          ? "El panel ya ofrece esa característica."
+                          : "El panel deja de ofrecer esa característica.",
+                      )
+                    }
+                    onMoveFilter={(filterId, direction) =>
+                      act(
+                        (current) => movePanelFilter(current, selected.block.id, filterId, direction),
+                        "Se movió el control dentro del panel.",
+                      )
+                    }
+                    onTarget={(target) =>
+                      act(
+                        (current) => setPanelTarget(current, selected.block.id, target),
+                        "Cambió lo que mueve este panel.",
+                      )
+                    }
+                    onToggleTargetBlock={(blockId, connected) =>
+                      act(
+                        (current) =>
+                          togglePanelTargetBlock(current, selected.block.id, blockId, connected),
+                        connected
+                          ? "El panel ahora mueve ese bloque."
+                          : "El panel ya no mueve ese bloque.",
+                      )
+                    }
+                  />
+                ) : null
               }
               onDuplicate={() =>
                 act((current) => duplicateBlock(current, selected.block.id), "Se duplicó el bloque.")
@@ -895,6 +994,8 @@ function TopBar({
   pages,
   blocks,
   preview,
+  zoom,
+  onZoom,
   onPreview,
   canUndo: undoable,
   canRedo: redoable,
@@ -909,6 +1010,7 @@ function TopBar({
   rightOpen,
   exitHref,
   previewHref,
+  draftPreviewHref,
 }: {
   status: SaveStatus;
   statusMessage: string | null;
@@ -918,6 +1020,8 @@ function TopBar({
   pages: number;
   blocks: number;
   preview: Breakpoint;
+  zoom: number;
+  onZoom: (zoom: number) => void;
   onPreview: (breakpoint: Breakpoint) => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -932,6 +1036,7 @@ function TopBar({
   rightOpen: boolean;
   exitHref: string;
   previewHref: string;
+  draftPreviewHref: string;
 }) {
   return (
     <div className="min-w-0 rounded-xl border border-line bg-surface p-3 sm:p-4">
@@ -981,9 +1086,23 @@ function TopBar({
           </button>
         </span>
 
+        {/*
+          TWO PREVIEWS, TWO QUESTIONS, TWO LABELS.
+
+          There used to be one button called "Vista del cliente", and it opened
+          the client's CURRENT dashboard — which deliberately does not read a
+          composed draft. That is the right behaviour for that page and the
+          wrong thing to offer here: it implied the client's screen should
+          already contain the edits, so every honest answer it gave looked like
+          a bug. The two questions are now asked separately and neither label
+          suggests the other's answer.
+        */}
         <span className="ml-auto flex flex-wrap gap-2">
-          <Link href={previewHref} className={button}>
-            Vista del cliente
+          <Link href={draftPreviewHref} className={button}>
+            Vista previa del borrador
+          </Link>
+          <Link href={previewHref} className={button} title="Lo que el cliente ve hoy, sin tus cambios">
+            Ver versión actualmente publicada
           </Link>
           <Link href={exitHref} className={button}>
             Salir
@@ -1034,6 +1153,28 @@ function TopBar({
             ))}
           </div>
         </fieldset>
+
+        {/*
+          ZOOM, beside the width it applies to.
+
+          The canvas draws each breakpoint at its real width and scrolls
+          sideways inside its own box when there is not room. That keeps a
+          three-column block three columns wide instead of an unreadable
+          strip — and this is how somebody sees the whole arrangement at once
+          when that is the question they have.
+        */}
+        <label className="flex min-h-11 items-center gap-1.5 text-xs text-body">
+          <span>Escala</span>
+          <select
+            value={String(zoom)}
+            onChange={(event) => onZoom(Number(event.target.value))}
+            className="min-h-11 rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-strong"
+          >
+            <option value="1">100 %</option>
+            <option value="0.75">75 %</option>
+            <option value="0.5">50 %</option>
+          </select>
+        </label>
       </div>
 
       <p className="mt-2 text-xs text-muted">
@@ -1460,6 +1601,7 @@ function Canvas({
   evidence,
   study,
   breakpoint,
+  zoom,
   selectedBlockId,
   onSelect,
   onMove,
@@ -1475,6 +1617,7 @@ function Canvas({
   evidence: BuilderClientPayload["evidence"];
   study: BuilderClientPayload["study"];
   breakpoint: Breakpoint;
+  zoom: number;
   selectedBlockId: string | null;
   onSelect: (blockId: string) => void;
   onMove: (blockId: string, direction: "up" | "down") => void;
@@ -1513,7 +1656,28 @@ function Canvas({
           Esta página todavía no tiene bloques. Añade uno desde el catálogo.
         </p>
       ) : (
-        <ul className="mt-3 grid min-w-0 grid-cols-12 gap-3">
+        /*
+          THE CANVAS KEEPS THE WIDTH IT IS PRETENDING TO BE.
+
+          A twelve-column grid squeezed into whatever space is left between two
+          panels is not a preview of a 1 280 px screen: four "full" columns
+          became unreadable 90 px strips, and a KPI clipped its own number. The
+          grid is now laid out at the width of the breakpoint being previewed
+          and SCROLLS SIDEWAYS INSIDE ITS OWN BOX when there is not room for it
+          — the page itself never scrolls sideways, which the acceptance matrix
+          checks at every width. The zoom above is for seeing the whole
+          arrangement at once; the scroll is for reading it at full size.
+        */
+        <div className="mt-3 min-w-0 overflow-x-auto">
+          <div
+            style={{
+              minWidth: `${CANVAS_WIDTH[breakpoint]}px`,
+              width: zoom === 1 ? undefined : `${100 / zoom}%`,
+              transform: zoom === 1 ? undefined : `scale(${zoom})`,
+              transformOrigin: "top left",
+            }}
+          >
+        <ul className="grid min-w-0 grid-cols-12 gap-3">
           {ordered.map(({ block }, position) => (
             <li
               key={block.id}
@@ -1569,10 +1733,26 @@ function Canvas({
             </li>
           ))}
         </ul>
+          </div>
+        </div>
       )}
     </section>
   );
 }
+
+/**
+ * The width each previewed breakpoint is drawn at.
+ *
+ * Not the breakpoint's own number for the desktop case: 1 280 is the width of
+ * the WINDOW, and the canvas sits inside a shell with padding and up to two
+ * panels. 1 120 is what a 1 280 px browser actually gives the content, so the
+ * proportions on screen are the proportions a client will see.
+ */
+const CANVAS_WIDTH: Record<Breakpoint, number> = {
+  desktop: 1120,
+  tablet: 720,
+  mobile: 360,
+};
 
 function CanvasBlock({
   block,
@@ -1732,6 +1912,7 @@ function Inspector({
   onSpan,
   onSamplePolicy,
   onConnection,
+  panelCard,
   onDuplicate,
   onToggle,
   onRemove,
@@ -1750,6 +1931,8 @@ function Inspector({
   onSpan: (breakpoint: Breakpoint, span: number) => void;
   onSamplePolicy: (override: { kind: "inherit" } | { kind: "override"; policy: { policyVersion: 1; mode: SamplePolicyMode; threshold: number } }) => void;
   onConnection: (filterId: string, connected: boolean) => void;
+  /** The panel's own card, when the selected block is one. */
+  panelCard?: React.ReactNode;
   onDuplicate: () => void;
   onToggle: () => void;
   onRemove: () => void;
@@ -1804,6 +1987,8 @@ function Inspector({
             </>
           ) : null}
         </section>
+
+        {panelCard}
 
         {/* --- Where its number comes from -------------------------------- */}
         {block.query ? (

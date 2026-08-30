@@ -56,6 +56,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: true,
     responses: 54,
+    scale: { minimum: 1, maximum: 5 },
+    topBoxMinimum: 4,
   },
   {
     id: "satisfaction_onboarding",
@@ -75,6 +77,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: true,
     responses: 51,
+    scale: { minimum: 1, maximum: 5 },
+    topBoxMinimum: 4,
   },
   {
     id: "recommendation",
@@ -94,6 +98,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: true,
     responses: 54,
+    scale: null,
+    topBoxMinimum: null,
   },
   {
     id: "renewal_probability",
@@ -113,6 +119,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: true,
     responses: 49,
+    scale: null,
+    topBoxMinimum: null,
   },
   {
     id: "return_on_investment",
@@ -132,6 +140,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: true,
     responses: 41,
+    scale: null,
+    topBoxMinimum: null,
   },
   {
     id: "performance_band",
@@ -152,6 +162,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: true,
     responses: 54,
+    scale: null,
+    topBoxMinimum: null,
   },
   {
     id: "moment_unknown_share",
@@ -172,6 +184,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: true,
     responses: 54,
+    scale: null,
+    topBoxMinimum: null,
   },
   {
     id: "referrals_given",
@@ -191,6 +205,8 @@ const METRICS: SemanticMetric[] = [
     samplePolicy: null,
     publicationReady: false,
     responses: 0,
+    scale: null,
+    topBoxMinimum: null,
   },
 ];
 

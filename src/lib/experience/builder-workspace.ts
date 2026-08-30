@@ -88,19 +88,46 @@ export type BuilderWorkspace = {
   evidence: BuilderEvidence;
   /** Server-side only. Never included in what a page hands to a client component. */
   keyIndex: RegistryKeyIndex;
-  rows: LongRow[];
+  rows: readonly LongRow[];
 };
+
+/**
+ * The registry and the adapted arrangement, WITHOUT the aggregates, the draft
+ * or the confirmed themes.
+ *
+ * The two Server Actions need a registry to validate a handle against, and
+ * nothing else. Loading the whole workspace to get one meant every autosave
+ * recomputed every aggregate on the server and threw the result away. This is
+ * the same code path, stopped where the caller's need stops.
+ */
+export type BuilderRegistryContext = {
+  registry: SemanticRegistry;
+  keyIndex: RegistryKeyIndex;
+  adapted: ExperienceDefinitionV1;
+  rows: readonly LongRow[];
+};
+
+export async function loadBuilderRegistry(
+  admin: ReturnType<typeof createAdminClient>,
+  workspace: StudioStudyWorkspace,
+): Promise<BuilderRegistryContext> {
+  const rows = await loadStudyRows(admin, workspace.study.id);
+  const snapshot = await loadLegacyStudySnapshot(admin, workspace, rows);
+  const { definition: adapted, registry } = adaptLegacyStudy(snapshot);
+  return { registry, keyIndex: registryKeyIndex(snapshot), adapted, rows };
+}
 
 export async function loadBuilderWorkspace(
   admin: ReturnType<typeof createAdminClient>,
   workspace: StudioStudyWorkspace,
 ): Promise<BuilderWorkspace> {
-  const snapshot = await loadLegacyStudySnapshot(admin, workspace);
+  // One read of the study's rows, shared by the snapshot and the aggregates.
+  const rows = await loadStudyRows(admin, workspace.study.id);
+  const snapshot = await loadLegacyStudySnapshot(admin, workspace, rows);
   const { definition: adapted, registry, warnings } = adaptLegacyStudy(snapshot);
   const keyIndex = registryKeyIndex(snapshot);
 
-  const [rows, stored, confirmed] = await Promise.all([
-    loadStudyRows(admin, workspace.study.id),
+  const [stored, confirmed] = await Promise.all([
     loadExperienceDraft(admin, workspace.study.id),
     loadConfirmedThemes(admin, workspace.study.id),
   ]);
@@ -176,7 +203,7 @@ async function loadConfirmedThemes(
 function buildEvidence(
   snapshot: Awaited<ReturnType<typeof loadLegacyStudySnapshot>>,
   registry: SemanticRegistry,
-  rows: LongRow[],
+  rows: readonly LongRow[],
   confirmed: ConfirmedQualitative[],
 ): BuilderEvidence {
   const crossable = registry.dimensions.filter(

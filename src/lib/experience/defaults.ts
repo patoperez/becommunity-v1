@@ -20,6 +20,7 @@ import {
   type BlockQuerySpec,
   type ExperienceBlock,
   type ExperienceDefinitionV1,
+  type ExperienceIdentity,
   type ExperiencePage,
   type ExperienceTheme,
 } from "./definition";
@@ -51,7 +52,7 @@ export function defaultQuery(
     aggregation: metric.defaultAggregation,
     primaryDimensionId: dimension?.id ?? null,
     secondaryDimensionId: null,
-    filterRefs: [],
+    fixedFilters: [],
     sort: { by: dimension ? "value" : "label", direction: "desc" },
     topN: null,
     period: { kind: "latest", periodId: null },
@@ -183,6 +184,16 @@ export function newBlock(request: NewBlockRequest): ExperienceBlock | null {
     );
     if (!crossable || registry.metrics.length === 0) return null;
   }
+  // A panel needs at least one characteristic a reader could actually choose
+  // from. On a study with none, the catalogue does not offer the block rather
+  // than creating an empty box.
+  if (request.type === "filter_panel") {
+    if (!registry) return null;
+    const offerable = registry.dimensions.some(
+      (dimension) => dimension.filterEligible && dimension.values.length > 0,
+    );
+    if (!offerable) return null;
+  }
   // An image block without a picture cannot be built. This slice has no asset
   // picker, so the catalogue simply does not offer one rather than creating a
   // block the schema would then refuse.
@@ -199,6 +210,25 @@ export function newBlock(request: NewBlockRequest): ExperienceBlock | null {
       : null,
     journeyRef: spec.requiresJourney ? (request.journeyId ?? null) : null,
     image: request.type === "image" ? (request.image ?? null) : null,
+    /*
+     * A NEW PANEL GOVERNS ITS OWN PAGE, and offers no control yet.
+     *
+     * "This page" is the answer a person means the first time far more often
+     * than "everything", and it is the one whose consequence is visible on the
+     * screen they are looking at. Widening it to the whole experience is one
+     * deliberate choice away; narrowing an accidental experience-wide panel
+     * means finding what it silently started moving.
+     */
+    filterPanel:
+      request.type === "filter_panel"
+        ? {
+            intro: null,
+            layout: "inline",
+            showClear: true,
+            showActive: true,
+            target: { kind: "page" },
+          }
+        : null,
     filterRefs: [],
     samplePolicy: INHERIT_SAMPLE_POLICY,
     presentation: {
@@ -248,12 +278,47 @@ export function newPage(seed: string, title: string, order: number): ExperienceP
   };
 }
 
+/** The identity a study starts with: its own name, and nothing invented. */
+export function newIdentity(options: {
+  title: string;
+  organization?: string | null;
+  period?: string | null;
+  description?: string | null;
+  showMark?: boolean;
+  showReportDownload?: boolean;
+}): ExperienceIdentity {
+  const description = options.description ?? null;
+  const organization = options.organization ?? null;
+  const period = options.period ?? null;
+  const mark = options.showMark ?? true;
+  return {
+    visible: true,
+    title: options.title,
+    organization,
+    period,
+    description,
+    mark: mark ? { source: "client_brand" } : { source: "none" },
+    showReportDownload: options.showReportDownload ?? false,
+    // A part is shown when there is something to show. An identity layer that
+    // reserves a line for a period the study does not have is exactly the
+    // "absence rendered as a finding" the client contract forbids.
+    show: {
+      title: true,
+      organization: organization !== null,
+      period: period !== null,
+      description: description !== null,
+      mark,
+    },
+  };
+}
+
 export function newExperience(options: {
   seed: string;
   title: string;
   studyId: string;
   tenantId: string;
   subtitle?: string | null;
+  identity?: ExperienceIdentity;
   samplePolicy?: SampleVisibilityPolicy;
   theme?: ExperienceTheme;
 }): ExperienceDefinitionV1 {
@@ -261,6 +326,7 @@ export function newExperience(options: {
     schemaVersion: EXPERIENCE_SCHEMA_VERSION,
     id: mintId("experience", options.seed),
     title: options.title,
+    identity: options.identity ?? newIdentity({ title: options.title, description: options.subtitle ?? null }),
     metadata: {
       studyId: options.studyId,
       tenantId: options.tenantId,

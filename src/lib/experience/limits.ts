@@ -32,8 +32,20 @@ export const EXPERIENCE_LIMITS = {
   filterConnections: 200,
   /** Blocks one connection may name. */
   blocksPerConnection: 300,
-  /** Filters one block may answer to. */
+  /** Filters one ordinary block may answer to. */
   filterRefsPerBlock: 12,
+  /**
+   * Controls one visible panel may offer.
+   *
+   * A different question from the one above, and it gets a different number
+   * for the same reason `filterOptions` is not `dimensionCardinality`: twelve
+   * is a sensible bound on how many filters one CHART quietly answers to,
+   * while a panel is a box a person reads top to bottom and a study may
+   * legitimately expose every characteristic it has. It is held to the number
+   * of filters an experience may declare at all, so a panel can offer all of
+   * them and never more.
+   */
+  filtersPerPanel: 24,
   /** Default values one filter may pre-select. */
   defaultValuesPerFilter: 50,
   /** Independent journeys in one experience. */

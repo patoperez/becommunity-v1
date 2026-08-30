@@ -54,6 +54,13 @@ import {
 } from "../src/lib/experience/definition.ts";
 import { fixtureRegistry, satisfactionOnlyJourneyRegistry } from "../src/lib/experience/fixtures.ts";
 import { EXPERIENCE_ID_PATTERN, idKindOf, isExperienceId, mintId } from "../src/lib/experience/ids.ts";
+import {
+  effectiveFilterTargets,
+  filterPanels,
+  isFilterTargetable,
+  panelTargetBlockIds,
+  removalConsequence,
+} from "../src/lib/experience/filters.ts";
 import { BREAKPOINTS, GRID_COLUMNS, defaultLayout, layoutProblems, rowWidths } from "../src/lib/experience/layout.ts";
 import { EXPERIENCE_LIMITS } from "../src/lib/experience/limits.ts";
 import { declaredVersion, migrateExperienceDefinition } from "../src/lib/experience/migrate.ts";
@@ -72,6 +79,9 @@ import {
   openPage,
   redo,
   removeBlock,
+  setPanelTarget,
+  togglePanelFilter,
+  togglePanelTargetBlock,
   removePage,
   renamePage,
   resetToAdapted,
@@ -97,6 +107,7 @@ import {
   dataKeyForMoment,
   dataKeyForPivot,
   decimalsForUnit,
+  blockRestriction,
   resolveBlockData,
   resolveDefinitionData,
   unitForAggregation,
@@ -170,10 +181,15 @@ const snapshot = {
     ],
   },
   metrics: [
-    { key: "nps_general", name: "Recomendación", question: "¿Recomendarían?", unit: "nps", responses: 54, available: true },
-    { key: "sat_bienvenida", name: "Satisfacción · Bienvenida", question: "¿Buena bienvenida?", unit: "percent", responses: 52, available: true },
-    { key: "sat_acompanamiento", name: "Satisfacción · Acompañamiento", question: "¿Buen acompañamiento?", unit: "percent", responses: 48, available: true },
-    { key: "ltv_cliente", name: "Valor por cliente", question: "¿Cuánto vale?", unit: "score", responses: 41, available: true },
+    // `scale` is what the study's OWN answers span, and it is what decides the
+    // Top-2-Box threshold. These two satisfaction results are answered 0–10, so
+    // the documented threshold for them is 9; a study answered 1–5 gets 4.
+    // Passing a 0–10 default to a 1–5 study is what made every satisfaction
+    // result on the real study read 0 %.
+    { key: "nps_general", name: "Recomendación", question: "¿Recomendarían?", unit: "nps", responses: 54, available: true, scale: { minimum: 0, maximum: 10 } },
+    { key: "sat_bienvenida", name: "Satisfacción · Bienvenida", question: "¿Buena bienvenida?", unit: "percent", responses: 52, available: true, scale: { minimum: 0, maximum: 10 } },
+    { key: "sat_acompanamiento", name: "Satisfacción · Acompañamiento", question: "¿Buen acompañamiento?", unit: "percent", responses: 48, available: true, scale: { minimum: 0, maximum: 10 } },
+    { key: "ltv_cliente", name: "Valor por cliente", question: "¿Cuánto vale?", unit: "score", responses: 41, available: true, scale: { minimum: 0, maximum: 40000 } },
   ],
   dimensions: [
     { key: "seg_generacion", values: ["Millennial", "Generación X", "Baby boomer"] },
@@ -313,7 +329,7 @@ withUnknownLayout.pages[0].blocks[0].layout.desktop.left = 40;
 assert.equal(parseExperienceDefinition(withUnknownLayout).ok, false, "a pixel coordinate is refused");
 ok("unknown fields are refused at the root, inside a block and inside a layout");
 
-const wrongVersion = { ...adapted.definition, schemaVersion: 2 };
+const wrongVersion = { ...adapted.definition, schemaVersion: 3 };
 assert.equal(parseExperienceDefinition(wrongVersion).ok, false, "only the declared schema version parses");
 ok("a document declaring another schema version is refused");
 
@@ -736,7 +752,10 @@ for (const expected of ["Panorama", "Recorrido", "Permanencia", "Lo que dijeron"
 }
 const types = new Set(allBlocks(runA.definition).map((block) => block.type));
 for (const expected of [
-  "cover",
+  // NO `cover`. Since schema version 2 the study's own name, client, period
+  // and introduction are the global IDENTITY layer, not a block inside
+  // Panorama — see the identity assertions below.
+  "filter_panel",
   "metric",
   "finding",
   "comparison",
@@ -751,6 +770,40 @@ for (const expected of [
   assert.ok(types.has(expected), `the adapted experience must contain a ${expected} block`);
 }
 ok(`the current client experience is represented as ${titles.length} pages and ${types.size} block kinds`);
+
+// ---------------------------------------------------------------------------
+// The identity layer, and the fact that it is NOT a block
+// ---------------------------------------------------------------------------
+assert.equal(
+  allBlocks(runA.definition).filter((block) => block.type === "cover").length,
+  0,
+  "an adapted study carries no cover block: its identity is the global layer",
+);
+assert.equal(runA.definition.identity.title, snapshot.studyName, "the identity carries the study's own name");
+assert.equal(runA.definition.identity.organization, snapshot.clientName, "and the client it belongs to");
+assert.equal(runA.definition.identity.period, snapshot.period, "and the period it covers");
+assert.equal(
+  runA.definition.identity.description,
+  null,
+  "and no introduction, because an introduction is authored work and is never invented",
+);
+assert.equal(runA.definition.identity.visible, true, "the identity is shown by default");
+assert.equal(
+  runA.definition.identity.show.description,
+  false,
+  "a part with nothing in it is not shown, so absence renders as nothing",
+);
+ok("the study's identity is a global layer carrying its name, client and period — and no cover block exists");
+
+// The identity cannot be reordered with Panorama, because it is not in any
+// page's block list. Asserted rather than described.
+for (const page of runA.definition.pages) {
+  assert.ok(
+    !page.blocks.some((block) => block.title === runA.definition.identity.title && block.type === "cover"),
+    "the identity must not also exist as a block on a page",
+  );
+}
+ok("the identity appears in no page's block list, so no reorder or page duplication can move it");
 
 assert.equal(runA.definition.journeyReferences.length, 1);
 assert.equal(runA.definition.journeyReferences[0].origin, "legacy_journey_definition");
@@ -975,10 +1028,12 @@ ok("resetting restores the adapted study byte for byte");
 console.log("\n[12] The registries cover what the product needs to express");
 // ===========================================================================
 
-// Nineteen: the eighteen the foundation declared, plus `pivot_explorer`, which
-// closed the one gap the compatibility adapter could not carry.
-assert.equal(BLOCK_TYPES.length, 19);
+// Twenty: the eighteen the foundation declared, `pivot_explorer`, which closed
+// the one gap the compatibility adapter could not carry, and `filter_panel` —
+// the reader's own controls, placed like any other block.
+assert.equal(BLOCK_TYPES.length, 20);
 assert.ok(BLOCK_TYPES.includes("pivot_explorer"));
+assert.ok(BLOCK_TYPES.includes("filter_panel"));
 for (const type of BLOCK_TYPES) {
   const spec = blockSpec(type);
   assert.ok(spec.label && spec.description, `${type} must be described in words`);
@@ -1161,14 +1216,99 @@ assert.deepEqual(approvalInvalidations(basis, { ...basis, categorySignature: "c2
 assert.deepEqual(approvalInvalidations(basis, { ...basis, consentSignature: "k2" }), ["consent_changed"]);
 ok("changing the data, the registry, the categories, the consent or the disclosure rule invalidates an approval");
 
-assert.equal(declaredVersion(runA.definition), 1);
+assert.equal(declaredVersion(runA.definition), 2);
 assert.equal(declaredVersion({}), null);
 assert.equal(migrateExperienceDefinition({ schemaVersion: 99 }).reason, "unknown_version");
-assert.equal(migrateExperienceDefinition({ schemaVersion: 1 }).reason, "invalid_document");
+assert.equal(migrateExperienceDefinition({ schemaVersion: 2 }).reason, "invalid_document");
 const migrated = migrateExperienceDefinition(JSON.parse(serializeExperienceDefinition(runA.definition)));
 assert.ok(migrated.ok, "a stored definition round-trips through serialization and migration");
-assert.equal(migrated.migratedFrom, 1);
+assert.equal(migrated.migratedFrom, 2);
 ok("an unknown schema version is refused by name, and a stored document round-trips");
+
+// ---------------------------------------------------------------------------
+// VERSION 1 -> VERSION 2, against a document written under version 1
+// ---------------------------------------------------------------------------
+// The whole point of the migration: a draft somebody saved before the identity
+// layer existed must OPEN, with its cover's words moved into the identity and
+// no duplication left behind. Built here from the adapted version-2 document
+// by putting it back into the shape version 1 had.
+const asVersionOne = JSON.parse(serializeExperienceDefinition(runA.definition));
+asVersionOne.schemaVersion = 1;
+delete asVersionOne.identity;
+const legacyFilterId = asVersionOne.filterDefinitions[0]?.id ?? null;
+if (legacyFilterId) asVersionOne.filterDefinitions[0].defaultValues = [];
+asVersionOne.pages = asVersionOne.pages.map((page, pageIndex) => ({
+  ...page,
+  blocks: (pageIndex === 0
+    ? [
+        {
+          ...structuredClone(asVersionOne.pages[0].blocks[0]),
+          id: mintId("block", "legacy/cover"),
+          type: "cover",
+          title: "La voz de la comunidad",
+          query: null,
+          visualization: null,
+          journeyRef: null,
+          image: null,
+          filterRefs: [],
+          copy: { eyebrow: null, body: "Cómo leer este informe.", caption: null, items: [] },
+        },
+        ...page.blocks,
+      ]
+    : page.blocks
+  ).map((block) => {
+    const { filterPanel, ...rest } = block;
+    void filterPanel;
+    if (rest.query) {
+      const { fixedFilters, ...query } = rest.query;
+      void fixedFilters;
+      return { ...rest, query: { ...query, filterRefs: [] } };
+    }
+    return rest;
+  }),
+}));
+// A version-1 document has no panels at all.
+asVersionOne.pages = asVersionOne.pages.map((page) => ({
+  ...page,
+  blocks: page.blocks.filter((block) => block.type !== "filter_panel"),
+}));
+asVersionOne.filterConnections = asVersionOne.filterConnections
+  .map((connection) => ({
+    ...connection,
+    blockIds: connection.blockIds.filter((blockId) =>
+      asVersionOne.pages.some((page) => page.blocks.some((block) => block.id === blockId)),
+    ),
+  }))
+  .filter((connection) => connection.blockIds.length > 0);
+
+const brought = migrateExperienceDefinition(asVersionOne);
+assert.ok(brought.ok, `a version-1 draft must open: ${JSON.stringify(brought.detail ?? "")}`);
+assert.equal(brought.migratedFrom, 1);
+assert.equal(brought.definition.schemaVersion, 2);
+assert.equal(
+  brought.definition.identity.title,
+  "La voz de la comunidad",
+  "the cover's title becomes the identity's title",
+);
+assert.equal(
+  brought.definition.identity.description,
+  "Cómo leer este informe.",
+  "and the cover's paragraph becomes the introduction",
+);
+assert.equal(
+  allBlocks(brought.definition).filter((block) => block.type === "cover").length,
+  0,
+  "and the cover block is removed, so the study's name is not printed twice",
+);
+for (const block of allBlocks(brought.definition)) {
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(block.query ?? {}, "filterRefs"),
+    "a version-1 query's filterRefs must not survive into version 2",
+  );
+  assert.ok(Array.isArray(block.query?.fixedFilters ?? []), "and it becomes fixedFilters");
+  assert.equal(block.filterPanel, null, "no version-1 block becomes a panel");
+}
+ok("a version-1 draft opens as version 2: the cover becomes the identity, and nothing is duplicated or lost");
 // ===========================================================================
 console.log("\n[15] The builder route and its Server Actions authorize first");
 // ===========================================================================
@@ -1201,7 +1341,7 @@ assert.doesNotMatch(actionsSource, /getSession\(/, "never getSession for an auth
 assert.match(actionsSource, /role !== "internal"/, "the role is read from the database");
 for (const [pattern, message] of [
   [/parseExperienceDefinition\(rawDefinition\)/, "the submitted document goes through the strict boundary"],
-  [/validateExperienceDefinition\(parsed\.definition, workspace\.registry\)/, "and through a registry the SERVER rebuilt"],
+  [/validateExperienceDefinition\(parsed\.definition, context\.registry\)/, "and through a registry the SERVER rebuilt"],
   [/metadata\.studyId !== studio\.study\.id/, "a document naming another study is refused"],
   [/metadata\.tenantId !== studio\.study\.tenantId/, "a document naming another client is refused"],
 ]) {
@@ -1219,6 +1359,39 @@ assert.doesNotMatch(
 const actorAt = actionsSource.indexOf("function internalActor");
 const adminAt = actionsSource.indexOf("createAdminClient()");
 assert.ok(actorAt >= 0 && adminAt > actorAt, "the privileged client is created inside the role check");
+
+/*
+ * NO SERVER ACTION ON THE BUILDER MAY REVALIDATE A PATH.
+ *
+ * `revalidatePath` inside a Server Action makes Next re-render the current
+ * route INSIDE the action's response. On this route that meant a second full
+ * workspace load — every row of the study, the adapter, the registry and every
+ * aggregate — in the request that had just done all of it to validate the
+ * document. On the Cloudflare Worker, against the real study, the write landed
+ * and the re-render then aborted, and the truncated payload's errored row
+ * reached the browser as React error #441: the editor was replaced by the
+ * Studio error boundary even though the save had succeeded.
+ *
+ * There is nothing to revalidate. The builder holds the document in client
+ * state and the stored draft is read on a fresh page load, which is a new
+ * request with its own budget.
+ */
+assert.doesNotMatch(
+  actionsSource,
+  /revalidatePath/,
+  "the builder's Server Actions must not force a re-render of their own route",
+);
+const previewActionsSource = await readCode("src/app/studio/e/[studyId]/vista-previa/actions.ts");
+assert.doesNotMatch(
+  previewActionsSource,
+  /revalidatePath/,
+  "the draft preview's Server Action must not force a re-render of its own route either",
+);
+assert.match(previewActionsSource, /^"use server";/m, "the preview action is a server action");
+assert.match(previewActionsSource, /auth\.getUser\(\)/, "and revalidates identity from scratch");
+assert.doesNotMatch(previewActionsSource, /getSession\(/, "never getSession for an authorization decision");
+assert.match(previewActionsSource, /role !== "internal"/, "and reads the role from the database");
+ok("no builder or preview Server Action revalidates its own route, and both re-authorize from scratch");
 ok("both Server Actions revalidate identity and role and re-validate the document server-side");
 
 // --- Saving goes through one function, and that function is the only writer.
@@ -1650,8 +1823,12 @@ console.log("\n[17] The defects the acceptance review found stay fixed");
       dependsOn: null,
     },
   ];
+  // TWO BLOCKS HOST THE SAME CONTROL. Since version 2 a block's author-fixed
+  // narrowing carries its own characteristic and values and cannot reference a
+  // viewer control at all, so "something else still names this filter" now
+  // means another host, a page, a panel or a journey — never a query.
   hostBlock.filterRefs = [blockFilterId];
-  readerBlock.query.filterRefs = [blockFilterId];
+  readerBlock.filterRefs = [blockFilterId];
   hosting.filterConnections = [
     ...hosting.filterConnections,
     { id: mintId("connection", "orphan/test"), filterId: blockFilterId, blockIds: [readerBlock.id] },
@@ -1670,29 +1847,31 @@ console.log("\n[17] The defects the acceptance review found stay fixed");
     [],
     "removing the only block hosting a filter must not leave a dangling reference behind",
   );
-  // STILL USED, SO IT STAYS. Another block's query narrows by this filter, and
-  // an author-fixed narrowing needs no control to be meaningful. What must
-  // never happen — and did — is the filter being deleted while that narrowing
-  // keeps naming it.
+  // STILL USED, SO IT STAYS. Another block still hosts this filter's control.
+  // What must never happen — and did — is the filter being deleted while
+  // something else keeps naming it.
   const survivingReader = allBlocks(afterHostRemoved.definition).find(
     (block) => block.id === readerBlock.id,
   );
   assert.deepEqual(
-    survivingReader.query.filterRefs,
+    survivingReader.filterRefs,
     [blockFilterId],
-    "a filter another block's query still narrows by is not deleted out from under it",
+    "a filter another block still hosts is not deleted out from under it",
   );
   assert.ok(
     afterHostRemoved.definition.filterDefinitions.some((filter) => filter.id === blockFilterId),
     "the filter something still references survives the block that hosted its control",
   );
-  ok("removing a block never deletes a filter another block is still narrowed by");
+  ok("removing a block never deletes a filter another block still hosts");
 
   // NOTHING LEFT USING IT, SO IT GOES — and every mention of it goes too.
   const soleHost = structuredClone(hosting);
   for (const page of soleHost.pages) {
+    page.filterRefs = page.filterRefs.filter((id) => id !== blockFilterId);
     for (const block of page.blocks) {
-      if (block.id !== hostBlock.id && block.query) block.query.filterRefs = [];
+      if (block.id !== hostBlock.id) {
+        block.filterRefs = block.filterRefs.filter((id) => id !== blockFilterId);
+      }
     }
   }
   const afterSoleHostRemoved = removeBlock(initialState(soleHost), hostBlock.id);
@@ -2525,6 +2704,351 @@ console.log("\n[20] An exported definition carries nothing that must stay inside
   // And it is deterministic: the same document always produces the same bytes.
   assert.equal(exported, serializeExperienceDefinition(adaptLegacyStudy(snapshot).definition, { pretty: true }));
   ok("an exported definition carries handles, layout and words — no key, no answer, no secret");
+}
+
+// ===========================================================================
+console.log("\n[21] Visible filter panels: what they offer and what they move");
+// ===========================================================================
+{
+  const base = adaptLegacyStudy(snapshot).definition;
+
+  // The adapter puts a real panel on Panorama, offering characteristics the
+  // study actually has, in the order the template recommends.
+  const panels = filterPanels(base);
+  assert.ok(panels.length >= 1, "an adapted study opens with at least one visible filter panel");
+  const first = panels[0].block;
+  assert.equal(first.type, "filter_panel");
+  assert.ok(first.filterPanel, "a panel carries its configuration");
+  assert.ok(first.filterRefs.length > 0, "and it offers at least one characteristic");
+  for (const filterId of first.filterRefs) {
+    assert.ok(
+      base.filterDefinitions.some((filter) => filter.id === filterId),
+      "a panel only offers characteristics the experience declares",
+    );
+  }
+  ok(`an adapted study opens with a visible panel offering ${first.filterRefs.length} characteristics`);
+
+  // SUGGESTIONS RECOMMEND; THEY DO NOT RESTRICT. Every filter-eligible
+  // characteristic is still declared and still offerable, whether or not a
+  // suggestion named it.
+  const eligible = base.filterDefinitions.length;
+  assert.ok(
+    eligible >= first.filterRefs.length,
+    "the experience declares at least as many filters as any one panel offers",
+  );
+  const notSuggested = base.filterDefinitions.filter((filter) => !first.filterRefs.includes(filter.id));
+  if (notSuggested.length > 0) {
+    const widened = togglePanelFilter(initialState(base), first.id, notSuggested[0].id, true);
+    assert.equal(widened.refusal, null, "a characteristic a suggestion did not name can still be added");
+    const widenedPanel = findBlock(widened.definition, first.id).block;
+    assert.ok(widenedPanel.filterRefs.includes(notSuggested[0].id));
+  }
+  ok("a template's suggestions decide what a panel opens with and restrict nothing");
+
+  // --- Scope: experience, page, sections, blocks -------------------------
+  const experienceWide = setPanelTarget(initialState(base), first.id, { kind: "experience" });
+  assert.equal(experienceWide.refusal, null);
+  const acrossAll = panelTargetBlockIds(
+    experienceWide.definition,
+    findBlock(experienceWide.definition, first.id).block,
+  );
+
+  const pageOnly = setPanelTarget(initialState(base), first.id, { kind: "page" });
+  assert.equal(pageOnly.refusal, null);
+  const onThisPage = panelTargetBlockIds(
+    pageOnly.definition,
+    findBlock(pageOnly.definition, first.id).block,
+  );
+  assert.ok(
+    acrossAll.size > onThisPage.size,
+    "the whole experience is more than one page of it",
+  );
+  for (const blockId of onThisPage) {
+    assert.ok(acrossAll.has(blockId), "everything a page panel moves, an experience panel moves too");
+  }
+  ok(`scope is real: experience moves ${acrossAll.size} blocks, this page moves ${onThisPage.size}`);
+
+  // A PANEL NEVER MOVES ITSELF OR ANOTHER PANEL.
+  for (const blockId of acrossAll) {
+    const found = findBlock(experienceWide.definition, blockId).block;
+    assert.notEqual(found.type, "filter_panel", "a panel does not filter a panel");
+    assert.notEqual(found.id, first.id, "a panel does not filter itself");
+  }
+  ok("a panel never moves itself or another panel");
+
+  // --- Explicit blocks, by id, and an incompatible one refused -----------
+  const compatible = allBlocks(base).find(
+    (block) => block.type !== "filter_panel" && isFilterTargetable(block),
+  );
+  const incompatible = allBlocks(base).find((block) => !isFilterTargetable(block));
+  assert.ok(compatible, "the adapted study must contain a block a filter can move");
+
+  const explicit = setPanelTarget(initialState(base), first.id, {
+    kind: "blocks",
+    blockIds: [compatible.id],
+  });
+  assert.equal(explicit.refusal, null, "naming one compatible block is allowed");
+  assert.deepEqual(
+    [...panelTargetBlockIds(explicit.definition, findBlock(explicit.definition, first.id).block)],
+    [compatible.id],
+    "an explicit target moves exactly what it names",
+  );
+
+  if (incompatible) {
+    const refused = togglePanelTargetBlock(explicit, first.id, incompatible.id, true);
+    assert.ok(refused.refusal, "connecting a block that shows no result is refused");
+    assert.match(
+      refused.refusal,
+      /no muestra ning[úu]n resultado|no se pueda recalcular|recalcular/i,
+      `and the refusal explains why in words: ${refused.refusal}`,
+    );
+    assert.equal(
+      serializeExperienceDefinition(refused.definition),
+      serializeExperienceDefinition(explicit.definition),
+      "a refused connection changes nothing",
+    );
+  }
+  ok("an explicit target names blocks by id, and an incompatible connection is refused with a reason");
+
+  // LABELS ARE EDITABLE WITHOUT BREAKING A CONNECTION, because a target names
+  // identifiers and never words.
+  const renamed = setBlockTitle(explicit, compatible.id, "Un nombre completamente distinto");
+  assert.deepEqual(
+    [...panelTargetBlockIds(renamed.definition, findBlock(renamed.definition, first.id).block)],
+    [compatible.id],
+    "renaming a block does not change what a panel moves",
+  );
+  ok("renaming a block never breaks a panel's connection to it");
+
+  // NO DANGLING REFERENCE WHEN THE TARGET IS REMOVED.
+  const afterRemoval = removeBlock(renamed, compatible.id);
+  assert.equal(afterRemoval.refusal, null, "removing a targeted block is not a refusal");
+  assert.ok(
+    parseExperienceDefinition(afterRemoval.definition).ok,
+    "the document stays well-formed after the only targeted block is removed",
+  );
+  assert.deepEqual(
+    validateExperienceDefinition(afterRemoval.definition, runA.registry).errors,
+    [],
+    "and it leaves no dangling target behind",
+  );
+  ok("removing a block a panel names leaves no dangling reference and the draft still saves");
+
+  // The person is told what a removal will affect, before it happens.
+  const consequence = removalConsequence(explicit.definition, compatible.id);
+  assert.ok(
+    typeof consequence === "string" && consequence.length > 0,
+    "removing a block a panel explicitly names says so first",
+  );
+  ok(`a removal explains what it will affect: “${consequence.slice(0, 60)}…”`);
+}
+
+// ===========================================================================
+console.log("\n[22] The two kinds of filter are two different things");
+// ===========================================================================
+{
+  const base = adaptLegacyStudy(snapshot).definition;
+  const dimension = runA.registry.dimensions.find(
+    (entry) => entry.filterEligible && entry.values.length > 1,
+  );
+  assert.ok(dimension, "the study must offer a characteristic to fix a block to");
+
+  const target = allBlocks(base).find((block) => block.query);
+  assert.ok(target, "the study must contain a block that reads a result");
+
+  // FILTRO FIJO DEL BLOQUE — carried by the query, self-contained, and
+  // independent of any viewer control.
+  const fixed = structuredClone(base);
+  const fixedBlock = allBlocks(fixed).find((block) => block.id === target.id);
+  fixedBlock.query.fixedFilters = [
+    { dimensionId: dimension.id, values: [dimension.values[0].value] },
+  ];
+  assert.ok(parseExperienceDefinition(fixed).ok, "a fixed filter is a valid part of a query");
+  assert.deepEqual(validateExperienceDefinition(fixed, runA.registry).errors, []);
+
+  // Removing every viewer control leaves the fixed filter untouched: the two
+  // concepts do not depend on each other, which is the whole point of the
+  // version-2 shape.
+  const strippedState = initialState(fixed);
+  let stripped = strippedState;
+  for (const filter of fixed.filterDefinitions) {
+    stripped = setFilterConnection(stripped, filter.id, target.id, false);
+  }
+  const stillFixed = findBlock(stripped.definition, target.id).block;
+  assert.deepEqual(
+    stillFixed.query.fixedFilters,
+    [{ dimensionId: dimension.id, values: [dimension.values[0].value] }],
+    "disconnecting every viewer filter does not change what the block is permanently about",
+  );
+  ok("a block's fixed filter is self-contained and survives every change to the viewer's controls");
+
+  // A fixed filter over a characteristic the study no longer has is a HARD
+  // error, because a block that silently widens to everybody is a wrong number.
+  const gone = structuredClone(fixed);
+  allBlocks(gone).find((block) => block.id === target.id).query.fixedFilters = [
+    { dimensionId: "c_does_not_exist", values: ["cualquiera"] },
+  ];
+  const goneReport = validateExperienceDefinition(gone, runA.registry);
+  assert.ok(
+    goneReport.errors.some((issue) => issue.code === "unknown_dimension"),
+    "a fixed filter over a characteristic the study lost is a hard error",
+  );
+  ok("a fixed filter naming a characteristic the study no longer has blocks the save");
+}
+
+// ===========================================================================
+console.log("\n[23] A reader's choices combine, and never widen past the author");
+// ===========================================================================
+{
+  const base = adaptLegacyStudy(snapshot).definition;
+  const movedBy = effectiveFilterTargets(base);
+  const target = allBlocks(base).find(
+    (block) => block.query && (movedBy.get(base.filterDefinitions[0]?.id ?? "")?.has(block.id) ?? false),
+  );
+
+  if (target) {
+    const generation = base.filterDefinitions[0];
+    const dimension = runA.registry.dimensions.find((entry) => entry.id === generation.dimensionId);
+    const [one, two] = dimension.values.map((entry) => entry.value);
+
+    // SEVERAL VALUES OF ONE CHARACTERISTIC WIDEN IT.
+    const both = blockRestriction(base, target.id, target, { [generation.id]: [one, two] }, movedBy);
+    const forThis = both.find((entry) => entry.dimensionId === dimension.id);
+    assert.deepEqual(
+      forThis.values,
+      [one, two],
+      "choosing two values of one characteristic asks for either of them",
+    );
+
+    // A DIFFERENT CHARACTERISTIC NARROWS IT — a separate entry, combined with AND.
+    const second = base.filterDefinitions.find(
+      (filter) => filter.dimensionId !== generation.dimensionId,
+    );
+    if (second) {
+      const secondDimension = runA.registry.dimensions.find(
+        (entry) => entry.id === second.dimensionId,
+      );
+      const combined = blockRestriction(
+        base,
+        target.id,
+        target,
+        { [generation.id]: [one], [second.id]: [secondDimension.values[0].value] },
+        movedBy,
+      );
+      assert.equal(
+        combined.length,
+        2,
+        "two characteristics produce two narrowings, combined with AND",
+      );
+    }
+
+    // A READER CANNOT WIDEN PAST THE AUTHOR.
+    const authored = structuredClone(target);
+    authored.query.fixedFilters = [{ dimensionId: dimension.id, values: [one] }];
+    const bounded = blockRestriction(
+      base,
+      target.id,
+      authored,
+      { [generation.id]: [one, two] },
+      movedBy,
+    );
+    assert.deepEqual(
+      bounded.find((entry) => entry.dimensionId === dimension.id).values,
+      [one],
+      "a reader's choice is intersected with the author's fixed filter, never unioned with it",
+    );
+    ok("choices widen within one characteristic, narrow across characteristics, and never widen past the author");
+
+    // AN UNCONNECTED BLOCK IS UNCHANGED, whatever the reader chooses.
+    const unconnected = allBlocks(base).find(
+      (block) => block.query && !(movedBy.get(generation.id)?.has(block.id) ?? false),
+    );
+    if (unconnected) {
+      assert.deepEqual(
+        blockRestriction(base, unconnected.id, unconnected, { [generation.id]: [one] }, movedBy),
+        [],
+        "a block no filter connects to is not narrowed by that filter",
+      );
+      ok("a block the filter does not reach is not narrowed by it");
+    }
+  }
+
+  // The reader's choices are never part of the document.
+  const exported = serializeExperienceDefinition(base);
+  assert.doesNotMatch(exported, /"selection"/, "a saved definition carries no reader selection");
+  ok("a reader's exploration is transient and never reaches the saved definition");
+}
+
+// ===========================================================================
+console.log("\n[24] A Top-2-Box is never invented from a scale nobody agreed to");
+// ===========================================================================
+{
+  // The defect in one sentence: `DEFAULT_CSAT_MIN` is 9, which is the
+  // threshold for a 0–10 scale. Applied to a study answered 1–5, every
+  // satisfaction result reported 0.0 % — a confident wrong number rather than
+  // a missing one. `docs/CALCULATION_CATALOG.md` §4 fixes the 1–5 rule
+  // (four and five are satisfied) and `docs/CALCULATION_POLICY.md` §5 says the
+  // threshold is an explicit input and is never guessed.
+  const oneToFive = structuredClone(snapshot);
+  oneToFive.metrics = oneToFive.metrics.map((metric) =>
+    metric.unit === "percent" ? { ...metric, scale: { minimum: 1, maximum: 5 } } : metric,
+  );
+  const registryOneToFive = buildLegacyRegistry(oneToFive);
+  const satisfaction = registryOneToFive.metrics.find((metric) => metric.unit === "percent");
+  assert.equal(
+    satisfaction.topBoxMinimum,
+    4,
+    "on a 1–5 scale the documented Top-2-Box threshold is four",
+  );
+
+  const zeroToTen = buildLegacyRegistry(snapshot);
+  assert.equal(
+    zeroToTen.metrics.find((metric) => metric.unit === "percent").topBoxMinimum,
+    9,
+    "on a 0–10 scale it is nine",
+  );
+
+  // A scale the catalogue does not document produces NO threshold, and the
+  // aggregation is not offered at all.
+  const unknownScale = structuredClone(snapshot);
+  unknownScale.metrics = unknownScale.metrics.map((metric) =>
+    metric.unit === "percent" ? { ...metric, scale: { minimum: 0, maximum: 100 } } : metric,
+  );
+  const registryUnknown = buildLegacyRegistry(unknownScale);
+  const undocumented = registryUnknown.metrics.find((metric) => metric.unit === "percent");
+  assert.equal(undocumented.topBoxMinimum, null, "an undocumented scale has no threshold");
+  assert.ok(
+    !undocumented.aggregations.includes("top_box"),
+    "and the composer does not offer an aggregation it cannot compute honestly",
+  );
+  assert.notEqual(
+    undocumented.defaultAggregation,
+    "top_box",
+    "nor does it default to one",
+  );
+
+  // And if a document asks for it anyway, the engine REFUSES rather than
+  // returning a zero.
+  const index = registryKeyIndex(unknownScale);
+  const handle = undocumented.id;
+  const rows = [1, 2, 3, 4, 5].map((value, person) => ({
+    respondent_id: `p${person}`,
+    metric_key: index.metrics[handle],
+    value,
+  }));
+  const outcome = resolveBlockData(rows, registryUnknown, index, {
+    blockId: "probe",
+    metricId: handle,
+    aggregation: "top_box",
+    primaryDimensionId: null,
+    secondaryDimensionId: null,
+    topN: null,
+    sort: { by: "value", direction: "desc" },
+    restrict: [],
+  });
+  assert.equal(outcome.ok, false, "a Top-2-Box with no agreed threshold is refused");
+  assert.equal(outcome.reason, "unsupported_aggregation");
+  ok("a Top-2-Box is computed from the study's own scale, and refused rather than faked when there is none");
 }
 
 console.log(`\nOK — ${checks} Experience Composer checks passed.`);

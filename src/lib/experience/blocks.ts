@@ -17,6 +17,14 @@
  *              theme_cloud, all_results_disclosure  — what the data says
  *   narrative  rich_text, finding, interpretation   — what it means
  *   action     recommendation, report_download      — what to do about it
+ *   exploration filter_panel, pivot_explorer         — what the READER may ask
+ *
+ * The fifth group is not a tidier way of writing the first four. A block a
+ * reader OPERATES is a different kind of thing from a block a reader READS: it
+ * changes what the rest of the page says, it belongs at the top of what it
+ * governs rather than wherever a chart would sit, and offering it in the same
+ * list as a KPI is how a page ends up with three filter boxes nobody meant to
+ * add.
  */
 
 import type { ChartVariant } from "./charts";
@@ -41,11 +49,18 @@ export const BLOCK_TYPES = [
   "report_download",
   "all_results_disclosure",
   "pivot_explorer",
+  "filter_panel",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
-export const BLOCK_GROUPS = ["structure", "evidence", "narrative", "action"] as const;
+export const BLOCK_GROUPS = [
+  "structure",
+  "evidence",
+  "narrative",
+  "action",
+  "exploration",
+] as const;
 export type BlockGroup = (typeof BLOCK_GROUPS)[number];
 
 export type BlockSpec = {
@@ -398,7 +413,9 @@ const SPECS: BlockSpec[] = [
     label: "Explorador de cruces",
     description:
       "El lector elige un resultado y hasta dos características, y el servidor calcula ese cruce.",
-    group: "evidence",
+    // Exploration, beside the filter panel: both are blocks the READER
+    // operates. It sat under evidence when it was the only one of its kind.
+    group: "exploration",
     /*
      * THE ONE BLOCK WHOSE QUERY THE READER WRITES.
      *
@@ -447,6 +464,43 @@ const SPECS: BlockSpec[] = [
     span: { min: 8, max: 12, default: 12 },
     clientFacing: true,
   },
+  {
+    id: "filter_panel",
+    label: "Panel de filtros",
+    description:
+      "Una caja visible con la que el cliente explora los resultados: elige características y los bloques conectados se recalculan.",
+    group: "exploration",
+    /*
+     * THE READER'S CONTROLS, PLACED LIKE ANY OTHER BLOCK.
+     *
+     * It carries NO query. A panel does not represent a number; it changes
+     * which respondents the numbers in the blocks it is connected to are
+     * computed over. What is composed here is where the panel sits, how wide
+     * it is, what it is called, which characteristics it offers, in what
+     * order, and — the part that matters most — WHICH BLOCKS IT MOVES.
+     *
+     * It hosts filter controls through `filterRefs`, exactly as a page does,
+     * and it states what it affects in `filterPanel.target`. Those are two
+     * different questions and they stay two different fields: hosting a
+     * control and being moved by one have never been the same thing in this
+     * model, and a panel does not become an exception to that.
+     *
+     * `allowsFilters` is true because hosting is the whole point.
+     * `allowsSamplePolicyOverride` is false because a panel draws no
+     * aggregate, so there is no disclosure decision to make about it.
+     */
+    requiresQuery: false,
+    allowsQuery: false,
+    allowsVisualization: false,
+    variants: [],
+    defaultVariant: null,
+    allowsFilters: true,
+    allowsSamplePolicyOverride: false,
+    copy: "short",
+    requiresJourney: false,
+    span: { min: 4, max: 12, default: 12 },
+    clientFacing: true,
+  },
 ];
 
 export const BLOCK_SPECS: Readonly<Record<BlockType, BlockSpec>> = Object.freeze(
@@ -468,6 +522,7 @@ export function blockCatalogue(): { group: BlockGroup; label: string; blocks: Bl
     evidence: "Evidencia",
     narrative: "Narrativa",
     action: "Acción",
+    exploration: "Exploración",
   };
   return BLOCK_GROUPS.map((group) => ({
     group,

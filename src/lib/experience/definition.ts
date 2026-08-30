@@ -50,7 +50,7 @@ import {
 import { isSafeAuthoredText, isSafeStoredValue } from "./text";
 
 /** The only schema version this build writes. See `migrate.ts` for the rest. */
-export const EXPERIENCE_SCHEMA_VERSION = 1;
+export const EXPERIENCE_SCHEMA_VERSION = 2;
 
 const L = EXPERIENCE_LIMITS;
 
@@ -148,6 +148,83 @@ export const visualizationSchema = z.strictObject({
 export type BlockVisualization = z.infer<typeof visualizationSchema>;
 
 // ---------------------------------------------------------------------------
+// The two kinds of filter, kept apart on purpose
+// ---------------------------------------------------------------------------
+
+/**
+ * A narrowing an author fixed on one block. Self-contained: a characteristic
+ * and the values it is held to, named directly rather than through a viewer
+ * control that somebody could delete.
+ */
+export const fixedFilterSchema = z
+  .strictObject({
+    dimensionId: semanticId,
+    values: z.array(storedValue).min(1).max(L.defaultValuesPerFilter),
+  })
+  .superRefine((filter, context) => {
+    if (new Set(filter.values).size !== filter.values.length) {
+      context.addIssue({ code: "custom", path: ["values"], message: "repeated value" });
+    }
+  });
+
+export type FixedFilter = z.infer<typeof fixedFilterSchema>;
+
+/**
+ * WHAT A VISIBLE PANEL MOVES.
+ *
+ * Four answers, and they are deliberately not the same mechanism:
+ *
+ *   `experience`  every compatible block in the whole experience
+ *   `page`        every compatible block on the page the panel sits on
+ *   `sections`    the named sections, and the blocks that follow each one
+ *   `blocks`      exactly the blocks named
+ *
+ * The first two RESOLVE at render time, so a block added later automatically
+ * joins what the panel already governs — which is what "every compatible
+ * block" has to mean if it is not to quietly go stale. The last two are BY ID
+ * and stay by id: renaming a section or a block never changes what a panel
+ * moves, and an id naming nothing is a hard validation error rather than a
+ * silently dropped connection.
+ */
+export const FILTER_TARGET_KINDS = ["experience", "page", "sections", "blocks"] as const;
+export type FilterTargetKind = (typeof FILTER_TARGET_KINDS)[number];
+
+export const filterTargetSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("experience") }),
+  z.strictObject({ kind: z.literal("page") }),
+  z.strictObject({
+    kind: z.literal("sections"),
+    sectionIds: z.array(identifier("block")).min(1).max(L.blocksPerPage),
+  }),
+  z.strictObject({
+    kind: z.literal("blocks"),
+    blockIds: z.array(identifier("block")).min(1).max(L.blocksPerConnection),
+  }),
+]);
+
+export type FilterTarget = z.infer<typeof filterTargetSchema>;
+
+export const FILTER_PANEL_LAYOUTS = ["inline", "stacked", "grid"] as const;
+export type FilterPanelLayout = (typeof FILTER_PANEL_LAYOUTS)[number];
+
+/**
+ * PANEL DE FILTROS PARA EXPLORAR — how one visible panel presents itself and
+ * what it governs. The controls it offers are its `filterRefs`, in that order.
+ */
+export const filterPanelSchema = z.strictObject({
+  /** The sentence under the panel's title that says what it is for. */
+  intro: authored(L.bodyLength).nullable(),
+  layout: z.enum(FILTER_PANEL_LAYOUTS),
+  /** Whether "Limpiar filtros" is offered. */
+  showClear: z.boolean(),
+  /** Whether the choices in force are listed above the controls. */
+  showActive: z.boolean(),
+  target: filterTargetSchema,
+});
+
+export type FilterPanel = z.infer<typeof filterPanelSchema>;
+
+// ---------------------------------------------------------------------------
 // The query one block asks
 // ---------------------------------------------------------------------------
 
@@ -159,11 +236,23 @@ export const blockQuerySchema = z
     primaryDimensionId: semanticId.nullable(),
     secondaryDimensionId: semanticId.nullable(),
     /**
-     * Narrowings the AUTHOR fixed on this block — "this chart is always about
-     * the people who renewed". Distinct from the filters a READER drives, which
-     * are declared once in `filterDefinitions` and wired by `filterConnections`.
+     * FILTRO FIJO DEL BLOQUE — the narrowing the AUTHOR fixed, permanently.
+     * "This chart is always about the people who renewed."
+     *
+     * IT CARRIES ITS OWN CHARACTERISTIC AND VALUES, and that is the point of
+     * the shape. Until version 2 this was a list of `filterDefinition` ids,
+     * which made an author's permanent restriction depend on a viewer control
+     * existing — delete the control and the block's meaning changed. The two
+     * concepts are now different things in the document as well as in the UI:
+     *
+     *   `fixedFilters`      what this block is ALWAYS about        (author)
+     *   `filterDefinitions` + `filterPanel` + `filterConnections`
+     *                       what the READER may change temporarily (viewer)
+     *
+     * A fixed filter is applied before anything a reader chooses, and no
+     * reader choice can widen past it.
      */
-    filterRefs: z.array(identifier("filter")).max(L.filterRefsPerBlock),
+    fixedFilters: z.array(fixedFilterSchema).max(L.filterRefsPerBlock),
     sort: z.strictObject({
       by: z.enum(["value", "label", "dimension_order"]),
       direction: z.enum(["asc", "desc"]),
@@ -252,8 +341,13 @@ export const blockQuerySchema = z
         message: "the ideal range ends before it starts",
       });
     }
-    if (new Set(query.filterRefs).size !== query.filterRefs.length) {
-      context.addIssue({ code: "custom", path: ["filterRefs"], message: "repeated filter" });
+    const fixedDimensions = query.fixedFilters.map((filter) => filter.dimensionId);
+    if (new Set(fixedDimensions).size !== fixedDimensions.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["fixedFilters"],
+        message: "repeated characteristic in the block's fixed filter",
+      });
     }
   });
 
@@ -303,13 +397,15 @@ export const experienceBlockSchema = z
     visualization: visualizationSchema.nullable(),
     journeyRef: identifier("journey").nullable(),
     image: imageSchema.nullable(),
+    /** Present exactly on a `filter_panel`, absent everywhere else. */
+    filterPanel: filterPanelSchema.nullable(),
     /**
      * Filters whose CONTROL this block hosts — the "block filters" of the
      * design. Which blocks a filter DRIVES is a separate, explicit statement in
      * `filterConnections`; hosting a control and answering to it are two
      * different things and are stored as two different things.
      */
-    filterRefs: z.array(identifier("filter")).max(L.filterRefsPerBlock),
+    filterRefs: z.array(identifier("filter")).max(L.filtersPerPanel),
     samplePolicy: samplePolicyOverrideSchema,
     presentation: presentationSchema,
     /** Hidden blocks stay in the document, in place, and render nowhere. */
@@ -374,6 +470,18 @@ export const experienceBlockSchema = z
         message: `${spec.label} does not host a filter`,
       });
     }
+    // The array's own ceiling is the panel's. An ordinary block is held to the
+    // smaller one here, so the two numbers stay two numbers.
+    if (block.type !== "filter_panel" && block.filterRefs.length > L.filterRefsPerBlock) {
+      context.addIssue({
+        code: "custom",
+        path: ["filterRefs"],
+        message: `a block hosts at most ${L.filterRefsPerBlock} controls`,
+      });
+    }
+    if (new Set(block.filterRefs).size !== block.filterRefs.length) {
+      context.addIssue({ code: "custom", path: ["filterRefs"], message: "repeated filter" });
+    }
     if (!spec.allowsSamplePolicyOverride && block.samplePolicy.kind === "override") {
       context.addIssue({
         code: "custom",
@@ -390,6 +498,23 @@ export const experienceBlockSchema = z
     if (block.type !== "image" && block.image) {
       context.addIssue({ code: "custom", path: ["image"], message: "only an image block carries one" });
     }
+    if (block.type === "filter_panel" && !block.filterPanel) {
+      context.addIssue({
+        code: "custom",
+        path: ["filterPanel"],
+        message: "a filter panel needs its configuration",
+      });
+    }
+    if (block.type !== "filter_panel" && block.filterPanel) {
+      context.addIssue({
+        code: "custom",
+        path: ["filterPanel"],
+        message: "only a filter panel carries a panel configuration",
+      });
+    }
+    // A panel that offers no control is a heading pretending to be a control.
+    // It is allowed to exist while it is being built, so this is not an error
+    // here; `validate.ts` says it as a soft warning, next to the choice.
   });
 
 export type ExperienceBlock = z.infer<typeof experienceBlockSchema>;
@@ -549,6 +674,64 @@ export const experiencePageSchema = z
 export type ExperiencePage = z.infer<typeof experiencePageSchema>;
 
 // ---------------------------------------------------------------------------
+// Identity — who the study belongs to, above the pages
+// ---------------------------------------------------------------------------
+
+/**
+ * IDENTIDAD Y PORTADA DEL ESTUDIO.
+ *
+ * The study's own name, the organisation it was done for, the period it
+ * covers, the sentence that introduces it and the mark it carries. It is a
+ * GLOBAL LAYER, not a block: it renders once, before the pages, and it is
+ * configured on its own.
+ *
+ * IT USED TO BE A `cover` BLOCK INSIDE PANORAMA, and that was wrong in a way
+ * that mattered. It made the identity of the study look like ordinary
+ * Panorama content: it appeared in the block count, it could be reordered
+ * underneath a chart, duplicating the page duplicated the study's name, and
+ * hiding Panorama hid who the report was for. Identity is not a section of the
+ * report; it is what the report IS.
+ *
+ * Pages keep every ordinary heading and text block they had. Nothing here
+ * removes the ability to write a title anywhere — it removes the accident of
+ * the study's own title being one of them.
+ */
+export const experienceIdentitySchema = z.strictObject({
+  /** Whether the identity layer renders at all. */
+  visible: z.boolean(),
+  /** The study's visible title, as the reader should see it. */
+  title: authored(L.titleLength),
+  /** The client or organisation the work was done for. */
+  organization: authored(L.titleLength).nullable(),
+  /** The period the study covers, in words. */
+  period: authored(L.titleLength).nullable(),
+  /** The paragraph that introduces the study. */
+  description: authored(L.bodyLength).nullable(),
+  /**
+   * The identity mark. `client_brand` resolves to the client's own mark
+   * through the existing brand layer; it is never a URL somebody typed, so a
+   * definition cannot be made to fetch from an address of an attacker's
+   * choosing.
+   */
+  mark: z.discriminatedUnion("source", [
+    z.strictObject({ source: z.literal("none") }),
+    z.strictObject({ source: z.literal("client_brand") }),
+  ]),
+  /** Whether the identity layer offers the report download. */
+  showReportDownload: z.boolean(),
+  /** Which parts are shown. Each is an independent decision. */
+  show: z.strictObject({
+    title: z.boolean(),
+    organization: z.boolean(),
+    period: z.boolean(),
+    description: z.boolean(),
+    mark: z.boolean(),
+  }),
+});
+
+export type ExperienceIdentity = z.infer<typeof experienceIdentitySchema>;
+
+// ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
 
@@ -606,6 +789,8 @@ export const experienceDefinitionSchema = z
     schemaVersion: z.literal(EXPERIENCE_SCHEMA_VERSION),
     id: identifier("experience"),
     title: authored(L.titleLength),
+    /** The global identity layer. Renders once, above the pages. */
+    identity: experienceIdentitySchema,
     metadata: z.strictObject({
       studyId: z.string().uuid(),
       tenantId: z.string().uuid(),
@@ -645,6 +830,49 @@ export const experienceDefinitionSchema = z
     if (new Set(journeyIds).size !== journeyIds.length) {
       context.addIssue({ code: "custom", path: ["journeyReferences"], message: "repeated journey" });
     }
+
+    /*
+     * A PANEL MAY NOT NAME A BLOCK THAT IS NOT THERE.
+     *
+     * The same rule a dangling `filterConnection` already lives under, applied
+     * to the other place a block id can now appear. A target naming nothing is
+     * refused rather than quietly resolving to fewer blocks than the author
+     * chose — a filter that silently stops moving a chart is worse than one
+     * that refuses to save.
+     */
+    const known = new Set(blockIds);
+    const sectionIds = new Set(
+      definition.pages.flatMap((page) =>
+        page.blocks.filter((block) => block.type === "section").map((block) => block.id),
+      ),
+    );
+    definition.pages.forEach((page, pageIndex) => {
+      page.blocks.forEach((block, blockIndex) => {
+        const target = block.filterPanel?.target;
+        if (!target) return;
+        const path = ["pages", pageIndex, "blocks", blockIndex, "filterPanel", "target"];
+        if (target.kind === "blocks") {
+          for (const id of target.blockIds) {
+            if (!known.has(id)) {
+              context.addIssue({ code: "custom", path, message: "the panel names a block that is not there" });
+            }
+          }
+          if (new Set(target.blockIds).size !== target.blockIds.length) {
+            context.addIssue({ code: "custom", path, message: "repeated block" });
+          }
+        }
+        if (target.kind === "sections") {
+          for (const id of target.sectionIds) {
+            if (!sectionIds.has(id)) {
+              context.addIssue({ code: "custom", path, message: "the panel names a section that is not there" });
+            }
+          }
+          if (new Set(target.sectionIds).size !== target.sectionIds.length) {
+            context.addIssue({ code: "custom", path, message: "repeated section" });
+          }
+        }
+      });
+    });
   });
 
 /**
@@ -662,6 +890,7 @@ export type ExperienceDefinitionV1 = {
     subtitle: string | null;
     locale: "es-MX";
   };
+  identity: ExperienceIdentity;
   sampleVisibilityPolicy: SampleVisibilityPolicy;
   theme: ExperienceTheme;
   pages: ExperiencePage[];

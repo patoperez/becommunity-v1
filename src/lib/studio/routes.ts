@@ -40,6 +40,27 @@ export const studioStudyPublish = (studyId: string) => `/studio/e/${studyId}/pub
  */
 export const studioStudyComposer = (studyId: string) => `/studio/e/${studyId}/construccion`;
 
+/**
+ * THE INTERNAL PREVIEW OF THE COMPOSED DRAFT — and the reason it is a separate
+ * address from `studioStudyPreview`.
+ *
+ * `vista-cliente` shows the experience the client is being served TODAY. It
+ * deliberately does not read a composed draft, which is correct and is what
+ * makes it a truthful picture of what the client currently sees — and which
+ * made it useless for judging work in progress, because every change the
+ * builder saved was invisible there. Offering one button called "Vista del
+ * cliente" for both questions was the mistake: it implied the client dashboard
+ * should already contain the draft.
+ *
+ * `vista-previa` renders the LATEST SAVED DRAFT with the study's real
+ * aggregates, for internal users only, and publishes nothing. Two addresses,
+ * two questions, two labels:
+ *
+ *   Vista previa del borrador       -> here; what the work looks like now
+ *   Ver versión actualmente publicada -> vista-cliente; what the client has
+ */
+export const studioStudyDraftPreview = (studyId: string) => `/studio/e/${studyId}/vista-previa`;
+
 /** The legacy address each Studio surface continues to answer at. */
 export const ADMIN_ALIASES: { studio: string; admin: string }[] = [
   { studio: STUDIO_ROOT, admin: "/dashboard" },

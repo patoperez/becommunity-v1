@@ -300,12 +300,21 @@ export function TrafficLightChart({
     return <KpiChart data={data} policy={policy} />;
   }
   if (!target || (target.minimum === null && target.maximum === null)) {
+    /*
+     * A SHORT CHIP HERE, THE WHOLE SENTENCE IN THE BLOCK'S CARD.
+     *
+     * This paragraph used to be printed in full inside every block that
+     * lacked a range. On a canvas showing a dozen quarter-width cards it
+     * repeated a hundred words a dozen times and buried the numbers it was
+     * about. The block says WHAT is missing in three words; the card the
+     * person opens to fix it says what to do about it, once.
+     */
     return (
       <div className="min-w-0">
         <KpiChart data={data} policy={policy} showDetail={false} />
-        <p className="mt-2 rounded-lg border border-caution-line bg-caution-surface px-2.5 py-2 text-xs text-caution [overflow-wrap:anywhere]">
-          Un semáforo necesita un rango acordado. Define el rango ideal de este resultado en la
-          ficha del bloque; mientras tanto se muestra el número sin color.
+        <p className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-md border border-caution-line bg-caution-surface px-2 py-1 text-xs text-caution">
+          <span aria-hidden="true">▲</span>
+          <span className="min-w-0 truncate">Falta configurar el rango</span>
         </p>
       </div>
     );

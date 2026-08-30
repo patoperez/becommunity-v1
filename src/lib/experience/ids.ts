@@ -85,6 +85,38 @@ export function mintId(kind: IdKind, seed: string): string {
   return `${ID_KINDS[kind]}_${token}`;
 }
 
+/**
+ * The same identifier, moved aside until it is free in the document it is
+ * joining.
+ *
+ * THIS EXISTS BECAUSE A SEED IS ONLY AS UNIQUE AS THE COUNTER IN IT. The
+ * editor's `sequence` starts at zero every time the builder is OPENED, so
+ * duplicating the same block, or adding a block to the same page, in two
+ * different sessions minted the SAME id twice. The document then held two
+ * blocks with one identifier, the strict boundary refused it with "repeated
+ * block", and — because the refusal is a property of the document rather than
+ * of the request — every subsequent save failed too. The builder became a
+ * surface somebody could keep working in and never save again.
+ *
+ * The counter is not made global, because a global counter is a clock by
+ * another name and would destroy the determinism the adapter and the gates
+ * depend on. Instead the caller says which identifiers are already taken, and
+ * the seed is salted until it is free. Given the same document and the same
+ * operation the answer is still the same id, every time.
+ */
+export function mintFreeId(kind: IdKind, seed: string, taken: (id: string) => boolean): string {
+  const first = mintId(kind, seed);
+  if (!taken(first)) return first;
+  for (let attempt = 1; attempt <= 512; attempt += 1) {
+    const candidate = mintId(kind, `${seed}~${attempt}`);
+    if (!taken(candidate)) return candidate;
+  }
+  // Unreachable in practice: the document's own ceilings are far below 512
+  // collisions on one seed. Returning the last candidate rather than throwing
+  // keeps a pure function pure; the schema still refuses a duplicate.
+  return mintId(kind, `${seed}~overflow`);
+}
+
 /** Whether a value is a well-formed identifier, optionally of one exact kind. */
 export function isExperienceId(value: unknown, kind?: IdKind): boolean {
   if (typeof value !== "string") return false;

@@ -23,6 +23,8 @@ import {
 import { DEFAULT_THEME_CLOUD_OPTIONS, layoutThemeCloud } from "@/lib/experience/theme-cloud";
 import type { BuilderEvidence } from "@/lib/experience/builder-workspace";
 
+import { FilterPanelView, type ViewerContext } from "./ExploreViews";
+
 import {
   DataTable,
   EmptyChart,
@@ -74,6 +76,13 @@ export type BlockViewProps = {
   data: BlockDataSet;
   evidence: BuilderEvidence;
   study: { name: string; clientName: string; period: string | null };
+  /**
+   * Present only where a reader is actually exploring — the internal draft
+   * preview. On the builder's canvas it is absent and a filter panel draws the
+   * same controls inert, so composing shows what the client will see without
+   * the author's own clicks moving numbers underneath their edit.
+   */
+  viewer?: ViewerContext;
 };
 
 const CONFIG_FRAME =
@@ -122,6 +131,15 @@ export function BlockView(props: BlockViewProps) {
       return <AllResultsBlock {...props} />;
     case "pivot_explorer":
       return <PivotBlock {...props} policy={policy} />;
+    case "filter_panel":
+      return (
+        <FilterPanelView
+          block={block}
+          definition={definition}
+          registry={props.registry}
+          viewer={props.viewer}
+        />
+      );
     case "journey":
       return <JourneyBlock {...props} policy={policy} />;
     case "qualitative_themes":

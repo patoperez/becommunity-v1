@@ -28,7 +28,6 @@
  * than to a guess.
  */
 
-import { DEFAULT_CSAT_MIN } from "@/lib/calc/engine";
 import type { LongRow } from "@/lib/calc/engine";
 import { DECIMALS, csatTopBox, mean, npsFromScores, percentage, roundTo } from "@/lib/calc/metrics";
 import {
@@ -64,6 +63,22 @@ export type BlockDataRequest = {
   secondaryDimensionId: string | null;
   topN: number | null;
   sort: { by: "value" | "label" | "dimension_order"; direction: "asc" | "desc" };
+  /**
+   * WHO THE NUMBER IS ABOUT, before anything is grouped.
+   *
+   * The author's fixed narrowing and the reader's current choices, already
+   * combined by the caller into one list of characteristic-and-values. It is
+   * expressed in HANDLES like everything else, resolved through the same
+   * server-side index, and a handle this study does not have is a refusal
+   * rather than a silently unfiltered result.
+   *
+   * COMBINATION IS AND ACROSS CHARACTERISTICS, OR WITHIN ONE. Choosing two
+   * generations means "either generation"; choosing a generation and a sphere
+   * means "that generation AND that sphere". That is the behaviour the
+   * deployed dashboard already has, and it is the only reading of a filter bar
+   * that matches what people expect from one.
+   */
+  restrict?: readonly { dimensionId: string; values: readonly string[] }[];
 };
 
 export type SeriesUnit = "nps" | "percent" | "score" | "count";
@@ -142,6 +157,7 @@ function aggregate(
   rows: readonly DataRow[],
   unit: SeriesUnit,
   total: number,
+  topBoxMinimum: number | null,
 ): { value: number | null; n: number } {
   const values = numericValues(rows);
   const n = values.length;
@@ -152,7 +168,12 @@ function aggregate(
   if (n === 0) return { value: null, n: 0 };
   if (aggregation === "net_score") return { value: npsFromScores(values).nps, n: values.length };
   if (aggregation === "top_box") {
-    const result = csatTopBox(values, DEFAULT_CSAT_MIN);
+    // NO THRESHOLD, NO NUMBER. `satisfiedMin` is an explicit input by design
+    // (`docs/CALCULATION_POLICY.md` §5); applying the 0–10 default to a study
+    // answered 1–5 produced a confident 0 % on every satisfaction result. A
+    // missing configuration is reported as missing.
+    if (topBoxMinimum === null) return { value: null, n: values.length };
+    const result = csatTopBox(values, topBoxMinimum);
     return { value: result.csat, n: result.total };
   }
   if (aggregation === "sum") {
@@ -173,7 +194,11 @@ function aggregate(
 }
 
 /** The breakdown a result carries with it, when its aggregation has one. */
-function detailFor(aggregation: Aggregation, rows: readonly DataRow[]): { label: string; value: string }[] {
+function detailFor(
+  aggregation: Aggregation,
+  rows: readonly DataRow[],
+  topBoxMinimum: number | null,
+): { label: string; value: string }[] {
   const values = numericValues(rows);
   if (values.length === 0) return [];
   if (aggregation === "net_score") {
@@ -185,7 +210,11 @@ function detailFor(aggregation: Aggregation, rows: readonly DataRow[]): { label:
     ];
   }
   if (aggregation === "top_box") {
-    const result = csatTopBox(values, DEFAULT_CSAT_MIN);
+    // The same explicit threshold the value was computed with, so the
+    // breakdown can never describe a different calculation from the number
+    // it sits under.
+    if (topBoxMinimum === null) return [];
+    const result = csatTopBox(values, topBoxMinimum);
     return [
       { label: "Satisfechas", value: String(result.satisfied) },
       { label: "Respuestas", value: String(result.total) },
@@ -276,18 +305,41 @@ export function resolveBlockData(
     });
   }
 
+  // The narrowing, resolved to real columns before anything is aggregated. A
+  // handle the study does not have refuses; it never silently widens the
+  // result to everybody, which would be a wrong number rather than an error.
+  const restrictions: { key: string; values: Set<string> }[] = [];
+  for (const entry of request.restrict ?? []) {
+    if (entry.values.length === 0) continue;
+    const key = index.dimensions[entry.dimensionId];
+    if (!key) return { ok: false, blockId: request.blockId, reason: "unknown_dimension" };
+    restrictions.push({ key, values: new Set(entry.values) });
+  }
+
   const unit = unitForAggregation(request.aggregation, metric.unit);
   const decimals = decimalsForUnit(unit);
-  const metricRows = (rows as readonly DataRow[]).filter((row) => row.metric_key === metricKey);
+  const metricRows = (rows as readonly DataRow[]).filter((row) => {
+    if (row.metric_key !== metricKey) return false;
+    for (const restriction of restrictions) {
+      const value = row[restriction.key];
+      if (typeof value !== "string" || !restriction.values.has(value)) return false;
+    }
+    return true;
+  });
   const totalAnswers = numericValues(metricRows).length;
 
-  const overallAggregate = aggregate(request.aggregation, metricRows, unit, totalAnswers);
+  const topBoxMinimum = metric.topBoxMinimum;
+  if (request.aggregation === "top_box" && topBoxMinimum === null) {
+    return { ok: false, blockId: request.blockId, reason: "unsupported_aggregation" };
+  }
+
+  const overallAggregate = aggregate(request.aggregation, metricRows, unit, totalAnswers, topBoxMinimum);
   const overall: DataCell = {
     categoryKey: "",
     value: overallAggregate.value,
     n: overallAggregate.n,
   };
-  const detail = detailFor(request.aggregation, metricRows);
+  const detail = detailFor(request.aggregation, metricRows, topBoxMinimum);
 
   const base = {
     blockId: request.blockId,
@@ -331,7 +383,7 @@ export function resolveBlockData(
     }
     cellByKey.set(
       cellKey(categoryKey, seriesKey),
-      aggregate(request.aggregation, group.rows, unit, totalAnswers),
+      aggregate(request.aggregation, group.rows, unit, totalAnswers, topBoxMinimum),
     );
   }
 
@@ -343,7 +395,10 @@ export function resolveBlockData(
     for (const group of groupRows(metricRows, [primary.key])) {
       const raw = group.values[0];
       const key = raw == null || raw === "" ? "" : String(raw);
-      categoryTotals.set(key, aggregate(request.aggregation, group.rows, unit, totalAnswers).value);
+      categoryTotals.set(
+        key,
+        aggregate(request.aggregation, group.rows, unit, totalAnswers, topBoxMinimum).value,
+      );
     }
   } else {
     for (const key of categoryLabels.keys()) {
@@ -448,9 +503,61 @@ export function coarsestDimensionId(registry: SemanticRegistry): string | null {
  * computing "what does this page need" separately is how one of them starts
  * showing a number the other never asked for.
  */
+/**
+ * What the reader currently has chosen, by filter id.
+ *
+ * TRANSIENT, AND NEVER PART OF THE DOCUMENT. It arrives from the URL of the
+ * preview, lives in the page's own state, and is thrown away. Nothing here can
+ * reach the saved definition, the survey answers or a calculation: the whole
+ * of its effect is which rows an aggregate is computed over on this request.
+ */
+export type ViewerSelection = Readonly<Record<string, readonly string[]>>;
+
+export const NO_SELECTION: ViewerSelection = Object.freeze({});
+
+/**
+ * The narrowing one block is under: what the author fixed, plus what the
+ * reader chose on the filters that actually move this block.
+ *
+ * A READER CAN NEVER WIDEN PAST THE AUTHOR. When both name the same
+ * characteristic the two are intersected, so a block fixed to "renovaron" can
+ * be narrowed to one generation of them and never opened up to everybody. An
+ * intersection that is empty stays empty — an honest "nobody matches both"
+ * rather than quietly dropping the author's restriction.
+ */
+export function blockRestriction(
+  definition: ExperienceDefinitionV1,
+  blockId: string,
+  block: { query: { fixedFilters: readonly { dimensionId: string; values: readonly string[] }[] } | null },
+  selection: ViewerSelection,
+  movedBy: Map<string, Set<string>>,
+): { dimensionId: string; values: readonly string[] }[] {
+  const byDimension = new Map<string, string[]>();
+  for (const fixed of block.query?.fixedFilters ?? []) {
+    byDimension.set(fixed.dimensionId, [...fixed.values]);
+  }
+
+  for (const filter of definition.filterDefinitions) {
+    const chosen = selection[filter.id];
+    if (!chosen || chosen.length === 0) continue;
+    if (!movedBy.get(filter.id)?.has(blockId)) continue;
+    const existing = byDimension.get(filter.dimensionId);
+    if (!existing) {
+      byDimension.set(filter.dimensionId, [...chosen]);
+      continue;
+    }
+    const allowed = new Set(existing);
+    byDimension.set(filter.dimensionId, chosen.filter((value) => allowed.has(value)));
+  }
+
+  return [...byDimension].map(([dimensionId, values]) => ({ dimensionId, values }));
+}
+
 export function blockDataRequests(
   definition: ExperienceDefinitionV1,
   registry: SemanticRegistry,
+  selection: ViewerSelection = NO_SELECTION,
+  movedBy: Map<string, Set<string>> = new Map(),
 ): (BlockDataRequest & { key: string })[] {
   const requests: (BlockDataRequest & { key: string })[] = [];
   const seen = new Set<string>();
@@ -472,6 +579,7 @@ export function blockDataRequests(
           secondaryDimensionId: block.query.secondaryDimensionId,
           topN: block.query.topN,
           sort: block.query.sort,
+          restrict: blockRestriction(definition, block.id, block, selection, movedBy),
         });
         continue;
       }
@@ -490,6 +598,7 @@ export function blockDataRequests(
         secondaryDimensionId: null,
         topN: null,
         sort: { by: "value", direction: "desc" },
+        restrict: blockRestriction(definition, block.id, block, selection, movedBy),
       });
     }
   }
@@ -508,6 +617,9 @@ export function blockDataRequests(
         secondaryDimensionId: null,
         topN: null,
         sort: { by: "value", direction: "desc" },
+        // A journey moment belongs to the journey BLOCK, so it is narrowed by
+        // whatever moves that block.
+        restrict: journeyRestriction(definition, journey.id, selection, movedBy),
       });
     }
   }
@@ -521,14 +633,50 @@ export type BlockDataSet = Record<
   { ok: true; data: ResolvedBlockData } | { ok: false; reason: string }
 >;
 
+/**
+ * The narrowing every block drawing this journey is under.
+ *
+ * A journey draws many numbers from one block, so its moments follow whatever
+ * moves the block. When several blocks draw the same journey they are
+ * intersected: a moment has one number per request, and computing it under the
+ * loosest of several scopes would show one block's answer inside another.
+ */
+function journeyRestriction(
+  definition: ExperienceDefinitionV1,
+  journeyId: string,
+  selection: ViewerSelection,
+  movedBy: Map<string, Set<string>>,
+): { dimensionId: string; values: readonly string[] }[] {
+  const hosts = definition.pages
+    .flatMap((page) => page.blocks)
+    .filter((block) => block.journeyRef === journeyId);
+  if (hosts.length === 0) return [];
+  const perHost = hosts.map((block) =>
+    blockRestriction(definition, block.id, block, selection, movedBy),
+  );
+  const [first, ...rest] = perHost;
+  return first.flatMap((entry) => {
+    let values = [...entry.values];
+    for (const other of rest) {
+      const match = other.find((candidate) => candidate.dimensionId === entry.dimensionId);
+      if (!match) return [];
+      const allowed = new Set(match.values);
+      values = values.filter((value) => allowed.has(value));
+    }
+    return [{ dimensionId: entry.dimensionId, values }];
+  });
+}
+
 export function resolveDefinitionData(
   rows: readonly LongRow[],
   registry: SemanticRegistry,
   index: RegistryKeyIndex,
   definition: ExperienceDefinitionV1,
+  selection: ViewerSelection = NO_SELECTION,
+  movedBy: Map<string, Set<string>> = new Map(),
 ): BlockDataSet {
   const set: BlockDataSet = {};
-  for (const request of blockDataRequests(definition, registry)) {
+  for (const request of blockDataRequests(definition, registry, selection, movedBy)) {
     const outcome = resolveBlockData(rows, registry, index, request);
     set[request.key] = outcome.ok
       ? { ok: true, data: outcome.data }

@@ -32,6 +32,7 @@ import {
   type ExperienceDefinitionV1,
   type BlockQuerySpec,
 } from "./definition";
+import { panelTargetBlockIds } from "./filters";
 import { layoutProblems, rowWidths, GRID_COLUMNS, BREAKPOINTS, type PlacedBlock } from "./layout";
 import { EXPERIENCE_LIMITS } from "./limits";
 import {
@@ -61,6 +62,8 @@ export const SOFT_CODES = [
   "crowded_categories",
   "hard_to_read_chart",
   "sparse_result",
+  "empty_panel",
+  "panel_moves_nothing",
   "long_labels",
   "weak_mobile_fit",
   "hidden_everywhere",
@@ -190,10 +193,37 @@ export function validateBlockQuery(
     }
   }
 
-  for (const id of query.filterRefs) {
-    // Filters are resolved against the document in `validateExperienceDefinition`.
-    // Here only the shape matters, and the schema already proved it.
-    void id;
+  /*
+   * FILTRO FIJO DEL BLOQUE — the author's permanent narrowing.
+   *
+   * It names a characteristic and the values it is held to, so unlike a viewer
+   * control it is checked HERE, against the study's own registry: a fixed
+   * filter over a characteristic the study no longer has silently stops
+   * narrowing anything, and a block that quietly widens to everybody is a
+   * wrong number rather than an ugly one.
+   */
+  for (const fixed of query.fixedFilters) {
+    const dimension = findDimension(registry, fixed.dimensionId);
+    if (!dimension) {
+      errors.push({
+        code: "unknown_dimension",
+        target,
+        detail: "Este bloque está acotado por una característica que este estudio ya no tiene.",
+      });
+      continue;
+    }
+    const known = new Set(dimension.values.map((value) => value.value));
+    const missing = fixed.values.filter((value) => !known.has(value));
+    if (missing.length > 0) {
+      warnings.push({
+        code: "sparse_result",
+        target,
+        detail: `“${dimension.label}” ya no tiene ${missing.length === 1 ? "el valor" : "los valores"} ${missing
+          .slice(0, 3)
+          .map((value) => `“${value}”`)
+          .join(", ")}, así que ese acotamiento no deja pasar nada.`,
+      });
+    }
   }
 
   if (context.variant) {
@@ -294,6 +324,7 @@ function validateBlock(
   block: ExperienceBlock,
   registry: SemanticRegistry,
   known: { filters: Set<string>; journeys: Set<string> },
+  definition: ExperienceDefinitionV1,
 ): ValidationReport {
   const target = { kind: "block" as const, id: block.id };
   const errors: Issue<HardCode>[] = [];
@@ -318,6 +349,35 @@ function validateBlock(
     }
   }
 
+  /*
+   * A PANEL THAT OFFERS NOTHING, OR GOVERNS NOTHING, IS SAID — AND NOT BLOCKED.
+   *
+   * Both are states a person passes through while building one: they add the
+   * panel, then choose its controls, then choose what it moves. Refusing to
+   * save in between is how a tool stops being usable. They are warnings, said
+   * once, next to the choice — which is the hard/soft split this module exists
+   * to keep.
+   */
+  if (block.type === "filter_panel" && block.filterPanel) {
+    if (block.filterRefs.length === 0) {
+      warnings.push({
+        code: "empty_panel",
+        target,
+        detail:
+          "Este panel todavía no ofrece ninguna característica, así que el cliente no verá ningún control en él.",
+      });
+    }
+    const governed = panelTargetBlockIds(definition, block);
+    if (governed.size === 0) {
+      warnings.push({
+        code: "panel_moves_nothing",
+        target,
+        detail:
+          "Este panel no está conectado con ningún bloque que pueda responder, así que cambiar sus filtros no cambiaría nada en pantalla.",
+      });
+    }
+  }
+
   if (block.journeyRef && !known.journeys.has(block.journeyRef)) {
     errors.push({
       code: "unknown_reference",
@@ -327,15 +387,6 @@ function validateBlock(
   }
 
   if (block.query) {
-    for (const filterId of block.query.filterRefs) {
-      if (!known.filters.has(filterId)) {
-        errors.push({
-          code: "unknown_reference",
-          target,
-          detail: `${spec.label} está acotado por un filtro que no existe.`,
-        });
-      }
-    }
     const report = validateBlockQuery(block.query, registry, {
       blockId: block.id,
       type: block.type as BlockType,
@@ -549,7 +600,7 @@ export function validateExperienceDefinition(
       }
     }
     for (const block of page.blocks) {
-      const report = validateBlock(block, registry, { filters, journeys });
+      const report = validateBlock(block, registry, { filters, journeys }, definition);
       errors.push(...report.errors);
       warnings.push(...report.warnings);
     }

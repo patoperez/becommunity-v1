@@ -1,20 +1,18 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
-import { loadBuilderWorkspace } from "@/lib/experience/builder-workspace";
+import { loadBuilderRegistry } from "@/lib/experience/builder-workspace";
 import {
   parseExperienceDefinition,
   type ExperienceDefinitionV1,
 } from "@/lib/experience/definition";
 import { resolveDefinitionData, type BlockDataSet } from "@/lib/experience/data";
-import { saveExperienceDraft } from "@/lib/experience/storage";
+import { loadExperienceDraft, saveExperienceDraft } from "@/lib/experience/storage";
 import { validateExperienceDefinition } from "@/lib/experience/validate";
-import { studioStudyComposer } from "@/lib/studio/routes";
 
 /**
  * The two things the dashboard builder asks the server for: save this draft,
@@ -35,8 +33,28 @@ import { studioStudyComposer } from "@/lib/studio/routes";
  * the Server Action does not take one, and `save_study_experience_draft`
  * derives it from the study row.
  *
- * NOTHING HERE PUBLISHES. Saving a draft changes no client-facing surface, and
- * `revalidatePath` deliberately names only the builder's own address.
+ * NOTHING HERE PUBLISHES. Saving a draft changes no client-facing surface.
+ *
+ * NEITHER ACTION REVALIDATES A PATH, AND THAT IS THE FIX FOR A REAL DEFECT.
+ * `revalidatePath` inside a Server Action makes Next re-render the current
+ * route INSIDE the action's own response. For this route that meant a second
+ * full builder load — every row of the study, the whole adapter, the registry
+ * and every aggregate — in the same request that had just done all of it to
+ * validate the document. Measured on the zero-traffic Cloudflare preview
+ * against the real 3 282-answer study: the save landed (the stored revision
+ * advanced every time), the POST answered 200 after ~10 s with
+ * `text/x-component`, and the re-rendered tree was TRUNCATED and ended in an
+ * errored row — `d:E{"digest":...}`. React surfaced that as error #441, "an
+ * error occurred in the Server Components render", and the route's error
+ * boundary replaced the whole editor with "No pudimos abrir esta parte del
+ * trabajo" even though the write had already succeeded. The same action on an
+ * 80-answer study answered in 1.9 s with a complete tree and no failure, which
+ * is what identifies the cause as the duplicated work rather than the
+ * document.
+ *
+ * There is nothing to revalidate. The builder holds the document in client
+ * state; the stored draft is read on a fresh page load, which is a new request
+ * with its own budget. A re-render here was work whose result was discarded.
  */
 
 const uuid = z.string().uuid();
@@ -119,8 +137,8 @@ export async function saveExperienceDraftAction(
     };
   }
 
-  const workspace = await loadBuilderWorkspace(actor.admin, studio);
-  const report = validateExperienceDefinition(parsed.definition, workspace.registry);
+  const context = await loadBuilderRegistry(actor.admin, studio);
+  const report = validateExperienceDefinition(parsed.definition, context.registry);
   if (report.errors.length > 0) {
     return {
       ok: false,
@@ -139,13 +157,17 @@ export async function saveExperienceDraftAction(
 
   if (!saved.ok) {
     if (saved.kind === "conflict") {
+      // The stored version is read HERE, on the one path that needs it, rather
+      // than on every save that will never conflict.
+      const stored = await loadExperienceDraft(actor.admin, studio.study.id);
       return {
         ok: false,
         kind: "conflict",
         message: saved.message,
-        current: workspace.draft
-          ? { definition: workspace.draft.definition, revision: workspace.draft.revision }
-          : null,
+        current:
+          stored.ok && stored.draft
+            ? { definition: stored.draft.definition, revision: stored.draft.revision }
+            : null,
       };
     }
     return {
@@ -155,10 +177,6 @@ export async function saveExperienceDraftAction(
     };
   }
 
-  // Only the builder's own address. Saving a draft changes nothing a client
-  // sees, so revalidating a client route here would be a lie about what
-  // happened.
-  revalidatePath(studioStudyComposer(studio.study.id));
   return {
     ok: true,
     revision: saved.revision,
@@ -201,14 +219,14 @@ export async function refreshExperienceData(
     return { ok: false, message: "Ese borrador pertenece a otro estudio." };
   }
 
-  const workspace = await loadBuilderWorkspace(actor.admin, studio);
+  const context = await loadBuilderRegistry(actor.admin, studio);
   try {
     return {
       ok: true,
       data: resolveDefinitionData(
-        workspace.rows,
-        workspace.registry,
-        workspace.keyIndex,
+        context.rows,
+        context.registry,
+        context.keyIndex,
         parsed.definition,
       ),
     };

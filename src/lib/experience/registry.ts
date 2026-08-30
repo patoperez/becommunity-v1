@@ -145,6 +145,29 @@ export type SemanticMetric = {
   publicationReady: boolean;
   /** How many answers the study currently holds for it. */
   responses: number;
+  /**
+   * THE SCALE THE RESULT IS ACTUALLY ANSWERED ON, read from the study's own
+   * imported answers. Null when the study holds none.
+   */
+  scale: { minimum: number; maximum: number } | null;
+  /**
+   * The score from which an answer counts as satisfied, for Top-2-Box.
+   *
+   * IT IS CONFIGURATION, AND IT IS NEVER GUESSED. `docs/CALCULATION_POLICY.md`
+   * §5 is explicit that `satisfiedMin` is an explicit input precisely so one
+   * canonical function serves a 1–5 scale (min 4) and a 0–10 scale (min 9),
+   * and `docs/CALCULATION_CATALOG.md` §4 fixes the 1–5 rule as authoritative:
+   * four and five are satisfied, one to three are not, and both are in the
+   * denominator.
+   *
+   * NULL MEANS "DO NOT COMPUTE IT". A result whose scale is neither of the two
+   * the catalogue documents has no authoritative Top-2-Box, and the engine
+   * refuses to produce one rather than applying a threshold nobody agreed to.
+   * That refusal is the whole point of this field: passing the 0–10 default at
+   * a study answered 1–5 made every satisfaction result read 0 %, which is a
+   * confident wrong number rather than a missing one.
+   */
+  topBoxMinimum: number | null;
 };
 
 /** What a dimension IS, so a chart can decide whether an order is meaningful. */

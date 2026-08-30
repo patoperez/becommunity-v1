@@ -1,14 +1,25 @@
 # The Experience Composer — the dashboard builder
 
 > Standing architecture reference for the governed data-experience builder.
-> Status on 2026-08-30: **persistent, first production slice**. The model, the
-> schema, the registries, the compatibility adapter, the storage, the Server
-> Actions, fifteen renderers and one internal builder route exist. Drafts are
-> saved and reload. **Nothing is published**, no client-facing route reads a
-> composed definition, and the deployed client experience is unchanged.
+> Status on 2026-08-30: **schema version 2 — the editor is stable, the draft
+> can be looked at, and the reader can explore.** The model, the schema, the
+> registries, the compatibility adapter, the storage, the Server Actions,
+> fifteen renderers, one internal builder route and one internal draft-preview
+> route exist. Drafts are saved and reload. **Nothing is published**, no
+> client-facing route reads a composed definition, and the deployed client
+> experience is unchanged.
 >
-> Sections 1–10 describe the model, which the foundation established and this
-> slice did not change. Sections 11 onwards describe what was built on it.
+> Sections 1–10 describe the model, which the foundation established.
+> Sections 11–22 describe the persistent slice built on it. **Sections 23–31
+> describe this milestone**: the defect that replaced the editor with an error
+> page, the two previews, the study identity layer, viewer-facing filter
+> panels, the satisfaction results that were reading zero, and schema
+> version 2.
+>
+> Where sections 1–22 and 23–31 disagree, the later sections are current. In
+> particular: the schema version is **2**, not 1; there are **twenty** block
+> types, not nineteen; the study's identity is a **global layer**, not a
+> `cover` block; and `query.filterRefs` is now `query.fixedFilters`.
 
 ---
 
@@ -714,7 +725,7 @@ so.
 **Offline, credentials-free, inside `npm test`:**
 
 ```
-npm run test:experience-composer     # 123 deterministic checks
+npm run test:experience-composer     # 140 deterministic checks
 ```
 
 It covers the strict boundary, opaque and stable identifiers, every ceiling,
@@ -728,12 +739,44 @@ keyboard reordering, its collapsing panels and drawers, undo and redo, the page
 operations, reference integrity, the canonical-parity of every aggregate, and
 the export's safety.
 
+It also covers, since this milestone: the identity layer and the fact that no
+adapted study carries a cover block; the version 1 → 2 migration against a
+version-1 document; filter panels, their four target scopes, refusal of an
+incompatible connection, and that renaming a block never breaks one; the two
+kinds of filter and their independence; how a reader's choices combine and that
+they never widen past the author; that a reader's selection never reaches the
+saved definition; that a Top-2-Box is computed from the study's own scale and
+refused rather than faked when there is none; and that **no builder or preview
+Server Action calls `revalidatePath`**.
+
 **Live, credential-bearing, inside `npm run gates:live`:**
 
 ```
 npm run test:experience-persistence-live   # 23 checks against the real database
 npm run test:experience-builder-live       # 20 checks driving a real browser
+npm run test:experience-editor-regression  # 35 checks — every mutation, consecutively
 ```
+
+The third is this milestone's regression gate and is shaped by the defect it
+exists to catch (§23). It seeds one disposable client and study with generated
+respondents, two characteristics and two results, then performs **thirty
+editable operations one after another in a single session** — typing, renaming,
+adding a page, adding a result and a chart, selecting, changing the result, the
+calculation, the title, the prose, the width and the visualization, changing the
+disclosure rule, editing the identity, hiding part of it, adding a visible
+filter panel, keyboard reordering, drag and drop, duplicating a block **twice**,
+hiding, showing, undo, redo, saving by hand, removing with its confirmation, and
+duplicating a page. After **each** one it asserts that the Studio error boundary
+is not on screen, that React is still attached, that the save chip is still
+there, that nothing logged a React or hydration error, that there are no
+duplicate DOM ids, and — at the source rather than through the symptom — that
+the Server Action's response carried **no re-rendered page tree and no errored
+row**.
+
+It then proves that a saved edit survives a reload, that an invalid edit is
+refused in place without taking the editor down, and that a save which cannot
+reach the server says so, keeps the session, and succeeds on retry once the
+network is back.
 
 The first proves RLS, the privilege model, every refusal the writer makes, the
 optimistic-concurrency check and its promptness, and that a save writes exactly
@@ -857,7 +900,371 @@ process row; open it by its address:
 
 ---
 
-## 22. What has to happen before this may control the client dashboard
+---
+
+## 23. The defect that took the editor down, and what fixes it
+
+On the zero-traffic preview, almost any edit eventually replaced the whole
+builder with the Studio error boundary — *"No pudimos abrir esta parte del
+trabajo"* — and the edit was usually still there afterwards. Both halves of
+that sentence were true, and together they name the cause.
+
+**Reproduced, 4/4, against the real study.** The save Server Action called
+`revalidatePath(studioStudyComposer(...))`. `revalidatePath` inside a Server
+Action makes Next re-render the current route **inside the action's own
+response**. For this route that meant a *second* full builder load — every row
+of the study, the whole adapter, the registry and every aggregate — in the same
+request that had just done all of it to validate the document.
+
+Measured on the preview Worker:
+
+| study | answers | action POST | RSC payload | outcome |
+| --- | --- | --- | --- | --- |
+| ACEPTACIÓN P6E | 80 | 1.9 s | 35 668 B, complete | saves, no boundary |
+| BNI Cuicuilco | 3 282 | ~10 s | 7 788 B, **truncated**, ends `d:E{"digest":…}` | boundary, every time |
+
+The stored revision advanced every time, so **the write always succeeded**. The
+re-render that followed it did not: on a real-volume study it exceeded the
+Worker's per-request budget, the tree was cut short, and its errored row reached
+the browser as React error #441 — *"an error occurred in the Server Components
+render"* — which the route's error boundary turned into a full-page failure.
+The same action on an 80-answer study returned a complete tree in under two
+seconds, which is what identifies the cause as the duplicated work rather than
+the document.
+
+**The fix is to stop doing the work twice.**
+
+- `revalidatePath` is gone from both builder Server Actions, and from the draft
+  preview's action. There was never anything to revalidate: the builder holds
+  the document in client state, and the stored draft is read on a fresh page
+  load, which is a new request with its own budget. The re-render's result was
+  discarded.
+- The save action no longer loads the whole workspace. `loadBuilderRegistry`
+  gives it the registry it needs to validate a handle and stops there — no
+  rows-to-aggregates pass, no draft read, no confirmed themes. The stored
+  version is read only on the one path that needs it, a conflict.
+- `loadLegacyStudySnapshot` accepts already-loaded rows. It used to read the
+  study's rows itself while `loadBuilderWorkspace` read them again, so **every**
+  workspace load read every row twice.
+
+Measured after the fix, on the same server and the same study: the action
+response went from **7 788 bytes of re-rendered page** to **147 bytes** — the
+return value alone.
+
+### A rejected write, and a lost connection
+
+Two things that must not look like a crash, and now do not:
+
+- **A refused save** leaves the document exactly as it was, keeps the editor
+  interactive, and says why in place — next to the save chip, not on a
+  replacement page.
+- **A save that cannot reach the server** shows *No se pudo guardar*, offers
+  *Reintentar*, retries once automatically, and then waits for a person. The
+  session, the history and the unsaved document all survive it, and the same
+  edit saves when the network comes back.
+
+### The other defect the same investigation found
+
+`sequence` — the counter the editor salts new identifiers with — restarts at
+zero **every time the builder is opened**. Duplicating the same block, or
+adding a block to the same page, in two different sessions therefore minted the
+*same* identifier twice. The document then held two blocks with one id, the
+strict boundary refused it with `repeated block`, and — because that is a
+property of the **document** rather than of the request — every later save
+failed too. The builder became a surface somebody could keep working in and
+never save again.
+
+`mintFreeId` salts a seed until it is free in the document it is joining.
+Determinism is preserved: the same document and the same operation still
+produce the same identifier, so the adapter and the gates are unaffected.
+
+---
+
+## 24. Two previews, because there are two questions
+
+`Vista del cliente` used to be one button, and it opened the client's current
+dashboard — which deliberately does not read a composed draft. That behaviour
+was correct and it made the button useless: every honest answer it gave looked
+like the builder had lost the work. The label implied the client's screen
+should already contain the draft.
+
+There are now two, and neither label suggests the other's answer:
+
+| | what it answers | route |
+| --- | --- | --- |
+| **Vista previa del borrador** | what the work looks like right now | `/studio/e/[studyId]/vista-previa` |
+| **Ver versión actualmente publicada** | what the client has today | `/studio/e/[studyId]/vista-cliente` |
+
+`vista-previa` is internal-only (`requireInternal()` before any read), renders
+the **latest saved draft** with the study's **real aggregates**, honours the
+saved layout, titles, pages, blocks, charts, filters and visibility settings,
+and **publishes nothing**. It opens under a banner that cannot be missed:
+*"Vista previa interna del borrador; el cliente todavía no ve estos cambios."*
+with an obvious way back to Construcción. `vista-cliente` is untouched, and no
+client-facing route imports anything from `src/lib/experience/**`.
+
+---
+
+## 25. Identidad y portada del estudio
+
+The study's visible title, the client it was done for, the period it covers,
+its introductory description and its identity mark are a **global layer**, not
+a block. `definition.identity`, rendered once before the pages.
+
+It used to be a `cover` block inside Panorama, and that was wrong in a way that
+mattered: it made the identity of the study look like ordinary Panorama
+content. It counted among Panorama's blocks, it could be reordered underneath a
+chart, duplicating the page duplicated the study's name, and hiding Panorama
+hid who the report was for. Identity is not a section of the report; it is what
+the report **is**.
+
+- Every part has its own show/hide switch, and it is configured apart from
+  every page.
+- A part with nothing written in it renders as **nothing** — no heading, no
+  reserved line — which is contract C11 applied where it belongs.
+- The optional **download-report** action lives here too.
+- **Pages keep every ordinary heading and text block they had.** Nothing was
+  removed from what can be written anywhere; what was removed is the accident
+  of the study's own title being one of them.
+
+The compatibility adapter fills the identity from the study itself — its name,
+its client, its period — and leaves `description` null, because an
+introduction is authored work and inventing one would put words in the
+consultant's mouth.
+
+---
+
+## 26. Two kinds of filter, and they are not the same thing
+
+The UI and the canonical model now distinguish them by name and by shape:
+
+| | **Filtro fijo del bloque** | **Panel de filtros para explorar** |
+| --- | --- | --- |
+| who sets it | the author, permanently | the reader, temporarily |
+| where it lives | `block.query.fixedFilters` | a `filter_panel` block |
+| what it carries | a characteristic and its values, **directly** | which controls to offer, and what they move |
+| what it does | decides what the block is always about | changes the view while it is being read |
+
+Until schema version 2 an author's fixed narrowing named a `filterDefinition`,
+which made a permanent restriction depend on a viewer control existing —
+delete the control and the block's meaning changed. A fixed filter now carries
+its own characteristic and values and is independent of every viewer control.
+
+**A reader can never widen past the author.** When both name the same
+characteristic the two are intersected, so a block fixed to "renovaron" can be
+narrowed to one generation of them and never opened up to everybody.
+
+---
+
+## 27. `Panel de filtros` — a first-class block
+
+The twentieth block type, in a fifth group — **exploration**, beside the
+comparison explorer. A block a reader *operates* is a different kind of thing
+from a block a reader *reads*.
+
+It behaves like every other block: it can be added to any page, moved,
+duplicated, hidden, removed, and given a configurable width, a custom visible
+title and an explanation. It can offer one or many controls, chosen from every
+filterable characteristic the study's registry exposes, in an order the author
+sets. It offers *Limpiar filtros*, shows the active selections, lays out inline,
+stacked or in a grid, and several panels may coexist in one experience.
+
+### What a panel moves
+
+`filterPanel.target`, one of four:
+
+| kind | what it resolves to |
+| --- | --- |
+| `experience` | every compatible block in the experience |
+| `page` | every compatible block on the page the panel sits on |
+| `sections` | the named sections, and the blocks that follow each one |
+| `blocks` | exactly the blocks named |
+
+The first two resolve **at render time**, so a block added later joins what the
+panel already governs — which is what "every compatible block" has to mean if
+the phrase is not to go quietly stale. The last two are **by id and stay by
+id**: renaming a section or a block never changes what a panel moves, and an id
+naming nothing is a hard validation error rather than a silently dropped
+connection.
+
+**Compatibility is declared, not special-cased.** A block is a legal filter
+target when its catalogue entry says `allowsFilters` — so KPIs, charts,
+comparisons, tables, journeys, qualitative theme summaries and the theme cloud
+are all targets today, and a block type added later becomes one by declaring it
+in the one table that already governs everything else about it. The real
+theme-cloud visualization, when it arrives, inherits this rather than needing an
+exception carved for it.
+
+**A block responds when *either* an explicit `filterConnection` names it *or* a
+panel hosting that filter resolves to it.** That union is computed in exactly
+one place — `effectiveFilterTargets` in `src/lib/experience/filters.ts` — and
+every surface that needs the answer calls it: the canvas, the block card, the
+validator, the draft preview and the gates.
+
+### Refusals and cleanup
+
+- Connecting a block that shows no recomputable result is **refused with a
+  sentence** naming the block and saying why.
+- A panel does not filter itself or another panel.
+- Removing a block a panel names drops it from that panel; a target emptied by
+  the removal falls back to the panel's own page rather than to nothing, and
+  the confirmation says what will be affected first.
+- A panel offering nothing, or governing nothing, is a **soft warning** said
+  next to the choice — never a blocked save. Both are states a person passes
+  through while building one.
+
+### How choices combine
+
+Stated on the panel itself rather than left to be inferred:
+
+> Si eliges varios valores de una misma característica, se suman. Si eliges
+> características distintas, se combinan y el resultado es más específico.
+
+**OR within one characteristic, AND across characteristics** — the behaviour
+the deployed dashboard already has.
+
+### The reader's state
+
+Transient. It lives in the preview's own state, is mirrored into the address
+bar so a view can be refreshed or sent to a colleague, and is **never written
+anywhere**. It cannot mutate survey responses, calculations or the saved
+definition; its whole effect is which rows an aggregate is computed over on one
+request. The URL carries an opaque composer filter id and segment values the
+study already prints as chart labels — no respondent, no answer, no metric key
+— and the route it points at runs `requireInternal()` before it reads anything.
+
+---
+
+## 28. Suggestions are a template's, restrictions are nobody's
+
+`src/lib/experience/template-suggestions.ts` holds two ordered lists of label
+fragments — a journey-oriented reading and a findings-oriented one — and that
+file is the **only** place a client's vocabulary is allowed to appear. The
+composer's own gate refuses a client's name in `adapter.ts`, `registry.ts`,
+`validate.ts`, `definition.ts` and every other generic module, and that is how
+this rule is kept rather than remembered.
+
+A suggestion decides which characteristics a **freshly adapted panel opens
+with**, and their order. It decides nothing else:
+
+- every filter-eligible characteristic in the study's registry is declared as a
+  filter and offerable in the builder whether or not a suggestion named it;
+- a study matching none of the fragments falls back to the characteristics it
+  does have, so a school or a hospital study gets a working panel from a list
+  written with a business network in mind;
+- **age range is deliberately absent from both lists.** It remains available
+  like every other characteristic and can be added in one click; it is not a
+  default and is not restored as one.
+
+---
+
+## 29. A zero is a number, and missing configuration is not one
+
+The builder showed `0 %` on satisfaction results, under a repeated paragraph
+saying a semáforo needs a configured range. Both were defects, and the first
+was the serious one.
+
+**Every satisfaction result in the real study read 0.0 %, and none of them was
+zero.** `DEFAULT_CSAT_MIN` is 9 — the Top-2-Box threshold for a **0–10** scale.
+Every `csat_*` result in the BNI study is answered on a **1–5** scale, so
+nothing ever cleared the threshold and the composer reported a confident,
+wrong 0 % for all 55 of them.
+
+`docs/CALCULATION_POLICY.md` §5 already says why that must not happen:
+`satisfiedMin` is an **explicit input** precisely so one canonical function
+serves both scales, and *"the scale is never guessed — configuration over
+code"*. `docs/CALCULATION_CATALOG.md` §4 fixes the 1–5 rule as authoritative:
+four and five are satisfied; one to three are not; both are in the denominator.
+
+So the scale became configuration:
+
+- the semantic registry carries `scale` and `topBoxMinimum` per result;
+- the adapter reads the scale from the **study's own answers** and applies the
+  documented threshold — 4 on a 1–5 scale, 9 on a 0–10 scale;
+- a scale the catalogue does not document yields **no threshold**, the
+  composer does not **offer** Top-2-Box for that result, and if a document asks
+  for it anyway the engine returns `unsupported_aggregation` rather than a
+  number. No formula is invented.
+
+On BNI the 55 satisfaction results now read their real values — 78.6 %, 89.3 %,
+82.1 %, 61.5 % and so on — computed by the canonical `csatTopBox` with the
+threshold the catalogue documents.
+
+> ⓘ **The client dashboard was deliberately not changed.**
+> `src/lib/dashboard/view.ts` calls `computeStudyMetrics` without a `csatMin`,
+> so the same 0–10 default is in that path. For the BNI study the client view
+> renders averages rather than CSAT tiles, so no wrong zero is visible there
+> today — but the code path is reachable for a study whose configuration
+> surfaces them. Changing it changes client-facing numbers, which is a
+> human-review zone and a separate, explicitly-approved decision.
+
+### The warning, once
+
+A long paragraph printed inside every narrow card buried the numbers it was
+about. The block now carries a short chip — *Falta configurar el rango* — and
+the full explanation lives in the block's own card, where the person goes to
+fix it.
+
+### A canvas that can be read
+
+A twelve-column grid squeezed into whatever space is left between two panels is
+not a preview of a 1 280 px screen: four "full" columns became unreadable
+strips. The canvas is now laid out **at the width of the breakpoint being
+previewed** (1 120 for a computer, 720 for a tablet, 360 for a phone) and
+**scrolls sideways inside its own box** when there is not room for it. The page
+itself never scrolls sideways, which the acceptance matrix checks at every
+width. A **scale** control (100 % / 75 % / 50 %) is for seeing the whole
+arrangement at once; the scroll is for reading it at full size.
+
+---
+
+## 30. Schema version 2, and what happens to a draft written under version 1
+
+`EXPERIENCE_SCHEMA_VERSION` is **2**. The strategy `migrate.ts` committed to
+before there was anything to migrate is the strategy that ran: forward only,
+one step per version, never in place, a published snapshot never migrated, an
+unknown version refused by name, and every migration tested against a document
+of the version it starts from.
+
+`oneToTwo` makes three changes, and each is a **move rather than a loss**:
+
+1. **The study's identity leaves Panorama.** The first page's first `cover`
+   block gives its title and its paragraph to `identity`, and that block is
+   **removed** — carrying it and leaving it would print the study's name twice.
+   A cover block that is not the first one is left exactly where it is: a
+   person put it there on purpose. The blocks that followed are renumbered so
+   no gap is left where the cover was.
+2. **`query.filterRefs` becomes `query.fixedFilters`.** Each reference is
+   resolved through the document's own filter definitions and its default
+   values become the fixed values. A reference that resolved to nothing, or to
+   a filter with no defaults, restricted nothing under version 1 either, so it
+   is dropped rather than invented.
+3. **Every block gains `filterPanel: null`.** No version-1 block was a panel.
+
+Nothing else is touched: pages, blocks, layout, connections, journeys, review
+and publication survive byte for byte. **No database change was required** —
+the definition is a `jsonb` column and the migration is in code, so migrations
+`0023` and `0024` are unchanged and no new SQL is applied. Existing drafts open
+without manual repair, which the gate proves against a version-1 document and
+which was confirmed against the real saved BNI draft.
+
+---
+
+## 31. Recovering from a save that fails
+
+| what happened | what the editor does |
+| --- | --- |
+| the document is invalid | refuses, says which rule, leaves the document and the session untouched |
+| the server rejects it | shows the server's sentence beside the save chip; the next edit clears it and the autosave tries again |
+| the network is gone | *No se pudo guardar*, one automatic retry after four seconds, then *Reintentar* and it waits for a person |
+| somebody else saved first | *Hay una versión más nueva*; offers the stored version or a download of your own. Nothing is overwritten |
+| the tab is closing with unsaved work | warns |
+
+None of these is a full-page failure, and the gate drives all of them.
+
+---
+
+## 32. What has to happen before this may control the client dashboard
 
 In order, and none of it is started:
 

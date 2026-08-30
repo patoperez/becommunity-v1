@@ -57,7 +57,11 @@
 import { parseDashboardConfig, type DashboardSections } from "@/lib/dashboard/config";
 import { parseJourneyDefinition } from "@/lib/calc/journey";
 
-import { newBlock, newPage, DEFAULT_THEME } from "./defaults";
+import { newBlock, newIdentity, newPage, DEFAULT_THEME } from "./defaults";
+import {
+  FINDINGS_FILTER_SUGGESTIONS,
+  JOURNEY_FILTER_SUGGESTIONS,
+} from "./template-suggestions";
 import {
   EXPERIENCE_SCHEMA_VERSION,
   type ExperienceBlock,
@@ -65,6 +69,7 @@ import {
   type ExperiencePage,
   type FilterConnection,
   type FilterDefinition,
+  type FilterTarget,
   type JourneyReference,
 } from "./definition";
 import { mintId } from "./ids";
@@ -100,6 +105,8 @@ export type LegacyMetricInput = {
   responses: number;
   /** False when the study's current data no longer produces this result. */
   available: boolean;
+  /** The range the study's own answers to this result actually span. */
+  scale: { minimum: number; maximum: number } | null;
 };
 
 export type LegacyDimensionInput = {
@@ -206,14 +213,23 @@ function metricEntry(studyId: string, metric: LegacyMetricInput): SemanticMetric
     // an aggregation whose parts actually add up to the total. Without them the
     // composer could offer those three drawings and the validator would refuse
     // every one, which is a menu that lies about what is possible.
+    // A result whose scale has no documented Top-2-Box does not OFFER one.
+    // The menu and the engine agree: an aggregation that cannot be computed
+    // honestly is not something the composer lets somebody choose.
     aggregations:
       metric.unit === "nps"
         ? (["net_score", "value", "count", "share"] as const)
         : metric.unit === "percent"
-          ? (["top_box", "value", "average", "count", "share"] as const)
+          ? topBoxMinimumFor(metric) === null
+            ? (["average", "value", "count", "share"] as const)
+            : (["top_box", "value", "average", "count", "share"] as const)
           : (["average", "value", "min", "max", "count", "share"] as const),
     defaultAggregation:
-      metric.unit === "nps" ? "net_score" : metric.unit === "percent" ? "top_box" : "average",
+      metric.unit === "nps"
+        ? "net_score"
+        : metric.unit === "percent" && topBoxMinimumFor(metric) !== null
+          ? "top_box"
+          : "average",
     // Every drawing the model can express. Which of them is HONEST for a given
     // block is decided by `validateExperienceDefinition` against the query that
     // block actually carries — how many characteristics it supplies, how many
@@ -245,7 +261,28 @@ function metricEntry(studyId: string, metric: LegacyMetricInput): SemanticMetric
     samplePolicy: null,
     publicationReady: metric.available && metric.responses > 0,
     responses: metric.responses,
+    scale: metric.scale,
+    topBoxMinimum: topBoxMinimumFor(metric),
   };
+}
+
+/**
+ * The satisfied-from score for a Top-2-Box, taken from the two scales the
+ * calculation catalogue documents and from nowhere else.
+ *
+ * `docs/CALCULATION_CATALOG.md` §4: on a 1–5 scale, four and five are
+ * satisfied. `docs/CALCULATION_POLICY.md` §5: on a 0–10 scale it is nine.
+ * Anything else returns null, and a null threshold makes the engine refuse the
+ * aggregation instead of producing a number. Widening this to "whatever the
+ * top two values happen to be" would be inventing a formula, which is exactly
+ * what the project forbids.
+ */
+function topBoxMinimumFor(metric: LegacyMetricInput): number | null {
+  if (!metric.scale) return null;
+  const { minimum, maximum } = metric.scale;
+  if (minimum >= 1 && maximum <= 5) return 4;
+  if (maximum > 5 && maximum <= 10) return 9;
+  return null;
 }
 
 function dimensionEntry(studyId: string, dimension: LegacyDimensionInput): SemanticDimension {
@@ -308,6 +345,85 @@ export function buildLegacyRegistry(snapshot: LegacyStudySnapshot): SemanticRegi
 
 // ---------------------------------------------------------------------------
 // The adaptation
+// ---------------------------------------------------------------------------
+// Suggested filters — a template's recommendation, never the engine's rule
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH CHARACTERISTICS A FRESHLY ADAPTED PANEL OPENS WITH.
+ *
+ * The recommendations themselves are DATA and live in
+ * `template-suggestions.ts`, which is where a client's configuration is
+ * allowed to be specific. This module stays a generic mechanism: it applies
+ * whatever ordered list of label fragments it is given, to whatever
+ * characteristics the study actually has, and restricts nothing. Every
+ * filter-eligible characteristic is still declared as a filter and still
+ * offerable in the builder whether or not a suggestion named it.
+ */
+/** Accent- and case-insensitive, so "Generacion" matches "generación". */
+function fold(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * The suggested filters this study actually has, in the suggested order,
+ * followed by nothing. A suggestion that matches no characteristic is simply
+ * not offered — it is never invented.
+ */
+function suggestFilters(
+  available: readonly FilterDefinition[],
+  suggestions: readonly string[],
+): string[] {
+  const chosen: string[] = [];
+  const taken = new Set<string>();
+  for (const suggestion of suggestions) {
+    const folded = fold(suggestion);
+    for (const filter of available) {
+      if (taken.has(filter.id)) continue;
+      if (!fold(filter.label).includes(folded)) continue;
+      taken.add(filter.id);
+      chosen.push(filter.id);
+      break;
+    }
+  }
+  // A study that matches none of the suggestions is not a study without
+  // filters. It opens on the characteristics it does have, which is better
+  // than an empty panel that looks broken.
+  if (chosen.length === 0) {
+    for (const filter of available.slice(0, 6)) chosen.push(filter.id);
+  }
+  return chosen.slice(0, EXPERIENCE_LIMITS.filtersPerPanel);
+}
+
+/** A visible panel, built the same way every other adapted block is. */
+function panelBlock(request: {
+  seed: string;
+  order: number;
+  registry: SemanticRegistry;
+  title: string;
+  intro: string | null;
+  filterIds: string[];
+  target: FilterTarget;
+}): ExperienceBlock | null {
+  const block = newBlock({
+    type: "filter_panel",
+    seed: request.seed,
+    order: request.order,
+    registry: request.registry,
+    title: request.title,
+  });
+  if (!block || !block.filterPanel) return null;
+  return {
+    ...block,
+    filterRefs: request.filterIds,
+    filterPanel: { ...block.filterPanel, intro: request.intro, target: request.target },
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 function pageSeed(snapshot: LegacyStudySnapshot, name: string): string {
@@ -485,6 +601,7 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
     });
   }
 
+
   // --- Pages --------------------------------------------------------------
   const pages: ExperiencePage[] = [];
   const record = (block: ExperienceBlock | null, what: string): ExperienceBlock[] => {
@@ -494,20 +611,37 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
   };
 
   // 1. Panorama — what the client sees first today.
+  //
+  // NO COVER BLOCK. The study's own name, its client, its period and its
+  // introductory sentence are the IDENTITY of the report, not a section of
+  // Panorama, and they live in the global identity layer built below. Putting
+  // them in a block made them reorderable underneath a chart, countable as
+  // Panorama content, and duplicated whenever the page was.
   const panorama = newPage(pageSeed(snapshot, "panorama"), "Panorama", 0);
   const panoramaBlocks: ExperienceBlock[] = [];
-  panoramaBlocks.push(
-    ...record(
-      newBlock({
-        type: "cover",
-        seed: blockSeed(snapshot, "panorama", "cover"),
-        order: panoramaBlocks.length,
-        registry,
-        title: snapshot.studyName,
-      }),
-      "la portada",
-    ),
-  );
+
+  // The visible controls the reader explores with. The deployed dashboard
+  // narrows the whole screen from one global filter bar, so the panel this
+  // adapts to governs the whole experience and offers the same
+  // characteristics — now as a block somebody can move, rename, narrow or
+  // remove instead of a fixed bar nobody could touch.
+  if (filterDefinitions.length > 0) {
+    panoramaBlocks.push(
+      ...record(
+        panelBlock({
+          seed: blockSeed(snapshot, "panorama", "filter-panel"),
+          order: panoramaBlocks.length,
+          registry,
+          title: "Explora los resultados",
+          intro:
+            "Elige una o varias características para ver los resultados de ese grupo. Puedes limpiar los filtros en cualquier momento.",
+          filterIds: suggestFilters(filterDefinitions, JOURNEY_FILTER_SUGGESTIONS),
+          target: { kind: "experience" },
+        }),
+        "el panel de filtros",
+      ),
+    );
+  }
 
   const stageMetricKeys = stages.map((stage) => stage.metric);
   const featured = featuredMetricIds(snapshot, registry, stageMetricKeys);
@@ -645,12 +779,33 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
   if (sections.qualitative) {
     const voices = newPage(pageSeed(snapshot, "cualitativo"), "Lo que dijeron", pages.length);
     const blocks: ExperienceBlock[] = [];
+    // A SECOND PANEL, SCOPED TO THIS PAGE, with the characteristics a reading
+    // of findings usually turns on. It moves what is on this page and nothing
+    // else — which is the difference between "page" and "experience" made
+    // visible on the study the team actually looks at.
+    if (filterDefinitions.length > 0) {
+      blocks.push(
+        ...record(
+          panelBlock({
+            seed: blockSeed(snapshot, "cualitativo", "filter-panel"),
+            order: blocks.length,
+            registry,
+            title: "Filtra lo que dijeron",
+            intro:
+              "Estos filtros solo cambian lo de esta página. Los resultados de las otras páginas se quedan como están.",
+            filterIds: suggestFilters(filterDefinitions, FINDINGS_FILTER_SUGGESTIONS),
+            target: { kind: "page" },
+          }),
+          "el panel de filtros de la página",
+        ),
+      );
+    }
     blocks.push(
       ...record(
         newBlock({
           type: "qualitative_themes",
           seed: blockSeed(snapshot, "cualitativo", "themes"),
-          order: 0,
+          order: blocks.length,
           registry,
           title: "Temas confirmados",
         }),
@@ -662,7 +817,7 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
         newBlock({
           type: "theme_cloud",
           seed: blockSeed(snapshot, "cualitativo", "cloud"),
-          order: 1,
+          order: blocks.length,
           registry,
           title: "Nube de temas",
         }),
@@ -732,6 +887,25 @@ export function adaptLegacyStudy(snapshot: LegacyStudySnapshot): AdapterResult {
     schemaVersion: EXPERIENCE_SCHEMA_VERSION,
     id: mintId("experience", `${snapshot.studyId}/experience/legacy`),
     title: snapshot.studyName,
+    /*
+     * THE IDENTITY LAYER, carrying what the cover block used to carry.
+     *
+     * Read from the study itself — its name, the client it belongs to and the
+     * period it covers — so adapting an existing study loses none of the
+     * information the cover showed. `description` is left null rather than
+     * filled with a sentence nobody wrote: an introduction is authored work,
+     * and inventing one would be the composer putting words in the
+     * consultant's mouth. The part is hidden until there is something to show,
+     * so nothing renders as an empty line.
+     */
+    identity: newIdentity({
+      title: snapshot.studyName,
+      organization: snapshot.clientName,
+      period: snapshot.period,
+      description: null,
+      showMark: DEFAULT_THEME.showClientMark,
+      showReportDownload: sections.report,
+    }),
     metadata: {
       studyId: snapshot.studyId,
       tenantId: snapshot.tenantId,

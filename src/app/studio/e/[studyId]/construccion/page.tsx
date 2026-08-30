@@ -11,7 +11,7 @@ import {
 } from "@/lib/experience/builder-workspace";
 import { requireInternal } from "@/lib/studio/guard";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
-import { studioStudy, studioStudyPreview } from "@/lib/studio/routes";
+import { studioStudy, studioStudyDraftPreview, studioStudyPreview } from "@/lib/studio/routes";
 
 import { refreshExperienceData, saveExperienceDraftAction } from "./actions";
 
@@ -79,6 +79,7 @@ export default async function StudioStudyBuilderPage({ params }: { params: Param
         payload={builderClientPayload(workspace)}
         exitHref={studioStudy(studyId)}
         previewHref={studioStudyPreview(studyId)}
+        draftPreviewHref={studioStudyDraftPreview(studyId)}
         saveDraft={saveExperienceDraftAction}
         refreshData={refreshExperienceData}
       />

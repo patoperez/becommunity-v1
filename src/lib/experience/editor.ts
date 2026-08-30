@@ -57,8 +57,12 @@ import {
   type ExperienceBlock,
   type ExperienceDefinitionV1,
   type ExperiencePage,
+  type FilterPanel,
+  type FilterPanelLayout,
+  type FilterTarget,
 } from "./definition";
-import { mintId } from "./ids";
+import { isFilterTargetable } from "./filters";
+import { mintFreeId, mintId, type IdKind } from "./ids";
 import { BREAKPOINTS, GRID_COLUMNS, type Breakpoint } from "./layout";
 import type { Aggregation, SemanticRegistry } from "./registry";
 import { findDimension, findMetric } from "./registry";
@@ -630,7 +634,11 @@ export function setFilterConnection(
         filterConnections: [
           ...definition.filterConnections,
           {
-            id: mintId("connection", `${filterId}/${blockId}/${state.sequence + 1}`),
+            id: mintFreeId(
+              "connection",
+              `${filterId}/${blockId}/${state.sequence + 1}`,
+              (id) => definition.filterConnections.some((connection) => connection.id === id),
+            ),
             filterId,
             blockIds: [blockId],
           },
@@ -705,9 +713,11 @@ function pruneFilterReferences(
       blocks: page.blocks.map((block) => ({
         ...block,
         filterRefs: block.filterRefs.filter(keep),
-        query: block.query
-          ? { ...block.query, filterRefs: block.query.filterRefs.filter(keep) }
-          : null,
+        // A fixed filter names a CHARACTERISTIC, not a filter definition, so
+        // removing a viewer control can no longer change what a block is
+        // permanently about. That independence is the point of the version-2
+        // shape, and a panel's target names BLOCKS, so neither has anything to
+        // clean up when a filter goes.
       })),
     })),
     filterDefinitions: definition.filterDefinitions
@@ -746,15 +756,58 @@ function forgetBlocks(
     // leave a statement about blocks that no longer exist in the document.
     .filter((connection) => connection.blockIds.length > 0);
 
+  /*
+   * A PANEL'S TARGET IS THE OTHER PLACE A BLOCK ID LIVES, so it is cleaned in
+   * the same breath. A target left naming a removed block is refused by the
+   * schema, which would turn "quitar este bloque" into a draft that can never
+   * be saved again — the same class of dead end the duplicate-id defect was.
+   *
+   * A `sections` or `blocks` target emptied by the removal falls back to the
+   * page it sits on rather than to nothing: a panel that governs nothing is a
+   * box of controls that silently do not work, and the person is told which
+   * blocks it used to move before they confirm.
+   */
+  const pagesWithoutBlocks = definition.pages.map((page) => ({
+    ...page,
+    blocks: page.blocks.map((block) => {
+      if (!block.filterPanel) return block;
+      const target = block.filterPanel.target;
+      if (target.kind === "blocks") {
+        const kept = target.blockIds.filter((id) => !removedBlockIds.has(id));
+        return {
+          ...block,
+          filterPanel: {
+            ...block.filterPanel,
+            target: kept.length > 0
+              ? { kind: "blocks" as const, blockIds: kept }
+              : { kind: "page" as const },
+          },
+        };
+      }
+      if (target.kind === "sections") {
+        const kept = target.sectionIds.filter((id) => !removedBlockIds.has(id));
+        return {
+          ...block,
+          filterPanel: {
+            ...block.filterPanel,
+            target: kept.length > 0
+              ? { kind: "sections" as const, sectionIds: kept }
+              : { kind: "page" as const },
+          },
+        };
+      }
+      return block;
+    }),
+  }));
+
   // A block-scoped filter exists to be shown on one block. With that block
   // gone it has nowhere to live, so it goes too rather than becoming a
-  // dangling reference — UNLESS something else still names it. "Something
-  // else" includes a query's author-fixed narrowing, a page, and a journey,
-  // not only another block's hosted controls.
+  // dangling reference — UNLESS something else still names it: a page, a
+  // panel, another block's hosted controls, or a journey.
   const stillReferenced = new Set([
-    ...definition.pages.flatMap((page) => [
+    ...pagesWithoutBlocks.flatMap((page) => [
       ...page.filterRefs,
-      ...page.blocks.flatMap((block) => [...block.filterRefs, ...(block.query?.filterRefs ?? [])]),
+      ...page.blocks.flatMap((block) => block.filterRefs),
     ]),
     ...definition.journeyReferences.flatMap((journey) => journey.filterRefs),
   ]);
@@ -764,7 +817,49 @@ function forgetBlocks(
       .map((filter) => filter.id),
   );
 
-  return pruneFilterReferences({ ...definition, filterConnections: connections }, orphaned);
+  return pruneFilterReferences(
+    { ...definition, pages: pagesWithoutBlocks, filterConnections: connections },
+    orphaned,
+  );
+}
+
+
+/**
+ * Every identifier the document already holds, of every kind.
+ *
+ * The uniqueness rule the schema enforces is document-wide for pages and for
+ * blocks, so the set a new id must avoid is document-wide too. Cheap: a
+ * composed experience is bounded at 24 pages, 300 blocks, 24 filters and 200
+ * connections, and this runs once per creating operation.
+ */
+function takenIds(definition: ExperienceDefinitionV1): Set<string> {
+  const taken = new Set<string>([definition.id]);
+  for (const page of definition.pages) {
+    taken.add(page.id);
+    for (const block of page.blocks) taken.add(block.id);
+  }
+  for (const filter of definition.filterDefinitions) taken.add(filter.id);
+  for (const connection of definition.filterConnections) taken.add(connection.id);
+  for (const journey of definition.journeyReferences) {
+    taken.add(journey.id);
+    for (const moment of journey.moments) taken.add(moment.id);
+  }
+  return taken;
+}
+
+/**
+ * A seed whose minted identifier is free, for the factories that mint from a
+ * seed rather than taking an id. Salted exactly the way `mintFreeId` salts, so
+ * the two agree on what the nth alternative is.
+ */
+function freeSeed(definition: ExperienceDefinitionV1, kind: IdKind, seed: string): string {
+  const taken = takenIds(definition);
+  if (!taken.has(mintId(kind, seed))) return seed;
+  for (let attempt = 1; attempt <= 512; attempt += 1) {
+    const candidate = `${seed}~${attempt}`;
+    if (!taken.has(mintId(kind, candidate))) return candidate;
+  }
+  return `${seed}~overflow`;
 }
 
 export function addBlock(
@@ -781,7 +876,7 @@ export function addBlock(
   const sequence = state.sequence + 1;
   const created = newBlock({
     type,
-    seed: `${pageId}/added/${sequence}`,
+    seed: freeSeed(state.definition, "block", `${pageId}/added/${sequence}`),
     order: page.blocks.length,
     registry,
     journeyId: state.definition.journeyReferences[0]?.id ?? null,
@@ -814,9 +909,10 @@ export function duplicateBlock(state: EditorState, blockId: string): EditorState
   if (full) return refuse(state, full);
 
   const sequence = state.sequence + 1;
+  const taken = takenIds(state.definition);
   const copy: ExperienceBlock = {
     ...found.block,
-    id: mintId("block", `${blockId}/copy/${sequence}`),
+    id: mintFreeId("block", `${blockId}/copy/${sequence}`, (id) => taken.has(id)),
     title: found.block.title
       ? `${found.block.title} (copia)`.slice(0, EXPERIENCE_LIMITS.titleLength)
       : null,
@@ -922,7 +1018,7 @@ export function addPage(state: EditorState, title: string): EditorState {
   if (trimmed === "") return refuse(state, "Ponle un nombre a la página.");
   const sequence = state.sequence + 1;
   const page = newPage(
-    `${state.definition.id}/page/added/${sequence}`,
+    freeSeed(state.definition, "page", `${state.definition.id}/page/added/${sequence}`),
     trimmed,
     state.definition.pages.length,
   );
@@ -1019,16 +1115,21 @@ export function duplicatePage(state: EditorState, pageId: string): EditorState {
   }
 
   const sequence = state.sequence + 1;
+  const taken = takenIds(state.definition);
   const copy: ExperiencePage = {
     ...source,
-    id: mintId("page", `${pageId}/copy/${sequence}`),
+    id: mintFreeId("page", `${pageId}/copy/${sequence}`, (id) => taken.has(id)),
     title: `${source.title} (copia)`.slice(0, EXPERIENCE_LIMITS.titleLength),
     // A page-scoped filter control belongs to the page it was declared on. The
     // copy hosts none, for the same reason a duplicated block hosts none.
     filterRefs: [],
     blocks: source.blocks.map((block, index) => ({
       ...block,
-      id: mintId("block", `${block.id}/pagecopy/${sequence}/${index}`),
+      id: mintFreeId("block", `${block.id}/pagecopy/${sequence}/${index}`, (id) => {
+        if (taken.has(id)) return true;
+        taken.add(id);
+        return false;
+      }),
       filterRefs: [],
     })),
   };
@@ -1124,3 +1225,278 @@ export function adoptDefinition(
 
 /** Re-exported so a caller needs one import for the chart vocabulary. */
 export { CHART_SPECS };
+
+// ---------------------------------------------------------------------------
+// Identidad y portada del estudio
+// ---------------------------------------------------------------------------
+
+/**
+ * The identity layer is edited on its own, and it is edited as a WHOLE FIELD
+ * AT A TIME rather than through one setter per property.
+ *
+ * It is a small, closed object of authored words and five independent show
+ * switches; five setters and five reducer cases would be five places for the
+ * ceiling on a title to be forgotten. The trimming is done once, here.
+ */
+export type IdentityField = "title" | "organization" | "period" | "description";
+
+export function setIdentityText(
+  state: EditorState,
+  field: IdentityField,
+  value: string,
+): EditorState {
+  const limit =
+    field === "description" ? EXPERIENCE_LIMITS.bodyLength : EXPERIENCE_LIMITS.titleLength;
+  const trimmed = value.slice(0, limit);
+  const empty = trimmed.trim() === "";
+  const identity = { ...state.definition.identity };
+
+  if (field === "title") {
+    // The study's own name is the one part that cannot become nothing: an
+    // identity layer with no title is a report that does not say what it is.
+    if (empty) return refuse(state, "El estudio necesita un título visible.");
+    identity.title = trimmed;
+  } else {
+    identity[field] = empty ? null : trimmed;
+    // Emptying a part turns its switch off rather than leaving a heading with
+    // nothing under it — absence renders as nothing, never as a blank line.
+    if (empty) identity.show = { ...identity.show, [field]: false };
+  }
+
+  return commit(state, { ...state.definition, identity });
+}
+
+export type IdentityPart = "title" | "organization" | "period" | "description" | "mark";
+
+export function toggleIdentityPart(
+  state: EditorState,
+  part: IdentityPart,
+  shown: boolean,
+): EditorState {
+  const identity = state.definition.identity;
+  if (shown && part !== "title" && part !== "mark" && !identity[part]) {
+    return refuse(state, "Escribe algo antes de mostrarlo en la portada.");
+  }
+  return commit(state, {
+    ...state.definition,
+    identity: {
+      ...identity,
+      show: { ...identity.show, [part]: shown },
+      mark: part === "mark"
+        ? shown
+          ? { source: "client_brand" as const }
+          : { source: "none" as const }
+        : identity.mark,
+    },
+  });
+}
+
+export function setIdentityVisible(state: EditorState, visible: boolean): EditorState {
+  return commit(state, {
+    ...state.definition,
+    identity: { ...state.definition.identity, visible },
+  });
+}
+
+export function setIdentityReportDownload(state: EditorState, offered: boolean): EditorState {
+  return commit(state, {
+    ...state.definition,
+    identity: { ...state.definition.identity, showReportDownload: offered },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Panel de filtros para explorar
+// ---------------------------------------------------------------------------
+
+function mapPanel(
+  state: EditorState,
+  blockId: string,
+  change: (panel: FilterPanel, block: ExperienceBlock) => FilterPanel,
+): EditorState {
+  const found = findBlock(state.definition, blockId);
+  if (!found || !found.block.filterPanel) {
+    return refuse(state, "Ese panel de filtros ya no está en la experiencia.");
+  }
+  return commit(
+    state,
+    mapBlock(state.definition, blockId, (block) =>
+      block.filterPanel ? { ...block, filterPanel: change(block.filterPanel, block) } : block,
+    ),
+  );
+}
+
+export function setPanelLayout(
+  state: EditorState,
+  blockId: string,
+  layout: FilterPanelLayout,
+): EditorState {
+  return mapPanel(state, blockId, (panel) => ({ ...panel, layout }));
+}
+
+export function setPanelIntro(state: EditorState, blockId: string, intro: string): EditorState {
+  const trimmed = intro.slice(0, EXPERIENCE_LIMITS.bodyLength);
+  return mapPanel(state, blockId, (panel) => ({
+    ...panel,
+    intro: trimmed.trim() === "" ? null : trimmed,
+  }));
+}
+
+export function setPanelOption(
+  state: EditorState,
+  blockId: string,
+  option: "showClear" | "showActive",
+  on: boolean,
+): EditorState {
+  return mapPanel(state, blockId, (panel) => ({ ...panel, [option]: on }));
+}
+
+/**
+ * Offer a characteristic on this panel, or stop offering it.
+ *
+ * ADDING A CONTROL IS NOT THE SAME ACT AS CHOOSING WHAT IT MOVES. The panel's
+ * `target` answers the second question once for the whole panel, so adding a
+ * characteristic here never silently rewires anything.
+ */
+export function togglePanelFilter(
+  state: EditorState,
+  blockId: string,
+  filterId: string,
+  offered: boolean,
+): EditorState {
+  const found = findBlock(state.definition, blockId);
+  if (!found || found.block.type !== "filter_panel") {
+    return refuse(state, "Ese panel de filtros ya no está en la experiencia.");
+  }
+  if (!state.definition.filterDefinitions.some((filter) => filter.id === filterId)) {
+    return refuse(state, "Esa característica ya no está en la experiencia.");
+  }
+  const current = found.block.filterRefs;
+  if (offered && current.includes(filterId)) return state;
+  if (!offered && !current.includes(filterId)) return state;
+  if (offered && current.length >= EXPERIENCE_LIMITS.filtersPerPanel) {
+    return refuse(
+      state,
+      `Un panel ofrece hasta ${EXPERIENCE_LIMITS.filtersPerPanel} características.`,
+    );
+  }
+  return commit(
+    state,
+    mapBlock(state.definition, blockId, (block) => ({
+      ...block,
+      filterRefs: offered
+        ? [...current, filterId]
+        : current.filter((candidate) => candidate !== filterId),
+    })),
+  );
+}
+
+/** The order the controls appear in, which is the order a person reads them. */
+export function movePanelFilter(
+  state: EditorState,
+  blockId: string,
+  filterId: string,
+  direction: "up" | "down",
+): EditorState {
+  const found = findBlock(state.definition, blockId);
+  if (!found || found.block.type !== "filter_panel") {
+    return refuse(state, "Ese panel de filtros ya no está en la experiencia.");
+  }
+  const order = [...found.block.filterRefs];
+  const index = order.indexOf(filterId);
+  if (index < 0) return refuse(state, "Ese filtro no está en este panel.");
+  const next = direction === "up" ? index - 1 : index + 1;
+  if (next < 0) return refuse(state, "Ya es el primero del panel.");
+  if (next >= order.length) return refuse(state, "Ya es el último del panel.");
+  [order[index], order[next]] = [order[next], order[index]];
+  return commit(
+    state,
+    mapBlock(state.definition, blockId, (block) => ({ ...block, filterRefs: order })),
+  );
+}
+
+/**
+ * WHAT THIS PANEL MOVES.
+ *
+ * The scope changes; nothing about the controls does. A `blocks` or `sections`
+ * target that would name nothing is refused with a sentence rather than
+ * stored, because a panel connected to nothing looks identical to a panel that
+ * is simply not working.
+ */
+export function setPanelTarget(
+  state: EditorState,
+  blockId: string,
+  target: FilterTarget,
+): EditorState {
+  const found = findBlock(state.definition, blockId);
+  if (!found || found.block.type !== "filter_panel") {
+    return refuse(state, "Ese panel de filtros ya no está en la experiencia.");
+  }
+  if (target.kind === "blocks" && target.blockIds.length === 0) {
+    return refuse(state, "Elige al menos un bloque para que el panel tenga algo que mover.");
+  }
+  if (target.kind === "sections" && target.sectionIds.length === 0) {
+    return refuse(state, "Elige al menos una sección para que el panel tenga algo que mover.");
+  }
+  return mapPanel(state, blockId, (panel) => ({ ...panel, target }));
+}
+
+/**
+ * Add or remove ONE block from an explicit `blocks` target.
+ *
+ * REFUSED, WITH A REASON, WHEN THE BLOCK CANNOT RESPOND. A KPI, a chart, a
+ * comparison, a table, a journey, a theme summary and the theme cloud can all
+ * follow a filter; a divider, a spacer, an image and a plain paragraph cannot,
+ * because there is no number in them to recompute. Saying which and why beats
+ * a checkbox that silently does nothing.
+ */
+export function togglePanelTargetBlock(
+  state: EditorState,
+  panelId: string,
+  blockId: string,
+  connected: boolean,
+): EditorState {
+  const panel = findBlock(state.definition, panelId);
+  if (!panel || !panel.block.filterPanel) {
+    return refuse(state, "Ese panel de filtros ya no está en la experiencia.");
+  }
+  const candidate = findBlock(state.definition, blockId);
+  if (!candidate) return refuse(state, "Ese bloque ya no está en la experiencia.");
+
+  if (connected) {
+    if (candidate.block.id === panel.block.id) {
+      return refuse(state, "Un panel no se filtra a sí mismo.");
+    }
+    if (candidate.block.type === "filter_panel") {
+      return refuse(state, "Un panel de filtros no puede filtrar a otro panel de filtros.");
+    }
+    if (!isFilterTargetable(candidate.block)) {
+      return refuse(
+        state,
+        `“${candidate.block.title ?? blockSpec(candidate.block.type as BlockType).label}” no muestra ningún resultado que se pueda recalcular, así que un filtro no lo cambiaría.`,
+      );
+    }
+  }
+
+  const target = panel.block.filterPanel.target;
+  const current = target.kind === "blocks" ? target.blockIds : [];
+  const next = connected
+    ? current.includes(blockId)
+      ? current
+      : [...current, blockId]
+    : current.filter((id) => id !== blockId);
+
+  if (next.length === 0) {
+    return refuse(
+      state,
+      "Un panel necesita mover al menos un bloque. Cámbialo a “toda la página” o elige otro bloque antes de quitar este.",
+    );
+  }
+  if (next.length > EXPERIENCE_LIMITS.blocksPerConnection) {
+    return refuse(state, "Ese panel ya mueve todos los bloques que admite.");
+  }
+  return mapPanel(state, panelId, (config) => ({
+    ...config,
+    target: { kind: "blocks", blockIds: next },
+  }));
+}
