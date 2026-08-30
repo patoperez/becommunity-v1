@@ -356,6 +356,27 @@ let session = null;
 let internal = null;
 let client = null;
 
+/**
+ * Remove anything a PREVIOUS run of this gate left behind.
+ *
+ * The `finally` below cleans up after an ordinary pass and an ordinary
+ * failure. It cannot clean up after a run somebody killed — a timeout, a
+ * Ctrl-C — and six of those left six disposable clients in the project before
+ * this existed. A gate that creates fixtures has to be able to find its own
+ * litter, so the name carries the prefix and the next run sweeps it.
+ */
+async function sweepPreviousRuns(prefix) {
+  let removed = 0;
+  for (const table of ["study", "tenant"]) {
+    const rows = await rest(`${table}?select=id,name&name=like.${prefix}*`);
+    for (const row of rows.body ?? []) {
+      await rest(`${table}?id=eq.${row.id}`, { method: "DELETE" });
+      removed += 1;
+    }
+  }
+  if (removed > 0) console.log(`  SWEPT  ${removed} row(s) left by an interrupted earlier run`);
+}
+
 async function cleanup() {
   session?.close();
   if (chrome) {
@@ -375,6 +396,7 @@ async function cleanup() {
 }
 
 try {
+  await sweepPreviousRuns("EXPERIENCE-BUILDER-GATE-");
   const health = await fetch(new URL("/api/health", APP_ORIGIN)).catch(() => null);
   assert.ok(health?.ok, `start the application at ${APP_ORIGIN} before running this gate`);
 
