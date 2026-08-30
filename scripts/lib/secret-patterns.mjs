@@ -43,6 +43,14 @@ export function classifyJwt(token) {
   return typeof payload.role === "string" ? payload.role : "unknown";
 }
 
+/**
+ * The ways this codebase legitimately READS a privileged variable rather than
+ * writing one down. Anchored at the start of the bound expression and followed
+ * by a member access, so `env.FOO` matches and `envelope` does not.
+ */
+const ENV_READ =
+  /^(?:globalThis\.process\.env|process\.env|import\.meta\.env|Deno\.env|os\.environ|env)[.[]/;
+
 // Every class is a *value* pattern. None of them match a bare environment
 // variable NAME: `process.env.SUPABASE_SERVICE_ROLE_KEY` is legitimate server
 // code and must stay allowed. Only a name bound to a literal value is a finding.
@@ -62,6 +70,35 @@ export const SECRET_CLASSES = [
     description: "A secret-bearing environment variable bound to a literal value",
     pattern:
       /(?:SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SECRET_KEY|CLOUDFLARE_API_TOKEN|SUPABASE_DB_PASSWORD)\s*[=:]\s*["']?[A-Za-z0-9_.-]{16,}/g,
+    // A NAME BOUND TO A READ OF THE ENVIRONMENT IS NOT A VALUE.
+    //
+    // The pattern above is deliberately a *value* pattern, and the comment at
+    // the head of this list says so — but it only ever tested what came before
+    // the separator. `SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY`
+    // is an ordinary object literal in a live test harness collecting the
+    // variables it requires: the right-hand side is a READ of the environment,
+    // is thirty-seven characters of `[A-Za-z0-9_.-]`, and matched. That is the
+    // shape the historical blob of `scripts/journey-editor-live-test.mjs`
+    // carries, and no rewrite of history can remove it from a reachable commit.
+    //
+    // This confirm removes exactly that false positive and nothing else:
+    //
+    //   - a QUOTED right-hand side is a literal by construction and is still a
+    //     finding, whatever it contains — which is the shape a real leaked key
+    //     takes in a `.env` file, a compiled bundle or a CI definition;
+    //   - an UNQUOTED right-hand side is a finding unless it begins with a
+    //     recognised read of the environment, anchored at its first character.
+    //
+    // It is a precision fix, not a relaxation. `isPrivilegedSupabaseKey`, the
+    // value-independent `privilegedEnvNames` snapshot check and every other
+    // class here are untouched, and `selfTest()` below now carries both the
+    // positive control (a literal is still reported) and the negative control
+    // (an environment read is not), so the fix cannot silently regress.
+    confirm: (match) => {
+      const bound = match.slice(match.search(/[=:]/) + 1).trim();
+      if (/^["']/.test(bound)) return true;
+      return !ENV_READ.test(bound);
+    },
   },
   {
     id: "postgres-url-password",
@@ -129,6 +166,44 @@ export function selfTest() {
   // Negative control: the public anon key must NOT be reported.
   if (scanText(syntheticAnonJwt).some((f) => f.id === "service-role-jwt")) {
     missed.push("negative-control:anon-jwt-must-not-match");
+  }
+
+  // `assigned-secret-env` distinguishes a WRITTEN value from a READ of the
+  // environment. Both directions are controlled, because a fix that only
+  // stopped reporting things would be indistinguishable from switching the
+  // class off.
+  // EVERY sample is assembled at runtime, for the reason this function's header
+  // gives: the history scanner reads THIS FILE, so a credential-shaped literal
+  // written here would be a finding about the matcher's own controls. The first
+  // version of these controls contained one, and Suite D said so.
+  const quote = String.fromCharCode(34);
+  const literalForms = [
+    "SUPABASE_SERVICE_ROLE" + "_KEY=" + quote + "CANARYVALUE".repeat(2) + quote,
+    "SUPABASE_SERVICE_ROLE" + "_KEY=" + "CANARYVALUE".repeat(2),
+    "CLOUDFLARE_API" + "_TOKEN: " + quote + "CANARYVALUE".repeat(2) + quote,
+    // A quoted right-hand side is a literal even when its TEXT looks like code.
+    "SUPABASE_SECRET" + "_KEY: " + quote + "process." + "env.CANARYVALUE" + quote,
+  ];
+  for (const form of literalForms) {
+    if (!scanText(form).some((f) => f.id === "assigned-secret-env")) {
+      missed.push("assigned-secret-env:literal-must-match");
+    }
+  }
+  // These are the shape the historical blob carries. They match the pattern and
+  // must NOT be reported; each is still assembled rather than written out, so
+  // the controls stay controls rather than becoming findings of their own.
+  const read = (name, expression) => name + ": " + expression + name;
+  const environmentReads = [
+    read("SUPABASE_SERVICE_ROLE" + "_KEY", "process." + "env."),
+    "SUPABASE_SERVICE_ROLE" + "_KEY = " + "process." + "env." + "SUPABASE_SERVICE_ROLE_KEY;",
+    read("CLOUDFLARE_API" + "_TOKEN", "env."),
+    "SUPABASE_DB" + "_PASSWORD: " + "process." + "env[" + quote + "SUPABASE_DB_PASSWORD" + quote + "]",
+    read("SUPABASE_SECRET" + "_KEY", "import.meta." + "env."),
+  ];
+  for (const form of environmentReads) {
+    if (scanText(form).some((f) => f.id === "assigned-secret-env")) {
+      missed.push("negative-control:environment-read-must-not-match");
+    }
   }
 
   // The build-time env snapshot check is value-independent, so it needs its own
