@@ -89,6 +89,8 @@ export type BuilderWorkspace = {
   /** Server-side only. Never included in what a page hands to a client component. */
   keyIndex: RegistryKeyIndex;
   rows: readonly LongRow[];
+  /** Server-side only, like `rows`: the browser receives theme COUNTS, never observations. */
+  confirmed: ConfirmedQualitative[];
 };
 
 /**
@@ -105,6 +107,14 @@ export type BuilderRegistryContext = {
   keyIndex: RegistryKeyIndex;
   adapted: ExperienceDefinitionV1;
   rows: readonly LongRow[];
+  /**
+   * The CONFIRMED qualitative observations, so a theme summary can be narrowed
+   * by the reader's choice exactly as a number is. Three columns, confirmed
+   * only, no quote — see `loadConfirmedThemes`. It is a handful of rows beside
+   * the study's answers, which is why it can be afforded on the path §23 exists
+   * to keep small.
+   */
+  confirmed: ConfirmedQualitative[];
 };
 
 export async function loadBuilderRegistry(
@@ -112,9 +122,12 @@ export async function loadBuilderRegistry(
   workspace: StudioStudyWorkspace,
 ): Promise<BuilderRegistryContext> {
   const rows = await loadStudyRows(admin, workspace.study.id);
-  const snapshot = await loadLegacyStudySnapshot(admin, workspace, rows);
+  const [snapshot, confirmed] = await Promise.all([
+    loadLegacyStudySnapshot(admin, workspace, rows),
+    loadConfirmedThemes(admin, workspace.study.id),
+  ]);
   const { definition: adapted, registry } = adaptLegacyStudy(snapshot);
-  return { registry, keyIndex: registryKeyIndex(snapshot), adapted, rows };
+  return { registry, keyIndex: registryKeyIndex(snapshot), adapted, rows, confirmed };
 }
 
 export async function loadBuilderWorkspace(
@@ -152,10 +165,11 @@ export async function loadBuilderWorkspace(
     draftProblem,
     definition,
     report: validateExperienceDefinition(definition, registry),
-    data: resolveDefinitionData(rows, registry, keyIndex, definition),
+    data: resolveDefinitionData(rows, registry, keyIndex, definition, undefined, undefined, confirmed),
     evidence: buildEvidence(snapshot, registry, rows, confirmed),
     keyIndex,
     rows,
+    confirmed,
   };
 }
 

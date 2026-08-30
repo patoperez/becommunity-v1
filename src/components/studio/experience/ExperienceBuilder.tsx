@@ -13,10 +13,10 @@ import {
 } from "react";
 
 import { blockCatalogue, blockSpec, type BlockType } from "@/lib/experience/blocks";
+import { blockFilterSources, filterDimensionKinds } from "@/lib/experience/filters";
 import { CHART_SPECS, compatibleVariants, isRendererImplemented, type ChartVariant } from "@/lib/experience/charts";
 import { canAddBlock } from "@/lib/experience/defaults";
 import {
-  filtersAffecting,
   findBlock,
   parseExperienceDefinition,
   type ExperienceBlock,
@@ -30,6 +30,7 @@ import {
   adoptDefinition,
   canRedo,
   canUndo,
+  detachBlockFromPanel,
   duplicateBlock,
   duplicatePage,
   initialState,
@@ -827,10 +828,21 @@ export function ExperienceBuilder({
                   "Se cambió la regla de este bloque.",
                 )
               }
-              onConnection={(filterId, connected) =>
+              onOpenPanel={(pageId, panelId) => {
+                act((current) => selectBlock(openPage(current, pageId), panelId), "");
+                if (window.matchMedia("(max-width: 1279px)").matches) setDrawer("right");
+              }}
+              onDisconnectSource={(source) =>
                 act(
-                  (current) => setFilterConnection(current, filterId, selected.block.id, connected),
-                  connected ? "El filtro ahora mueve este bloque." : "El filtro ya no mueve este bloque.",
+                  (current) =>
+                    source.panelId
+                      ? detachBlockFromPanel(current, source.panelId, selected.block.id)
+                      : source.filterIds.reduce(
+                          (state, filterId) =>
+                            setFilterConnection(state, filterId, selected.block.id, false),
+                          current,
+                        ),
+                  "Este bloque ya no responde a ese filtro.",
                 )
               }
               panelCard={
@@ -1911,7 +1923,8 @@ function Inspector({
   onDimension,
   onSpan,
   onSamplePolicy,
-  onConnection,
+  onOpenPanel,
+  onDisconnectSource,
   panelCard,
   onDuplicate,
   onToggle,
@@ -1930,7 +1943,10 @@ function Inspector({
   onDimension: (slot: "primary" | "secondary", dimensionId: string | null) => void;
   onSpan: (breakpoint: Breakpoint, span: number) => void;
   onSamplePolicy: (override: { kind: "inherit" } | { kind: "override"; policy: { policyVersion: 1; mode: SamplePolicyMode; threshold: number } }) => void;
-  onConnection: (filterId: string, connected: boolean) => void;
+  /** Select the panel that governs this block, so it can be edited there. */
+  onOpenPanel: (pageId: string, panelId: string) => void;
+  /** Stop one source moving this block: a panel target, or a direct connection. */
+  onDisconnectSource: (source: { panelId: string | null; filterIds: string[] }) => void;
   /** The panel's own card, when the selected block is one. */
   panelCard?: React.ReactNode;
   onDuplicate: () => void;
@@ -1949,7 +1965,6 @@ function Inspector({
   const notOffered = (spec.variants as readonly ChartVariant[]).filter(
     (variant) => !offered.includes(variant),
   );
-  const connected = new Set(filtersAffecting(definition, block.id));
 
   return (
     <div className="rounded-xl border border-line bg-surface p-4">
@@ -2143,30 +2158,27 @@ function Inspector({
           </p>
         </section>
 
-        {/* --- Which filters move it -------------------------------------- */}
-        {definition.filterDefinitions.length > 0 ? (
-          <section>
-            <h3 className="text-sm font-semibold text-strong">Qué filtros lo mueven</h3>
-            <p className="mt-1 text-xs text-muted">
-              Un filtro mueve un bloque solo cuando alguien lo dice aquí. Compartir una
-              característica no basta.
-            </p>
-            <ul className="mt-2 space-y-1">
-              {definition.filterDefinitions.map((filter) => (
-                <li key={filter.id}>
-                  <label className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg px-1 text-sm text-body hover:bg-surface-sunken">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 shrink-0"
-                      checked={connected.has(filter.id)}
-                      onChange={(event) => onConnection(filter.id, event.target.checked)}
-                    />
-                    <span className="min-w-0 truncate">{filter.label}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </section>
+        {/* --- What moves it: a SUMMARY, and only when it can be moved -----
+            THE CHECKLIST THAT USED TO BE HERE IS GONE.
+
+            It printed every characteristic in the study's registry, as
+            checkboxes, on EVERY block — a paragraph, a heading, the approved
+            team reading, the download button. Thirteen tick boxes that did
+            nothing, on a card whose job is to explain one block.
+
+            A static block now gets no filter section at all, and a data-backed
+            one gets a sentence naming the panel that moves it and the
+            characteristics that panel offers. Changing WHICH blocks a panel
+            moves is the panel's job, and the way there is one click from
+            here. ------------------------------------------------------------- */}
+        {spec.capabilities.supportsViewerFilters ? (
+          <BlockFilterSummary
+            definition={definition}
+            registry={registry}
+            blockId={block.id}
+            onOpenPanel={onOpenPanel}
+            onDisconnect={onDisconnectSource}
+          />
         ) : null}
 
         {/* --- Its own disclosure rule ------------------------------------ */}
@@ -2235,6 +2247,96 @@ function Inspector({
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * WHAT MOVES THIS BLOCK — the compact summary that replaced a registry-wide
+ * checklist.
+ *
+ * It is rendered ONLY for a block whose catalogue entry declares
+ * `supportsViewerFilters`. A paragraph, a heading, the approved team reading,
+ * the study's identity and the download button get nothing here — not an empty
+ * section, not a disabled one, not an explanation of why: an absent control is
+ * the clearest statement that there is no decision to make.
+ *
+ * For a block that CAN be moved it says which panel moves it and which
+ * characteristics that panel offers, and it offers exactly two verbs:
+ * disconnect, or go to the panel and edit it there. Choosing WHICH blocks a
+ * panel governs belongs to the panel, in one place, once.
+ */
+function BlockFilterSummary({
+  definition,
+  registry,
+  blockId,
+  onOpenPanel,
+  onDisconnect,
+}: {
+  definition: ExperienceDefinitionV1;
+  registry: SemanticRegistry;
+  blockId: string;
+  onOpenPanel: (pageId: string, panelId: string) => void;
+  onDisconnect: (source: { panelId: string | null; filterIds: string[] }) => void;
+}) {
+  const kinds = useMemo(() => filterDimensionKinds(definition, registry), [definition, registry]);
+  const sources = useMemo(
+    () => blockFilterSources(definition, blockId, kinds),
+    [definition, blockId, kinds],
+  );
+
+  return (
+    <section>
+      <h3 className="text-sm font-semibold text-strong">Este bloque responde a</h3>
+      {sources.length === 0 ? (
+        <p className="mt-1 text-xs text-muted">
+          Ningún filtro lo mueve todavía. Se decide desde un “Panel de filtros”: selecciónalo en el
+          lienzo y elige ahí qué bloques cambia.
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {sources.map((source) => (
+            <li
+              key={source.panelId ?? "direct"}
+              className="rounded-lg border border-line bg-surface-sunken p-2.5"
+            >
+              <p className="text-sm text-body">
+                {source.panelId ? (
+                  <span className="font-medium text-strong">“{source.panelTitle}”: </span>
+                ) : (
+                  <span className="font-medium text-strong">Conexión directa: </span>
+                )}
+                {source.filters.map((filter) => filter.label).join(", ")}
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {source.panelId && source.panelPageId ? (
+                  <button
+                    type="button"
+                    className={button}
+                    onClick={() =>
+                      onOpenPanel(source.panelPageId as string, source.panelId as string)
+                    }
+                  >
+                    Ir al panel
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={button}
+                  onClick={() =>
+                    onDisconnect({
+                      panelId: source.panelId,
+                      filterIds: source.filters.map((filter) => filter.id),
+                    })
+                  }
+                >
+                  Desconectar
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

@@ -463,7 +463,12 @@ export const experienceBlockSchema = z
         message: `${spec.label} does not carry a journey`,
       });
     }
-    if (!spec.allowsFilters && block.filterRefs.length > 0) {
+    // HOSTING, not responding. `filterRefs` is where a block OFFERS a
+    // reader's controls; being moved by one is `filterConnections` and a
+    // panel's target, and the two have never been the same question. They used
+    // to share one boolean, which is how a paragraph came to be offered the
+    // whole characteristic registry.
+    if (!spec.capabilities.hostsFilterControls && block.filterRefs.length > 0) {
       context.addIssue({
         code: "custom",
         path: ["filterRefs"],

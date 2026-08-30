@@ -13,6 +13,7 @@
 
 import { blockSpec, type BlockType } from "@/lib/experience/blocks";
 import {
+  filterTargetRefusal,
   isFilterTargetable,
   panelTargetBlockIds,
   sectionMembers,
@@ -219,6 +220,24 @@ const TARGET_LABEL: Record<FilterTarget["kind"], string> = {
   blocks: "Solo los bloques que elija",
 };
 
+/**
+ * WHAT EACH SCOPE ACTUALLY DOES, said next to the choice.
+ *
+ * "Toda la experiencia" and "Página actual" resolve AT RENDER TIME, so a block
+ * added afterwards joins what the panel already moves. The other two are by
+ * identifier and stay by identifier, so renaming a section or a block never
+ * changes what a panel governs. Both facts change what a person should expect
+ * and neither is guessable from the label alone.
+ */
+const SCOPE_EXPLANATION: Record<FilterTarget["kind"], string> = {
+  experience:
+    "Mueve todos los bloques con datos de toda la experiencia, incluidos los que se añadan después.",
+  page: "Mueve todos los bloques con datos de la página donde está el panel, incluidos los que se añadan después.",
+  sections:
+    "Mueve los bloques con datos que van debajo de cada encabezado elegido, hasta el siguiente encabezado.",
+  blocks: "Mueve exactamente los bloques que elijas, y ninguno más.",
+};
+
 const LAYOUT_LABEL: Record<FilterPanelLayout, string> = {
   inline: "En una fila que se acomoda sola",
   stacked: "Uno debajo del otro",
@@ -259,6 +278,17 @@ export function FilterPanelCard({
       .filter((candidate) => candidate.type === "section")
       .map((candidate) => ({ page, block: candidate })),
   );
+
+  const candidates = definition.pages.flatMap((page) =>
+    page.blocks
+      .filter((candidate) => candidate.id !== block.id)
+      .map((candidate) => ({ page, block: candidate })),
+  );
+  const compatibleTargets = candidates.filter((entry) => isFilterTargetable(entry.block));
+  const incompatibleTargets = candidates.flatMap((entry) => {
+    const reason = filterTargetRefusal(entry.block);
+    return reason ? [{ ...entry, reason }] : [];
+  });
 
   return (
     <section className="mt-3 rounded-lg border border-line bg-surface-sunken p-3">
@@ -370,10 +400,17 @@ export function FilterPanelCard({
         </ul>
       )}
 
-      {/* ---- What it moves ---------------------------------------------- */}
+      {/* ---- What it moves ----------------------------------------------
+          THIS IS THE PRIMARY CONNECTION EDITOR.
+
+          Which blocks a filter moves is decided HERE, on the panel, once —
+          not on every block's own card as a checklist of the whole
+          characteristic registry. A block's card states which panel moves it
+          and links back to this one. --------------------------------------- */}
       <h5 className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
         Qué cambia este panel
       </h5>
+      <p className="mt-1 text-xs text-muted">{SCOPE_EXPLANATION[panel.target.kind]}</p>
       <label className={label} htmlFor={id("target")}>
         Alcance
       </label>
@@ -440,40 +477,66 @@ export function FilterPanelCard({
       ) : null}
 
       {panel.target.kind === "blocks" ? (
-        <ul className="mt-2 space-y-1">
-          {definition.pages.flatMap((page) =>
-            page.blocks
-              .filter((candidate) => candidate.id !== block.id && candidate.type !== "filter_panel")
-              .map((candidate) => {
-                const compatible = isFilterTargetable(candidate);
-                const chosen =
-                  panel.target.kind === "blocks" && panel.target.blockIds.includes(candidate.id);
-                const name =
-                  candidate.title ?? blockSpec(candidate.type as BlockType).label;
-                return (
+        /*
+         * COMPATIBLE AND INCOMPATIBLE TARGETS, VISUALLY SEPARATED.
+         *
+         * They used to be one undifferentiated list in document order, so a
+         * divider, a paragraph and a KPI sat side by side and the only
+         * difference was that one checkbox happened to be disabled. The
+         * compatible ones are the list; the rest are folded away under a
+         * heading that says they are not offered, each with the reason, so a
+         * person who wonders "why can I not tick the interpretation" gets an
+         * answer without the answer being in their way.
+         */
+        <>
+          <ul className="mt-2 space-y-1">
+            {compatibleTargets.length === 0 ? (
+              <li className="text-xs text-muted">
+                Esta experiencia todavía no tiene ningún bloque que se recalcule con un filtro.
+              </li>
+            ) : null}
+            {compatibleTargets.map(({ page, block: candidate }) => {
+              const chosen =
+                panel.target.kind === "blocks" && panel.target.blockIds.includes(candidate.id);
+              const name = candidate.title ?? blockSpec(candidate.type as BlockType).label;
+              return (
+                <li key={candidate.id}>
+                  <label className="flex min-h-11 items-center gap-2 text-sm text-body">
+                    <input
+                      type="checkbox"
+                      checked={chosen}
+                      onChange={(event) => onToggleTargetBlock(candidate.id, event.target.checked)}
+                      className="size-4 shrink-0"
+                    />
+                    <span className="min-w-0">
+                      {name} <span className="text-muted">· {page.title}</span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          {incompatibleTargets.length > 0 ? (
+            <details className="mt-2 rounded-lg border border-line bg-surface p-2">
+              <summary className="min-h-11 cursor-pointer list-none py-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                No se pueden conectar ({incompatibleTargets.length})
+              </summary>
+              <ul className="mt-1 space-y-1">
+                {incompatibleTargets.map(({ page, block: candidate, reason }) => (
                   <li key={candidate.id}>
-                    <label
-                      className={`flex min-h-11 items-center gap-2 text-sm ${compatible ? "text-body" : "text-muted"}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={chosen}
-                        disabled={!compatible}
-                        onChange={(event) => onToggleTargetBlock(candidate.id, event.target.checked)}
-                        className="size-4 shrink-0"
-                      />
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-muted">
+                      <input type="checkbox" checked={false} disabled readOnly className="size-4 shrink-0" />
                       <span className="min-w-0">
-                        {name} <span className="text-muted">· {page.title}</span>
-                        {compatible ? null : (
-                          <span className="text-muted"> · no muestra resultados que se recalculen</span>
-                        )}
+                        {candidate.title ?? blockSpec(candidate.type as BlockType).label}{" "}
+                        <span>· {page.title} · {reason}</span>
                       </span>
                     </label>
                   </li>
-                );
-              }),
-          )}
-        </ul>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </>
       ) : null}
 
       <p className="mt-2 text-xs text-muted">
@@ -482,7 +545,22 @@ export function FilterPanelCard({
           : governed.size === 1
             ? "Ahora mismo cambia 1 bloque."
             : `Ahora mismo cambia ${governed.size} bloques.`}
+        {" "}
+        Los bloques de contenido fijo — texto, encabezados, la lectura del equipo, la portada y el
+        botón de descarga — quedan fuera siempre, con cualquier alcance.
       </p>
+      {governed.size > 0 ? (
+        <ul className="mt-1 space-y-0.5 text-xs text-muted">
+          {compatibleTargets
+            .filter((entry) => governed.has(entry.block.id))
+            .map((entry) => (
+              <li key={entry.block.id} className="min-w-0 truncate">
+                · {entry.block.title ?? blockSpec(entry.block.type as BlockType).label}{" "}
+                <span>({entry.page.title})</span>
+              </li>
+            ))}
+        </ul>
+      ) : null}
     </section>
   );
 }

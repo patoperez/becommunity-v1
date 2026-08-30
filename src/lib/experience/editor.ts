@@ -61,7 +61,7 @@ import {
   type FilterPanelLayout,
   type FilterTarget,
 } from "./definition";
-import { isFilterTargetable } from "./filters";
+import { filterTargetRefusal } from "./filters";
 import { mintFreeId, mintId, type IdKind } from "./ids";
 import { BREAKPOINTS, GRID_COLUMNS, type Breakpoint } from "./layout";
 import type { Aggregation, SemanticRegistry } from "./registry";
@@ -606,6 +606,19 @@ export function setFilterConnection(
   }
   if (!findBlock(definition, blockId)) {
     return refuse(state, "Ese bloque ya no está en la experiencia.");
+  }
+
+  // REFUSED, WITH THE REASON, WHEN THE BLOCK SHOWS NOTHING THAT RECOMPUTES.
+  // The card no longer OFFERS this on a static block at all, but a connection
+  // can also arrive from the panel's own target list and from an older
+  // document, so the rule lives with the operation rather than with one screen.
+  if (connected) {
+    const found = findBlock(definition, blockId);
+    const refusal = found ? filterTargetRefusal(found.block) : null;
+    if (found && refusal) {
+      const label = found.block.title ?? blockSpec(found.block.type as BlockType).label;
+      return refuse(state, `“${label}” ${refusal}, así que un filtro no lo cambiaría.`);
+    }
   }
 
   const existing = definition.filterConnections.find(
@@ -1442,6 +1455,42 @@ export function setPanelTarget(
 }
 
 /**
+ * STOP ONE PANEL MOVING ONE BLOCK, asked from the block's own card.
+ *
+ * A panel whose scope is "exactly these blocks" simply loses this one. A panel
+ * whose scope is the whole experience, the whole page or chosen sections
+ * governs this block BY POSITION rather than by name, so there is nothing here
+ * to remove — and inventing a per-block exception list would make "every
+ * compatible block" mean something different on every panel. It is refused
+ * with a sentence that says where the decision actually lives, which is the
+ * panel the card links to.
+ */
+export function detachBlockFromPanel(
+  state: EditorState,
+  panelId: string,
+  blockId: string,
+): EditorState {
+  const panel = findBlock(state.definition, panelId);
+  if (!panel || !panel.block.filterPanel) {
+    return refuse(state, "Ese panel de filtros ya no está en la experiencia.");
+  }
+  const target = panel.block.filterPanel.target;
+  const name = panel.block.title ?? blockSpec("filter_panel").label;
+  if (target.kind === "blocks") return togglePanelTargetBlock(state, panelId, blockId, false);
+
+  const scope =
+    target.kind === "experience"
+      ? "toda la experiencia"
+      : target.kind === "page"
+        ? "toda esta página"
+        : "las secciones que tiene elegidas";
+  return refuse(
+    state,
+    `“${name}” mueve ${scope}, así que no se puede quitar un bloque suelto. Abre el panel y cambia su alcance.`,
+  );
+}
+
+/**
  * Add or remove ONE block from an explicit `blocks` target.
  *
  * REFUSED, WITH A REASON, WHEN THE BLOCK CANNOT RESPOND. A KPI, a chart, a
@@ -1467,13 +1516,11 @@ export function togglePanelTargetBlock(
     if (candidate.block.id === panel.block.id) {
       return refuse(state, "Un panel no se filtra a sí mismo.");
     }
-    if (candidate.block.type === "filter_panel") {
-      return refuse(state, "Un panel de filtros no puede filtrar a otro panel de filtros.");
-    }
-    if (!isFilterTargetable(candidate.block)) {
+    const refusal = filterTargetRefusal(candidate.block);
+    if (refusal) {
       return refuse(
         state,
-        `“${candidate.block.title ?? blockSpec(candidate.block.type as BlockType).label}” no muestra ningún resultado que se pueda recalcular, así que un filtro no lo cambiaría.`,
+        `“${candidate.block.title ?? blockSpec(candidate.block.type as BlockType).label}” ${refusal}, así que un filtro no lo cambiaría.`,
       );
     }
   }

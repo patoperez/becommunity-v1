@@ -28,7 +28,13 @@ import { readFile } from "node:fs/promises";
 
 import { csatTopBox, mean, npsFromScores } from "../src/lib/calc/metrics.ts";
 
-import { BLOCK_TYPES, blockCatalogue, blockSpec } from "../src/lib/experience/blocks.ts";
+import {
+  BLOCK_TYPES,
+  blockCapabilities,
+  blockCatalogue,
+  blockSpec,
+  viewerFilterRefusal,
+} from "../src/lib/experience/blocks.ts";
 import {
   CHART_SPECS,
   CHART_VARIANTS,
@@ -106,6 +112,9 @@ import {
   dataKeyForBlock,
   dataKeyForMoment,
   dataKeyForPivot,
+  dataKeyForThemes,
+  definitionDataKeys,
+  qualitativeBlockIds,
   decimalsForUnit,
   blockRestriction,
   resolveBlockData,
@@ -2368,8 +2377,14 @@ console.log("\n[18] The editor persists a real workflow: pages, history, data");
   // --- Filter connections are made and broken deliberately. ----------------
   const filterId = base.definition.filterDefinitions[0]?.id;
   if (filterId) {
+    // AN ELIGIBLE ONE. Since the capability model, connecting a filter to a
+    // block that shows nothing recomputable is refused with a reason, so the
+    // block this picks has to be one that CAN respond — which is asserted
+    // separately, below.
     const lonely = allBlocks(base.definition).find(
-      (block) => !filtersAffecting(base.definition, block.id).includes(filterId),
+      (block) =>
+        isFilterTargetable(block)
+        && !filtersAffecting(base.definition, block.id).includes(filterId),
     );
     let wiring = initialState(base.definition);
     if (lonely) {
@@ -2392,6 +2407,24 @@ console.log("\n[18] The editor persists a real workflow: pages, history, data");
     );
     assert.ok(parseExperienceDefinition(wiring.definition).ok);
     ok("a filter is connected to a block, and disconnected from it, one deliberate act at a time");
+
+    // AND AN INELIGIBLE ONE IS REFUSED, WITH THE REASON — not silently
+    // accepted into a connection that would never move anything.
+    for (const type of ["rich_text", "interpretation", "report_download", "filter_panel"]) {
+      const victim = allBlocks(wiring.definition).find((block) => block.type === type);
+      if (!victim) continue;
+      const refused = setFilterConnection(wiring, filterId, victim.id, true);
+      assert.ok(
+        refused.refusal,
+        `connecting a filter to a ${type} must be refused`,
+      );
+      assert.deepEqual(
+        refused.definition,
+        wiring.definition,
+        "a refused connection leaves the document exactly as it was",
+      );
+    }
+    ok("a filter cannot be connected to a block that shows nothing which recomputes");
   }
 
   // --- Widths: bounded on a computer, and never editable on a phone. -------
@@ -2626,8 +2659,22 @@ console.log("\n[19] The numbers are the study's own, computed once, by the canon
   const opensOn = requests.find((request) => request.key === dataKeyForPivot(pivotBlock.id));
   assert.equal(opensOn.primaryDimensionId, coarsestDimensionId(registry));
 
+  // The qualitative blocks are resolved too, so a filtered page cannot show a
+  // filtered chart beside an unfiltered theme count. They are declared in the
+  // same one place, and the resolved set must be exactly that list.
+  const expectedKeys = definitionDataKeys(base.definition, registry);
+  for (const blockId of qualitativeBlockIds(base.definition)) {
+    assert.ok(
+      expectedKeys.includes(dataKeyForThemes(blockId)),
+      "every qualitative block gets its own theme series",
+    );
+  }
   const set = resolveDefinitionData(rows, registry, index, base.definition);
-  assert.deepEqual(Object.keys(set).sort(), keys.slice().sort(), "the resolved set is exactly the requests");
+  assert.deepEqual(
+    Object.keys(set).sort(),
+    expectedKeys.slice().sort(),
+    "the resolved set is exactly the requests",
+  );
   for (const [key, entry] of Object.entries(set)) {
     if (entry.ok) continue;
     assert.equal(typeof entry.reason, "string", `${key} explains why it has no number`);
@@ -2780,7 +2827,11 @@ console.log("\n[21] Visible filter panels: what they offer and what they move");
   const compatible = allBlocks(base).find(
     (block) => block.type !== "filter_panel" && isFilterTargetable(block),
   );
-  const incompatible = allBlocks(base).find((block) => !isFilterTargetable(block));
+  // NOT the panel itself — a panel refuses to filter a panel for its own
+  // reason, which is asserted separately below.
+  const incompatible = allBlocks(base).find(
+    (block) => block.type !== "filter_panel" && !isFilterTargetable(block),
+  );
   assert.ok(compatible, "the adapted study must contain a block a filter can move");
 
   const explicit = setPanelTarget(initialState(base), first.id, {
@@ -2799,8 +2850,12 @@ console.log("\n[21] Visible filter panels: what they offer and what they move");
     assert.ok(refused.refusal, "connecting a block that shows no result is refused");
     assert.match(
       refused.refusal,
-      /no muestra ning[úu]n resultado|no se pueda recalcular|recalcular/i,
+      /contenido fijo|una acci[oó]n|panel de filtros/i,
       `and the refusal explains why in words: ${refused.refusal}`,
+    );
+    assert.ok(
+      refused.refusal.includes(incompatible.title ?? blockSpec(incompatible.type).label),
+      "the refusal names the block it is about",
     );
     assert.equal(
       serializeExperienceDefinition(refused.definition),
@@ -2808,6 +2863,53 @@ console.log("\n[21] Visible filter panels: what they offer and what they move");
       "a refused connection changes nothing",
     );
   }
+
+  // THE FOUR KINDS OF STATIC BLOCK THE PRODUCT CARES ABOUT MOST, by name.
+  // A checklist of every characteristic used to be printed on all of them.
+  for (const type of [
+    "rich_text",
+    "section",
+    "interpretation",
+    "report_download",
+    "cover",
+    "divider",
+    "image",
+    "all_results_disclosure",
+  ]) {
+    assert.equal(
+      blockSpec(type).capabilities.supportsViewerFilters,
+      false,
+      `${type} must never be moved by a viewer filter`,
+    );
+    assert.ok(
+      viewerFilterRefusal(type),
+      `${type} must be able to say why in words`,
+    );
+  }
+  for (const type of [
+    "metric",
+    "chart",
+    "comparison",
+    "retention",
+    "journey",
+    "qualitative_themes",
+    "theme_cloud",
+    "pivot_explorer",
+    "finding",
+  ]) {
+    assert.equal(
+      blockSpec(type).capabilities.supportsViewerFilters,
+      true,
+      `${type} shows a recomputable result and must be eligible`,
+    );
+    assert.equal(viewerFilterRefusal(type), null);
+    assert.equal(
+      blockSpec(type).capabilities.consumesStudyData,
+      true,
+      `${type} must declare that it reads study data`,
+    );
+  }
+  ok("static and actionable blocks are ineligible by declaration; data-backed ones are eligible");
   ok("an explicit target names blocks by id, and an incompatible connection is refused with a reason");
 
   // LABELS ARE EDITABLE WITHOUT BREAKING A CONNECTION, because a target names

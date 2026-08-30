@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
 import { loadBuilderRegistry } from "@/lib/experience/builder-workspace";
-import { effectiveFilterTargets } from "@/lib/experience/filters";
+import { effectiveFilterTargets, filterDimensionKinds } from "@/lib/experience/filters";
 import { loadExperienceDraft } from "@/lib/experience/storage";
 import { resolveDefinitionData, type BlockDataSet } from "@/lib/experience/data";
 import { EXPERIENCE_LIMITS } from "@/lib/experience/limits";
@@ -120,7 +120,8 @@ export async function previewDraftData(
         context.keyIndex,
         definition,
         selection,
-        effectiveFilterTargets(definition),
+        effectiveFilterTargets(definition, filterDimensionKinds(definition, context.registry)),
+        context.confirmed,
       ),
     };
   } catch {

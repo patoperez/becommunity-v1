@@ -32,7 +32,7 @@ import {
   type ExperienceDefinitionV1,
   type BlockQuerySpec,
 } from "./definition";
-import { panelTargetBlockIds } from "./filters";
+import { filterDimensionKinds, inertConnections, panelTargetBlockIds } from "./filters";
 import { layoutProblems, rowWidths, GRID_COLUMNS, BREAKPOINTS, type PlacedBlock } from "./layout";
 import { EXPERIENCE_LIMITS } from "./limits";
 import {
@@ -68,6 +68,7 @@ export const SOFT_CODES = [
   "weak_mobile_fit",
   "hidden_everywhere",
   "unconnected_filter",
+  "inert_connection",
   "no_renderer_yet",
 ] as const;
 export type SoftCode = (typeof SOFT_CODES)[number];
@@ -510,6 +511,27 @@ export function validateExperienceDefinition(
         detail: `“${filter.label}” no está conectado a ningún bloque, así que no cambia nada todavía.`,
       });
     }
+  }
+
+  /*
+   * A CONNECTION THAT CANNOT DO ANYTHING IS SAID, AND NEVER BLOCKED.
+   *
+   * A document written before the capability model — or one edited by a hand
+   * that knew the identifiers — can name a paragraph or a download button as a
+   * filter target. `effectiveFilterTargets` does not honour it, so nothing
+   * lies on screen; refusing to SAVE it would strand a draft somebody already
+   * has, which is worse than the reference. So it is a warning, once, naming
+   * the block and the reason.
+   */
+  for (const inert of inertConnections(definition, filterDimensionKinds(definition, registry))) {
+    const filter = definition.filterDefinitions.find((entry) => entry.id === inert.filterId);
+    warnings.push({
+      code: "inert_connection",
+      target: { kind: "filter", id: inert.filterId },
+      detail: `“${filter?.label ?? "Un filtro"}” está conectado a “${
+        inert.block.title ?? blockSpec(inert.block.type as BlockType).label
+      }”, que ${inert.reason}. Esa conexión no hace nada.`,
+    });
   }
 
   for (const connection of definition.filterConnections) {

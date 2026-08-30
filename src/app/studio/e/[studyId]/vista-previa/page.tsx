@@ -7,7 +7,7 @@ import { studyParent } from "@/components/shell/BackLink";
 import { DraftPreview } from "@/components/studio/experience/DraftPreview";
 import { loadBuilderWorkspace } from "@/lib/experience/builder-workspace";
 import { resolveDefinitionData } from "@/lib/experience/data";
-import { effectiveFilterTargets } from "@/lib/experience/filters";
+import { effectiveFilterTargets, filterDimensionKinds } from "@/lib/experience/filters";
 import { parseViewerSelection } from "@/lib/experience/viewer-params";
 import { requireInternal } from "@/lib/studio/guard";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
@@ -61,7 +61,10 @@ export default async function StudioDraftPreviewPage({
   // the preview writes them with, and kept only where this document and this
   // study can account for them.
   const selection = parseViewerSelection(await searchParams, definition, workspace.registry);
-  const movedBy = effectiveFilterTargets(definition);
+  const movedBy = effectiveFilterTargets(
+    definition,
+    filterDimensionKinds(definition, workspace.registry),
+  );
   const data =
     Object.keys(selection).length === 0
       ? workspace.data
@@ -72,6 +75,7 @@ export default async function StudioDraftPreviewPage({
           definition,
           selection,
           movedBy,
+          workspace.confirmed,
         );
 
   const savedAt = workspace.draft

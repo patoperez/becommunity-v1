@@ -8,6 +8,7 @@ import {
   dataKeyForBlock,
   dataKeyForMoment,
   dataKeyForPivot,
+  dataKeyForThemes,
   type BlockDataSet,
   type ResolvedBlockData,
 } from "@/lib/experience/data";
@@ -341,8 +342,31 @@ function RetentionBlock(props: BlockViewProps & { policy: SampleVisibilityPolicy
  * base a disclosure rule is applied to is `n` — distinct voices — and NOT the
  * mention count, because two mentions from one person is one person.
  */
-function QualitativeBlock({ block, evidence, policy }: BlockViewProps & { policy: SampleVisibilityPolicy }) {
+/**
+ * THE THEMES A READER IS ACTUALLY LOOKING AT.
+ *
+ * The catalogue declares that this block responds to a viewer filter, so it
+ * reads the RESOLVED, narrowed theme series the server computed for this exact
+ * block — not the study-wide `evidence.themes`, which is the same list for
+ * everybody and would have left a filtered page showing an unfiltered count
+ * beside filtered charts. `evidence.themes` remains the fallback for a surface
+ * that has not resolved one yet, which is what it always was.
+ */
+function QualitativeBlock({ block, data, evidence, policy }: BlockViewProps & { policy: SampleVisibilityPolicy }) {
   const variant = (block.visualization?.variant ?? "bar_horizontal") as ChartVariant;
+  const resolved = data[dataKeyForThemes(block.id)];
+  const themes = useMemo(
+    () =>
+      resolved?.ok
+        ? resolved.data.series[0].cells.map((cell) => ({
+            label: resolved.data.categories.find((category) => category.key === cell.categoryKey)?.label
+              ?? cell.categoryKey,
+            count: cell.value ?? 0,
+            n: cell.n,
+          }))
+        : evidence.themes,
+    [resolved, evidence.themes],
+  );
   const themeData = useMemo<ResolvedBlockData>(
     () => ({
       blockId: block.id,
@@ -351,12 +375,12 @@ function QualitativeBlock({ block, evidence, policy }: BlockViewProps & { policy
       decimals: 0,
       categoryLabel: "Tema",
       seriesLabel: null,
-      categories: evidence.themes.map((theme) => ({ key: theme.label, label: theme.label })),
+      categories: themes.map((theme) => ({ key: theme.label, label: theme.label })),
       series: [
         {
           key: "",
           label: null,
-          cells: evidence.themes.map((theme) => ({
+          cells: themes.map((theme) => ({
             categoryKey: theme.label,
             value: theme.count,
             n: theme.n,
@@ -365,17 +389,22 @@ function QualitativeBlock({ block, evidence, policy }: BlockViewProps & { policy
       ],
       overall: {
         categoryKey: "",
-        value: evidence.themes.reduce((sum, theme) => sum + theme.count, 0),
-        n: evidence.themes.reduce((sum, theme) => sum + theme.n, 0),
+        value: themes.reduce((sum, theme) => sum + theme.count, 0),
+        n: themes.reduce((sum, theme) => sum + theme.n, 0),
       },
       omittedCategories: 0,
       detail: [],
     }),
-    [block.id, evidence.themes],
+    [block.id, themes],
   );
 
-  if (evidence.themes.length === 0) {
-    return (
+  if (themes.length === 0) {
+    return evidence.themes.length > 0 ? (
+      <EmptyChart
+        title="Nadie de este grupo dijo algo con un tema confirmado"
+        detail="Hay temas confirmados en el estudio, pero ninguno viene de las personas que el filtro deja."
+      />
+    ) : (
       <EmptyChart
         title="Todavía no hay temas confirmados"
         detail="Solo entra lo que el equipo ya confirmó en la revisión cualitativa; nada se toma de un comentario sin revisar."
@@ -384,7 +413,7 @@ function QualitativeBlock({ block, evidence, policy }: BlockViewProps & { policy
   }
 
   const cloud = layoutThemeCloud(
-    evidence.themes.map((theme) => ({
+    themes.map((theme) => ({
       label: theme.label,
       count: theme.count,
       evidenceHref: null,

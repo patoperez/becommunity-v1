@@ -25,26 +25,75 @@
  * the only place respondents are touched at all.
  */
 
-import { blockSpec, type BlockType } from "./blocks";
+import {
+  acceptsDimensionKind,
+  blockCapabilities,
+  blockSpec,
+  viewerFilterRefusal,
+  type BlockType,
+} from "./blocks";
 import type {
   ExperienceBlock,
   ExperienceDefinitionV1,
   ExperiencePage,
   FilterDefinition,
 } from "./definition";
+import type { DimensionKind, SemanticRegistry } from "./registry";
 
 /**
  * Whether a block is the kind of thing a reader's filter can move.
  *
- * It is the registry's `allowsFilters` and nothing else — deliberately, so a
- * block type added later declares its own compatibility in the one table that
- * already governs everything else about it, and becomes a legal filter target
- * without a single edit here. The theme cloud and the qualitative summary are
- * compatible today; the real theme-cloud visualization arriving later inherits
- * that rather than needing an exception carved for it.
+ * It is the catalogue's DECLARED `supportsViewerFilters` and nothing else. Not
+ * a label, not "it happens to have a query-shaped property", not a list kept
+ * here. A block type added later becomes a legal target by declaring itself in
+ * the one table that already governs everything else about it.
+ *
+ * The hardcoded `block.type !== "filter_panel"` that used to be written into
+ * the resolver below is gone, because a panel now says so itself.
  */
 export function isFilterTargetable(block: ExperienceBlock): boolean {
-  return blockSpec(block.type as BlockType).allowsFilters;
+  return blockCapabilities(block.type as BlockType).supportsViewerFilters;
+}
+
+/** Why a block cannot be moved, in words, or null when it can. */
+export function filterTargetRefusal(block: ExperienceBlock): string | null {
+  return viewerFilterRefusal(block.type as BlockType);
+}
+
+/**
+ * The characteristic KIND behind each filter, so a block that can only
+ * recompute over respondent characteristics is not moved by a period control.
+ *
+ * A map rather than a registry argument, because the resolver is called from
+ * places that hold a document and no registry — the migration, a gate, a
+ * confirmation dialog. When the map is absent no kind restriction applies,
+ * which is the behaviour every one of those callers had before.
+ */
+export type FilterDimensionKinds = ReadonlyMap<string, DimensionKind>;
+
+export function filterDimensionKinds(
+  definition: ExperienceDefinitionV1,
+  registry: SemanticRegistry,
+): FilterDimensionKinds {
+  const kindOf = new Map(registry.dimensions.map((dimension) => [dimension.id, dimension.kind]));
+  const kinds = new Map<string, DimensionKind>();
+  for (const filter of definition.filterDefinitions) {
+    const kind = kindOf.get(filter.dimensionId);
+    if (kind) kinds.set(filter.id, kind);
+  }
+  return kinds;
+}
+
+/** Whether ONE filter can move ONE block, capability and kind together. */
+export function blockAcceptsFilter(
+  block: ExperienceBlock,
+  filterId: string,
+  kinds?: FilterDimensionKinds,
+): boolean {
+  if (!isFilterTargetable(block)) return false;
+  const kind = kinds?.get(filterId);
+  if (!kind) return true;
+  return acceptsDimensionKind(block.type as BlockType, kind);
 }
 
 /** Every block in the experience, with the page it sits on. */
@@ -102,8 +151,10 @@ export function panelTargetBlockIds(
   const governed = new Set<string>();
   if (!config) return governed;
 
-  const eligible = (block: ExperienceBlock) =>
-    block.id !== panel.id && block.type !== "filter_panel" && isFilterTargetable(block);
+  // `isFilterTargetable` already refuses another panel — `filter_panel`
+  // declares `supportsViewerFilters: false` — so the only thing left to say
+  // here is that a panel does not move itself.
+  const eligible = (block: ExperienceBlock) => block.id !== panel.id && isFilterTargetable(block);
 
   if (config.target.kind === "experience") {
     for (const { block } of allBlocks(definition)) if (eligible(block)) governed.add(block.id);
@@ -145,13 +196,21 @@ export function filterPanels(
 /**
  * The complete answer: for every filter, every block it moves.
  *
- * The union of the explicit connections and every panel that hosts the filter.
+ * The union of the explicit connections and every panel that hosts the filter,
+ * INTERSECTED WITH WHAT EACH BLOCK CAN ACTUALLY DO. A stored connection naming
+ * a paragraph or a download button is not honoured — it is dropped here and
+ * reported as a soft warning by the validator, so an older document keeps
+ * saving while never being described as doing something it does not do.
  */
 export function effectiveFilterTargets(
   definition: ExperienceDefinitionV1,
+  kinds?: FilterDimensionKinds,
 ): Map<string, Set<string>> {
   const moved = new Map<string, Set<string>>();
+  const byId = new Map(allBlocks(definition).map(({ block }) => [block.id, block]));
   const add = (filterId: string, blockId: string) => {
+    const block = byId.get(blockId);
+    if (!block || !blockAcceptsFilter(block, filterId, kinds)) return;
     const set = moved.get(filterId) ?? new Set<string>();
     set.add(blockId);
     moved.set(filterId, set);
@@ -174,8 +233,104 @@ export function blockRespondsTo(
   definition: ExperienceDefinitionV1,
   blockId: string,
   filterId: string,
+  kinds?: FilterDimensionKinds,
 ): boolean {
-  return effectiveFilterTargets(definition).get(filterId)?.has(blockId) ?? false;
+  return effectiveFilterTargets(definition, kinds).get(filterId)?.has(blockId) ?? false;
+}
+
+/**
+ * EVERY STORED CONNECTION THAT CANNOT DO ANYTHING, named.
+ *
+ * A document written before the capability model, or edited by a hand that
+ * knew the block ids, can name a target that shows nothing recomputable. That
+ * is never a hard error — refusing to save a document somebody already has is
+ * worse than the inert reference — so it is listed here, warned about once,
+ * and simply not honoured.
+ */
+export function inertConnections(
+  definition: ExperienceDefinitionV1,
+  kinds?: FilterDimensionKinds,
+): { filterId: string; blockId: string; block: ExperienceBlock; reason: string }[] {
+  const byId = new Map(allBlocks(definition).map(({ block }) => [block.id, block]));
+  const inert: { filterId: string; blockId: string; block: ExperienceBlock; reason: string }[] = [];
+  for (const connection of definition.filterConnections) {
+    for (const blockId of connection.blockIds) {
+      const block = byId.get(blockId);
+      if (!block) continue;
+      if (blockAcceptsFilter(block, connection.filterId, kinds)) continue;
+      inert.push({
+        filterId: connection.filterId,
+        blockId,
+        block,
+        reason:
+          filterTargetRefusal(block)
+          ?? "no puede recalcularse con esa clase de característica",
+      });
+    }
+  }
+  return inert;
+}
+
+/**
+ * WHAT ONE BLOCK RESPONDS TO, said the way its card needs to say it.
+ *
+ * This is the compact summary that replaced the registry-wide checklist. It
+ * answers "which panel, offering which characteristics, moves this block" —
+ * grouped BY THE PANEL, because the panel is where a person changes it, and
+ * separately the explicit one-block-at-a-time connections that no panel
+ * accounts for.
+ */
+export type BlockFilterSource = {
+  /** The panel that moves it, or null for a direct connection. */
+  panelId: string | null;
+  panelTitle: string | null;
+  /** The page the panel sits on, for a summary that can be navigated. */
+  panelPageId: string | null;
+  filters: FilterDefinition[];
+};
+
+export function blockFilterSources(
+  definition: ExperienceDefinitionV1,
+  blockId: string,
+  kinds?: FilterDimensionKinds,
+): BlockFilterSource[] {
+  const block = allBlocks(definition).find((entry) => entry.block.id === blockId)?.block;
+  if (!block || !isFilterTargetable(block)) return [];
+  const byFilterId = new Map(definition.filterDefinitions.map((filter) => [filter.id, filter]));
+
+  const sources: BlockFilterSource[] = [];
+  const accountedFor = new Set<string>();
+
+  for (const { page, block: panel } of filterPanels(definition)) {
+    if (!panelTargetBlockIds(definition, panel).has(blockId)) continue;
+    const filters = panel.filterRefs.flatMap((filterId) => {
+      const filter = byFilterId.get(filterId);
+      if (!filter || !blockAcceptsFilter(block, filterId, kinds)) return [];
+      accountedFor.add(filterId);
+      return [filter];
+    });
+    if (filters.length === 0) continue;
+    sources.push({
+      panelId: panel.id,
+      panelTitle: panel.title ?? blockSpec("filter_panel").label,
+      panelPageId: page.id,
+      filters,
+    });
+  }
+
+  const direct = definition.filterConnections
+    .filter((connection) => connection.blockIds.includes(blockId))
+    .flatMap((connection) => {
+      if (accountedFor.has(connection.filterId)) return [];
+      const filter = byFilterId.get(connection.filterId);
+      if (!filter || !blockAcceptsFilter(block, connection.filterId, kinds)) return [];
+      return [filter];
+    });
+  if (direct.length > 0) {
+    sources.push({ panelId: null, panelTitle: null, panelPageId: null, filters: direct });
+  }
+
+  return sources;
 }
 
 /**

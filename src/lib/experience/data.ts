@@ -39,6 +39,8 @@ import {
   type DataRow,
 } from "@/lib/calc/table";
 
+import { summarizeConfirmedQualitative, type ConfirmedQualitative } from "@/lib/qualitative/published";
+
 import type { ExperienceDefinitionV1 } from "./definition";
 import type { Aggregation, SemanticRegistry } from "./registry";
 import { findDimension, findMetric } from "./registry";
@@ -470,6 +472,7 @@ export const dataKeyForBlock = (blockId: string) => `block:${blockId}`;
 export const dataKeyForMoment = (journeyId: string, momentId: string) =>
   `moment:${journeyId}:${momentId}`;
 export const dataKeyForPivot = (blockId: string) => `pivot:${blockId}`;
+export const dataKeyForThemes = (blockId: string) => `themes:${blockId}`;
 
 /**
  * The characteristic a comparison explorer opens on: the one with the fewest
@@ -627,6 +630,37 @@ export function blockDataRequests(
   return requests;
 }
 
+/**
+ * The blocks whose evidence is the confirmed qualitative review.
+ *
+ * Named here rather than tested for at each call site, so the resolver, the
+ * renderer and the gate agree about which blocks get a theme series.
+ */
+export function qualitativeBlockIds(definition: ExperienceDefinitionV1): string[] {
+  return definition.pages.flatMap((page) =>
+    page.blocks
+      .filter((block) => block.type === "qualitative_themes" || block.type === "theme_cloud")
+      .map((block) => block.id),
+  );
+}
+
+/**
+ * EVERY KEY `resolveDefinitionData` PRODUCES, and no other.
+ *
+ * The numbers a document asks for, plus one theme series per qualitative
+ * block. The gate compares the resolved set against exactly this, so a surface
+ * cannot start computing something the document never asked for.
+ */
+export function definitionDataKeys(
+  definition: ExperienceDefinitionV1,
+  registry: SemanticRegistry,
+): string[] {
+  return [
+    ...blockDataRequests(definition, registry).map((request) => request.key),
+    ...qualitativeBlockIds(definition).map(dataKeyForThemes),
+  ];
+}
+
 /** The resolved set, keyed the way the surfaces look it up. */
 export type BlockDataSet = Record<
   string,
@@ -667,6 +701,92 @@ function journeyRestriction(
   });
 }
 
+/**
+ * THE CONFIRMED QUALITATIVE EVIDENCE, NARROWED THE SAME WAY A NUMBER IS.
+ *
+ * The catalogue declares that a "Lo que dijeron" summary and a theme cloud
+ * respond to a reader's filter. That declaration has to be TRUE, so this
+ * resolves them: the observations are joined to the people who said them,
+ * those people are narrowed by exactly the restriction the block is under, and
+ * the counts are recomputed by `summarizeConfirmedQualitative` — the same
+ * function the client dashboard already uses, so a builder preview and a
+ * client screen cannot disagree about a theme's count.
+ *
+ * WHAT IT NEVER READS. `quote` is not selected by any caller and is not read
+ * here; a suggested theme never enters at all. Only confirmed observations
+ * cross into the composer, which is the qualitative publication boundary and
+ * is not relaxed by making them filterable.
+ *
+ * An observation with no respondent cannot be attributed to a characteristic,
+ * so a narrowed view drops it rather than counting it under every value. With
+ * no narrowing at all it is counted exactly as it always was.
+ */
+export function resolveThemeData(
+  rows: readonly LongRow[],
+  index: RegistryKeyIndex,
+  confirmed: readonly ConfirmedQualitative[],
+  blockId: string,
+  restrict: readonly { dimensionId: string; values: readonly string[] }[],
+): ResolvedBlockData {
+  const active = restrict.filter((entry) => entry.values.length > 0);
+
+  let kept: readonly ConfirmedQualitative[] = confirmed;
+  if (active.length > 0) {
+    const columns: { key: string; values: Set<string> }[] = [];
+    for (const entry of active) {
+      const key = index.dimensions[entry.dimensionId];
+      // An unknown handle narrows to nothing rather than silently widening to
+      // everybody — the same rule `resolveBlockData` applies to a number.
+      if (!key) return themeSeries(blockId, []);
+      columns.push({ key, values: new Set(entry.values) });
+    }
+    const allowed = new Set<string>();
+    for (const row of rows as readonly DataRow[]) {
+      let matches = true;
+      for (const column of columns) {
+        const value = row[column.key];
+        if (typeof value !== "string" || !column.values.has(value)) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) allowed.add(String(row.respondent_id));
+    }
+    kept = confirmed.filter((row) => row.respondent_id !== null && allowed.has(row.respondent_id));
+  }
+
+  return themeSeries(blockId, summarizeConfirmedQualitative([...kept]).themes);
+}
+
+function themeSeries(
+  blockId: string,
+  themes: readonly { theme: string; count: number; n: number }[],
+): ResolvedBlockData {
+  return {
+    blockId,
+    metricLabel: "Menciones confirmadas",
+    unit: "count",
+    decimals: 0,
+    categoryLabel: "Tema",
+    seriesLabel: null,
+    categories: themes.map((theme) => ({ key: theme.theme, label: theme.theme })),
+    series: [
+      {
+        key: "",
+        label: null,
+        cells: themes.map((theme) => ({ categoryKey: theme.theme, value: theme.count, n: theme.n })),
+      },
+    ],
+    overall: {
+      categoryKey: "",
+      value: themes.reduce((sum, theme) => sum + theme.count, 0),
+      n: themes.reduce((sum, theme) => sum + theme.n, 0),
+    },
+    omittedCategories: 0,
+    detail: [],
+  };
+}
+
 export function resolveDefinitionData(
   rows: readonly LongRow[],
   registry: SemanticRegistry,
@@ -674,8 +794,31 @@ export function resolveDefinitionData(
   definition: ExperienceDefinitionV1,
   selection: ViewerSelection = NO_SELECTION,
   movedBy: Map<string, Set<string>> = new Map(),
+  confirmed: readonly ConfirmedQualitative[] = [],
 ): BlockDataSet {
   const set: BlockDataSet = {};
+
+  // The qualitative blocks, narrowed by whatever moves them. Resolved beside
+  // the numbers rather than in a second pass, so a surface can never draw a
+  // filtered chart next to an unfiltered theme count.
+  const blocksById = new Map(
+    definition.pages.flatMap((page) => page.blocks).map((block) => [block.id, block]),
+  );
+  for (const blockId of qualitativeBlockIds(definition)) {
+    const block = blocksById.get(blockId);
+    if (!block) continue;
+    set[dataKeyForThemes(blockId)] = {
+      ok: true,
+      data: resolveThemeData(
+        rows,
+        index,
+        confirmed,
+        blockId,
+        blockRestriction(definition, blockId, block, selection, movedBy),
+      ),
+    };
+  }
+
   for (const request of blockDataRequests(definition, registry, selection, movedBy)) {
     const outcome = resolveBlockData(rows, registry, index, request);
     set[request.key] = outcome.ok

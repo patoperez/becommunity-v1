@@ -228,6 +228,9 @@ export async function refreshExperienceData(
         context.registry,
         context.keyIndex,
         parsed.definition,
+        undefined,
+        undefined,
+        context.confirmed,
       ),
     };
   } catch {
