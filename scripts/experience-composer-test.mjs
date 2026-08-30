@@ -1117,11 +1117,35 @@ for (const promised of [
 ]) {
   assert.ok(isRendererImplemented(promised), `${promised} must be genuinely implemented`);
 }
-assert.equal(implementedVariants().length, 15);
-for (const missing of ["heatmap", "bubble", "treemap"]) {
-  assert.ok(!isRendererImplemented(missing), `${missing} is not implemented and must say so`);
+/*
+ * ALL EIGHTEEN ARE DRAWN NOW.
+ *
+ * The heat map, the bubbles and the proportional rectangles used to declare
+ * themselves undrawn and offer a reference representation beside that
+ * statement. They are real renderers, so they declare NO substitute — and that
+ * absence is the assertion: `alternative: null` is what makes a silent swap
+ * impossible, because there is nothing left to swap to.
+ */
+for (const drawn of ["heatmap", "bubble", "treemap"]) {
+  assert.ok(isRendererImplemented(drawn), `${drawn} is drawn for real in this build`);
+  assert.equal(
+    CHART_SPECS[drawn].alternative,
+    null,
+    `${drawn} declares no substitute, because it no longer needs one`,
+  );
 }
-ok(`15 of the ${CHART_VARIANTS.length} chart variants are drawn, and the other 3 say they are not`);
+assert.equal(implementedVariants().length, CHART_VARIANTS.length);
+for (const variant of CHART_VARIANTS) {
+  // NOTHING IS EVER SILENTLY SUBSTITUTED. A variant that is drawn has no
+  // alternative; one that is not must name the representation offered BESIDE
+  // the notice. Both halves, so neither can be forgotten.
+  assert.equal(
+    CHART_SPECS[variant].alternative === null,
+    CHART_SPECS[variant].rendererImplemented,
+    `${variant}: a drawn variant has no substitute, an undrawn one names its reference`,
+  );
+}
+ok(`all ${CHART_VARIANTS.length} chart variants are drawn, and none declares a silent substitute`);
 
 assert.deepEqual(
   compatibleVariants(["kpi", "bar_horizontal", "pie"], 1).sort(),
@@ -2345,18 +2369,25 @@ console.log("\n[17] The defects the acceptance review found stay fixed");
   const bubbleReport = validateExperienceDefinition(asBubbles.definition, runA.registry);
   assert.ok(
     bubbleReport.warnings.some(
-      (issue) => issue.code === "no_renderer_yet" && issue.target.id === cloudBlock.id,
-    ),
-    "a variant with no renderer is announced even when no query sits behind it",
-  );
-  assert.ok(
-    bubbleReport.warnings.some(
       (issue) => issue.code === "weak_mobile_fit" && issue.target.id === cloudBlock.id,
     ),
-    "and so is one that reads badly on a phone",
+    "a drawing that reads badly on a phone is announced even with no query behind it",
   );
-  assert.deepEqual(bubbleReport.errors, [], "neither of those blocks anything");
-  ok("a block that draws without a query is still told what its drawing costs");
+  /*
+   * AND `no_renderer_yet` IS SILENT, BECAUSE THERE IS NOTHING LEFT TO ANNOUNCE.
+   *
+   * This assertion used `bubble` as its example of an undrawn variant. All
+   * eighteen are drawn now, so the honest version of the check is the opposite
+   * one: no variant in the catalogue can raise the warning, because none of
+   * them declares itself missing.
+   */
+  assert.deepEqual(
+    bubbleReport.warnings.filter((issue) => issue.code === "no_renderer_yet"),
+    [],
+    "no variant announces a missing renderer, because every one of them is drawn",
+  );
+  assert.deepEqual(bubbleReport.errors, [], "and none of that blocks anything");
+  ok("a block that draws without a query is still told what its drawing costs on a phone");
 
   // --- The target comparison carries a range, and refuses an impossible one.
   const targetBlock = allBlocks(runA.definition).find(

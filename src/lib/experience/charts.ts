@@ -227,7 +227,10 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 12,
     mobile: "acceptable",
     rendererImplemented: true,
-    aggregations: null,
+    // ITS SLICES ASSERT THEY SUM TO THE TOTAL. A promedio, an NPS and a
+    // Top-2-Box by characteristic sum to nothing, so three slices reading
+    // 8.4, 7.9 and 9.1 make a picture whose angles mean nothing at all.
+    aggregations: ["count", "sum", "share"],
     usesPalette: false,
     alternative: null,
   },
@@ -240,7 +243,10 @@ const SPECS: ChartVariantSpec[] = [
     maximumCategories: 12,
     mobile: "acceptable",
     rendererImplemented: true,
-    aggregations: null,
+    // ITS SLICES ASSERT THEY SUM TO THE TOTAL. A promedio, an NPS and a
+    // Top-2-Box by characteristic sum to nothing, so three slices reading
+    // 8.4, 7.9 and 9.1 make a picture whose angles mean nothing at all.
+    aggregations: ["count", "sum", "share"],
     usesPalette: false,
     alternative: null,
   },
@@ -261,27 +267,35 @@ const SPECS: ChartVariantSpec[] = [
     id: "heatmap",
     label: "Mapa de calor",
     description: "Dos características cruzadas, con la intensidad como valor.",
+    // TWO characteristics, exactly. A heat map with one axis is a bar chart
+    // drawn badly, and with none there is no grid at all.
     dimensions: { min: 2, max: 2 },
     comfortableCategories: 12,
     maximumCategories: 40,
     mobile: "poor",
-    rendererImplemented: false,
+    rendererImplemented: true,
+    // Any aggregation: a cell is one number about one crossing and makes no
+    // claim about summing to anything.
     aggregations: null,
-    usesPalette: false,
-    alternative: "table",
+    usesPalette: true,
+    alternative: null,
   },
   {
     id: "bubble",
     label: "Burbujas",
-    description: "Tres cosas a la vez: posición, posición y tamaño.",
+    description: "Dos características cruzadas, con el tamaño como valor.",
     dimensions: { min: 2, max: 2 },
     comfortableCategories: 24,
     maximumCategories: 60,
     mobile: "poor",
-    rendererImplemented: false,
-    aggregations: null,
-    usesPalette: false,
-    alternative: "table",
+    rendererImplemented: true,
+    // A RADIUS CANNOT BE NEGATIVE, and an area of zero is a value that
+    // vanishes. So it draws magnitudes: counts, sums, shares, a Top-2-Box. An
+    // NPS runs from -100 and a promedio has no zero point, and neither of
+    // those has an area.
+    aggregations: ["count", "sum", "share", "top_box"],
+    usesPalette: true,
+    alternative: null,
   },
   {
     id: "treemap",
@@ -291,10 +305,13 @@ const SPECS: ChartVariantSpec[] = [
     comfortableCategories: 20,
     maximumCategories: 60,
     mobile: "poor",
-    rendererImplemented: false,
-    aggregations: null,
-    usesPalette: false,
-    alternative: "bar_horizontal",
+    rendererImplemented: true,
+    // A RECTANGLE'S AREA IS ITS SHARE OF THE WHOLE. That is the entire claim
+    // the drawing makes, so it accepts only the aggregations whose parts
+    // genuinely add up — the same rule the pastel and the dona live under.
+    aggregations: ["count", "sum", "share"],
+    usesPalette: true,
+    alternative: null,
   },
   {
     id: "traffic_light",

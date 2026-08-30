@@ -90,8 +90,44 @@ export type ValidationReport = {
  * The drawings whose geometry ASSERTS that the parts add up to the whole, and
  * the aggregations for which that assertion is true.
  */
-const PART_OF_WHOLE_VARIANTS: ReadonlySet<string> = new Set(["pie", "donut", "treemap"]);
-const PART_OF_WHOLE_AGGREGATIONS: ReadonlySet<string> = new Set(["count", "sum", "share"]);
+/*
+ * WHICH AGGREGATIONS A DRAWING CAN TELL THE TRUTH ABOUT — read from the
+ * catalogue, not kept here.
+ *
+ * This used to be two sets in this file, listing the variants that divide a
+ * whole and the aggregations that do. That is the same fact stated twice: the
+ * catalogue already says what each drawing needs, and two lists of one fact
+ * drift the moment a variant is added to one of them. `charts.ts` now declares
+ * `aggregations` per variant and this reads it, so a new drawing becomes
+ * correctly restricted by declaring itself.
+ */
+function aggregationRefusal(
+  variant: ChartVariant,
+  aggregation: string,
+  metricLabel: string,
+): string | null {
+  const spec = CHART_SPECS[variant];
+  if (spec.aggregations === null) return null;
+  if ((spec.aggregations as readonly string[]).includes(aggregation)) return null;
+  const allowed = spec.aggregations.map((entry) => AGGREGATION_WORD[entry] ?? entry).join(", ");
+  return (
+    `“${spec.label}” no puede representar honestamente “${metricLabel}” calculado así. `
+    + `Esta gráfica solo admite: ${allowed}. Cambia el cálculo o elige otra gráfica.`
+  );
+}
+
+/** The aggregations in the words the composer uses for them. */
+const AGGREGATION_WORD: Record<string, string> = {
+  count: "cantidad",
+  sum: "suma",
+  share: "porcentaje del total",
+  top_box: "porcentaje de satisfacción",
+  average: "promedio",
+  value: "valor",
+  net_score: "recomendación neta",
+  min: "mínimo",
+  max: "máximo",
+};
 
 const EMPTY: ValidationReport = { errors: [], warnings: [] };
 
@@ -244,24 +280,20 @@ export function validateBlockQuery(
         detail: `“${metric.label}” no se puede representar como ${spec.label.toLowerCase()}.`,
       });
     }
-    // A DRAWING THAT DIVIDES A WHOLE NEEDS PARTS THAT ADD UP TO ONE.
-    //
-    // A pie, a dona and a treemap all say "this is how the total splits". A
-    // promedio, un NPS o un Top-2-Box por característica do not add up to
-    // anything: three slices reading 8.4, 7.9 and 9.1 make a picture whose
-    // angles mean nothing at all. Counting answers, adding them up, or taking
-    // the share of the total does divide a whole, so those three aggregations
-    // are exactly the ones these drawings accept. It is a hard error because
-    // the alternative is a graphic that misrepresents the data.
-    if (PART_OF_WHOLE_VARIANTS.has(context.variant) && !PART_OF_WHOLE_AGGREGATIONS.has(query.aggregation)) {
-      errors.push({
-        code: "impossible_schema",
-        target,
-        detail:
-          `“${spec.label}” reparte un total entre sus partes, y “${metric.label}” está calculado como `
-          + "un promedio, así que las partes no suman el total. Cambia el cálculo a cantidad, suma o "
-          + "porcentaje del total, o elige otra gráfica.",
-      });
+    /*
+     * A DRAWING THAT DIVIDES A WHOLE NEEDS PARTS THAT ADD UP TO ONE, and a
+     * drawing that encodes magnitude as AREA needs magnitudes.
+     *
+     * A pie, a dona and unos rectángulos all say "this is how the total
+     * splits"; three slices reading 8.4, 7.9 and 9.1 make a picture whose
+     * angles mean nothing. A burbuja says "this much"; an NPS runs from -100
+     * and a promedio has no zero point, and neither has an area. Both are hard
+     * errors, because the alternative is a graphic that misrepresents the data
+     * rather than one that is merely ugly.
+     */
+    const refusal = aggregationRefusal(context.variant, query.aggregation, metric.label);
+    if (refusal) {
+      errors.push({ code: "impossible_schema", target, detail: refusal });
     }
     const shown = query.topN ? Math.min(query.topN, cardinality || query.topN) : cardinality;
     if (spec.maximumCategories !== null && shown > spec.maximumCategories) {
