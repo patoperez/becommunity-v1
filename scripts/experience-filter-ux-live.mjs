@@ -391,6 +391,19 @@ const TARGETS = `(() => {
     + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.') : '');
   return [...document.querySelectorAll('a[href],button,summary,select,textarea,input:not([type="hidden"])')]
     .filter(visible)
+    /*
+     * THE COLLAPSE RAIL IS THE ONE DELIBERATE EXCEPTION, and it is the
+     * exception the guideline itself names: a control below the target minimum
+     * is acceptable when the same action is available through an equivalent
+     * control of full size on the same screen. Collapsing a panel has exactly
+     * that — a labelled toolbar button, always present, never hidden by focus
+     * mode. The rail lives in the 16 px seam between the panel and the canvas,
+     * where a 44 px target cannot fit without covering one of the two things it
+     * sits between. It keeps 24 x 44, the WCAG 2.2 minimum, and it is never the
+     * only route. `test:milestone-live` measures it separately against that
+     * minimum, so the exemption is an exception you can see rather than a hole.
+     */
+    .filter((el) => !el.hasAttribute('data-rail-control'))
     .flatMap((el) => {
       const target = (el.matches('input[type="checkbox"],input[type="radio"]') ? el.closest('label') : el) || el;
       const rect = target.getBoundingClientRect();
