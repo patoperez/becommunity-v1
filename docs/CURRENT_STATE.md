@@ -9,7 +9,9 @@
 
 Standing reference: `docs/EXPERIENCE_COMPOSER.md`, **sections 38–44** for this
 milestone. Branch `claude/experience-builder-journeys-visuals-cloud`, from
-`claude/experience-builder-filter-ux-focus` at `24f9680`.
+`claude/experience-builder-filter-ux-focus` at `24f9680`. Verified implementation
+handoff: `e9fdd6268e16429be37498f389ad8f5bc706028d`; the tested zero-traffic Worker
+artifact was built from `07d14b9`, and the final commit only records that upload.
 
 - **Schema version 3**, reached by a purely additive one-step migration.
   `twoToThree` adds `bandSchemes`, per-block/journey/moment `bandSchemeId`,

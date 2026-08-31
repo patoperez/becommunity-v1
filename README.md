@@ -20,6 +20,10 @@ cp .env.example .env.local   # fill with values from the Supabase dashboard
 npm run dev                  # http://localhost:3000
 ```
 
+Run repository npm lifecycle commands in Linux/WSL, not on the Windows host;
+the signed-code policy on this workstation blocks Cloudflare's `workerd.exe`.
+See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for the verified environment.
+
 Apply every versioned migration in order before first run. For a linked
 development/staging project use `npx supabase db push --dry-run`, review the
 exact list, then `npx supabase db push`. Emergency rollback scripts live outside
@@ -37,7 +41,7 @@ npm run lint         # eslint
 npm run test         # complete deterministic suite
 npm run gates        # gates:offline + gates:live — the complete release chain
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
-npm run gates:live   # live credential-bearing chain: qualitative-live -> suite:a -> suite:b -> suite:c
+npm run gates:live   # complete credential-bearing browser/database chain, including composer milestones and Suites A-C
 npm run suite:a      # Suite A: tenant isolation, data scope, least privilege (A1-A5)
 npm run suite:b      # Suite B: server-side authorization (B1-B11, three evidence layers)
 npm run suite:c      # Suite C: hostile input, imports, pivot boundary, injection (C1-C5)
@@ -79,63 +83,34 @@ free-tier anti-pause): [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Current state
 
-P0-P6 are implemented, technically accepted and human-accepted with synthetic
-data. P7 engineering is complete at `b8fcfc4` (delivery PR #38). P8-A is
-implementation-complete and owner-accepted at `3659a38` (delivery PR #37).
-P8.2's first owner-review slice — no-code access scope and guided import
-mapping — is owner-accepted and merged at `b1abfef` (delivery PR #39).
+P0-P8 are implemented and owner-accepted; P9 hardening and the first real-study
+path are established. Guided XLSX/CSV mapping supports internal-only respondent
+metadata, aggregate retention/churn has its own period-series import, semantic
+category grouping is decided by a person, and the Journey editor focus-loss
+regression is covered by deterministic and real-browser gates.
 
-**P8.2 is implementation-complete and owner-accepted as part of the final P8
-pass on 2026-08-27.** Be Community
-Studio has its own addresses under `/studio/**` — every `/admin/**` address
-still answers — an actionable home, a study work surface with process steps,
-the journey-metric and theme pickers, visible paging, publication reachable only
-through the client preview, one accessible destructive-action dialog, and the
-account and client lifecycle. Migration `0015` is applied to the synthetic
-project only; the complete offline and live chains and the lifecycle acceptance
-passed at `543889a`, and all disposable acceptance data was removed with the
-protected fixture unchanged. Permanent client deletion remains deliberately
-disabled and refused server-side until a recoverable cross-system deletion
-workflow exists.
+**Current product-construction milestone:** the governed Experience Composer is
+at schema version 3 on
+`claude/experience-builder-journeys-visuals-cloud` (verified implementation
+handoff `e9fdd6268e16429be37498f389ad8f5bc706028d`). It supports independently
+collapsible editor panels, multiple reusable recorridos, exact awareness
+mappings, authored semáforo standards that can become filters, real heat-map /
+bubble / treemap renderers, and a deterministic thematic cloud over approved
+qualitative categories. The full design and verification record is in
+[docs/EXPERIENCE_COMPOSER.md](docs/EXPERIENCE_COMPOSER.md), sections 38-44.
 
-**P8.3 is implementation-complete and owner-accepted.** `/insights` now has a
-compact study library and an authorized
-route per study; filter state is shareable in the URL and drives the same
-bounded grammar used by the PDF. Comparisons, longitudinal reading, sample
-context, recovery states and the PDF vocabulary are one client-facing story.
-Calculations, ingestion, RLS, roles and publication boundaries are unchanged.
+The composer still saves an **internal draft only**. It does not yet change the
+client dashboard. Publication/version history/rollback and the client renderer
+are the next bounded unit. The real Cuicuilco draft remains unchanged at
+revision 72; the milestone was uploaded only as a zero-traffic Worker preview,
+and production traffic was not promoted.
 
-**P8.4 is implementation-complete and owner-accepted.**
-Studio now has a structured consultant-reading workflow with private draft,
-visible review state and a separately published client snapshot. The client
-story and PDF show only that snapshot. Qualitative results add an optional,
-downloadable word cloud while retaining the counted list as the reference; the
-journey keeps the most useful friction points close to each moment. Client and
-study presentation settings inherit predictably, support one focused threshold
-alert, and travel with team-shared templates. Migrations `0017` and `0018` are
-applied to the synthetic project only. `npm run test:p8-qualitative` is the
-30th deterministic gate; `npm run test:p8-qualitative-live` verifies the full
-interpretation lifecycle with disposable data.
-
-**P8.5 is implementation-complete and owner-accepted; P8 closed on
-2026-08-27.** The 31st deterministic gate checks named loading/empty/error/
-not-found states, keyboard and focus contracts, reduced motion, plain language
-and accessible word-cloud semantics. A separate authenticated rendered gate
-visits the client and Studio route set at 320, 360, 390, 768, 1024 and 1280 px,
-without screenshots, and fails on page overflow, clipped text, duplicate IDs,
-unnamed graphics, missing image alternatives or undersized controls. The human
-acceptance record is in `.design/be-community-v2/implementation-reviews/p8-5-final-acceptance/REVIEW.md`.
-
-**Real-study import support is prepared after P8.** Guided XLSX/CSV mapping now
-includes internal-only respondent metadata, and aggregate retention/churn
-history has its own period-series upload instead of being represented as survey
-responses. Migration `0019` is required before using these additions.
-
-**Current P9 handoff:** the Journey stage editor's per-keystroke focus loss is
-fixed and guarded by deterministic and real-browser tests. Before any subsequent
-manual Cloudflare deployment, read `docs/CURRENT_STATE.md` and
-`docs/DEPLOYMENT.md`: the next deploy is blocked until Wrangler is configured to
-preserve the dashboard-managed public Supabase variables.
+Before any manual Cloudflare deployment, read
+[docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) and
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). `keep_vars = true` is enforced, but
+the two public Supabase bindings currently still have to be supplied on a
+version upload; the privileged service-role key remains an encrypted Worker
+secret and must never enter a build or committed file.
 
 Standalone visual prototyping is closed: implement reviewable vertical slices in
 the real product and correct them through human testing. Read

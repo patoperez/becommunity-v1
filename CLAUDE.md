@@ -17,17 +17,20 @@ data-connected journey maps for the firm's clients (schools).
 
 **It is NOT a CRM.** No sales pipelines. The product is data → insight → client-facing story.
 
-- The P0-P6 V2 framework is deployed to a **synthetic-data test/beta Worker**.
-  P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`, but that branch
-  is not yet merged into remote `main`; the P8 worktree intentionally descends
-  from it. This is not yet a real-client go-live environment, and deferred
-  go-live controls return only after the product experience is complete.
+- The V2 framework and hardening baseline are deployed to a
+  **synthetic-data test/beta Worker**. The current Experience Composer milestone
+  exists on its own branch and as a zero-traffic preview only; it has not been
+  promoted to production traffic. This is not yet a real-client go-live
+  environment, and deferred go-live controls still require the final domain,
+  production Supabase and operational decisions recorded in
+  `docs/CURRENT_STATE.md`.
 - Full V2 architecture lives in `BeCommunity_V2_Technical_Architecture.docx` (reference only — consult, don't inline).
 - Project background and decisions live in `system_context.md`.
 
-## Tech stack  *(verified against package.json + config, 2026-08-22)*
+## Tech stack  *(verified against package.json + config, 2026-08-30)*
 
-- Framework: **Next.js 16.2.9** (App Router) + **React 19.2.4** + **TypeScript ^5, `strict: true`**.
+- Framework: **Next.js 16.3.2** (App Router) + **React 19.2.4** +
+  **TypeScript 5.9.3, `strict: true`**.
 - Styling: **TailwindCSS v4** (`@tailwindcss/postcss`).
 - Backend/DB: **Supabase Cloud** (`@supabase/supabase-js 2.108.2`, `@supabase/ssr 0.12.0`) — Postgres + Auth + Storage + RLS.
 - Deployment: **Cloudflare Worker via `@opennextjs/cloudflare 1.20.1`**, `nodejs_compat`. The full Next server runs on the **Node.js runtime** (not Edge); middleware uses the **Edge `middleware.ts` convention** because OpenNext rejects Node middleware. ⓘ **`nodejs_compat` is NOT a guarantee that a Node library works.** workerd's `unenv` shims throw on unimplemented APIs, and ExcelJS's Node entry dies on a module-level `process.umask()` (via `unzipper` → `fstream`). `.xlsx` therefore loads ExcelJS's **browser** build lazily — see `src/lib/ingestion/parse.ts` and the `test:workers-ingestion` gate.
@@ -182,11 +185,16 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — the Experience Composer, schema v2; do not skip ahead
+## Current work — the Experience Composer, schema v3; publication is next
 
 The authoritative state is `docs/CURRENT_STATE.md`. Standing architecture
-reference: `docs/EXPERIENCE_COMPOSER.md` (sections 23-31 are the current
-milestone). Branch `claude/experience-builder-preview-filters`.
+reference: `docs/EXPERIENCE_COMPOSER.md`; **sections 38-44 are the current
+milestone**. Work from branch
+`claude/experience-builder-journeys-visuals-cloud`; verified implementation
+handoff: `e9fdd6268e16429be37498f389ad8f5bc706028d`. Its tested zero-traffic Worker
+artifact was built from `07d14b9`; the later commit only records that upload.
+Production traffic was not promoted and remains on the previously live Worker
+version recorded in `docs/CURRENT_STATE.md`.
 
 - ⓘ **A Server Action on the builder or the draft preview must never call
   `revalidatePath`.** It makes Next re-render the route inside the action's own
@@ -213,25 +221,54 @@ milestone). Branch `claude/experience-builder-preview-filters`.
   `src/lib/experience/template-suggestions.ts`.** The composer gate refuses a
   client's name in every generic module. Suggestions decide defaults; they never
   restrict what the engine offers.
-- **`EXPERIENCE_SCHEMA_VERSION` is 2**, migrated in code, no database change.
-  Identity is a global layer, not a `cover` block; `query.fixedFilters`
-  replaces `query.filterRefs`; `filter_panel` is the twentieth block type.
+- **`EXPERIENCE_SCHEMA_VERSION` is 3**, migrated forward in code through
+  `oneToTwo` and then `twoToThree`; there is no database change. Version 3 adds
+  authored band schemes, several reusable recorridos, exact awareness mappings,
+  visualization palettes and real thematic-cloud configuration. It never
+  invents missing configuration while migrating an older draft. Identity is a
+  global layer, not a `cover` block; `query.fixedFilters` replaces
+  `query.filterRefs`; `filter_panel` remains an exploration block.
+- **The two sidebar rails are independent editor chrome, not document state.**
+  Either side may be collapsed and restored without moving the other; all four
+  combinations persist in `sessionStorage`, never in the draft. Focus mode is
+  still the explicit action that hides both, and mobile uses drawers instead of
+  a narrow rail.
+- **A study may define several recorridos; a block only points at one.**
+  Duplicating a block creates another view of the same recorrido, while
+  duplicating the recorrido creates an independently editable definition.
+  Awareness requires both the result and the exact values meaning "no lo
+  conocía"; blanks are not silently counted.
+- **A semáforo exists only when a person authors its complete standard.** Never
+  infer bands from percentiles, terciles or the current response distribution.
+  A complete scheme may become a derived filter characteristic, calculated per
+  respondent by the same pure registry function on server and browser. Colour
+  is always accompanied by shape and text.
+- **Heat map, bubble and treemap now have honest renderers**, with only the
+  dimensions and aggregations their geometry can represent and an accessible
+  table carrying the same values. The thematic cloud is deterministic,
+  collision-free and sourced only from approved qualitative categories and
+  their reviewed aliases; it never exposes a raw quote, pending suggestion or
+  respondent identity. `npm run test:renderer-parity` keeps the catalogue and
+  renderer implementations aligned.
 - **Two previews, two labels.** `vista-previa` is the internal draft preview;
   `vista-cliente` is what the client has today and is unchanged. Never reuse a
   label implying the client dashboard already contains draft changes.
 
-P8 is implementation-complete and owner-accepted on
-`p8f-responsive-accessibility-acceptance` at `b49df5d`. Deliver the closure
-record without reopening design scope. It is not merged or deployed; after
-delivery, the next bounded unit is go-live hardening for the final domain,
-production Supabase and operational prerequisites.
+The original P8 product-experience programme is implementation-complete and
+owner-accepted. The active work has since advanced through the governed
+Experience Composer milestones above. **The composed document still drives only
+the builder canvas and internal draft preview.** The next bounded product unit
+is publication/version history/rollback and a client renderer; do not claim a
+saved draft changes the client experience until that bridge exists.
 
 - P0-P6 are implemented, technically accepted and human-accepted on synthetic
   data. P6E completed with 108 automated checks and 0 failures.
 - The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
   #28, human-accepted, squash-merged and deployed. P6 is closed.
-- P7 engineering is concluded and merged (PR #38), and `main` is
-  `fd986940accae5a87170e3de0cb4b2f52dc9d7a9`. Do not reopen P7 correction loops
+- P7 engineering is concluded and merged (PR #38). At the last remote check on
+  2026-08-30, `origin/main` was
+  `c76762f428834b7401118b7d2ad7f0d40158d56a`; verify it again before branching.
+  Do not reopen P7 correction loops
   during P8. Deferred edge, production-environment,
   backup/DR and operational controls return as a bounded go-live hardening pass
   after the product is functionally and visually complete.
@@ -355,7 +392,8 @@ production Supabase and operational prerequisites.
   reference: `docs/EXPERIENCE_COMPOSER.md`. The product direction is a governed
   data-experience builder over the same canonical calculations, authorization,
   approved evidence and immutable snapshots — not an unrestricted query tool.
-  `src/lib/experience/**` holds `ExperienceDefinitionV1` (strict Zod,
+  `src/lib/experience/**` holds the current versioned experience definition
+  (strict Zod,
   server-side, no unknown fields, no SQL/HTML/script/CSS, no database key, no
   respondent, no nesting), the semantic/block/chart registries, a pure
   compatibility adapter, a canonical data resolver, the editor operations, and
@@ -383,11 +421,11 @@ production Supabase and operational prerequisites.
 - ⓘ **The builder refuses out loud and never pretends.** Every editor operation
   that declines returns the state unchanged WITH a reason a person reads, and
   the screen announces it — a silent no-op is an edit somebody believes worked.
-  Fifteen of the eighteen chart variants are drawn for real; the other three say
-  so BY NAME above the reference representation, never instead of it. A semáforo
-  needs a range somebody agreed to and says so when there is none. Do not
-  reintroduce a silent refusal, and do not substitute one drawing for another
-  without saying which is missing.
+  Every chart variant currently declared implemented is drawn for real; heat
+  map, bubble and treemap are no longer substituted with bars. A semáforo needs
+  a complete standard somebody agreed to and says what is missing when there is
+  none. Do not reintroduce a silent refusal, and do not substitute one drawing
+  for another without saying which is missing.
 - ⓘ **`test:experience-builder-live` needs `npm run build && npm start`.** React
   development calls `eval()` and this application's CSP correctly forbids it, so
   under `next dev` the builder never hydrates and every control is inert. A gate

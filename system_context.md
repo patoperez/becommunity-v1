@@ -68,64 +68,46 @@ The number-one adversary is our own AI-generated code, not an external hacker. H
 
 Supabase Cloud (not self-hosted — self-hosting was considered and deferred; it's more work and less secure unless a contractual data-residency requirement appears, which would migrate the same Postgres without an app rewrite). Free tier through build/testing; Pro (~$25/mo) only when the first real client has live access, for leaked-password protection, session controls, and daily backups. Cloudflare free tier hosts and provides the security perimeter. Cost is ~$0 until a live client exists.
 
-## 7. Current phase (verified 2026-08-25)
+## 7. Current phase (verified 2026-08-30)
 
-P0-P6 of the V2 framework have been implemented. P6E synthetic acceptance was
-completed against the deployed Cloudflare Worker: CSV/XLSX ingestion, canonical
-calculations, filters, pivot, journey, server PDF, publication boundaries and
-Tenant A/Tenant B isolation passed 108 automated checks with no failures.
+P0-P8 are implementation-complete and owner-accepted. The synthetic beta has
+the hardened V2 framework, guided ingestion, canonical calculations, client
+Insights, Studio workflows, governed interpretation and bounded presentation
+customisation. P9 established the real-study ingestion/reconciliation path, the
+human semantic-category decision ledger and its disabled-by-default AI advisor,
+and the verified Journey editor focus fix. Deferred controls that need the final
+domain, a production Supabase environment, billing or full disaster recovery
+remain explicit go-live work; they are not silently treated as green.
 
-Human acceptance then found two visual defects in mobile layout and PDF
-pagination. PR #28 fixed both without changing calculations or security
-boundaries; the real-phone and final two-page PDF checks passed, the change was
-merged and deployed, and P6 is now closed.
+The active construction line is the governed **Experience Composer** on branch
+`claude/experience-builder-journeys-visuals-cloud`, with the verified
+implementation handoff at `e9fdd6268e16429be37498f389ad8f5bc706028d`.
+Its schema version is 3. Internal
+staff can compose pages and filter panels, collapse either editor sidebar
+independently, define several reusable recorridos with exact awareness rules,
+author semáforo standards that may become derived filters, use real heat-map /
+bubble / treemap renderers, and create deterministic thematic clouds from
+approved qualitative categories. The milestone's offline, production-browser
+and disposable-live-data gates passed; the real Cuicuilco draft remained at
+revision 72 with the same canonical hash.
 
-P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`; PR #38 is its
-separate delivery unit so P8 does not obscure P7 provenance. Deferred controls
-that require a custom domain, final production environment, billing or full DR
-return as a bounded go-live pass after the product experience is complete; they
-are not silently treated as green.
+The Composer **stores a draft and publishes nothing**. It currently drives the
+builder canvas and internal draft preview only. The next bounded unit is the
+publication/version-history/rollback workflow plus a client renderer over an
+immutable published snapshot. Until that bridge exists, a saved composition
+must never be described as changing what the client sees.
 
-P8 product experience implementation is active in an isolated worktree that
-intentionally descended from that P7 head. Discovery and standalone visual
-comparison are finished. The
-approved direction is an Interactive Insight Experience: guided `Recorrido` and
-bounded `Explorar` for clients, a no-code Studio for internal staff, progressive
-disclosure, rich evidence-connected journeys and controlled Be Community /
-co-branded / white-label presentation. Work now proceeds in reviewable slices
-of the real product, not additional detached HTML prototypes. P8-A is complete
-and owner-accepted at `3659a38` (delivery PR #37). P8.2's first owner-review
-slice — the no-code access-scope picker and guided mapping/readable import
-preview — is owner-accepted and merged at `b1abfef` (delivery PR #39), with its
-storage, authorization and ingestion contracts unchanged.
+The milestone was uploaded as zero-traffic Cloudflare version
+`be070931-a316-4050-989d-2be724b50b38` from tested commit `07d14b9`; production
+traffic was not promoted. Manual uploads must keep `keep_vars = true`, pass both
+public Supabase text bindings while they remain version-only, and inherit the
+encrypted service-role secret without exposing it to a build or committed file.
 
-The remaining P8.2 scope is now implemented, synthetic-acceptance-complete and
-awaiting owner review: Studio's
-own `/studio/**` addresses beside every preserved `/admin/**` one, the
-actionable home, the study work surface, the journey-metric and theme pickers,
-visible paging, publication reachable only through the client preview, one
-accessible destructive-action dialog, and the account and client lifecycle. That
-lifecycle needed its own reviewed boundary, and got the smallest one that could
-carry it: migration `0015` adds two nullable columns and one internal audit
-table and changes no existing policy, grant or function. Suspending a person is
-deliberately NOT in that schema — it is enforced at the authentication boundary
-and read back from the account, so the product cannot show "con acceso" for an
-identity Auth is already refusing. `0015` is applied to the synthetic project
-only. At `543889a` the canonical offline chain, the complete live adversarial
-chain and exact-ledger lifecycle acceptance passed; all disposable acceptance
-objects were removed and the protected fixture remained unchanged. Permanent
-client deletion remains intentionally disabled until a recoverable cross-system
-workflow exists.
-
-P8.3 is implementation-complete on `p8d-insights-data-story` and awaiting owner
-review. It adds the authorized per-study Insights route, compact study library,
-URL/report filter parity, guided comparison over the unchanged pivot allowlist,
-adaptive longitudinal list/chart plus table, canonical sample language on screen
-and in the PDF, and explicit loading/error/invalid-filter states. It changes no
-formula, ingestion contract, role, RLS policy, migration or publication boundary.
-Every P7 and
-calculation boundary remains in force. V2.5 content still follows authoritative
-documented business definitions; never invent formulas.
+Every P7 authorization, tenant-isolation, RLS, calculation and ingestion
+boundary remains in force. V2.5 content still follows authoritative documented
+business definitions; never invent formulas. For exact operational state read
+`docs/CURRENT_STATE.md`; for the Composer contract read
+`docs/EXPERIENCE_COMPOSER.md`, especially sections 38-44.
 
 ## 8. How we work with AI
 
