@@ -266,43 +266,6 @@ function PanelControl({
     );
   }
 
-  /*
-   * ON THE BUILDER'S CANVAS THIS IS A PICTURE OF A CONTROL, SO IT IS DRAWN AS
-   * ONE.
-   *
-   * `onChange === null` means nobody is exploring: the canvas deliberately does
-   * not let the author's own clicks move numbers underneath their edit. Until
-   * now that was a `disabled` select, which is non-operable but still announced
-   * to a screen reader as a form control, still lands in the tab order's
-   * disabled set, and — the moment the canvas is drawn at a scale — is a 26 px
-   * form control on screen.
-   *
-   * Drawing it as text says the same thing more truthfully: here is the
-   * control, here is what it opens with, and it is not something you operate
-   * from this screen. The real control, at full size, is what the draft
-   * preview, the revision preview and the client all render, because all three
-   * pass a `viewer`.
-   */
-  if (!onChange) {
-    const opening = selection.length > 0
-      ? options
-          .filter((option) => selection.includes(option.value))
-          .map((option) => option.label)
-          .join(", ")
-      : multiple
-        ? "Sin selección"
-        : "Todas";
-    return (
-      <div className={inline ? "min-w-0 basis-56 grow" : "min-w-0"}>
-        <p className="block text-xs font-medium text-body">{filter.label}</p>
-        <p className="mt-1 min-w-0 truncate rounded-md border border-dashed border-line bg-surface px-2 py-1.5 text-sm text-muted">
-          {opening}
-          <span className="sr-only"> — así abre para el cliente; no se opera desde el lienzo.</span>
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className={inline ? "min-w-0 basis-56 grow" : "min-w-0"}>
       <label htmlFor={id} className="block text-xs font-medium text-body">
@@ -313,7 +276,9 @@ function PanelControl({
         multiple={multiple}
         size={multiple ? Math.min(4, options.length) : undefined}
         value={multiple ? [...selection] : (selection[0] ?? "")}
+        disabled={onChange === null}
         onChange={(event) => {
+          if (!onChange) return;
           const chosen = multiple
             ? [...event.target.selectedOptions].map((option) => option.value)
             : event.target.value === ""
@@ -321,7 +286,7 @@ function PanelControl({
               : [event.target.value];
           onChange(chosen);
         }}
-        className="mt-1 min-h-11 w-full min-w-0 rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-strong"
+        className="mt-1 min-h-11 w-full min-w-0 rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-strong disabled:opacity-70"
       >
         {multiple ? null : <option value="">Todas</option>}
         {options.map((option) => (

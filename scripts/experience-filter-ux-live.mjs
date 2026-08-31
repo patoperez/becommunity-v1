@@ -355,6 +355,9 @@ async function clickUntil(session, findExpression, doneExpression, what, attempt
 
 const q = (value) => JSON.stringify(value);
 
+/** What a 1 280 px desktop preview is drawn at, for a failure message. */
+const CANVAS_FIT_HINT = "1 120 px";
+
 /** Click a button by its exact visible text. */
 const clickButton = (label) =>
   `(() => { const b = [...document.querySelectorAll('button')].find((el) => el.textContent.trim() === ${q(label)}); if (b) { b.click(); return true; } return false; })()`;
@@ -404,6 +407,20 @@ const TARGETS = `(() => {
      * minimum, so the exemption is an exception you can see rather than a hole.
      */
     .filter((el) => !el.hasAttribute('data-rail-control'))
+    /*
+     * AN INERT ELEMENT IS NOT A CONTROL.
+     *
+     * The builder's canvas draws a PICTURE of a client's page: it passes no
+     * viewer, so a filter panel's controls there do nothing by design, and the
+     * subtree is marked inert to say so — not focusable, not clickable, not
+     * announced as operable. Counting one as a control made this sweep report a
+     * 26 px control the moment the canvas was drawn at a scale, about something
+     * nobody can operate at any size. The block's own chrome sits outside that
+     * subtree and is still measured.
+     *
+     * No backticks in this comment: it lives inside a template literal.
+     */
+    .filter((el) => !el.closest('[inert]'))
     .flatMap((el) => {
       const target = (el.matches('input[type="checkbox"],input[type="radio"]') ? el.closest('label') : el) || el;
       const rect = target.getBoundingClientRect();
@@ -1458,8 +1475,40 @@ try {
     const drawnAt = await session.evaluate(
       `(() => { const el = document.querySelector('[aria-label="Lienzo de la página"] [style*="scale("]'); return el ? el.style.transform : "none"; })()`,
     );
-    assert.equal(drawnAt, "none", `${width}px: the canvas must open at full size, not at ${drawnAt}`);
-    ok(`${width}px: no error boundary, no sideways scrolling, no duplicate id, no control under 44 x 44, canvas at full size`);
+    /*
+     * THE CONTRACT THIS ASSERTION ENCODES CHANGED, AND IT NARROWED.
+     *
+     * It used to read "the canvas must open at full size" at every width, and
+     * that was the right claim for the milestone that wrote it: scaling was a
+     * deliberate act, and opening scaled would have shrunk a 44 px handle to
+     * 18 px without anybody asking.
+     *
+     * The publication milestone resolved that limitation rather than living
+     * with it. A session that has not chosen a scale now opens FITTED whenever
+     * the previewed width does not fit the room, and the block chrome
+     * compensates for the scale so a target still measures 44 px on screen. So
+     * the claim worth protecting is the pair: below the scaling minimum the
+     * canvas is never scaled, and above it — where both panels leave a 1 120 px
+     * canvas about 700 px of room — it fits itself rather than opening on a
+     * horizontal scroll of something nobody can see the shape of.
+     */
+    if (width < 1024) {
+      assert.equal(
+        drawnAt,
+        "none",
+        `${width}px: below the scaling minimum the canvas draws at full size, not at ${drawnAt}`,
+      );
+    } else {
+      assert.match(
+        drawnAt,
+        /^scale\(/,
+        `${width}px: with both panels open the canvas has room for ${CANVAS_FIT_HINT} and must fit itself; it is at ${drawnAt}`,
+      );
+    }
+    ok(
+      `${width}px: no error boundary, no sideways scrolling, no duplicate id, no control under 44 x 44, `
+        + `canvas ${width < 1024 ? "at full size" : `fitted (${drawnAt})`}`,
+    );
 
     if (width === 360) {
       // The panels are drawers here, and the canvas is still the primary view.

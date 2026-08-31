@@ -453,6 +453,20 @@ export const SMALL_TARGETS = `(() => {
   return [...document.querySelectorAll('a[href],button,summary,select,textarea,input:not([type="hidden"])')]
     .filter(visible)
     .filter((el) => !el.hasAttribute('data-rail-control'))
+    /*
+     * AN INERT ELEMENT IS NOT A CONTROL.
+     *
+     * The builder's canvas draws a PICTURE of a client's page: it passes no
+     * viewer, so a filter panel's controls there do nothing by design, and the
+     * subtree is marked inert to say so — not focusable, not clickable, not
+     * announced as operable. Counting one as a control made this sweep report a
+     * 26 px control the moment the canvas was drawn at a scale, about something
+     * nobody can operate at any size. The block's own chrome sits outside that
+     * subtree and is still measured.
+     *
+     * No backticks in this comment: it lives inside a template literal.
+     */
+    .filter((el) => !el.closest('[inert]'))
     .flatMap((el) => {
       const target = (el.matches('input[type="checkbox"],input[type="radio"]') ? el.closest('label') : el) || el;
       const rect = target.getBoundingClientRect();

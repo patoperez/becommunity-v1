@@ -2787,7 +2787,21 @@ function CanvasBlock({
         </Menu>
       </div>
 
-      <div className={`min-w-0 flex-1 px-3 py-2.5 ${hidden ? "opacity-45" : ""}`}>
+      {/*
+        THE DRAWN BLOCK IS A PICTURE, AND `inert` SAYS SO.
+
+        The canvas passes no `viewer`, so a filter panel's controls here are
+        already inert in behaviour: an author's own clicks must not move the
+        numbers underneath their edit. They were still real form controls in the
+        DOM — focusable, announced, and, once the canvas is drawn at a scale, 26
+        px on screen. `inert` makes the previewed page what it has always been:
+        something to look at. The block's own chrome — the handle, the name and
+        the menu — sits OUTSIDE this element and stays fully operable at 44 px.
+      */}
+      <div
+        inert
+        className={`min-w-0 flex-1 px-3 py-2.5 ${hidden ? "opacity-45" : ""}`}
+      >
         <BlockView
           block={block}
           definition={definition}
