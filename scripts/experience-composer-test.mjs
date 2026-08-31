@@ -124,6 +124,7 @@ import {
   dataKeyForMoment,
   dataKeyForPivot,
   dataKeyForThemes,
+  resolveThemeData,
   definitionDataKeys,
   qualitativeBlockIds,
   decimalsForUnit,
@@ -145,7 +146,11 @@ import {
 } from "../src/lib/experience/sample-policy.ts";
 import { definitionSignature, serializeExperienceDefinition, serializedBytes, withinSizeLimit } from "../src/lib/experience/serialize.ts";
 import { isSafeAuthoredText, rejectAuthoredText } from "../src/lib/experience/text.ts";
-import { layoutThemeCloud, themeCloudAlternative } from "../src/lib/experience/theme-cloud.ts";
+import {
+  DEFAULT_THEME_CLOUD_OPTIONS,
+  layoutThemeCloud,
+  themeCloudAlternative,
+} from "../src/lib/experience/theme-cloud.ts";
 import { validateBlockQuery, validateExperienceDefinition } from "../src/lib/experience/validate.ts";
 
 let checks = 0;
@@ -3769,6 +3774,215 @@ console.log("\n[26] A semáforo becomes a characteristic only when somebody says
     "and the module neither ranks nor sorts the values it classifies",
   );
   ok("the classification comes from the written bands, never from the distribution");
+}
+
+
+// ===========================================================================
+console.log("\n[27] The thematic cloud counts what it says it counts");
+// ===========================================================================
+
+{
+  const index = registryKeyIndex(snapshot);
+  const dimensionId = Object.keys(index.dimensions)[0];
+  const column = index.dimensions[dimensionId];
+  assert.ok(column, "the fixture study has a characteristic to narrow by");
+
+  /*
+   * FOUR OBSERVATIONS, THREE PEOPLE, TWO THEMES — chosen so mentions and
+   * people are DIFFERENT numbers. A cloud that quietly used one while its
+   * caption implied the other would be a wrong number with a font size.
+   */
+  const confirmed = [
+    { id: "o1", respondent_id: "r1", theme: "precio", suggestedTheme: "precio", source: "encuesta", stage_key: null, quote: null, category: null },
+    { id: "o2", respondent_id: "r1", theme: "precio", suggestedTheme: "el precio", source: "encuesta", stage_key: null, quote: null, category: null },
+    { id: "o3", respondent_id: "r2", theme: "precio", suggestedTheme: "PRECIO", source: "focus_group", stage_key: null, quote: null, category: null },
+    { id: "o4", respondent_id: "r3", theme: "atención", suggestedTheme: "atención", source: "encuesta", stage_key: null, quote: null, category: null },
+  ];
+  const rows = [
+    { respondent_id: "r1", metric_key: "m", value: 1, [column]: "A" },
+    { respondent_id: "r2", metric_key: "m", value: 1, [column]: "B" },
+    { respondent_id: "r3", metric_key: "m", value: 1, [column]: "A" },
+  ];
+
+  const byMentions = resolveThemeData(rows, index, confirmed, "bk", [], {
+    basis: "mentions",
+    source: null,
+  });
+  const byPeople = resolveThemeData(rows, index, confirmed, "bk", [], {
+    basis: "people",
+    source: null,
+  });
+  const precioMentions = byMentions.series[0].cells.find((cell) => cell.categoryKey === "precio");
+  const precioPeople = byPeople.series[0].cells.find((cell) => cell.categoryKey === "precio");
+  assert.equal(precioMentions.value, 3, "three observations carry the theme");
+  assert.equal(precioPeople.value, 2, "but only two people said it");
+  assert.notEqual(precioMentions.value, precioPeople.value, "and the two bases differ here");
+  assert.equal(precioMentions.n, 2, "the BASE is voices whichever basis sizes the word");
+  assert.equal(precioPeople.n, 2);
+  assert.match(byMentions.metricLabel, /menciones/i, "and the drawing says which it used");
+  assert.match(byPeople.metricLabel, /personas/i);
+  ok("a cloud sizes by mentions or by people, says which, and keeps voices as the disclosure base");
+
+  // THE MERGE IS THE ONE THE REVIEW ALREADY RECORDED. Two raw spellings
+  // confirmed to one theme are that theme's aliases — no second ledger.
+  const precio = byMentions.themes.find((theme) => theme.label === "precio");
+  // Collated the way Spanish sorts, not the way ASCII does — the same rule
+  // every other ordered list in the composer uses.
+  assert.deepEqual(
+    precio.aliases,
+    ["el precio", "PRECIO"],
+    "the raw spellings folded into a confirmed theme are its aliases",
+  );
+  assert.ok(!precio.aliases.includes("precio"), "and the theme is not an alias of itself");
+  assert.deepEqual(precio.sources, ["encuesta", "focus_group"]);
+  ok("a theme's aliases are the spellings the qualitative review folded into it");
+
+  // TWO CLOUDS, TWO SOURCES, ON ONE PAGE.
+  const surveyOnly = resolveThemeData(rows, index, confirmed, "bk", [], {
+    basis: "mentions",
+    source: "encuesta",
+  });
+  assert.equal(
+    surveyOnly.series[0].cells.find((cell) => cell.categoryKey === "precio").value,
+    2,
+    "a cloud reading one source counts only that source",
+  );
+  assert.ok(
+    surveyOnly.series[0].cells.some((cell) => cell.categoryKey === "atención"),
+    "and still carries the themes that source did produce",
+  );
+  ok("two clouds on one page can read two different qualitative sources");
+
+  // A FILTER NARROWS THE PEOPLE, AND THE COUNTS FOLLOW.
+  const narrowed = resolveThemeData(
+    rows,
+    index,
+    confirmed,
+    "bk",
+    [{ dimensionId, values: ["A"] }],
+    { basis: "mentions", source: null },
+  );
+  assert.equal(
+    narrowed.series[0].cells.find((cell) => cell.categoryKey === "precio").value,
+    2,
+    "only r1's two mentions survive a narrowing to A",
+  );
+  assert.ok(
+    narrowed.series[0].cells.some((cell) => cell.categoryKey === "atención"),
+    "and r3 is in A too",
+  );
+  const emptyNarrow = resolveThemeData(
+    rows,
+    index,
+    confirmed,
+    "bk",
+    [{ dimensionId, values: ["no existe"] }],
+    { basis: "mentions", source: null },
+  );
+  assert.deepEqual(emptyNarrow.themes, [], "a narrowing nobody matches produces no themes");
+  assert.equal(
+    resolveThemeData(rows, index, confirmed, "bk", [], { basis: "mentions", source: null })
+      .themes.length,
+    2,
+    "and clearing the filter restores the original cloud",
+  );
+  ok("a filter narrows the people, the counts recompute, and clearing it restores the cloud");
+
+  // NOTHING UNREVIEWED, AND NOTHING PERSONAL, CAN REACH IT.
+  const serialized = JSON.stringify(byMentions);
+  for (const respondent of ["r1", "r2", "r3"]) {
+    assert.ok(!serialized.includes(`"${respondent}"`), "no respondent identifier is carried");
+  }
+  assert.ok(!serialized.includes("quote"), "and no quote field at all");
+  const workspaceSource = await readCode("src/lib/experience/builder-workspace.ts");
+  assert.match(
+    workspaceSource,
+    /review_status", "confirmed"|eq\("review_status", "confirmed"\)/,
+    "only confirmed observations are ever loaded",
+  );
+  assert.doesNotMatch(
+    workspaceSource,
+    /\.select\([^)]*quote/,
+    "and the query cannot return a quote",
+  );
+  ok("a pending theme, a quote and a respondent identifier are each unreachable from a cloud");
+}
+
+// ===========================================================================
+console.log("\n[28] The cloud is a cloud: deterministic, collision-free, readable");
+// ===========================================================================
+
+{
+  const themes = [
+    { label: "precio y valor", count: 12, evidenceHref: null },
+    { label: "atención", count: 9, evidenceHref: null },
+    { label: "referencias", count: 7, evidenceHref: null },
+    { label: "capacitación continua", count: 5, evidenceHref: null },
+    { label: "liderazgo", count: 4, evidenceHref: null },
+    { label: "puntualidad", count: 3, evidenceHref: null },
+    { label: "seguimiento", count: 2, evidenceHref: null },
+    { label: "visitantes", count: 1, evidenceHref: null },
+  ];
+  const options = { ...DEFAULT_THEME_CLOUD_OPTIONS, width: 900, height: 380 };
+  const first = layoutThemeCloud(themes, options);
+  const again = layoutThemeCloud(themes, options);
+  assert.deepEqual(first.placed, again.placed, "the same themes always land in the same places");
+  ok("the layout is deterministic, so a screenshot in a report and the screen agree");
+
+  // NO TWO WORDS OVERLAP.
+  for (let i = 0; i < first.placed.length; i += 1) {
+    for (let j = i + 1; j < first.placed.length; j += 1) {
+      const a = first.placed[i];
+      const b = first.placed[j];
+      const apart =
+        Math.abs(a.x - b.x) * 2 >= a.width + b.width || Math.abs(a.y - b.y) * 2 >= a.height + b.height;
+      assert.ok(apart, `“${a.label}” and “${b.label}” overlap`);
+    }
+  }
+  ok("no two words overlap, and every word is inside the drawing area");
+
+  // SIZE MEANS COUNT, monotonically.
+  const bySize = [...first.placed].sort((a, b) => b.count - a.count);
+  for (let i = 0; i + 1 < bySize.length; i += 1) {
+    assert.ok(
+      bySize[i].fontSize >= bySize[i + 1].fontSize,
+      `a theme mentioned more must not be drawn smaller: ${bySize[i].label} vs ${bySize[i + 1].label}`,
+    );
+  }
+  ok("a theme mentioned more is never drawn smaller than one mentioned less");
+
+  // ROTATION IS DECIDED BY POSITION, NOT BY CHANCE — and the biggest words
+  // stay flat, because the ones read first should not need a tilted head.
+  const horizontal = layoutThemeCloud(themes, { ...options, orientation: "horizontal" });
+  assert.ok(horizontal.placed.every((theme) => theme.rotation === 0), "all horizontal means all flat");
+  const mixed = layoutThemeCloud(themes, { ...options, orientation: "mixed" });
+  assert.ok(mixed.placed.some((theme) => theme.rotation === 90), "mixed turns some words");
+  assert.deepEqual(
+    mixed.placed.slice(0, 2).map((theme) => theme.rotation),
+    [0, 0],
+    "and the two largest stay flat in every mode",
+  );
+  assert.deepEqual(
+    layoutThemeCloud(themes, { ...options, orientation: "mixed" }).placed.map((t) => t.rotation),
+    mixed.placed.map((t) => t.rotation),
+    "rotation is decided by position, so it does not change between renders",
+  );
+  ok("words are turned deterministically, and the largest ones stay flat");
+
+  // A CEILING COUNTS WHAT IT LEAVES OUT.
+  const capped = layoutThemeCloud(themes, { ...options, maximumWords: 3 });
+  assert.equal(capped.placed.length, 3, "only three words are drawn");
+  assert.equal(capped.omitted.length, 5, "and the other five are counted, not dropped in silence");
+  assert.equal(capped.ordered.length, 8, "the ordered list still carries every one");
+  ok("a maximum counts the themes it leaves out and keeps them in the reference list");
+
+  // THE FONT BOUNDS ARE THE BLOCK'S.
+  const big = layoutThemeCloud(themes, { ...options, minimumFontSize: 20, maximumFontSize: 60 });
+  assert.ok(
+    big.placed.every((theme) => theme.fontSize >= 20 && theme.fontSize <= 60),
+    "every word sits inside the configured bounds",
+  );
+  ok("the smallest and largest sizes are the ones the block was configured with");
 }
 
 console.log(`\nOK — ${checks} Experience Composer checks passed.`);

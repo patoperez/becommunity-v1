@@ -64,6 +64,13 @@ export type BuilderEvidence = {
   crossableResults: number;
   /** Which characteristics it can group by, named the way a person reads them. */
   crossableCharacteristics: string[];
+  /**
+   * The qualitative sources this study actually recorded — "encuesta",
+   * "focus_group". It is what lets two clouds on one page read two different
+   * questions, and the picker offers only what exists rather than a list of
+   * shapes the study might one day have.
+   */
+  qualitativeSources: string[];
 };
 
 export type BuilderWorkspace = {
@@ -201,14 +208,30 @@ async function loadConfirmedThemes(
   admin: ReturnType<typeof createAdminClient>,
   studyId: string,
 ): Promise<ConfirmedQualitative[]> {
-  type Row = { id: string; respondent_id: string | null; confirmed_theme: string | null };
+  type Row = {
+    id: string;
+    respondent_id: string | null;
+    confirmed_theme: string | null;
+    suggested_theme: string | null;
+    source: string | null;
+  };
   const rows = await selectAllPages<Row>(
     "qual_observation themes",
     (cursor, size) =>
       keysetWindow(
         admin
           .from("qual_observation")
-          .select("id, respondent_id, confirmed_theme")
+          /*
+           * FIVE COLUMNS, AND STILL NEVER `quote`.
+           *
+           * `suggested_theme` is read only to NAME the spellings a person
+           * folded into a confirmed theme — the cloud's "related aliases" — and
+           * `source` so two clouds on one page can read different questions.
+           * Neither is ever shown as a theme in its own right, and a pending
+           * observation is excluded by the filter below, so nothing unreviewed
+           * reaches a client through this path.
+           */
+          .select("id, respondent_id, confirmed_theme, suggested_theme, source")
           .eq("study_id", studyId)
           .eq("review_status", "confirmed"),
         { column: "id", cursor, size },
@@ -218,14 +241,16 @@ async function loadConfirmedThemes(
   return (rows ?? []).flatMap((row) => {
     const theme = typeof row.confirmed_theme === "string" ? row.confirmed_theme.trim() : "";
     if (!theme) return [];
+    const suggested = typeof row.suggested_theme === "string" ? row.suggested_theme.trim() : "";
     return [{
       id: String(row.id),
       respondent_id: row.respondent_id ? String(row.respondent_id) : null,
       theme,
       stage_key: null,
       quote: null,
-      source: null,
+      source: row.source ? String(row.source) : null,
       category: null,
+      suggestedTheme: suggested === "" ? null : suggested,
     }];
   });
 }
@@ -252,6 +277,9 @@ function buildEvidence(
     respondents: new Set(rows.map((row) => row.respondent_id)).size,
     crossableResults: registry.metrics.length,
     crossableCharacteristics: crossable.map((dimension) => dimension.label),
+    qualitativeSources: [
+      ...new Set(confirmed.flatMap((row) => (row.source ? [row.source] : []))),
+    ].sort((a, b) => a.localeCompare(b, "es-MX")),
   };
 }
 

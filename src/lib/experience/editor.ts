@@ -49,6 +49,7 @@ import { blockSpec, type BlockType } from "./blocks";
 import {
   CHART_SPECS,
   compatibleVariants,
+  type ChartPalette,
   type ChartVariant,
 } from "./charts";
 import { newBlock, newPage } from "./defaults";
@@ -63,6 +64,7 @@ import {
   type BandSchemeDocument,
   type JourneyMoment,
   type JourneyReference,
+  type ThemeCloudConfig,
 } from "./definition";
 import { filterTargetRefusal } from "./filters";
 import { mintFreeId, mintId, type IdKind } from "./ids";
@@ -2419,5 +2421,56 @@ export function setBlockBandScheme(
   return commit(
     state,
     mapBlock(state.definition, blockId, (block) => ({ ...block, bandSchemeId: schemeId })),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A drawing's palette, and a cloud's own settings
+// ---------------------------------------------------------------------------
+
+/** The colour SCALE a heat map, a treemap or a bubble field reads. */
+export function setChartPalette(
+  state: EditorState,
+  blockId: string,
+  palette: ChartPalette,
+): EditorState {
+  const found = findBlock(state.definition, blockId);
+  if (!found) return refuse(state, "Ese bloque ya no está en la experiencia.");
+  if (!found.block.visualization) {
+    return refuse(state, "Ese bloque no se dibuja como una gráfica.");
+  }
+  return commit(
+    state,
+    mapBlock(state.definition, blockId, (block) =>
+      block.visualization ? { ...block, visualization: { ...block.visualization, palette } } : block,
+    ),
+  );
+}
+
+/**
+ * ONE OR MORE OF A CLOUD'S SETTINGS.
+ *
+ * `basis` is the one that changes a NUMBER rather than an appearance: mentions
+ * and people are different counts of the same evidence, and the drawing prints
+ * which it used. The rest are how the picture looks, and the font bounds are
+ * held apart so a cloud whose smallest word is larger than its largest cannot
+ * be stored — the boundary refuses that, and refusing it here means the person
+ * finds out while they are typing rather than when they try to save.
+ */
+export function setThemeCloud(
+  state: EditorState,
+  blockId: string,
+  patch: Partial<ThemeCloudConfig>,
+): EditorState {
+  const found = findBlock(state.definition, blockId);
+  if (!found) return refuse(state, "Ese bloque ya no está en la experiencia.");
+  if (!found.block.themeCloud) return refuse(state, "Ese bloque no es una nube de temas.");
+  const next = { ...found.block.themeCloud, ...patch };
+  if (next.minimumFontSize >= next.maximumFontSize) {
+    return refuse(state, "La letra más grande tiene que ser mayor que la más chica.");
+  }
+  return commit(
+    state,
+    mapBlock(state.definition, blockId, (block) => ({ ...block, themeCloud: next })),
   );
 }

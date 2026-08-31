@@ -15,11 +15,19 @@ import {
 
 import { blockCatalogue, blockSpec, type BlockType } from "@/lib/experience/blocks";
 import { blockFilterSources, filterDimensionKinds } from "@/lib/experience/filters";
-import { CHART_SPECS, compatibleVariants, isRendererImplemented, type ChartVariant } from "@/lib/experience/charts";
+import {
+  CHART_PALETTES,
+  CHART_SPECS,
+  compatibleVariants,
+  isRendererImplemented,
+  type ChartPalette,
+  type ChartVariant,
+} from "@/lib/experience/charts";
 import { canAddBlock } from "@/lib/experience/defaults";
 import {
   findBlock,
   parseExperienceDefinition,
+  type ThemeCloudConfig,
   type ExperienceBlock,
   type ExperienceDefinitionV1,
   type ExperiencePage,
@@ -74,7 +82,9 @@ import {
   setBandSchemeSource,
   setBlockBandScheme,
   setBlockJourney,
+  setChartPalette,
   setChartVariant,
+  setThemeCloud,
   setFilterConnection,
   setJourneyBandScheme,
   setJourneyDescription,
@@ -167,6 +177,16 @@ import { BlockView } from "./BlockView";
  * words; they cannot fiddle with a twelve-column grid through a 320 px
  * viewport, and pretending otherwise produces a control nobody can hit.
  */
+
+/** The palettes, in the words a person chooses between rather than the tokens. */
+const PALETTE_LABEL: Record<ChartPalette, string> = {
+  auto: "La que corresponda",
+  mono: "Un solo tono, de claro a oscuro",
+  cool: "Fríos",
+  warm: "Cálidos",
+  diverging: "De un extremo al otro",
+  categorical: "Colores distintos por categoría",
+};
 
 const MODE_LABEL: Record<SamplePolicyMode, string> = {
   show_all: "Mostrar todos los resultados",
@@ -1296,6 +1316,13 @@ export function ExperienceBuilder({
                   schemeId ? "Este bloque se lee con ese semáforo." : "Este bloque queda sin semáforo.",
                 )
               }
+              onPalette={(palette) =>
+                act((current) => setChartPalette(current, selected.block.id, palette), "")
+              }
+              onThemeCloud={(patch) =>
+                act((current) => setThemeCloud(current, selected.block.id, patch), "")
+              }
+              qualitativeSources={evidence.qualitativeSources}
               onOpenPanel={(pageId, panelId) => {
                 act((current) => selectBlock(openPage(current, pageId), panelId), "");
                 if (window.matchMedia("(max-width: 1279px)").matches) setDrawer("right");
@@ -2575,6 +2602,9 @@ function Inspector({
   onSamplePolicy,
   onJourney,
   onBandScheme,
+  onPalette,
+  onThemeCloud,
+  qualitativeSources,
   onOpenPanel,
   onDisconnectSource,
   panelCard,
@@ -2599,6 +2629,12 @@ function Inspector({
   onJourney: (journeyId: string) => void;
   /** Which semáforo this block reads, when it is drawn as one. */
   onBandScheme: (schemeId: string | null) => void;
+  /** The palette a scaled drawing reads its colours from. */
+  onPalette: (palette: ChartPalette) => void;
+  /** One or more of a cloud's own settings. */
+  onThemeCloud: (patch: Partial<ThemeCloudConfig>) => void;
+  /** The qualitative sources this study actually has, for the cloud's picker. */
+  qualitativeSources: string[];
   /** Select the panel that governs this block, so it can be edited there. */
   onOpenPanel: (pageId: string, panelId: string) => void;
   /** Stop one source moving this block: a panel target, or a direct connection. */
@@ -2660,6 +2696,162 @@ function Inspector({
         </section>
 
         {panelCard}
+
+        {/* --- What the cloud counts and how it is drawn --------------------
+            The basis is the part that matters: mentions and people are
+            different numbers — one person saying the same thing three times is
+            3 and 1 — and a cloud that silently used one while its caption
+            implied the other would be a wrong number with a font size. ---- */}
+        {block.themeCloud ? (
+          <section>
+            <h3 className="text-sm font-semibold text-strong">Qué cuenta esta nube</h3>
+            <label htmlFor={`${idPrefix}-cloudbasis`} className="mt-2 block text-xs font-medium text-body">
+              Tamaño de cada palabra
+            </label>
+            <select
+              id={`${idPrefix}-cloudbasis`}
+              className={`${field} mt-1`}
+              value={block.themeCloud.basis}
+              onChange={(event) => onThemeCloud({ basis: event.target.value as "mentions" | "people" })}
+            >
+              <option value="mentions">Menciones — cuántas veces se dijo</option>
+              <option value="people">Personas — cuántas lo dijeron</option>
+            </select>
+            <p className="mt-1 text-xs text-muted">
+              Son números distintos: alguien que repite lo mismo tres veces son 3 menciones y 1
+              persona. La nube dice cuál está usando.
+            </p>
+
+            <label htmlFor={`${idPrefix}-cloudsource`} className="mt-2 block text-xs font-medium text-body">
+              De qué fuente
+            </label>
+            <select
+              id={`${idPrefix}-cloudsource`}
+              className={`${field} mt-1`}
+              value={block.themeCloud.source ?? ""}
+              onChange={(event) =>
+                onThemeCloud({ source: event.target.value === "" ? null : event.target.value })
+              }
+            >
+              <option value="">Todas las fuentes</option>
+              {qualitativeSources.map((source) => (
+                <option key={source} value={source}>
+                  {source}
+                </option>
+              ))}
+            </select>
+
+            <label htmlFor={`${idPrefix}-cloudmax`} className="mt-2 block text-xs font-medium text-body">
+              Cuántos temas como máximo — {block.themeCloud.maximumThemes}
+            </label>
+            <input
+              id={`${idPrefix}-cloudmax`}
+              type="range"
+              min={3}
+              max={120}
+              step={1}
+              value={block.themeCloud.maximumThemes}
+              onChange={(event) => onThemeCloud({ maximumThemes: Number(event.target.value) })}
+              className="mt-1 h-11 w-full"
+            />
+
+            <div className="mt-2 flex gap-2">
+              <div className="min-w-0 flex-1">
+                <label htmlFor={`${idPrefix}-cloudmin`} className="block text-xs font-medium text-body">
+                  Letra más chica
+                </label>
+                <input
+                  id={`${idPrefix}-cloudmin`}
+                  type="number"
+                  min={8}
+                  max={48}
+                  className={`${field} mt-1`}
+                  value={block.themeCloud.minimumFontSize}
+                  onChange={(event) => onThemeCloud({ minimumFontSize: Number(event.target.value) })}
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <label htmlFor={`${idPrefix}-cloudmaxfont`} className="block text-xs font-medium text-body">
+                  Letra más grande
+                </label>
+                <input
+                  id={`${idPrefix}-cloudmaxfont`}
+                  type="number"
+                  min={12}
+                  max={96}
+                  className={`${field} mt-1`}
+                  value={block.themeCloud.maximumFontSize}
+                  onChange={(event) => onThemeCloud({ maximumFontSize: Number(event.target.value) })}
+                />
+              </div>
+            </div>
+
+            <label htmlFor={`${idPrefix}-cloudorient`} className="mt-2 block text-xs font-medium text-body">
+              Cómo se acomodan las palabras
+            </label>
+            <select
+              id={`${idPrefix}-cloudorient`}
+              className={`${field} mt-1`}
+              value={block.themeCloud.orientation}
+              onChange={(event) =>
+                onThemeCloud({ orientation: event.target.value as "horizontal" | "mostly_horizontal" | "mixed" })
+              }
+            >
+              <option value="horizontal">Todas horizontales</option>
+              <option value="mostly_horizontal">Casi todas horizontales</option>
+              <option value="mixed">Mezcladas</option>
+            </select>
+
+            <label htmlFor={`${idPrefix}-cloudpalette`} className="mt-2 block text-xs font-medium text-body">
+              Paleta
+            </label>
+            <select
+              id={`${idPrefix}-cloudpalette`}
+              className={`${field} mt-1`}
+              value={block.themeCloud.palette}
+              onChange={(event) => onThemeCloud({ palette: event.target.value as ChartPalette })}
+            >
+              {CHART_PALETTES.map((option) => (
+                <option key={option} value={option}>
+                  {PALETTE_LABEL[option]}
+                </option>
+              ))}
+            </select>
+
+            <label className="mt-2 flex min-h-11 items-center gap-2 text-sm text-body">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={block.themeCloud.showCounts}
+                onChange={(event) => onThemeCloud({ showCounts: event.target.checked })}
+              />
+              Escribir el número junto a cada palabra
+            </label>
+          </section>
+        ) : null}
+
+        {/* --- The palette a scaled drawing reads --------------------------- */}
+        {block.visualization && CHART_SPECS[block.visualization.variant].usesPalette ? (
+          <section>
+            <h3 className="text-sm font-semibold text-strong">Paleta de la gráfica</h3>
+            <select
+              id={`${idPrefix}-palette`}
+              className={`${field} mt-2`}
+              value={block.visualization.palette}
+              onChange={(event) => onPalette(event.target.value as ChartPalette)}
+            >
+              {CHART_PALETTES.map((option) => (
+                <option key={option} value={option}>
+                  {PALETTE_LABEL[option]}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted">
+              Un mapa de calor, unas burbujas y unos rectángulos codifican una cantidad en el color,
+              así que la escala importa. Un arcoíris sugiere categorías donde hay grados.
+            </p>
+          </section>
+        ) : null}
 
         {/* --- The semáforo this block reads, when it is drawn as one -------
             Offered only on a block that actually chose the drawing, because a

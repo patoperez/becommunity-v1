@@ -50,6 +50,19 @@ export type ThemeCloudInput = {
   evidenceHref: string | null;
 };
 
+/**
+ * How words are turned to fill a box.
+ *
+ * `horizontal` reads best and is what a printed report wants. `mixed` fills a
+ * box more densely by turning some words 90°, which is what makes a cloud look
+ * like a cloud rather than like a centred list — at the cost of the reader
+ * tilting their head. `mostly_horizontal` is the compromise and the default:
+ * every third word turns, deterministically by POSITION rather than at random,
+ * so the same themes always produce the same picture.
+ */
+export const THEME_ORIENTATIONS = ["horizontal", "mostly_horizontal", "mixed"] as const;
+export type ThemeOrientation = (typeof THEME_ORIENTATIONS)[number];
+
 export type ThemeCloudOptions = {
   /** The drawing area. Bounded so the layout is responsive by construction. */
   width: number;
@@ -58,6 +71,7 @@ export type ThemeCloudOptions = {
   maximumWords: number;
   minimumFontSize: number;
   maximumFontSize: number;
+  orientation: ThemeOrientation;
 };
 
 export const DEFAULT_THEME_CLOUD_OPTIONS: ThemeCloudOptions = {
@@ -66,6 +80,7 @@ export const DEFAULT_THEME_CLOUD_OPTIONS: ThemeCloudOptions = {
   maximumWords: 40,
   minimumFontSize: 14,
   maximumFontSize: 44,
+  orientation: "mostly_horizontal",
 };
 
 export type PlacedTheme = {
@@ -73,6 +88,8 @@ export type PlacedTheme = {
   count: number;
   fontSize: number;
   colorRole: ThemeColorRole;
+  /** 0 or 90. Deterministic: decided by position, never by a random number. */
+  rotation: 0 | 90;
   /** Box centre and extent, in the drawing area's own units. */
   x: number;
   y: number;
@@ -132,12 +149,34 @@ export function layoutThemeCloud(
     const fontSize = Math.round(
       options.minimumFontSize + weight * (options.maximumFontSize - options.minimumFontSize),
     );
-    const box = extent(theme.label, fontSize);
+    /*
+     * ROTATION BY POSITION, NEVER BY CHANCE.
+     *
+     * A cloud that turns words at random redraws itself differently on every
+     * reload, so a screenshot in a report and the screen stop agreeing and no
+     * gate can assert a layout. The rule is arithmetic on the index: the
+     * largest words stay horizontal in every mode, because the ones a reader
+     * looks at first should not be the ones they have to tilt their head for.
+     */
+    const rotation: 0 | 90 =
+      options.orientation === "horizontal" || index < 2
+        ? 0
+        : options.orientation === "mixed"
+          ? index % 2 === 1
+            ? 90
+            : 0
+          : index % 3 === 2
+            ? 90
+            : 0;
+    const flat = extent(theme.label, fontSize);
+    // A turned word occupies a box turned with it.
+    const box = rotation === 90 ? { width: flat.height, height: flat.width } : flat;
     const candidate: PlacedTheme = {
       label: theme.label,
       count: theme.count,
       fontSize,
       colorRole: THEME_COLOR_ROLES[index % THEME_COLOR_ROLES.length],
+      rotation,
       x: options.width / 2,
       y: options.height / 2,
       width: box.width,

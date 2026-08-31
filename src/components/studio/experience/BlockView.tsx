@@ -425,17 +425,49 @@ function QualitativeBlock({ block, data, evidence, policy }: BlockViewProps & { 
     );
   }
 
+  /*
+   * THE BLOCK'S OWN SETTINGS DRIVE THE DRAWING.
+   *
+   * How many words, how large the smallest and the largest, how they are
+   * turned, which palette, whether the count is written beside the word. Two
+   * clouds on one page can therefore be two different pictures of two different
+   * questions, which is the whole reason a cloud carries settings at all rather
+   * than reading a constant.
+   */
+  const settings = block.themeCloud;
   const cloud = layoutThemeCloud(
     themes.map((theme) => ({
       label: theme.label,
       count: theme.count,
       evidenceHref: null,
     })),
-    { ...DEFAULT_THEME_CLOUD_OPTIONS, width: 900, height: 380 },
+    {
+      ...DEFAULT_THEME_CLOUD_OPTIONS,
+      width: 900,
+      height: 380,
+      maximumWords: settings?.maximumThemes ?? DEFAULT_THEME_CLOUD_OPTIONS.maximumWords,
+      minimumFontSize: settings?.minimumFontSize ?? DEFAULT_THEME_CLOUD_OPTIONS.minimumFontSize,
+      maximumFontSize: settings?.maximumFontSize ?? DEFAULT_THEME_CLOUD_OPTIONS.maximumFontSize,
+      orientation: settings?.orientation ?? DEFAULT_THEME_CLOUD_OPTIONS.orientation,
+    },
   );
 
   const draw = () => {
-    if (variant === "theme_cloud") return <ThemeCloud layout={cloud} />;
+    if (variant === "theme_cloud") {
+      return (
+        <ThemeCloud
+          layout={cloud}
+          basis={settings?.basis ?? "mentions"}
+          showCounts={settings?.showCounts ?? true}
+          palette={settings?.palette ?? "auto"}
+          themes={resolved?.ok ? (resolved.data.themes ?? []) : []}
+          policy={policy}
+          exportName={(block.title ?? "nube-de-temas")
+            .replace(/[^a-zA-Z0-9-]+/g, "-")
+            .toLowerCase()}
+        />
+      );
+    }
     if (variant === "table") return <DataTable data={themeData} policy={policy} />;
     return <HorizontalBars data={themeData} policy={policy} />;
   };

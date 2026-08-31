@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { formatNumber } from "@/lib/calc/format";
-import type { DataCell, ResolvedBlockData, SeriesUnit } from "@/lib/experience/data";
+import type { DataCell, ResolvedBlockData, SeriesUnit, ThemeDatum } from "@/lib/experience/data";
 import type { ChartPalette, ChartVariant } from "@/lib/experience/charts";
 import { CHART_SPECS, alternativeVariant } from "@/lib/experience/charts";
 import {
@@ -1040,16 +1040,55 @@ export function RetentionSeries({
   return <LineChart data={data} policy={policy} />;
 }
 
-export function ThemeCloud({ layout }: { layout: ThemeCloudLayout }) {
+/**
+ * THE THEMATIC CLOUD — a real one.
+ *
+ * What was there before placed words at hardcoded positions and printed the
+ * label with its count beside it. This one is a cloud: sized by the configured
+ * basis, turned deterministically, collision-free, selectable by mouse and by
+ * keyboard, with a ranked list that is the reference rather than the fallback,
+ * a detail panel for one theme, and an export that matches exactly what is on
+ * screen.
+ *
+ * WHAT IT NEVER DRAWS. A pending theme — those never reach this component,
+ * because only confirmed observations are loaded at all. A quote. A name. A
+ * respondent. The words are the canonical themes a person confirmed, and the
+ * "related spellings" are the raw wordings that same person folded INTO each
+ * one, which is the merge the review already recorded.
+ */
+export function ThemeCloud({
+  layout,
+  basis = "mentions",
+  showCounts = true,
+  palette = "auto",
+  themes = [],
+  policy,
+  exportName = "nube-de-temas",
+}: {
+  layout: ThemeCloudLayout;
+  basis?: "mentions" | "people";
+  showCounts?: boolean;
+  palette?: ChartPalette;
+  /** The richer per-theme record, for the detail panel. */
+  themes?: ThemeDatum[];
+  policy?: SampleVisibilityPolicy;
+  exportName?: string;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
   if (layout.ordered.length === 0) {
     return (
       <EmptyChart
         title="Todavía no hay temas confirmados"
-        detail="Solo entra lo que el equipo ya confirmó en la revisión cualitativa."
+        detail="Solo entra lo que el equipo ya confirmó en la revisión cualitativa; nada se toma de un comentario sin revisar."
       />
     );
   }
+
   const { width, height } = layout.options;
+  const ramp = PALETTE_RAMP[palette] ?? PALETTE_RAMP.auto;
   const ROLE_COLOR: Record<PlacedTheme["colorRole"], string> = {
     evidence: "var(--color-evidence)",
     voice: "var(--color-voice)",
@@ -1057,40 +1096,199 @@ export function ThemeCloud({ layout }: { layout: ThemeCloudLayout }) {
     lavender: "var(--color-lavender)",
     green: "var(--color-positive)",
   };
+  const colorOf = (theme: PlacedTheme, index: number) =>
+    palette === "auto" ? ROLE_COLOR[theme.colorRole] : ramp[index % ramp.length];
+
+  const word = basis === "people" ? "personas" : "menciones";
+  const one = basis === "people" ? "persona" : "mención";
+  const detail = themes.find((theme) => theme.label === selected) ?? null;
+  const selectedCount = layout.ordered.find((theme) => theme.label === selected)?.count ?? null;
+
+  /**
+   * THE EXPORT IS THE PICTURE, not a re-render of it.
+   *
+   * It serializes the SVG that is on screen at that moment, so a filtered cloud
+   * exports the filtered cloud and there is no second code path that could
+   * disagree with the first. It carries words and counts and nothing else — the
+   * same content the page already shows.
+   */
+  const download = () => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const clone = svg.cloneNode(true) as SVGSVGElement;
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.removeAttribute("aria-hidden");
+    const blob = new Blob([clone.outerHTML], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${exportName}.svg`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <ChartFrame
-      label={`Nube de ${layout.ordered.length} temas confirmados, del más mencionado al menos mencionado.`}
+      label={`Nube de ${layout.ordered.length} temas confirmados, del más mencionado al menos mencionado, por ${word}.`}
       table={
-        <ul>
+        <ol>
           {layout.ordered.map((theme) => (
             <li key={theme.label}>
-              {theme.label}: {theme.count} {theme.count === 1 ? "mención" : "menciones"}
+              {theme.label}: {theme.count} {theme.count === 1 ? one : word}
             </li>
           ))}
-        </ul>
+        </ol>
       }
     >
-      <svg aria-hidden="true" viewBox={`0 0 ${width} ${height}`} className="h-44 w-full min-w-0">
-        {layout.placed.map((theme) => (
-          <text
-            key={theme.label}
-            x={theme.x}
-            y={theme.y}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={theme.fontSize}
-            fontWeight="600"
-            fill={ROLE_COLOR[theme.colorRole]}
-          >
-            {theme.label} ({theme.count})
-          </text>
-        ))}
-      </svg>
-      {layout.omitted.length > 0 ? (
+      <div className="min-w-0">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-56 w-full min-w-0 sm:h-72"
+          role="group"
+          aria-label={`Nube de temas, por ${word}`}
+          data-theme-cloud=""
+        >
+          {layout.placed.map((theme, index) => {
+            const active = theme.label === selected;
+            return (
+              <g
+                key={theme.label}
+                // EVERY WORD IS A CONTROL, reachable in order by keyboard.
+                // A cloud a person can only use with a mouse is a cloud half
+                // the readers of a report cannot use at all.
+                role="button"
+                tabIndex={0}
+                aria-pressed={active}
+                aria-label={`${theme.label}: ${theme.count} ${theme.count === 1 ? one : word}`}
+                data-theme={theme.label}
+                onClick={() => setSelected(active ? null : theme.label)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  setSelected(active ? null : theme.label);
+                }}
+                className="cursor-pointer outline-none [&:focus-visible>rect]:stroke-2"
+                transform={
+                  theme.rotation === 90 ? `rotate(-90 ${theme.x} ${theme.y})` : undefined
+                }
+              >
+                <rect
+                  x={theme.x - (theme.rotation === 90 ? theme.height : theme.width) / 2 - 4}
+                  y={theme.y - (theme.rotation === 90 ? theme.width : theme.height) / 2 - 2}
+                  width={(theme.rotation === 90 ? theme.height : theme.width) + 8}
+                  height={(theme.rotation === 90 ? theme.width : theme.height) + 4}
+                  rx={4}
+                  fill={active ? "var(--color-surface-sunken)" : "transparent"}
+                  stroke={active ? colorOf(theme, index) : "transparent"}
+                />
+                <text
+                  x={theme.x}
+                  y={theme.y}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={theme.fontSize}
+                  fontWeight="600"
+                  fill={colorOf(theme, index)}
+                  opacity={selected && !active ? 0.45 : 1}
+                >
+                  {showCounts ? `${theme.label} (${theme.count})` : theme.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
         <p className="mt-1 text-xs text-muted">
-          {layout.omitted.length} tema(s) más no cupieron en el dibujo. Están en la lista completa.
+          El tamaño de cada palabra es su número de {word}.
+          {layout.omitted.length > 0
+            ? ` ${layout.omitted.length} tema(s) más no cupieron en el dibujo y están en la lista completa.`
+            : ""}
         </p>
-      ) : null}
+
+        {/* --- One theme, when somebody picks one ------------------------- */}
+        {selected ? (
+          <div
+            className="mt-2 rounded-lg border border-line bg-surface-sunken p-3"
+            data-theme-detail={selected}
+          >
+            <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
+              <p className="font-display text-sm font-semibold text-strong">{selected}</p>
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="min-h-11 rounded-md border border-line px-3 text-xs font-medium text-body hover:bg-surface"
+              >
+                Cerrar
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-body">
+              {detail
+                ? `${detail.mentions} ${detail.mentions === 1 ? "mención" : "menciones"} de ${detail.people} ${detail.people === 1 ? "persona" : "personas"}.`
+                : `${selectedCount} ${selectedCount === 1 ? one : word}.`}
+            </p>
+            {detail && detail.aliases.length > 0 ? (
+              <p className="mt-1 text-xs text-muted">
+                Se agruparon aquí, en la revisión cualitativa: {detail.aliases.join(", ")}.
+              </p>
+            ) : null}
+            {detail && detail.sources.length > 0 ? (
+              <p className="mt-1 text-xs text-muted">
+                De: {detail.sources.join(", ")}.
+              </p>
+            ) : null}
+            {/*
+              NO QUOTE APPEARS HERE. The approval model records a quote as
+              approved separately from the theme, and nothing in the composer
+              reads one — so the detail says what the theme IS made of and
+              never what somebody wrote.
+            */}
+          </div>
+        ) : null}
+
+        {/* --- The ranked list, visible on request ------------------------ */}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setListOpen((open) => !open)}
+            aria-expanded={listOpen}
+            className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-strong hover:bg-surface-sunken"
+          >
+            {listOpen ? "Ocultar la lista" : "Ver la lista ordenada"}
+          </button>
+          <button
+            type="button"
+            onClick={download}
+            className="min-h-11 rounded-lg border border-line-strong bg-surface px-3 text-sm font-medium text-strong hover:bg-surface-sunken"
+          >
+            Descargar la nube
+          </button>
+        </div>
+
+        {listOpen ? (
+          <ol className="mt-2 min-w-0 space-y-1" data-theme-list="">
+            {layout.ordered.map((theme, index) => (
+              <li key={theme.label} className="min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setSelected(theme.label === selected ? null : theme.label)}
+                  aria-pressed={theme.label === selected}
+                  className={`flex min-h-11 w-full min-w-0 items-baseline justify-between gap-3 rounded-md px-2 text-left text-sm ${
+                    theme.label === selected ? "bg-evidence-surface" : "hover:bg-surface-sunken"
+                  }`}
+                >
+                  <span className="min-w-0 truncate text-body">
+                    {index + 1}. {theme.label}
+                  </span>
+                  <span className="shrink-0 font-semibold text-strong">
+                    {theme.count} {theme.count === 1 ? one : word}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </div>
     </ChartFrame>
   );
 }

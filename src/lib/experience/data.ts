@@ -39,7 +39,7 @@ import {
   type DataRow,
 } from "@/lib/calc/table";
 
-import { summarizeConfirmedQualitative, type ConfirmedQualitative } from "@/lib/qualitative/published";
+import type { ConfirmedQualitative } from "@/lib/qualitative/published";
 
 import type { ExperienceDefinitionV1 } from "./definition";
 import type { Aggregation, SemanticRegistry } from "./registry";
@@ -115,6 +115,12 @@ export type ResolvedBlockData = {
   omittedCategories: number;
   /** A canonical breakdown, for the results that carry one (NPS, Top-2-Box). */
   detail: { label: string; value: string }[];
+  /**
+   * Present only on a qualitative series. Carries BOTH counts and the spellings
+   * the review folded into each canonical theme, because a cloud needs to say
+   * which basis it used and to show what a theme is made of.
+   */
+  themes?: ThemeDatum[];
 };
 
 export type BlockDataOutcome =
@@ -821,20 +827,44 @@ function journeyRestriction(
 }
 
 /**
+ * ONE THEME, AS THE CLOUD NEEDS TO KNOW IT.
+ *
+ * `mentions` and `people` are BOTH carried, always, whichever the block is
+ * sized by — one person saying the same thing three times is 3 and 1, and a
+ * reader who can see both can tell a widely-shared concern from a strongly-held
+ * one. The cloud sizes by the configured basis and prints which one it used.
+ *
+ * `aliases` are the raw spellings the qualitative review folded INTO this
+ * canonical theme. That fold is the merge point the product already has: a
+ * person reviewing an observation chooses its `confirmed_theme`, and two
+ * differently-worded suggestions confirmed to the same theme are the same theme
+ * from then on. There is no second category system here and no new ledger —
+ * this reads the decisions the review already recorded.
+ */
+export type ThemeDatum = {
+  label: string;
+  mentions: number;
+  people: number;
+  /** The raw spellings a person folded into this theme, minus the theme itself. */
+  aliases: string[];
+  /** Which qualitative sources it came from, so two clouds can differ. */
+  sources: string[];
+};
+
+/**
  * THE CONFIRMED QUALITATIVE EVIDENCE, NARROWED THE SAME WAY A NUMBER IS.
  *
  * The catalogue declares that a "Lo que dijeron" summary and a theme cloud
- * respond to a reader's filter. That declaration has to be TRUE, so this
- * resolves them: the observations are joined to the people who said them,
- * those people are narrowed by exactly the restriction the block is under, and
- * the counts are recomputed by `summarizeConfirmedQualitative` — the same
- * function the client dashboard already uses, so a builder preview and a
- * client screen cannot disagree about a theme's count.
+ * respond to a reader's filter, and that declaration has to be TRUE: the
+ * observations are joined to the people who said them, those people are
+ * narrowed by exactly the restriction the block is under, and the counts are
+ * recomputed.
  *
- * WHAT IT NEVER READS. `quote` is not selected by any caller and is not read
- * here; a suggested theme never enters at all. Only confirmed observations
- * cross into the composer, which is the qualitative publication boundary and
- * is not relaxed by making them filterable.
+ * WHAT NEVER ENTERS. `quote` is not selected by any caller and is not read
+ * here. A raw suggestion is read only to NAME the spellings a person folded
+ * into a confirmed theme, never as a theme in its own right. A PENDING
+ * observation is not in `confirmed` at all, so nothing unreviewed can reach a
+ * client through this path.
  *
  * An observation with no respondent cannot be attributed to a characteristic,
  * so a narrowed view drops it rather than counting it under every value. With
@@ -846,17 +876,27 @@ export function resolveThemeData(
   confirmed: readonly ConfirmedQualitative[],
   blockId: string,
   restrict: readonly { dimensionId: string; values: readonly string[] }[],
+  config: { basis: "mentions" | "people"; source: string | null } = {
+    basis: "mentions",
+    source: null,
+  },
 ): ResolvedBlockData {
   const active = restrict.filter((entry) => entry.values.length > 0);
 
-  let kept: readonly ConfirmedQualitative[] = confirmed;
+  // TWO CLOUDS, TWO QUESTIONS. A block may read one qualitative source, so a
+  // page can carry "lo que dijeron en la encuesta" beside "lo que dijeron en el
+  // focus group" without either being a filter of the other.
+  let kept: readonly ConfirmedQualitative[] = config.source
+    ? confirmed.filter((row) => row.source === config.source)
+    : confirmed;
+
   if (active.length > 0) {
     const columns: { key: string; values: Set<string> }[] = [];
     for (const entry of active) {
       const key = index.dimensions[entry.dimensionId];
       // An unknown handle narrows to nothing rather than silently widening to
       // everybody — the same rule `resolveBlockData` applies to a number.
-      if (!key) return themeSeries(blockId, []);
+      if (!key) return themeSeries(blockId, [], config.basis);
       columns.push({ key, values: new Set(entry.values) });
     }
     const allowed = new Set<string>();
@@ -871,38 +911,91 @@ export function resolveThemeData(
       }
       if (matches) allowed.add(String(row.respondent_id));
     }
-    kept = confirmed.filter((row) => row.respondent_id !== null && allowed.has(row.respondent_id));
+    kept = kept.filter((row) => row.respondent_id !== null && allowed.has(row.respondent_id));
   }
 
-  return themeSeries(blockId, summarizeConfirmedQualitative([...kept]).themes);
+  return themeSeries(blockId, summarizeThemes(kept), config.basis);
+}
+
+/**
+ * The themes behind a set of confirmed observations, with both counts and the
+ * spellings that were folded in.
+ *
+ * The voice count is computed exactly the way `summarizeConfirmedQualitative`
+ * computes it, so a cloud and the client dashboard cannot disagree about a
+ * theme's base: a respondent counts once, and an observation with no respondent
+ * counts as its own unit rather than being dropped.
+ */
+function summarizeThemes(rows: readonly ConfirmedQualitative[]): ThemeDatum[] {
+  const byTheme = new Map<
+    string,
+    { mentions: number; units: Set<string>; aliases: Set<string>; sources: Set<string> }
+  >();
+  for (const row of rows) {
+    const label = row.theme.trim();
+    if (label === "") continue;
+    const entry = byTheme.get(label) ?? {
+      mentions: 0,
+      units: new Set<string>(),
+      aliases: new Set<string>(),
+      sources: new Set<string>(),
+    };
+    entry.mentions += 1;
+    entry.units.add(row.respondent_id ? `r:${row.respondent_id}` : `o:${row.id}`);
+    const raw = typeof row.suggestedTheme === "string" ? row.suggestedTheme.trim() : "";
+    if (raw !== "" && raw !== label) entry.aliases.add(raw);
+    if (row.source) entry.sources.add(row.source);
+    byTheme.set(label, entry);
+  }
+  return [...byTheme.entries()]
+    .map(([label, entry]) => ({
+      label,
+      mentions: entry.mentions,
+      people: entry.units.size,
+      aliases: [...entry.aliases].sort((a, b) => a.localeCompare(b, "es-MX")),
+      sources: [...entry.sources].sort((a, b) => a.localeCompare(b, "es-MX")),
+    }))
+    // Deterministic: by mentions, then by name, so ties never reorder.
+    .sort((a, b) => b.mentions - a.mentions || a.label.localeCompare(b.label, "es-MX"));
 }
 
 function themeSeries(
   blockId: string,
-  themes: readonly { theme: string; count: number; n: number }[],
+  themes: readonly ThemeDatum[],
+  basis: "mentions" | "people",
 ): ResolvedBlockData {
+  const sized = (theme: ThemeDatum) => (basis === "people" ? theme.people : theme.mentions);
   return {
     blockId,
-    metricLabel: "Menciones confirmadas",
+    metricLabel: basis === "people" ? "Personas que lo mencionaron" : "Menciones confirmadas",
     unit: "count",
     decimals: 0,
     categoryLabel: "Tema",
     seriesLabel: null,
-    categories: themes.map((theme) => ({ key: theme.theme, label: theme.theme })),
+    categories: themes.map((theme) => ({ key: theme.label, label: theme.label })),
     series: [
       {
         key: "",
         label: null,
-        cells: themes.map((theme) => ({ categoryKey: theme.theme, value: theme.count, n: theme.n })),
+        cells: themes.map((theme) => ({
+          categoryKey: theme.label,
+          value: sized(theme),
+          // THE BASE A DISCLOSURE RULE READS IS ALWAYS THE NUMBER OF VOICES,
+          // whichever number the cloud is sized by. A theme mentioned six times
+          // by two people is still two people, and that is what decides whether
+          // it may be shown at all.
+          n: theme.people,
+        })),
       },
     ],
     overall: {
       categoryKey: "",
-      value: themes.reduce((sum, theme) => sum + theme.count, 0),
-      n: themes.reduce((sum, theme) => sum + theme.n, 0),
+      value: themes.reduce((sum, theme) => sum + sized(theme), 0),
+      n: themes.reduce((sum, theme) => sum + theme.people, 0),
     },
     omittedCategories: 0,
     detail: [],
+    themes: [...themes],
   };
 }
 
@@ -934,6 +1027,12 @@ export function resolveDefinitionData(
         confirmed,
         blockId,
         blockRestriction(definition, blockId, block, selection, movedBy),
+        // The BLOCK's own settings, so two clouds on one page can count
+        // different things from different sources and each say which.
+        {
+          basis: block.themeCloud?.basis ?? "mentions",
+          source: block.themeCloud?.source ?? null,
+        },
       ),
     };
   }
