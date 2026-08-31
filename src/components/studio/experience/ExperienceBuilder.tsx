@@ -2640,8 +2640,17 @@ const CANVAS_WIDTH: Record<Breakpoint, number> = {
  * 44 px.
  */
 const COMPENSATED_TARGET: React.CSSProperties = {
-  minHeight: "calc(2.75rem / var(--canvas-scale, 1))",
-  minWidth: "calc(2.75rem / var(--canvas-scale, 1))",
+  /*
+   * THE EXTRA PIXEL IS NOT DECORATION.
+   *
+   * 44 / 0.6125 is 71.83…, and 71.83… x 0.6125 comes back as 43.99 rather than
+   * 44 — so a control compensated exactly landed a hundredth of a pixel under
+   * the minimum and a live sweep correctly reported it. Rounding at either end
+   * of a scale cannot be relied on to land on the right side of a threshold, so
+   * the compensation clears it deliberately.
+   */
+  minHeight: "calc(2.75rem / var(--canvas-scale, 1) + 1px)",
+  minWidth: "calc(2.75rem / var(--canvas-scale, 1) + 1px)",
 };
 
 function CanvasBlock({

@@ -113,8 +113,13 @@ export function ComposedPublicationSection({
         {workspace.active ? (
           <>
             <p className="mt-1 text-sm text-body">
+              {/*
+                No sentence-ending period after the time: `es-MX` formats a
+                morning hour as "12:48 a.m.", so a full stop after it printed
+                "a.m..". A separator reads correctly whatever the locale does.
+              */}
               La revisión <strong>{workspace.active.revision}</strong>, publicada el{" "}
-              {formatMoment(workspace.active.publishedAt)}. Editar el borrador no la cambia.
+              {formatMoment(workspace.active.publishedAt)} · Editar el borrador no la cambia.
             </p>
             <p className="mt-1 text-sm text-muted">
               Huella <code className="font-mono text-xs">{shortHash(workspace.active.definitionSha256)}</code>

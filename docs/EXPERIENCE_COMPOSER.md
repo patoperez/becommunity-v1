@@ -2052,6 +2052,23 @@ grouping it was reviewed against), `acknowledged_warnings` with
 `acknowledged_by` and `acknowledged_at`, `prepared_by`, `prepared_at` and an
 optional 200-character internal note.
 
+Two smaller shapes in that table are deliberate and worth knowing before
+somebody "fixes" them. `study_experience_publication.active_event_id` carries no
+foreign key: the event it names references the revision, and a key back the
+other way would be a cycle that has to be created deferred and torn down in a
+particular order for no benefit — the event is written first, in the same
+transaction, so the value cannot dangle. And every foreign key on this path is
+`on delete cascade` rather than `restrict`, because deleting a STUDY cascades to
+its revisions and to the pointer at the same time and PostgreSQL does not
+promise which it reaches first; a `restrict` would make a study undeletable at
+random and break the disposable-fixture cleanup every live gate ends with. What
+protects a published revision from removal is that no role holds DELETE on
+`study_experience_revision`.
+
+The FK CONSTRAINT names still read `..._published_by_fkey` after the column
+rename — PostgreSQL renames the column, not the constraint. Nothing references
+those names; correcting them would mean a second migration for cosmetics.
+
 `published_by` / `published_at` were **renamed** to `prepared_by` /
 `prepared_at` by migration 0025, on a table that had never held a row. The old
 names assumed a revision is written at the moment it is published; it is not,
