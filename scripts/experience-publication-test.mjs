@@ -1149,19 +1149,39 @@ section("10. The canvas fits itself without taking the choice away");
   }
   ok("the compensation clears 44 px at every scale the automatic fit can produce, not just meets it");
 
-  const explore = await readFile(
-    new URL("../src/components/studio/experience/ExploreViews.tsx", import.meta.url),
-    "utf8",
-  );
+  /*
+   * THE CANVAS DRAWS A PICTURE, AND EVERY SWEEP AGREES.
+   *
+   * A filter panel on the builder's canvas gets no viewer, so its controls do
+   * nothing by design — and under the automatic fit they are 26 px on screen.
+   * Marking the drawn block inert makes them what they already were: not
+   * focusable, not clickable, not announced as operable. The four live sweeps
+   * stop counting one as a control, and this asserts that they all do, because
+   * one that still did would fail on a screen nobody can operate anyway.
+   */
   assert.ok(
-    explore.includes("if (!onChange) {"),
-    "the canvas still draws a filter control as an operable form element",
+    /<div\s+inert/.test(builder),
+    "the drawn block on the canvas is not marked inert",
   );
-  assert.ok(
-    !/disabled=\{onChange === null\}/.test(explore),
-    "a disabled select is still drawn where nobody is exploring",
-  );
-  ok("a filter control with nobody exploring is drawn as a picture, not as a disabled form control");
+  ok("the block drawn on the canvas is inert: a picture of a page, not a control surface");
+
+  for (const sweep of [
+    "scripts/experience-builder-live-test.mjs",
+    "scripts/experience-filter-ux-live.mjs",
+    "scripts/experience-milestone-live.mjs",
+    "scripts/lib/publication-live-harness.mjs",
+  ]) {
+    const source = await readFile(new URL(`../${sweep}`, import.meta.url), "utf8");
+    assert.ok(
+      source.includes("el.closest('[inert]')"),
+      `${sweep} still counts an inert element as a control`,
+    );
+    assert.ok(
+      source.includes("data-rail-control"),
+      `${sweep} lost the collapse-rail exemption it already had`,
+    );
+  }
+  ok("all four target sweeps skip inert subtrees, and each keeps the exemption it already had");
 
   assert.ok(
     builder.includes("CHROME_PREFERENCE_KEY") && builder.includes("sessionStorage"),
