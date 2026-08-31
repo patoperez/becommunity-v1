@@ -1716,21 +1716,47 @@ assert.doesNotMatch(
 );
 ok("the migration has a rollback that drops exactly what it created and nothing else");
 
-// --- The client-facing renderers stay exactly where they were.
+/*
+ * --- The legacy client path stays exactly where it was.
+ *
+ * THIS ASSERTION CHANGED, AND THE REASON IS THE POINT. Until the publication
+ * milestone it read "must not read a composed experience while nothing is
+ * published", and it was true because nothing could be published. That is the
+ * bridge migration 0025 built, so the claim worth protecting now is narrower
+ * and stronger: the legacy calculation and the two legacy route files still
+ * know nothing about the composer, and the ONE client-facing route that does
+ * reaches it only through an ACTIVE PUBLISHED REVISION.
+ */
 for (const path of [
-  "src/app/insights/e/[studyId]/page.tsx",
   "src/app/studio/e/[studyId]/vista-cliente/page.tsx",
   "src/lib/dashboard/view.ts",
   "src/app/admin/preview/[studyId]/page.tsx",
 ]) {
   const source = await read(path);
-  assert.doesNotMatch(
-    source,
-    /lib\/experience/,
-    `${path} must not read a composed experience while nothing is published`,
-  );
+  assert.doesNotMatch(source, /lib\/experience/, `${path} must not read a composed experience`);
 }
-ok("the deployed client preview, the insights route and the dashboard view do not import the builder");
+ok("the legacy dashboard calculation and both legacy preview routes still do not import the composer");
+
+{
+  const insights = await read("src/app/insights/e/[studyId]/page.tsx");
+  assert.match(
+    insights,
+    /activeComposition/,
+    "the client route no longer selects on an active published revision",
+  );
+  for (const forbidden of [
+    ["loadExperienceDraft", "reads a draft"],
+    ["loadBuilderWorkspace", "loads the builder's workspace"],
+    ["latestRevision", "reads a revision nobody published"],
+    ["ExperienceBuilder", "imports the builder"],
+  ]) {
+    assert.ok(
+      !insights.includes(forbidden[0]),
+      `the client route ${forbidden[1]}, which no client-facing surface may do`,
+    );
+  }
+  ok("the one client-facing route that reads a composed experience reads only the published revision");
+}
 
 // The recorrido editor keeps the focus fix it was given.
 const stageFields = await readCode("src/components/studio/JourneyStagesFields.tsx");
