@@ -240,8 +240,23 @@ const field =
  */
 export type CanvasZoom = "fit" | 1 | 0.75 | 0.5;
 
-/** The editor's own chrome, remembered for the browser session and nowhere else. */
-type ChromePreference = { left: boolean; right: boolean; focus: boolean; zoom: CanvasZoom };
+/**
+ * The editor's own chrome, remembered for the browser session and nowhere else.
+ *
+ * `zoomChosen` is the difference between "this is what the editor decided for
+ * you" and "this is what you asked for". Without it the automatic fit below
+ * could not exist without taking the choice away: either the editor never
+ * adapts, or it overrides a person who deliberately picked 100 %. One boolean
+ * keeps both true.
+ */
+type ChromePreference = {
+  left: boolean;
+  right: boolean;
+  focus: boolean;
+  zoom: CanvasZoom;
+  /** True once a person has picked a scale from the control themselves. */
+  zoomChosen: boolean;
+};
 
 const CHROME_PREFERENCE_KEY = "becommunity.composer.chrome";
 
@@ -257,7 +272,13 @@ const CHROME_PREFERENCE_KEY = "becommunity.composer.chrome";
  * "Ajustar al espacio" is there for the moment somebody wants the whole
  * arrangement at once, chosen deliberately, on a screen with room for it.
  */
-const DEFAULT_CHROME: ChromePreference = { left: true, right: true, focus: false, zoom: 1 };
+const DEFAULT_CHROME: ChromePreference = {
+  left: true,
+  right: true,
+  focus: false,
+  zoom: 1,
+  zoomChosen: false,
+};
 
 /**
  * Below this the canvas is never scaled, whatever is remembered.
@@ -321,6 +342,8 @@ function readChrome(): ChromePreference {
           parsed.zoom === "fit" || parsed.zoom === 1 || parsed.zoom === 0.75 || parsed.zoom === 0.5
             ? parsed.zoom
             : DEFAULT_CHROME.zoom,
+        zoomChosen:
+          typeof parsed.zoomChosen === "boolean" ? parsed.zoomChosen : DEFAULT_CHROME.zoomChosen,
       };
     }
   } catch {
@@ -472,8 +495,35 @@ export function ExperienceBuilder({
   const leftOpen = chrome.left;
   const rightOpen = chrome.right;
   const focusMode = chrome.focus;
-  const zoom = chrome.zoom;
   const [drawer, setDrawer] = useState<"none" | "left" | "right">("none");
+
+  /*
+   * AUTOMATIC FIT, WITHOUT TAKING THE CHOICE AWAY.
+   *
+   * The canvas draws the previewed width at full size and pans when there is
+   * not room for it. That is right when somebody is working on one block, and
+   * wrong the moment an editor OPENS with both panels showing on a 1 280 px
+   * screen: a 1 120 px canvas in roughly 700 px of room is a horizontal scroll
+   * of something whose shape nobody can see, beside a scale control nothing
+   * told them was there.
+   *
+   * So a session that has not chosen a scale gets "Ajustar al espacio"
+   * whenever the previewed width does not fit, and full size whenever it does.
+   * The moment somebody picks a scale from the control — 100 % included — that
+   * choice is remembered for the session and this stops deciding anything.
+   *
+   * IT RECALCULATES FROM MEASUREMENT, so hiding a panel, restoring one,
+   * entering focus mode, leaving it or resizing the window all re-answer the
+   * question on their own: `canvasRoom` is what the canvas measured, not a
+   * breakpoint somebody guessed from.
+   *
+   * NOTHING HERE TOUCHES THE DOCUMENT. It is a scale on one person's screen.
+   */
+  const [canvasRoom, setCanvasRoom] = useState(0);
+  const previewWidth = CANVAS_WIDTH[preview];
+  const previewFits = canvasRoom === 0 || canvasRoom >= previewWidth;
+  const zoomIsAutomatic = !chrome.zoomChosen && !previewFits;
+  const zoom: CanvasZoom = zoomIsAutomatic ? "fit" : chrome.zoom;
 
   /**
    * FOCUS MODE HIDES; IT DOES NOT FORGET.
@@ -820,8 +870,9 @@ export function ExperienceBuilder({
         blocks={totalBlocks}
         preview={preview}
         zoom={zoom}
+        zoomAutomatic={zoomIsAutomatic}
         onZoom={(next) => {
-          setChrome({ zoom: next });
+          setChrome({ zoom: next, zoomChosen: true });
           act(
             (current) => current,
             next === "fit"
@@ -1249,6 +1300,7 @@ export function ExperienceBuilder({
               study={study}
               breakpoint={preview}
               zoom={zoom}
+              onRoom={setCanvasRoom}
               selectedBlockId={state.selectedBlockId}
               onSelect={(blockId) => {
                 act((current) => selectBlock(current, blockId), "");
@@ -1537,6 +1589,7 @@ function TopBar({
   blocks,
   preview,
   zoom,
+  zoomAutomatic,
   onZoom,
   onPreview,
   canUndo: undoable,
@@ -1565,6 +1618,8 @@ function TopBar({
   blocks: number;
   preview: Breakpoint;
   zoom: CanvasZoom;
+  /** True when the editor chose the scale because the width did not fit. */
+  zoomAutomatic: boolean;
   onZoom: (zoom: CanvasZoom) => void;
   onPreview: (breakpoint: Breakpoint) => void;
   canUndo: boolean;
@@ -1749,6 +1804,7 @@ function TopBar({
         <label className="hidden min-h-11 items-center gap-1.5 text-xs text-body lg:flex">
           <span>Escala</span>
           <select
+            data-canvas-scale={zoomAutomatic ? "automatic" : "chosen"}
             value={String(zoom)}
             onChange={(event) =>
               onZoom(event.target.value === "fit" ? "fit" : (Number(event.target.value) as 1 | 0.75 | 0.5))
@@ -1760,6 +1816,15 @@ function TopBar({
             <option value="0.75">75 %</option>
             <option value="0.5">50 %</option>
           </select>
+          {/*
+            The control shows what is IN EFFECT, including when the editor
+            chose it. A select reading "100 %" over a canvas drawn at 62 % is a
+            control that lies, and the first thing somebody does with a lying
+            control is stop trusting it.
+          */}
+          {zoomAutomatic ? (
+            <span className="text-muted">automática</span>
+          ) : null}
         </label>
       </div>
 
@@ -2204,7 +2269,16 @@ function SamplePolicyPanel({
  * that stays open over the thing it just changed hides the result of the
  * choice.
  */
-function Menu({ label, children }: { label: string; children: React.ReactNode }) {
+function Menu({
+  label,
+  children,
+  triggerStyle,
+}: {
+  label: string;
+  children: React.ReactNode;
+  /** Set on the canvas, where a scaled transform would otherwise shrink it. */
+  triggerStyle?: React.CSSProperties;
+}) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -2238,6 +2312,7 @@ function Menu({ label, children }: { label: string; children: React.ReactNode })
         aria-label={label}
         aria-expanded={open}
         aria-haspopup="menu"
+        style={triggerStyle}
         className={iconButton}
         onClick={() => setOpen((current) => !current)}
       >
@@ -2273,6 +2348,7 @@ function Canvas({
   study,
   breakpoint,
   zoom,
+  onRoom,
   selectedBlockId,
   onSelect,
   onMove,
@@ -2289,6 +2365,13 @@ function Canvas({
   study: BuilderClientPayload["study"];
   breakpoint: Breakpoint;
   zoom: CanvasZoom;
+  /**
+   * How much room the canvas actually has, reported up so the editor can
+   * decide whether the previewed width fits. Only measurement can answer that:
+   * the room depends on which panels are open, which is a preference rather
+   * than a breakpoint.
+   */
+  onRoom: (width: number) => void;
   selectedBlockId: string | null;
   onSelect: (blockId: string) => void;
   onMove: (blockId: string, direction: "up" | "down") => void;
@@ -2333,21 +2416,29 @@ function Canvas({
    * `null` when it goes away, which is exactly the event being waited for.
    */
   const frameObserver = useRef<ResizeObserver | null>(null);
-  const measureFrame = useCallback((node: HTMLDivElement | null) => {
-    frameObserver.current?.disconnect();
-    frameObserver.current = null;
-    if (!node) {
-      setAvailable(0);
-      return;
-    }
-    setAvailable(node.clientWidth);
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) setAvailable(entry.contentRect.width);
-    });
-    observer.observe(node);
-    frameObserver.current = observer;
-  }, []);
+  const measureFrame = useCallback(
+    (node: HTMLDivElement | null) => {
+      frameObserver.current?.disconnect();
+      frameObserver.current = null;
+      if (!node) {
+        setAvailable(0);
+        onRoom(0);
+        return;
+      }
+      setAvailable(node.clientWidth);
+      onRoom(node.clientWidth);
+      if (typeof ResizeObserver === "undefined") return;
+      const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          setAvailable(entry.contentRect.width);
+          onRoom(entry.contentRect.width);
+        }
+      });
+      observer.observe(node);
+      frameObserver.current = observer;
+    },
+    [onRoom],
+  );
 
   const contentObserver = useRef<ResizeObserver | null>(null);
   const measureContent = useCallback((node: HTMLDivElement | null) => {
@@ -2439,11 +2530,26 @@ function Canvas({
           >
             <div
               ref={measureContent}
-              style={{
-                width: `${canvasWidth}px`,
-                transform: scale === 1 ? undefined : `scale(${scale})`,
-                transformOrigin: "top left",
-              }}
+              /*
+                `--canvas-scale` IS WHY SCALING NO LONGER SHRINKS A TARGET.
+                
+                `transform: scale()` shrinks everything inside it, the editor's
+                own controls included: at 0.4 a 44 px handle measures 18 px, and
+                an 18 px target is not a target. The block chrome therefore
+                sizes itself as `44px / var(--canvas-scale)` — bigger in CANVAS
+                coordinates by exactly the factor the transform will shrink it
+                by, so what a finger or a pointer meets on screen is 44 px at
+                every scale. The DRAWING inside still scales, which is the whole
+                point of a preview.
+              */
+              style={
+                {
+                  width: `${canvasWidth}px`,
+                  transform: scale === 1 ? undefined : `scale(${scale})`,
+                  transformOrigin: "top left",
+                  "--canvas-scale": String(scale),
+                } as React.CSSProperties
+              }
             >
         <ul className="grid min-w-0 grid-cols-12 gap-3">
           {ordered.map(({ block }, position) => (
@@ -2523,6 +2629,21 @@ const CANVAS_WIDTH: Record<Breakpoint, number> = {
   mobile: 360,
 };
 
+/**
+ * A 44 x 44 target, expressed in CANVAS coordinates.
+ *
+ * The canvas may be drawn under a `scale()` transform, which shrinks physical
+ * size. Dividing by `--canvas-scale` makes the box bigger in the transformed
+ * coordinate space by exactly the factor the transform will shrink it by, so
+ * the result on screen is 44 px whatever the scale. The fallback of 1 means an
+ * unscaled canvas — and any context that never sets the variable — gets plain
+ * 44 px.
+ */
+const COMPENSATED_TARGET: React.CSSProperties = {
+  minHeight: "calc(2.75rem / var(--canvas-scale, 1))",
+  minWidth: "calc(2.75rem / var(--canvas-scale, 1))",
+};
+
 function CanvasBlock({
   block,
   definition,
@@ -2592,7 +2713,8 @@ function CanvasBlock({
           type="button"
           aria-label={`Mover “${name}”. Usa las flechas arriba y abajo, o arrastra.`}
           title="Arrastra, o usa las flechas ↑ ↓"
-          className="flex min-h-11 min-w-11 cursor-grab items-center justify-center rounded-md text-muted hover:bg-surface-sunken active:cursor-grabbing"
+          style={COMPENSATED_TARGET}
+          className="flex cursor-grab items-center justify-center rounded-md text-muted hover:bg-surface-sunken active:cursor-grabbing"
           onKeyDown={(event) => {
             if (event.key === "ArrowUp") {
               event.preventDefault();
@@ -2611,7 +2733,8 @@ function CanvasBlock({
           data-block-select=""
           onClick={onSelect}
           aria-current={selected ? "true" : undefined}
-          className="flex min-h-11 min-w-11 flex-1 basis-24 flex-col justify-center rounded-md px-1 text-left"
+          style={COMPENSATED_TARGET}
+          className="flex flex-1 basis-24 flex-col justify-center rounded-md px-1 text-left"
         >
           <span className="block truncate text-sm font-semibold text-strong">{name}</span>
           <span className="block truncate text-xs text-muted">
@@ -2620,7 +2743,7 @@ function CanvasBlock({
           </span>
         </button>
 
-        <Menu label={`Acciones de “${name}”`}>
+        <Menu label={`Acciones de “${name}”`} triggerStyle={COMPENSATED_TARGET}>
           <button type="button" className={menuItem} onClick={onSelect}>
             Abrir su ficha
           </button>
