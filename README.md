@@ -90,20 +90,34 @@ category grouping is decided by a person, and the Journey editor focus-loss
 regression is covered by deterministic and real-browser gates.
 
 **Current product-construction milestone:** the governed Experience Composer is
-at schema version 3 on
-`claude/experience-builder-journeys-visuals-cloud` (verified implementation
-handoff `e9fdd6268e16429be37498f389ad8f5bc706028d`). It supports independently
-collapsible editor panels, multiple reusable recorridos, exact awareness
-mappings, authored semáforo standards that can become filters, real heat-map /
-bubble / treemap renderers, and a deterministic thematic cloud over approved
-qualitative categories. The full design and verification record is in
-[docs/EXPERIENCE_COMPOSER.md](docs/EXPERIENCE_COMPOSER.md), sections 38-44.
+at schema version 3 on `claude/experience-publication-versioning` (verified
+implementation handoff `8d3fb7ad1440df86c83b8b54250e0789a5aafb3e`). It supports
+independently collapsible editor panels, multiple reusable recorridos, exact
+awareness mappings, authored semáforo standards that can become filters, real
+heat-map / bubble / treemap renderers, and a deterministic thematic cloud over
+approved qualitative categories. The full design and verification record is in
+[docs/EXPERIENCE_COMPOSER.md](docs/EXPERIENCE_COMPOSER.md); sections 38-44
+describe that editor work and **sections 45-51 the publication milestone**.
 
-The composer still saves an **internal draft only**. It does not yet change the
-client dashboard. Publication/version history/rollback and the client renderer
-are the next bounded unit. The real Cuicuilco draft remains unchanged at
-revision 72; the milestone was uploaded only as a zero-traffic Worker preview,
-and production traffic was not promoted.
+**A composed experience now reaches a client, and only through a published
+revision.** Publication, version history and rollback are implemented per study:
+a draft is frozen into an immutable revision, reviewed exactly as it would be
+served, published atomically, and can be compared against any other revision and
+rolled back by appending a new event that deletes nothing. A study is served the
+composed experience only when it has an active published revision this build can
+read; **every other study keeps the legacy dashboard**, one study at a time.
+Saving a draft still changes nothing a client sees.
+
+Migration `0025_experience_publication.sql` is applied **only to the linked
+synthetic project**. The real Cuicuilco (BNI) study is **unpublished and
+unchanged** — draft revision 72, same canonical hash, same source rows — and was
+inspected read-only. The milestone was uploaded only as a zero-traffic Worker
+preview built from `f683165`, and **production traffic was not promoted**.
+
+**Next:** human acceptance, then an explicit integration and promotion decision.
+The branch contains everything on `origin/main`; `main` has not yet received the
+branch, and no new construction unit is established until those two decisions
+are made.
 
 Before any manual Cloudflare deployment, read
 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) and

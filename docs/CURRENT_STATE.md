@@ -4,6 +4,11 @@
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
+>
+> **Only the FIRST section below is current.** Every section after it is the
+> record of an earlier milestone, kept for its reasoning, and describes the
+> product as it was at that milestone — including statements about publication
+> that later milestones answered. Where sections disagree, the first one wins.
 
 ## Experience Composer — publication, version history and rollback
 
@@ -11,6 +16,20 @@ Standing reference: `docs/EXPERIENCE_COMPOSER.md`, **sections 45–51** for this
 milestone. Branch `claude/experience-publication-versioning`, from
 `claude/experience-builder-journeys-visuals-cloud` at `b20c502` (which is the
 verified handoff `e9fdd62` plus a documentation refresh).
+
+**Milestone status, in one place:**
+
+| | |
+| --- | --- |
+| Implementation branch | `claude/experience-publication-versioning` |
+| Verified implementation handoff | `8d3fb7ad1440df86c83b8b54250e0789a5aafb3e` |
+| Migration `0025_experience_publication.sql` | applied **only** to the linked synthetic project `ontvqazsqiwisdddblif` |
+| Zero-traffic artifact tested | built from `f683165`, version `e0222ced-80f4-4ad4-8eb7-92eb0aebf3c6` |
+| Production traffic | **not promoted** — still 100 % on `e691ecd8-de9a-4a02-a8e3-13aad7e9e805` |
+| Real BNI study | **unpublished and unchanged**, inspected read-only |
+| What is implemented | composed publication **per study**, over immutable revisions, with exact preview, history, comparison, rollback and legacy fallback |
+| `origin/main` | is an **ancestor of** this branch; the branch has not yet been integrated back into `main` |
+| What comes next | **human acceptance, then an explicit integration and promotion decision** — no new construction unit is established |
 
 - **A composed experience reaches a client for the first time.** The bridge
   §32 listed is built: prepare → review → publish → restore, over an immutable
@@ -142,6 +161,31 @@ verified handoff `e9fdd62` plus a documentation refresh).
   inherited as an encrypted secret. Account
   `b5717457dfde865f6e0b08b952586e90` (Ollin), confirmed by a read-only
   deployment list before uploading, from a checkout carrying no `.env`.
+
+### What comes next — a decision, not a construction unit
+
+⚠ **The repository establishes no further bounded unit, and this handoff does
+not invent one.** The publication milestone is implementation-complete and
+verified; what is outstanding is human judgement:
+
+1. **Human acceptance** of the published composer — the review surface, the
+   client renderer, the history and the rollback — against the 27 screenshots
+   in `artifacts/publication/` and the four block types publication refuses by
+   name, which is a stated limitation rather than a defect.
+2. **An explicit integration decision.** `origin/main`
+   (`c76762f428834b7401118b7d2ad7f0d40158d56a`) is an **ancestor of** this
+   branch, so the branch is not missing anything from `main`; it is `main` that
+   has not yet received the branch. Merging it is a separate, deliberate act.
+3. **An explicit promotion decision.** The zero-traffic version exists and was
+   verified; promoting it to production traffic has not been requested and must
+   not be inferred from the upload.
+
+Only after 1–3 does a construction question arise, and the two candidates are
+already written down in `docs/EXPERIENCE_COMPOSER.md` §32 as unstarted: moving a
+composed experience between studies — which is also the foundation of templates
+— and merging two concurrent editors rather than merely detecting them. Neither
+is scheduled. Do not begin either, and do not invent a third, before the
+decisions above are made.
 
 ## Experience Composer — recorridos, semáforo, the last drawings, and the cloud
 
@@ -395,6 +439,10 @@ milestone. Branch `claude/experience-builder-filter-ux-focus`, from
   read 64.3 % / 60.7 % / 40.7 % / 37 % where all 55 previously read 0.0 %.
 
 ## Experience Composer — the dashboard builder, persisted and unpublished
+
+> **Historical.** "Nothing is published" was true of THIS milestone. Migration
+> `0025` and the first section of this document superseded it: a composed
+> experience now reaches a client through a published revision.
 
 Standing reference: `docs/EXPERIENCE_COMPOSER.md`. Read it before touching
 anything under `src/lib/experience/**`.

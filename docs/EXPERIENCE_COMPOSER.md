@@ -1,26 +1,45 @@
 # The Experience Composer — the dashboard builder
 
 > Standing architecture reference for the governed data-experience builder.
-> Status on 2026-08-30: **schema version 2 — the editor is stable, the draft
-> can be looked at, and the reader can explore.** The model, the schema, the
-> registries, the compatibility adapter, the storage, the Server Actions,
-> fifteen renderers, one internal builder route and one internal draft-preview
-> route exist. Drafts are saved and reload. **Nothing is published**, no
-> client-facing route reads a composed definition, and the deployed client
-> experience is unchanged except for one calculation correction (§35).
+> Status on 2026-08-31: **schema version 3 — the editor is stable, and a
+> composed experience now REACHES A CLIENT, through a published revision and
+> nothing else.** The model, the schema, the registries, the compatibility
+> adapter, the storage, the Server Actions, eighteen drawn renderers, the
+> internal builder route, the internal draft preview, the publication review,
+> the revision preview, the history and comparison, the rollback and the
+> client renderer all exist. Drafts are saved and reload; publishing is a
+> separate, deliberate act over an immutable revision. **A study is served the
+> composed experience only when it has an active published revision this build
+> can read — every other study keeps the legacy dashboard**, one study at a
+> time, and saving a draft still changes nothing a client sees.
 >
 > Sections 1–10 describe the model, which the foundation established.
 > Sections 11–22 describe the persistent slice built on it. Sections 23–31
-> describe the milestone that made the editor stable. **Sections 33–36
-> describe this one**: the block capability model that stopped offering filter
-> controls on paragraphs, the reversed connection workflow, the collapsible
-> panels and focus mode, and the client-facing Top-2-Box threshold.
+> describe the milestone that made the editor stable. Sections 33–37 describe
+> the filter capability model, the collapsible panels and the client-facing
+> Top-2-Box threshold. Sections 38–44 describe schema version 3 — the
+> recorridos, the semáforo, the last three drawings and the thematic cloud.
+> **Sections 45–51 describe this one**: the five publication states, the three
+> privileged writes, blockers versus warnings, the review, the client renderer
+> and its per-study compatibility boundary, the automatic canvas fit, and the
+> gates.
 >
 > Where earlier and later sections disagree, the later ones are current. In
-> particular: the schema version is **2**, not 1; there are **twenty** block
-> types, not nineteen; the study's identity is a **global layer**, not a
-> `cover` block; `query.filterRefs` is now `query.fixedFilters`; and
-> `BlockSpec.allowsFilters` no longer exists — §33 replaced it.
+> particular: the schema version is **3**, not 1 or 2; there are **twenty**
+> block types, not nineteen; all **eighteen** chart variants are drawn for
+> real, so §13's "three that say they are not" was resolved by §42; the
+> study's identity is a **global layer**, not a `cover` block;
+> `query.filterRefs` is now `query.fixedFilters`; `BlockSpec.allowsFilters` no
+> longer exists — §33 replaced it; and §11's "nothing publishes this" and
+> §32's "none of it is started" were both answered by §§45–49.
+>
+> The implementation branch is `claude/experience-publication-versioning` and
+> the verified implementation handoff is
+> `8d3fb7ad1440df86c83b8b54250e0789a5aafb3e`. Migration
+> `0025_experience_publication.sql` is applied **only to the linked synthetic
+> project**; the real BNI study is **unpublished and unchanged**; and the
+> zero-traffic artifact tested for this milestone was built from `f683165`,
+> with **production traffic not promoted**.
 
 ---
 
@@ -346,7 +365,7 @@ who decided what.
 | Object | What it holds | Who may write it |
 | --- | --- | --- |
 | `study_experience_draft` | ONE mutable draft per study — the working document | only `save_study_experience_draft` |
-| `study_experience_revision` | IMMUTABLE published revisions | nobody yet; publication is the next milestone |
+| `study_experience_revision` | IMMUTABLE prepared/published revisions | since `0025`, only `prepare_study_experience_revision` (§46) |
 | `study_experience_event` | who saved what, and when | only `save_study_experience_draft` |
 
 ### What is stored
@@ -469,6 +488,10 @@ exactly the same things. Nothing else is computed.
 
 ## 13. Renderers — fifteen drawn, three that say they are not
 
+> **Superseded by §42.** All eighteen are drawn for real now. This section is
+> kept because the reasoning for refusing to substitute one drawing for another
+> is still the rule.
+
 > **Superseded.** All eighteen are drawn now. `heatmap`, `bubble` and
 > `treemap` were completed in the journeys / visuals / cloud milestone (§42),
 > and `test:renderer-parity` keeps the catalogue and the renderers from
@@ -576,13 +599,16 @@ builder shows them under a heading that says so.
 1. **Foundation — done.** Model, schema, registries, adapter, gate.
 2. **Persistence — done.** Table, migration, Server Actions, draft, optimistic
    concurrency, audit.
-3. **Renderers — done for 15 of 18.** Three declare themselves undrawn.
-4. **Publication.** Approve, snapshot, and serve a revision. NOT started; the
-   storage model supports it, nothing writes it.
-5. **Client rendering.** Serve `/insights/e/[studyId]` from a published
-   revision, behind a per-study switch, with the existing renderer as the
-   default until each study is deliberately moved. NOT started.
-6. **Templates.** Composed experiences saved and instantiated. NOT started.
+3. **Renderers — done, 18 of 18.** §42 drew the three that used to declare
+   themselves undrawn.
+4. **Publication — done (§§45–48).** Approve, snapshot and serve a revision.
+   Migration `0025` turns the revision into a PREPARED snapshot and adds the
+   per-study pointer; three privileged writes prepare, publish and restore.
+5. **Client rendering — done (§49).** `/insights/e/[studyId]` is served from a
+   published revision for a study that has one, behind a per-study switch, with
+   the existing renderer as the default until each study is deliberately moved.
+6. **Templates.** Composed experiences saved and instantiated. NOT started, and
+   it needs the import path §32.5 describes.
 
 ---
 
@@ -1346,7 +1372,16 @@ None of these is a full-page failure, and the gate drives all of them.
 
 ## 32. What has to happen before this may control the client dashboard
 
-In order, and none of it is started:
+> **Status, 2026-08-31.** Items 1, 2, 3 and 4 are DONE — §§45–49 built the
+> publication, the per-study switch and the client renderer, and §42 drew the
+> three missing charts. Items **5 and 6 remain unstarted and unscheduled**:
+> moving a composed experience between studies (which is also the foundation of
+> templates), and merging two editors rather than merely detecting them. The
+> list below is kept as written because it is the reasoning the milestone was
+> planned against, and because its closing paragraph names exactly the sentence
+> that stopped being true.
+
+In order, and none of it was started when this was written:
 
 1. **Publication.** Approve → snapshot → serve. `study_experience_revision`
    exists and is immutable; nothing writes it. It needs the approval basis
@@ -1368,6 +1403,12 @@ In order, and none of it is started:
 Until 1 and 2 exist, the builder is an internal tool that changes what the team
 can arrange and nothing about what a client receives. That is the honest
 description of this milestone, and the gates enforce it.
+
+> That paragraph described the milestone this section belonged to, and it is no
+> longer the description of the product. 1, 2 and 3 exist. What survives it
+> unchanged is the narrower rule the gates still enforce: **saving a draft
+> changes nothing a client sees.** Only a publication does, and only for the one
+> study it names.
 
 ---
 

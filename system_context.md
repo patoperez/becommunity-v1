@@ -82,7 +82,9 @@ remain explicit go-live work; they are not silently treated as green.
 The active construction line is the governed **Experience Composer** on branch
 `claude/experience-publication-versioning`, cut from
 `claude/experience-builder-journeys-visuals-cloud` at
-`b20c502b7a99942fa012ff3a462b278beda5ba60`.
+`b20c502b7a99942fa012ff3a462b278beda5ba60`. Its verified implementation handoff
+is `8d3fb7ad1440df86c83b8b54250e0789a5aafb3e`, and the publication milestone it
+carries is **implementation-complete**.
 Its schema version is 3. Internal
 staff can compose pages and filter panels, collapse either editor sidebar
 independently, define several reusable recorridos with exact awareness rules,
@@ -109,10 +111,27 @@ code, by a named person, at a recorded time; and the client renderer draws no
 sentence addressed to an author, which took two layers to get right and was
 found by looking at a screenshot rather than at the code.
 
+Migration `0025_experience_publication.sql`, which the publication milestone
+adds, is applied **only to the linked synthetic project**. The real Cuicuilco
+(BNI) study is **unpublished and unchanged** — the same draft revision, the same
+canonical hash and the same source rows before and after — and was inspected
+read-only throughout.
+
 Each milestone is uploaded as a zero-traffic Cloudflare version and never
-promoted; the current one is recorded in `docs/CURRENT_STATE.md`. Manual uploads must keep `keep_vars = true`, pass both
+promoted; the current one, built from `f683165`, is recorded in
+`docs/CURRENT_STATE.md`, and **production traffic was not promoted**. Manual
+uploads must keep `keep_vars = true`, pass both
 public Supabase text bindings while they remain version-only, and inherit the
 encrypted service-role secret without exposing it to a build or committed file.
+
+**What comes next is a decision, not a construction unit.** The repository
+establishes no further bounded unit beyond this milestone: what is outstanding
+is human acceptance of the published composer, and then an explicit decision to
+integrate the branch into `main` and to promote a version to production traffic.
+The two open items §32 of `docs/EXPERIENCE_COMPOSER.md` still lists — moving a
+composed experience between studies, which is also the foundation of templates,
+and merging two editors rather than merely detecting them — are unstarted and
+unscheduled, and neither should be started before those decisions are made.
 
 Every P7 authorization, tenant-isolation, RLS, calculation and ingestion
 boundary remains in force. V2.5 content still follows authoritative documented

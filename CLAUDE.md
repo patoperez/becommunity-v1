@@ -117,10 +117,10 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (41 gates at the 2026-08-28 handoff)
+npm test             # complete deterministic suite (46 gates at the 2026-08-31 handoff)
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
-npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
+npm run gates:live   # credential-bearing live chain: qualitative-live -> private-metadata-live -> the five composer/publication live gates -> suite:a -> suite:b -> suite:c
 npm run suite:a      # Suite A — tenant isolation, data scope, least privilege (A1-A5)
 npm run suite:b      # Suite B — behavioral server-side authorization (B1-B7)
 npm run suite:c      # Suite C — hostile input, imports, pivot boundary, injection (C1-C5)
@@ -191,9 +191,23 @@ The authoritative state is `docs/CURRENT_STATE.md`. Standing architecture
 reference: `docs/EXPERIENCE_COMPOSER.md`; **sections 45-51 are the current
 milestone**. Work from branch `claude/experience-publication-versioning`, cut
 from `claude/experience-builder-journeys-visuals-cloud` at `b20c502` (the
-verified handoff `e9fdd62` plus a documentation refresh). Production traffic was
+verified handoff `e9fdd62` plus a documentation refresh). The milestone is
+**implementation-complete**; its verified implementation handoff is
+`8d3fb7ad1440df86c83b8b54250e0789a5aafb3e`, and the zero-traffic artifact tested
+for it was built from `f683165`. Production traffic was
 not promoted and remains on the previously live Worker version recorded in
-`docs/CURRENT_STATE.md`.
+`docs/CURRENT_STATE.md`. Migration `0025_experience_publication.sql` is applied
+**only to the linked synthetic project**, and the real BNI study is
+**unpublished and unchanged**.
+
+⚠ **The next step is a decision, not a construction unit.** What is outstanding
+is human acceptance of the published composer, and then an explicit decision to
+integrate this branch into `main` and to promote a version to production
+traffic. The branch already contains everything on `origin/main`; `main` has not
+yet received the branch. Do not start a new construction unit — including the
+two items §32 of `docs/EXPERIENCE_COMPOSER.md` still lists as unstarted, moving
+a composed experience between studies and merging two editors — before those
+decisions are made.
 
 - ⓘ **A Server Action on the builder or the draft preview must never call
   `revalidatePath`.** It makes Next re-render the route inside the action's own
