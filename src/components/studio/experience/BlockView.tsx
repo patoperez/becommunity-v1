@@ -20,6 +20,7 @@ import type {
 import { findMetric, type SemanticRegistry } from "@/lib/experience/registry";
 import type { BandScheme } from "@/lib/experience/bands";
 import {
+  evaluateSampleVisibility,
   resolveSamplePolicy,
   type SampleVisibilityPolicy,
 } from "@/lib/experience/sample-policy";
@@ -368,18 +369,31 @@ function RetentionBlock(props: BlockViewProps & { policy: SampleVisibilityPolicy
 function QualitativeBlock({ block, data, evidence, policy }: BlockViewProps & { policy: SampleVisibilityPolicy }) {
   const variant = (block.visualization?.variant ?? "bar_horizontal") as ChartVariant;
   const resolved = data[dataKeyForThemes(block.id)];
-  const themes = useMemo(
-    () =>
-      resolved?.ok
-        ? resolved.data.series[0].cells.map((cell) => ({
-            label: resolved.data.categories.find((category) => category.key === cell.categoryKey)?.label
-              ?? cell.categoryKey,
-            count: cell.value ?? 0,
-            n: cell.n,
-          }))
-        : evidence.themes,
-    [resolved, evidence.themes],
-  );
+  /*
+   * THE STUDY'S DISCLOSURE RULE APPLIES TO A WORD EXACTLY AS IT APPLIES TO A
+   * NUMBER.
+   *
+   * A theme is an aggregate over a base of VOICES, and a base of two under a
+   * `hide_below` rule is two identifiable people whether the product renders it
+   * as a cell or as a large word. So a suppressed theme loses its word and its
+   * count together — publishing "oculto, 2 personas" would hide the number and
+   * announce the base, which is the half that identifies somebody.
+   *
+   * A withheld theme leaves nothing behind: no ghost word, no placeholder and
+   * no line in the ranked list. What Be Community chose not to disclose renders
+   * as silence.
+   */
+  const themes = useMemo(() => {
+    const all = resolved?.ok
+      ? resolved.data.series[0].cells.map((cell) => ({
+          label: resolved.data.categories.find((category) => category.key === cell.categoryKey)?.label
+            ?? cell.categoryKey,
+          count: cell.value ?? 0,
+          n: cell.n,
+        }))
+      : [];
+    return all.filter((theme) => evaluateSampleVisibility(theme.n, policy).state !== "suppressed");
+  }, [resolved, policy]);
   const themeData = useMemo<ResolvedBlockData>(
     () => ({
       blockId: block.id,
@@ -410,6 +424,25 @@ function QualitativeBlock({ block, data, evidence, policy }: BlockViewProps & { 
     }),
     [block.id, themes],
   );
+
+  /*
+   * A BLOCK WITH NO RESOLVED DATA SAYS SO, exactly as a number does.
+   *
+   * This used to fall back to `evidence.themes` — the STUDY-WIDE summary, the
+   * same list for everybody. On a narrowed page that renders an unfiltered
+   * count beside filtered charts and looks completely convincing; in the
+   * builder it renders yesterday's numbers under today's settings for as long
+   * as the recompute takes. "Not computed yet" is a different sentence from
+   * "here are the numbers", and it is the true one.
+   *
+   * `evidence.themes` is still read, once, to tell the two EMPTY states apart:
+   * a study with no confirmed themes at all reads differently from a study
+   * that has them and this selection that does not.
+   */
+  if (!resolved) {
+    return <EmptyChart title="Todavía no se calcularon los temas de este bloque" />;
+  }
+  if (!resolved.ok) return <BrokenReference reason={resolved.reason} />;
 
   if (themes.length === 0) {
     return evidence.themes.length > 0 ? (
@@ -443,12 +476,26 @@ function QualitativeBlock({ block, data, evidence, policy }: BlockViewProps & { 
     })),
     {
       ...DEFAULT_THEME_CLOUD_OPTIONS,
-      width: 900,
-      height: 380,
+      /*
+       * THE DRAWING AREA IS SIZED LIKE THE BOX IT WILL BE DRAWN IN.
+       *
+       * The SVG scales its viewBox to fit whatever width the block has — about
+       * 620 px for a half-width block on a 1 280 px page. A 900-unit-wide
+       * layout therefore arrives on screen at roughly 0.7, and a 14-unit word
+       * lands at ten pixels: present, correct, and unreadable. Laying out at a
+       * width close to the real one keeps the configured sizes meaning what
+       * they say.
+       */
+      width: 720,
+      height: 320,
       maximumWords: settings?.maximumThemes ?? DEFAULT_THEME_CLOUD_OPTIONS.maximumWords,
       minimumFontSize: settings?.minimumFontSize ?? DEFAULT_THEME_CLOUD_OPTIONS.minimumFontSize,
       maximumFontSize: settings?.maximumFontSize ?? DEFAULT_THEME_CLOUD_OPTIONS.maximumFontSize,
       orientation: settings?.orientation ?? DEFAULT_THEME_CLOUD_OPTIONS.orientation,
+      // The layout has to reserve room for what will actually be drawn, count
+      // and all, which is why this setting reaches the layout and not only the
+      // renderer.
+      showCounts: settings?.showCounts ?? DEFAULT_THEME_CLOUD_OPTIONS.showCounts,
     },
   );
 

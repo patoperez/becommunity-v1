@@ -370,9 +370,28 @@ function MomentCard({
   const eligible: SemanticMetric[] = registry.metrics.filter(
     (metric) => metric.journeyEligible && journey.eligibleFamilies.includes(metric.family),
   );
-  const awarenessMetric = moment.awareness
-    ? registry.metrics.find((metric) => metric.id === moment.awareness?.metricId) ?? null
+  /*
+   * THE HALF-FILLED MAPPING LIVES HERE, AND ONLY HERE.
+   *
+   * The document refuses to STORE an awareness mapping with a result and no
+   * answers — correctly, because that shape would compute a percentage with no
+   * numerator. But the two fields are filled one after the other, and if the
+   * second one only appeared once the first had been stored, nobody could ever
+   * reach it: the store refuses the first half, so the second half never
+   * renders, so the first half can never be completed. That is a deadlock, and
+   * it is the reason this component holds the in-progress choice itself and
+   * hands the document a mapping only when both halves exist.
+   *
+   * `chosen` is what the person picked a moment ago; `moment.awareness` is what
+   * the document actually holds. They differ for exactly as long as it takes to
+   * type the answers, and the screen says which state it is in.
+   */
+  const [pendingMetric, setPendingMetric] = useState<string | null>(null);
+  const chosenMetricId = moment.awareness?.metricId ?? pendingMetric ?? "";
+  const awarenessMetric = chosenMetricId
+    ? registry.metrics.find((metric) => metric.id === chosenMetricId) ?? null
     : null;
+  const awarenessValues = moment.awareness?.values ?? [];
 
   return (
     <li className="rounded-md border border-line bg-surface p-2" data-moment={moment.id}>
@@ -500,17 +519,18 @@ function MomentCard({
         <select
           id={id("aware")}
           className={field}
-          value={moment.awareness?.metricId ?? ""}
+          value={chosenMetricId}
           onChange={(event) => {
-            if (event.target.value === "") {
-              onAwareness(null);
+            const next = event.target.value;
+            setPendingMetric(next === "" ? null : next);
+            // Clearing it clears the stored mapping too. Choosing one stores
+            // nothing yet — there is no honest mapping until the answers that
+            // mean "no lo conocía" have been named.
+            if (next === "" || awarenessValues.length === 0) {
+              if (moment.awareness) onAwareness(null);
               return;
             }
-            onAwareness({
-              metricId: event.target.value,
-              label: moment.awareness?.label ?? null,
-              values: moment.awareness?.values ?? [],
-            });
+            onAwareness({ metricId: next, label: moment.awareness?.label ?? null, values: awarenessValues });
           }}
         >
           <option value="">No se mide</option>
@@ -521,7 +541,7 @@ function MomentCard({
           ))}
         </select>
 
-        {moment.awareness ? (
+        {chosenMetricId ? (
           <>
             <label className={`${label} mt-2`} htmlFor={id("awarevalues")}>
               Respuestas que significan “no lo conocía”
@@ -529,23 +549,30 @@ function MomentCard({
             <input
               id={id("awarevalues")}
               className={field}
-              value={moment.awareness.values.join(", ")}
+              defaultValue={awarenessValues.join(", ")}
               placeholder="Por ejemplo: 100, No lo conocía"
-              onChange={(event) =>
+              onChange={(event) => {
+                const values = event.target.value
+                  .split(",")
+                  .map((value) => value.trim())
+                  .filter((value) => value !== "");
+                if (values.length === 0) {
+                  if (moment.awareness) onAwareness(null);
+                  return;
+                }
                 onAwareness({
-                  metricId: moment.awareness?.metricId ?? "",
+                  metricId: chosenMetricId,
                   label: moment.awareness?.label ?? null,
-                  values: event.target.value
-                    .split(",")
-                    .map((value) => value.trim())
-                    .filter((value) => value !== ""),
-                })
-              }
+                  values,
+                });
+              }}
             />
-            <p className="mt-1 text-xs text-muted">
-              {moment.awareness.values.length === 0
-                ? "Falta esto: sin respuestas marcadas el porcentaje no tendría numerador."
-                : `Se contarán como “no lo conocía”: ${moment.awareness.values.join(", ")}.`}
+            <p
+              className={`mt-1 text-xs ${awarenessValues.length === 0 ? "text-caution" : "text-muted"}`}
+            >
+              {awarenessValues.length === 0
+                ? "Falta esto: sin respuestas marcadas el porcentaje no tendría numerador, así que todavía no se guarda nada."
+                : `Se contarán como “no lo conocía”: ${awarenessValues.join(", ")}.`}
               {awarenessMetric && awarenessMetric.scale
                 ? ` Este resultado va de ${awarenessMetric.scale.minimum} a ${awarenessMetric.scale.maximum}.`
                 : ""}

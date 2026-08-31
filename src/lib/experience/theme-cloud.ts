@@ -72,15 +72,27 @@ export type ThemeCloudOptions = {
   minimumFontSize: number;
   maximumFontSize: number;
   orientation: ThemeOrientation;
+  /**
+   * WHETHER THE COUNT IS DRAWN BESIDE THE WORD — which is a LAYOUT fact, not a
+   * decoration.
+   *
+   * The renderer draws “precio y valor (12)” when it is on and “precio y
+   * valor” when it is off, and those are different widths. Reserving space for
+   * the shorter one and drawing the longer one is not a rounding error: it is
+   * how two words end up printed on top of each other, and the reserved box is
+   * the only thing standing between a cloud and that.
+   */
+  showCounts: boolean;
 };
 
 export const DEFAULT_THEME_CLOUD_OPTIONS: ThemeCloudOptions = {
   width: 1200,
   height: 675,
   maximumWords: 40,
-  minimumFontSize: 14,
-  maximumFontSize: 44,
+  minimumFontSize: 20,
+  maximumFontSize: 56,
   orientation: "mostly_horizontal",
+  showCounts: true,
 };
 
 export type PlacedTheme = {
@@ -107,9 +119,40 @@ export type ThemeCloudLayout = {
   ordered: { label: string; count: number }[];
 };
 
-/** A crude but stable text-extent estimate. No DOM, no fonts, no measurement. */
-function extent(label: string, fontSize: number): { width: number; height: number } {
-  return { width: label.length * fontSize * 0.56 + fontSize, height: fontSize * 1.5 };
+export const THEME_WORD_PADDING = { x: 4, y: 2 } as const;
+
+/**
+ * A crude but stable text-extent estimate. No DOM, no fonts, no measurement.
+ *
+ * DELIBERATELY GENEROUS. The estimate has one job: to be at least as wide as
+ * the glyphs that will actually be drawn. Too wide and the cloud is a little
+ * airier than it had to be; too narrow and two words are printed on top of
+ * each other, which is the one failure a cloud cannot recover from. The words
+ * are drawn semibold, which is wider than the regular face this ratio was
+ * first fitted against, so the ratio errs upward on purpose.
+ */
+function extent(text: string, fontSize: number): { width: number; height: number } {
+  return {
+    width: text.length * fontSize * 0.64 + fontSize + THEME_WORD_PADDING.x * 2,
+    height: fontSize * 1.6 + THEME_WORD_PADDING.y * 2,
+  };
+}
+
+/**
+ * THE HALO AROUND A WORD IS PART OF THE WORD'S FOOTPRINT.
+ *
+ * A selected word is drawn inside a rounded plate, and a focused one gets a
+ * ring. That plate is a few units larger than the glyphs, and if the layout
+ * reserved only the glyphs then two neighbours whose boxes merely TOUCH would
+ * have plates that overlap by exactly this much — visible the moment somebody
+ * selects one. So the padding is declared here, counted into every reserved
+ * box, and the renderer draws the plate at the reserved box rather than adding
+ * the padding a second time.
+ */
+
+/** What the renderer will actually put on the screen for one word. */
+function drawnText(label: string, count: number, showCounts: boolean): string {
+  return showCounts ? `${label} (${count})` : label;
 }
 
 function overlaps(a: PlacedTheme, b: PlacedTheme): boolean {
@@ -136,10 +179,47 @@ export function layoutThemeCloud(
     .map((theme) => ({ ...theme, label: theme.label.trim() }));
 
   const considered = ordered.slice(0, options.maximumWords);
-  const omitted = ordered
+  const capped = ordered
     .slice(options.maximumWords)
     .map((theme) => ({ label: theme.label, count: theme.count }));
 
+  /*
+   * NARROW THE RANGE BEFORE DROPPING A THEME.
+   *
+   * A cloud that cannot fit its words has two ways out, and only one of them
+   * is honest about what it is doing. Dropping the smaller themes silently
+   * changes what the reader is looking at; drawing everything a little closer
+   * in size changes only how it looks. So the spread between the smallest and
+   * the largest word is reduced in fixed steps until everything fits, and the
+   * FLOOR is never crossed: the smallest word stays exactly the size the block
+   * was configured with, which is the size somebody decided was readable.
+   *
+   * Deterministic and bounded: five attempts, in a fixed order, no clock and
+   * no randomness — the same themes in the same box always produce the same
+   * picture, on a screen and in a report.
+   */
+  const spreads = [1, 0.8, 0.6, 0.4, 0];
+  let attempt = attemptLayout(considered, options, spreads[0]);
+  for (const spread of spreads.slice(1)) {
+    if (attempt.omitted.length === 0) break;
+    attempt = attemptLayout(considered, options, spread);
+  }
+
+  return {
+    options,
+    placed: attempt.placed,
+    omitted: [...attempt.omitted, ...capped],
+    ordered: ordered.map((theme) => ({ label: theme.label, count: theme.count })),
+  };
+}
+
+/** One placement pass at a given spread between the smallest and largest word. */
+function attemptLayout(
+  considered: readonly (ThemeCloudInput & { label: string })[],
+  options: ThemeCloudOptions,
+  spread: number,
+): { placed: PlacedTheme[]; omitted: { label: string; count: number }[] } {
+  const omitted: { label: string; count: number }[] = [];
   const max = Math.max(1, ...considered.map((theme) => theme.count));
   const min = Math.min(...considered.map((theme) => theme.count), max);
   const placed: PlacedTheme[] = [];
@@ -147,7 +227,8 @@ export function layoutThemeCloud(
   for (const [index, theme] of considered.entries()) {
     const weight = max === min ? 1 : (theme.count - min) / (max - min);
     const fontSize = Math.round(
-      options.minimumFontSize + weight * (options.maximumFontSize - options.minimumFontSize),
+      options.minimumFontSize
+        + weight * spread * (options.maximumFontSize - options.minimumFontSize),
     );
     /*
      * ROTATION BY POSITION, NEVER BY CHANCE.
@@ -158,7 +239,7 @@ export function layoutThemeCloud(
      * largest words stay horizontal in every mode, because the ones a reader
      * looks at first should not be the ones they have to tilt their head for.
      */
-    const rotation: 0 | 90 =
+    const turned: 0 | 90 =
       options.orientation === "horizontal" || index < 2
         ? 0
         : options.orientation === "mixed"
@@ -168,7 +249,18 @@ export function layoutThemeCloud(
           : index % 3 === 2
             ? 90
             : 0;
-    const flat = extent(theme.label, fontSize);
+    const flat = extent(drawnText(theme.label, theme.count, options.showCounts), fontSize);
+    /*
+     * ROTATION YIELDS TO FIT.
+     *
+     * A turned word is as tall as it is long, and a long theme turned on its
+     * side is taller than the drawing area — so it can never be placed
+     * anywhere, and the cloud reports it as "did not fit" when the only reason
+     * is that the layout insisted on standing it up. Turning is a stylistic
+     * choice; showing the theme is not. The rule stays deterministic: the same
+     * theme in the same box always makes the same decision.
+     */
+    const rotation: 0 | 90 = turned === 90 && flat.width > options.height ? 0 : turned;
     // A turned word occupies a box turned with it.
     const box = rotation === 90 ? { width: flat.height, height: flat.width } : flat;
     const candidate: PlacedTheme = {
@@ -190,8 +282,18 @@ export function layoutThemeCloud(
     for (let step = 0; step < 720; step += 1) {
       const angle = step * 0.35;
       const radius = step * 1.6;
-      candidate.x = options.width / 2 + Math.cos(angle) * radius;
-      candidate.y = options.height / 2 + Math.sin(angle) * radius * 0.62;
+      /*
+       * ROUNDED BEFORE THE TEST, NOT AFTER IT.
+       *
+       * The position that gets drawn is the rounded one, so the position that
+       * gets CHECKED has to be the rounded one too. Testing the exact spiral
+       * point and then snapping it to whole units afterwards moves every word
+       * by up to half a unit in each direction — enough for a pair that just
+       * cleared to end up printed on top of each other, in a layout whose one
+       * promise is that they never are.
+       */
+      candidate.x = Math.round(options.width / 2 + Math.cos(angle) * radius);
+      candidate.y = Math.round(options.height / 2 + Math.sin(angle) * radius * 0.62);
       const insideX =
         candidate.x - candidate.width / 2 >= 0 && candidate.x + candidate.width / 2 <= options.width;
       const insideY =
@@ -203,18 +305,13 @@ export function layoutThemeCloud(
       break;
     }
     if (settled) {
-      placed.push({ ...candidate, x: Math.round(candidate.x), y: Math.round(candidate.y) });
+      placed.push({ ...candidate });
     } else {
       omitted.push({ label: theme.label, count: theme.count });
     }
   }
 
-  return {
-    options,
-    placed,
-    omitted,
-    ordered: ordered.map((theme) => ({ label: theme.label, count: theme.count })),
-  };
+  return { placed, omitted };
 }
 
 /** What the accessible fallback says, in order, whatever the visual did. */

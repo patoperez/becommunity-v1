@@ -1103,6 +1103,16 @@ export function ThemeCloud({
   const one = basis === "people" ? "persona" : "mención";
   const detail = themes.find((theme) => theme.label === selected) ?? null;
   const selectedCount = layout.ordered.find((theme) => theme.label === selected)?.count ?? null;
+  /*
+   * A THEME THE RULE WOULD MARK IS MARKED WHERE ITS COUNTS ARE READ.
+   *
+   * `hide_below` already removed its word upstream — a suppressed theme has no
+   * word and no line. `warn_below` is the other half: the theme IS shown, so
+   * the caveat about the base it rests on belongs beside it. That is analytical
+   * honesty about something the reader can see, not an announcement of an
+   * omission.
+   */
+  const detailState = detail && policy ? evaluateSampleVisibility(detail.people, policy).state : null;
 
   /**
    * THE EXPORT IS THE PICTURE, not a re-render of it.
@@ -1144,7 +1154,7 @@ export function ThemeCloud({
         <svg
           ref={svgRef}
           viewBox={`0 0 ${width} ${height}`}
-          className="h-56 w-full min-w-0 sm:h-72"
+          className="h-64 w-full min-w-0 sm:h-80"
           role="group"
           aria-label={`Nube de temas, por ${word}`}
           data-theme-cloud=""
@@ -1173,11 +1183,17 @@ export function ThemeCloud({
                   theme.rotation === 90 ? `rotate(-90 ${theme.x} ${theme.y})` : undefined
                 }
               >
+                {/*
+                  DRAWN AT THE RESERVED BOX, not a few units outside it. The
+                  padding is already counted into the layout's extent, so
+                  adding it again here is how a plate ends up overlapping the
+                  neighbour the layout carefully kept it away from.
+                */}
                 <rect
-                  x={theme.x - (theme.rotation === 90 ? theme.height : theme.width) / 2 - 4}
-                  y={theme.y - (theme.rotation === 90 ? theme.width : theme.height) / 2 - 2}
-                  width={(theme.rotation === 90 ? theme.height : theme.width) + 8}
-                  height={(theme.rotation === 90 ? theme.width : theme.height) + 4}
+                  x={theme.x - (theme.rotation === 90 ? theme.height : theme.width) / 2}
+                  y={theme.y - (theme.rotation === 90 ? theme.width : theme.height) / 2}
+                  width={theme.rotation === 90 ? theme.height : theme.width}
+                  height={theme.rotation === 90 ? theme.width : theme.height}
                   rx={4}
                   fill={active ? "var(--color-surface-sunken)" : "transparent"}
                   stroke={active ? colorOf(theme, index) : "transparent"}
@@ -1235,6 +1251,11 @@ export function ThemeCloud({
             {detail && detail.sources.length > 0 ? (
               <p className="mt-1 text-xs text-muted">
                 De: {detail.sources.join(", ")}.
+              </p>
+            ) : null}
+            {detailState === "warning" ? (
+              <p className="mt-1 text-xs text-caution">
+                Pocas voces detrás de este tema. El número está, y la advertencia también.
               </p>
             ) : null}
             {/*
@@ -1616,7 +1637,10 @@ export function SemaforoUnconfigured({
  */
 const PALETTE_RAMP: Record<ChartPalette, readonly string[]> = {
   auto: ["var(--color-sky)", "var(--color-blue)", "var(--color-evidence)"],
-  mono: ["var(--color-sky)", "var(--color-blue)", "var(--color-evidence)"],
+  // ONE HUE, AND ONLY THE OPACITY MOVES — which is what "un solo tono, de
+  // claro a oscuro" says on the picker. It was a copy of `auto` and therefore
+  // a control with a promise and no consequence.
+  mono: ["var(--color-evidence)"],
   cool: ["var(--color-sky)", "var(--color-lavender)", "var(--color-blue)"],
   warm: ["var(--color-yellow)", "var(--color-magenta)", "var(--color-voice)"],
   diverging: ["var(--color-magenta)", "var(--color-yellow)", "var(--color-green)"],

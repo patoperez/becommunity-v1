@@ -1807,7 +1807,17 @@ for (const [pattern, message] of [
   [/setChrome\(\{ focus: false, left: !showLeft, right: showRight \}\)/, "the left panel collapses"],
   [/setChrome\(\{ focus: false, right: !showRight, left: showLeft \}\)/, "the right panel collapses"],
   [/setDrawer\(/, "and both become drawers"],
-  [/lg:static/, "the same element is a column from lg up"],
+  /*
+   * `lg:relative`, not `lg:static`. Both lay a grid item out identically, and
+   * only one of them makes the panel a containing block — which the collapse
+   * rail, positioned `-right-4` against its panel's edge, absolutely requires.
+   * As `static` the rail resolved against the viewport and was drawn pinned to
+   * the far right of the window, pushing the page into a sideways scroll.
+   */
+  [/lg:relative/, "the same element is a column from lg up, and a containing block for its rail"],
+  [/xl:relative/, "and the inspector is the same, at its own docking width"],
+  [/data-collapse-rail=/, "each panel carries a rail on its own inner edge"],
+  [/data-rail-control=/, "and the rail's control is nameable, so a gate can measure it"],
   [/event\.key === "Escape"/, "Escape closes an open drawer"],
   [/lg:grid-cols-\[auto_minmax\(0,1fr\)\] xl:grid-cols-\[auto_minmax\(0,1fr\)_auto\]/, "the canvas is the flexible column, and the inspector waits for xl so it stays dominant"],
 ]) {
@@ -3983,6 +3993,149 @@ console.log("\n[28] The cloud is a cloud: deterministic, collision-free, readabl
     "every word sits inside the configured bounds",
   );
   ok("the smallest and largest sizes are the ones the block was configured with");
+}
+
+
+// ===========================================================================
+console.log("\n[29] The cloud fits what it is given, or says what it left out");
+// ===========================================================================
+
+{
+  const crowded = [
+    { label: "precio y valor percibido", count: 18, evidenceHref: null },
+    { label: "atención del equipo", count: 11, evidenceHref: null },
+    { label: "capacitación continua", count: 9, evidenceHref: null },
+    { label: "seguimiento después de la visita", count: 7, evidenceHref: null },
+    { label: "referencias de otros socios", count: 5, evidenceHref: null },
+    { label: "puntualidad", count: 4, evidenceHref: null },
+  ];
+  const tight = { ...DEFAULT_THEME_CLOUD_OPTIONS, width: 720, height: 320 };
+
+  /*
+   * THE COUNT IS PART OF THE WORD, so it is part of the space the word needs.
+   * The renderer draws "precio y valor (18)" when the block is set to write
+   * the number beside each theme, and a layout that reserved room for "precio
+   * y valor" alone is a layout that has already decided two words will be
+   * printed on top of each other.
+   */
+  // Compared in a box big enough that neither run narrows its range, so the
+  // only difference between them is the one being measured.
+  const roomy = { ...DEFAULT_THEME_CLOUD_OPTIONS, width: 1400, height: 700 };
+  const withCounts = layoutThemeCloud(crowded, { ...roomy, showCounts: true });
+  const withoutCounts = layoutThemeCloud(crowded, { ...roomy, showCounts: false });
+  const widthOf = (layout, label) =>
+    layout.placed.find((theme) => theme.label === label)?.width ?? null;
+  assert.deepEqual(
+    withCounts.placed.map((theme) => theme.fontSize),
+    withoutCounts.placed.map((theme) => theme.fontSize),
+    "the comparison is only fair if both runs drew at the same sizes",
+  );
+  // Measured on a word that is drawn FLAT in both runs — a turned word's
+  // reserved width is its height, which is the same either way and would
+  // compare equal no matter what the layout did.
+  const flatWord = "atención del equipo";
+  assert.equal(
+    withCounts.placed.find((theme) => theme.label === flatWord)?.rotation,
+    0,
+    "the word being measured has to be one that is drawn flat",
+  );
+  assert.ok(
+    widthOf(withCounts, flatWord) > widthOf(withoutCounts, flatWord),
+    "a word drawn with its count beside it must reserve room for the count",
+  );
+  ok("the space a word reserves is the space the word it actually draws will need");
+
+  /*
+   * NARROWING THE RANGE BEFORE DROPPING A THEME. Making the words closer in
+   * size changes how the picture looks; dropping the smaller ones changes what
+   * the reader is looking at. The first is a drawing decision, the second is
+   * an editorial one, and only a person may make it.
+   */
+  const five = crowded.slice(0, 5);
+  const squeezed = layoutThemeCloud(five, { ...tight, showCounts: true });
+  assert.deepEqual(
+    squeezed.omitted,
+    [],
+    "the cloud dropped a theme it could have fitted by drawing the words closer in size",
+  );
+  assert.ok(
+    Math.max(...squeezed.placed.map((theme) => theme.fontSize))
+      < Math.max(...layoutThemeCloud(five, { ...roomy, showCounts: true }).placed.map((theme) => theme.fontSize)),
+    "the same themes in a smaller box must actually be drawn closer in size, not identically",
+  );
+  const smallest = Math.min(...squeezed.placed.map((theme) => theme.fontSize));
+  const largest = Math.max(...squeezed.placed.map((theme) => theme.fontSize));
+  assert.ok(
+    smallest >= tight.minimumFontSize,
+    `no word may go below the configured floor: ${smallest} < ${tight.minimumFontSize}`,
+  );
+  assert.ok(
+    largest <= tight.maximumFontSize,
+    `and none above the configured ceiling: ${largest} > ${tight.maximumFontSize}`,
+  );
+  ok("a crowded cloud narrows the range instead of dropping evidence, and never goes below the floor");
+
+  /*
+   * AND WHEN EVEN THE FLOOR WILL NOT FIT, the leftover is COUNTED rather than
+   * lost. There is a real limit — a box only holds so many words at a size
+   * somebody can read — and the honest answer at that limit is to say how many
+   * did not fit and keep every one of them in the reference list.
+   */
+  const many = Array.from({ length: 30 }, (unused, index) => ({
+    label: `tema recurrente número ${index + 1}`,
+    count: 30 - index,
+    evidenceHref: null,
+  }));
+  const overflowing = layoutThemeCloud(many, {
+    ...DEFAULT_THEME_CLOUD_OPTIONS,
+    width: 360,
+    height: 200,
+    showCounts: true,
+  });
+  assert.ok(overflowing.omitted.length > 0, "this fixture is supposed to exceed the box");
+  assert.equal(
+    overflowing.placed.length + overflowing.omitted.length,
+    many.length,
+    "every theme is either drawn or counted as not drawn",
+  );
+  assert.equal(overflowing.ordered.length, many.length, "and every one stays in the list");
+  ok("past the point where the floor still fits, what did not fit is counted and still listed");
+
+  /*
+   * NOT AT ANY PRICE, THOUGH: a ceiling the person WROTE is still a ceiling,
+   * and what it leaves out is counted rather than quietly lost.
+   */
+  const capped = layoutThemeCloud(crowded, { ...tight, maximumWords: 3 });
+  assert.equal(capped.placed.length, 3, "the maximum the person wrote is respected");
+  assert.equal(capped.omitted.length, 3, "and what it leaves out is counted");
+  assert.equal(capped.ordered.length, 6, "while the reference list still carries every theme");
+  ok("a maximum the person wrote is obeyed, and the themes it excludes are counted, not lost");
+
+  /*
+   * ROUNDED BEFORE THE TEST, NOT AFTER IT. The drawn position is the rounded
+   * one, so the checked position has to be the rounded one: snapping after the
+   * collision test moves every word by up to half a unit and lets a pair that
+   * just cleared end up printed on top of each other.
+   */
+  for (const layout of [withCounts, withoutCounts, squeezed, capped]) {
+    for (const theme of layout.placed) {
+      assert.ok(
+        Number.isInteger(theme.x) && Number.isInteger(theme.y),
+        `“${theme.label}” is placed at a fractional position, so what was checked is not what is drawn`,
+      );
+    }
+    for (let i = 0; i < layout.placed.length; i += 1) {
+      for (let j = i + 1; j < layout.placed.length; j += 1) {
+        const a = layout.placed[i];
+        const b = layout.placed[j];
+        const apart =
+          Math.abs(a.x - b.x) * 2 >= a.width + b.width
+          || Math.abs(a.y - b.y) * 2 >= a.height + b.height;
+        assert.ok(apart, `“${a.label}” and “${b.label}” overlap at the position that is drawn`);
+      }
+    }
+  }
+  ok("every word is placed at the exact position its collision was checked at");
 }
 
 console.log(`\nOK — ${checks} Experience Composer checks passed.`);

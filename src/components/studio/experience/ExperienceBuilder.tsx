@@ -124,6 +124,7 @@ import {
   type Breakpoint,
 } from "@/lib/experience/layout";
 import { findMetric, type Aggregation, type SemanticRegistry } from "@/lib/experience/registry";
+import { registryWithDerivedBands } from "@/lib/experience/band-filters";
 import {
   SAMPLE_POLICY_MODES,
   SAMPLE_POLICY_VERSION,
@@ -427,7 +428,7 @@ export function ExperienceBuilder({
   saveDraft: SaveDraftAction;
   refreshData: RefreshDataAction;
 }) {
-  const { study, registry, adapted, adapterWarnings, evidence } = payload;
+  const { study, adapted, adapterWarnings, evidence } = payload;
   const ids = useId().replace(/[^a-zA-Z0-9]/g, "");
 
   /**
@@ -651,6 +652,20 @@ export function ExperienceBuilder({
             block.query?.topN ?? null,
             block.query?.sort.by ?? null,
             block.query?.sort.direction ?? null,
+            /*
+             * A CLOUD'S BASIS AND SOURCE ARE PART OF THE QUESTION, not part of
+             * how it is painted.
+             *
+             * Mentions and people are two different counts, and "only the
+             * focus group" is a different set of observations — both are
+             * computed on the server. Leaving them out of this shape meant
+             * switching the basis repainted the caption over the OLD numbers,
+             * which is the exact failure a caption is supposed to prevent.
+             * Everything else about a cloud — its palette, its font bounds,
+             * how many words fit — is drawing, and correctly absent here.
+             */
+            block.themeCloud?.basis ?? null,
+            block.themeCloud?.source ?? null,
           ]),
         ),
         definition.journeyReferences.map((journey) => [
@@ -691,6 +706,26 @@ export function ExperienceBuilder({
     const parsed = parseExperienceDefinition(definition);
     return parsed.ok ? [] : parsed.issues;
   }, [definition]);
+  /*
+   * THE REGISTRY THE EDITOR WORKS AGAINST INCLUDES WHAT THE DOCUMENT DERIVES.
+   *
+   * The server widens the registry with the semáforos the SAVED document
+   * configures. That is right for the first paint and wrong for the next
+   * minute: somebody who has just written a standard and named the result it
+   * classifies has created a characteristic, and being told to save and reload
+   * before the filter panel will offer it is being told that the editor does
+   * not believe the edit happened.
+   *
+   * `registryWithDerivedBands` is a pure function of the document and the
+   * study's own registry, so deriving it again here produces exactly what the
+   * server will produce on the next load — one rule, evaluated in two places,
+   * never two rules.
+   */
+  const registry = useMemo(
+    () => registryWithDerivedBands(definition, payload.registry),
+    [definition, payload.registry],
+  );
+
   const report = useMemo(
     () => validateExperienceDefinition(definition, registry),
     [definition, registry],
@@ -1785,9 +1820,21 @@ function Panel({
   // built, so it keeps the room: the pages dock at `lg`, the inspector waits
   // until `xl`, and below that each is a drawer over the canvas rather than a
   // column beside it.
+  /*
+   * `relative`, NOT `static`, ONCE IT IS A COLUMN — and that is a bug fix, not
+   * a preference.
+   *
+   * The collapse rail is `absolute -right-4`, which means "sixteen units past
+   * my containing block's edge". A statically positioned panel is not a
+   * containing block, so the rail resolved against the VIEWPORT instead and was
+   * drawn sixteen pixels off the right edge of the window: pinned to the wrong
+   * side of the screen, and pushing the document into a horizontal scroll on
+   * its way. `relative` lays out identically for a grid item and gives the rail
+   * the edge it was written against.
+   */
   const dock = side === "left"
-    ? { column: open ? "lg:flex" : "lg:hidden", header: "lg:hidden", chrome: "lg:static lg:z-auto lg:w-64 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none xl:w-72" }
-    : { column: open ? "xl:flex" : "xl:hidden", header: "xl:hidden", chrome: "xl:static xl:z-auto xl:w-80 xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none" };
+    ? { column: open ? "lg:flex" : "lg:hidden", header: "lg:hidden", chrome: "lg:relative lg:z-auto lg:w-64 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none xl:w-72" }
+    : { column: open ? "xl:flex" : "xl:hidden", header: "xl:hidden", chrome: "xl:relative xl:z-auto xl:w-80 xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none" };
 
   /*
    * THE COLLAPSE RAIL, ON THE PANEL'S OWN INNER EDGE.
@@ -1822,13 +1869,27 @@ function Panel({
         title={`${collapseLabel} · doble clic en la guía`}
         className="pointer-events-auto flex h-full w-1.5 select-none items-center justify-center rounded-full bg-line transition-colors duration-[var(--motion-state)] hover:bg-line-strong"
       >
+        {/*
+          `shrink-0`, BECAUSE THE STRIP IT SITS IN IS SIX PIXELS WIDE.
+          Without it the flex parent squeezed this button down to the width of
+          the guide line — a 6 px target, which is no target at all. It keeps
+          its 24 x 44 and overhangs the guide, which is what the 24 px rail
+          around it is for.
+
+          TWENTY-FOUR WIDE, NOT FORTY-FOUR: it lives in the 16 px seam between
+          the panel and the canvas, and the same act has a full-size labelled
+          button in the toolbar ("Ocultar páginas" / "Ocultar ficha"). It is an
+          accelerator with an equivalent elsewhere on the page, never the only
+          way to do this.
+        */}
         <button
           type="button"
           onClick={onCollapse}
           draggable={false}
+          data-rail-control={side}
           aria-label={collapseLabel}
           title={collapseLabel}
-          className="pointer-events-auto flex min-h-11 w-6 select-none items-center justify-center rounded-md border border-line-strong bg-surface text-xs font-semibold text-strong transition-colors duration-[var(--motion-state)] hover:bg-surface-sunken"
+          className="pointer-events-auto flex min-h-11 w-6 shrink-0 select-none items-center justify-center rounded-md border border-line-strong bg-surface text-xs font-semibold text-strong transition-colors duration-[var(--motion-state)] hover:bg-surface-sunken"
         >
           <span aria-hidden="true">{side === "left" ? "‹" : "›"}</span>
         </button>
@@ -1844,11 +1905,13 @@ function Panel({
         dock.column,
         "fixed inset-y-0 z-40 w-[min(22rem,88vw)] flex-col gap-4 overflow-y-auto border-line bg-surface-page p-4 shadow-lifted",
         side === "left" ? "left-0 border-r" : "right-0 border-l",
-        dock.chrome,
         // The rail is positioned against the panel, so the panel has to be the
-        // containing block — but only once it is a static column. While it is a
-        // fixed drawer it already establishes one, and the rail is hidden.
-        "lg:relative",
+        // containing block once it is a column. While it is a fixed drawer it
+        // already establishes one, and the rail is hidden there anyway. Both
+        // are handled by `dock.chrome`, at each side's own docking width — a
+        // blanket `lg:relative` here would have made the inspector a containing
+        // block 256 px before it becomes a column.
+        dock.chrome,
       ].join(" ")}
     >
       <div className={`flex items-center justify-between ${dock.header}`}>
@@ -2252,32 +2315,56 @@ function Canvas({
    * a function of the viewport: it depends on which panels are open, which is
    * a preference. Only measuring answers it.
    */
-  const frameRef = useRef<HTMLDivElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
   const [available, setAvailable] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
 
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!frame || typeof ResizeObserver === "undefined") return;
+  /*
+   * MEASURED THROUGH CALLBACK REFS, NOT THROUGH AN EFFECT.
+   *
+   * An empty page draws no frame at all, so an effect that reads
+   * `frameRef.current` on mount found `null`, returned, and — with an empty
+   * dependency list — never ran again. Add the first block to that page and
+   * the frame appears unmeasured: `available` stays 0, and "Ajustar al
+   * espacio" silently does nothing for the rest of the session. A person
+   * chooses the fit, watches nothing happen, and reasonably concludes the
+   * control is broken.
+   *
+   * A callback ref is called with the node the moment it exists and with
+   * `null` when it goes away, which is exactly the event being waited for.
+   */
+  const frameObserver = useRef<ResizeObserver | null>(null);
+  const measureFrame = useCallback((node: HTMLDivElement | null) => {
+    frameObserver.current?.disconnect();
+    frameObserver.current = null;
+    if (!node) {
+      setAvailable(0);
+      return;
+    }
+    setAvailable(node.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) setAvailable(entry.contentRect.width);
     });
-    observer.observe(frame);
-    setAvailable(frame.clientWidth);
-    return () => observer.disconnect();
+    observer.observe(node);
+    frameObserver.current = observer;
   }, []);
 
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
+  const contentObserver = useRef<ResizeObserver | null>(null);
+  const measureContent = useCallback((node: HTMLDivElement | null) => {
+    contentObserver.current?.disconnect();
+    contentObserver.current = null;
+    if (!node) {
+      setContentHeight(0);
+      return;
+    }
+    setContentHeight(node.getBoundingClientRect().height);
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) setContentHeight(entry.contentRect.height);
     });
-    observer.observe(content);
-    setContentHeight(content.getBoundingClientRect().height);
-    return () => observer.disconnect();
-  }, [breakpoint, page.id]);
+    observer.observe(node);
+    contentObserver.current = observer;
+  }, []);
 
   const canvasWidth = CANVAS_WIDTH[breakpoint];
   const scalable = useSyncExternalStore(subscribeScalable, readScalable, serverScalable);
@@ -2328,7 +2415,7 @@ function Canvas({
           checks at every width. The zoom above is for seeing the whole
           arrangement at once; the scroll is for reading it at full size.
         */
-        <div ref={frameRef} className="mt-3 min-w-0 overflow-x-auto">
+        <div ref={measureFrame} className="mt-3 min-w-0 overflow-x-auto">
           {/*
             TWO BOXES, AND BOTH ARE NEEDED.
 
@@ -2351,7 +2438,7 @@ function Canvas({
             }}
           >
             <div
-              ref={contentRef}
+              ref={measureContent}
               style={{
                 width: `${canvasWidth}px`,
                 transform: scale === 1 ? undefined : `scale(${scale})`,

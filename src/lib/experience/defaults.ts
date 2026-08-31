@@ -253,8 +253,11 @@ export function newBlock(request: NewBlockRequest): ExperienceBlock | null {
         ? {
             basis: "mentions",
             maximumThemes: 40,
-            minimumFontSize: 14,
-            maximumFontSize: 44,
+            // The SMALLEST word still has to be readable after the drawing
+            // is scaled into the block's width. Fourteen was the size of the
+            // number, not the size on screen.
+            minimumFontSize: 20,
+            maximumFontSize: 56,
             orientation: "mostly_horizontal",
             palette: "auto",
             showCounts: true,

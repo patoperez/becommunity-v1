@@ -2243,6 +2243,27 @@ export function setBandSchemeScale(
  * Amarillo / Rojo" out of a study that records a score and no category. The
  * rule is the one written in the bands, by a person, in this document.
  */
+/**
+ * WHICH RESULT A SEMÁFORO CLASSIFIES — and, with it, whether it is a
+ * characteristic at all.
+ *
+ * SAYING SO IS THE WHOLE ACT. A scheme that names the result it classifies has
+ * become an ordinary filterable characteristic, and a panel has to be able to
+ * offer it in the same breath — being told to save, reload and come back is
+ * being told the editor did not believe the edit. So the document gains a
+ * filter definition for the scheme here, and loses it again the moment the
+ * scheme stops naming a result.
+ *
+ * ITS `dimensionId` IS THE SCHEME'S OWN ID, which is exactly what
+ * `derivedBandDimensions` mints the derived characteristic under. One handle,
+ * one meaning: the panel, the validator and the server-side resolution all
+ * name the same thing.
+ *
+ * REMOVING IT PRUNES EVERY REFERENCE TO IT — the panels that offered it and
+ * the blocks that answered to it — through the same helper a removed page
+ * uses. A filter definition that disappears while a block still names it is a
+ * dangling reference, and the document would stop validating.
+ */
 export function setBandSchemeFilter(
   state: EditorState,
   schemeId: string,
@@ -2253,14 +2274,77 @@ export function setBandSchemeFilter(
   if (metricId !== null && !registry.metrics.some((metric) => metric.id === metricId)) {
     return refuse(state, "Ese resultado no existe en este estudio.");
   }
-  return mapScheme(state, schemeId, (scheme) => ({
-    ...scheme,
+  const scheme = state.definition.bandSchemes.find((entry) => entry.id === schemeId);
+  if (!scheme) return refuse(state, "Ese semáforo ya no está en la experiencia.");
+
+  const label =
+    filterLabel && filterLabel.trim() !== ""
+      ? filterLabel.slice(0, EXPERIENCE_LIMITS.titleLength)
+      : null;
+  const next = mapScheme(state, schemeId, (entry) => ({
+    ...entry,
     filterMetricId: metricId,
-    filterLabel:
-      filterLabel && filterLabel.trim() !== ""
-        ? filterLabel.slice(0, EXPERIENCE_LIMITS.titleLength)
-        : null,
+    filterLabel: label,
   }));
+  if (next.refusal) return next;
+
+  const existing = next.definition.filterDefinitions.find(
+    (filter) => filter.dimensionId === schemeId,
+  );
+
+  if (metricId === null) {
+    if (!existing) return next;
+    return commit(
+      state,
+      pruneFilterReferences(
+        {
+          ...next.definition,
+          filterDefinitions: next.definition.filterDefinitions.filter(
+            (filter) => filter.id !== existing.id,
+          ),
+        },
+        new Set([existing.id]),
+      ),
+    );
+  }
+
+  const shown = label ?? scheme.title;
+  if (existing) {
+    return commit(state, {
+      ...next.definition,
+      filterDefinitions: next.definition.filterDefinitions.map((filter) =>
+        filter.id === existing.id ? { ...filter, label: shown } : filter,
+      ),
+    });
+  }
+  if (next.definition.filterDefinitions.length >= EXPERIENCE_LIMITS.filterDefinitions) {
+    return refuse(
+      state,
+      `Esta experiencia ya tiene las ${EXPERIENCE_LIMITS.filterDefinitions} características que admite.`,
+    );
+  }
+  const taken = new Set(next.definition.filterDefinitions.map((filter) => filter.id));
+  const id = mintFreeId("filter", `${schemeId}/asfilter`, (candidate) => taken.has(candidate));
+  return commit(state, {
+    ...next.definition,
+    filterDefinitions: [
+      ...next.definition.filterDefinitions,
+      {
+        id,
+        dimensionId: schemeId,
+        label: shown,
+        // Bands are mutually exclusive by construction: a respondent's answer
+        // falls in exactly one. "Verde y rojo a la vez" is not a question
+        // anybody asks, so the control is a single choice.
+        control: "single_select" as const,
+        defaultValues: [],
+        clientVisible: true,
+        scope: "global" as const,
+        pageId: null,
+        dependsOn: null,
+      },
+    ],
+  });
 }
 
 export function addBand(state: EditorState, schemeId: string, label: string): EditorState {
