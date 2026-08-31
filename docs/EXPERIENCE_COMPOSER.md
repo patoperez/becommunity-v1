@@ -2293,10 +2293,28 @@ depends on which panels are open and only measuring can tell.
 **And it no longer costs a target.** `transform: scale()` shrinks the editor's
 own controls with the drawing — at 0.4 a 44 px handle measured 18 px — so the
 canvas publishes its scale as `--canvas-scale` and the block chrome sizes itself
-as `44px / var(--canvas-scale)`: larger in canvas coordinates by exactly the
-factor the transform shrinks it by, so what a pointer meets is 44 px at every
-scale. Drag coordinates were already correct under scale and are untouched.
-Nothing here writes to the document.
+as `44px / var(--canvas-scale) + 1px`: larger in canvas coordinates by exactly
+the factor the transform shrinks it by, plus a pixel, because 44 / 0.6125 ×
+0.6125 comes back as 43.99 and a threshold met is a threshold missed. Drag
+coordinates were already correct under scale and are untouched. Nothing here
+writes to the document.
+
+**The drawn block is `inert`, and that is what makes the fit honest.** The
+canvas passes no viewer, so a filter panel's controls there do nothing by
+design — an author's own clicks must not move the numbers underneath their
+edit. They were still real form controls in the DOM: focusable, announced as
+operable, and, once the canvas is drawn at a scale, 26 px on screen. `inert`
+makes the previewed page what it has always been, something to look at, and the
+block's own chrome sits outside that subtree and stays operable at 44 px.
+
+The four live target sweeps therefore skip inert subtrees. That is not a gate
+weakened to let a change through: an inert element is not focusable, not
+clickable and not announced as operable, so counting one was measuring
+something that does not exist. Two earlier attempts to fix this from the
+outside are recorded in the commit history because each taught something —
+drawing the control as static text removed the 26 px finding and pushed the
+whole builder page into a 912 px horizontal scroll at 320 px, on the real study
+whose twelve filters carry segment values written as sentences.
 
 ---
 
@@ -2305,7 +2323,7 @@ Nothing here writes to the document.
 **Offline, credentials-free, inside `npm test`:**
 
 ```
-npm run test:experience-publication   # 105 deterministic checks
+npm run test:experience-publication   # 108 deterministic checks
 ```
 
 It drives the pure modules rather than asserting that a comment says the right

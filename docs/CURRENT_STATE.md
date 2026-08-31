@@ -98,7 +98,14 @@ verified handoff `e9fdd62` plus a documentation refresh).
   re-answers it. `--canvas-scale` makes the block chrome `44px / scale`, so a
   drag handle measures 44 px on screen at every scale — verified live.
 
-- Gates: `npm run test:experience-publication` (**105**, inside `npm test`) and
+- ⓘ **The block drawn on the builder's canvas is `inert`.** It passes no
+  viewer, so its controls do nothing by design; leaving them as real form
+  controls meant the automatic fit turned them into 26 px targets, which
+  `test:filter-ux-live` correctly refused. The block's own chrome sits outside
+  that subtree and compensates for the scale. The four live target sweeps skip
+  inert subtrees, because an inert element is not a control.
+
+- Gates: `npm run test:experience-publication` (**108**, inside `npm test`) and
   `npm run test:publication-live` (**50**, inside `npm run gates:live`, after
   `test:milestone-live`). The live gate writes one disposable study **inside the
   client fixture's own tenant** — the boundary cannot be driven from a tenant no
@@ -121,6 +128,20 @@ verified handoff `e9fdd62` plus a documentation refresh).
   function, trigger, policy, index and constraint inventory. `supabase db lint`
   reports no schema errors; the security advisor names nothing on any
   `study_experience` object.
+
+- **Uploaded as a zero-traffic Cloudflare version, not promoted.** Version
+  `e0222ced-80f4-4ad4-8eb7-92eb0aebf3c6`, tag `publication-f683165`, at
+  `https://e0222ced-becommunity-v1.ollinagencyllc.workers.dev` — `/api/health`
+  answers 200 with `supabase: true`, `/login` answers 200, and an
+  unauthenticated `/studio/e/<id>/publicar`, `publicar/historial` and
+  `/insights/e/<id>` each answer 307 to `/login`. Live traffic is unchanged:
+  100 % still on `e691ecd8-de9a-4a02-a8e3-13aad7e9e805`
+  (`exec-preview-4b0af06`), re-confirmed by a deployment list after the upload,
+  and the live beta alias still answers 200. The upload passed `--var` for the
+  two public values only; `SUPABASE_SERVICE_ROLE_KEY` was not passed and is
+  inherited as an encrypted secret. Account
+  `b5717457dfde865f6e0b08b952586e90` (Ollin), confirmed by a read-only
+  deployment list before uploading, from a checkout carrying no `.env`.
 
 ## Experience Composer — recorridos, semáforo, the last drawings, and the cloud
 
