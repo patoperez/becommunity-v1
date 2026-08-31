@@ -5,6 +5,123 @@
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
 
+## Experience Composer — publication, version history and rollback
+
+Standing reference: `docs/EXPERIENCE_COMPOSER.md`, **sections 45–51** for this
+milestone. Branch `claude/experience-publication-versioning`, from
+`claude/experience-builder-journeys-visuals-cloud` at `b20c502` (which is the
+verified handoff `e9fdd62` plus a documentation refresh).
+
+- **A composed experience reaches a client for the first time.** The bridge
+  §32 listed is built: prepare → review → publish → restore, over an immutable
+  revision, with a per-study compatibility boundary. Every study that has not
+  been published through it keeps the legacy dashboard byte for byte, and no
+  study moves because a draft was saved or a revision prepared.
+
+- **Migration `0025_experience_publication.sql` is applied to the synthetic
+  project `ontvqazsqiwisdddblif`.** It evolves 0023's model rather than adding
+  a second one: `study_experience_revision` becomes the PREPARED immutable
+  snapshot (`published_by`/`published_at` renamed to `prepared_by`/`prepared_at`
+  on a table that had never held a row, plus the canonical `definition_sha256`,
+  the exact `source_draft_revision`, a `study_fingerprint`, the exact
+  `acknowledged_warnings` with who and when, and an internal note);
+  `study_experience_event` learns `revision_prepared` / `published` / `restored`
+  with `revision_id`, `replaced_revision_id`, `acknowledged_warnings` and a
+  unique `idempotency_key`; and one new table, `study_experience_publication`,
+  is the per-study pointer at whatever revision a client is being served — the
+  only mutable object in the model, holding no history.
+
+- ⓘ **Status is derived, never stored on an immutable row.** A `superseded`
+  column would have to be UPDATEd on a table whose whole purpose is that it is
+  never updated, and it would be wrong exactly once: the time somebody restores
+  an older revision. It is read from the pointer and the event log.
+
+- ⓘ **A publication stores no calculated number.** A revision freezes the
+  CONFIGURATION and the fingerprints; every aggregate is computed at request
+  time by the canonical engine over the study's own rows. A frozen number would
+  disagree with the data behind it the first time a correction was imported.
+
+- **Three privileged writes, and nobody can call the body they share.** All
+  `security definer` with a pinned empty `search_path`; `anon` and
+  `authenticated` denied outright on all four tables; `service_role` holds
+  SELECT only; `select_study_experience_revision` is executable by **nobody**,
+  including `service_role` — verified against the linked project after
+  applying. `prepare` compares the snapshot against the stored draft as `jsonb`
+  under `for update`, so a prepared revision is provably the draft it claims.
+  `publish` additionally refuses a stale snapshot, an acknowledgement that is
+  not exactly the recorded set, a cross-study revision and a moved pointer, then
+  writes the event and moves the pointer in one transaction. `restore` appends
+  a NEW event pointing at an older revision, requires a stated reason, deletes
+  nothing and rewrites nothing.
+
+- ⓘ **Idempotency is a unique index on `(study_id, idempotency_key)`**, not a
+  read-then-write with a window in it, and the key is derived from the INTENT.
+  A browser's automatic retry finds its own first event; acknowledging one more
+  warning is a different act and gets a different key. Every concurrency
+  refusal is SQLSTATE `55000`, the code the Data API delivers.
+
+- ⓘ **A blocker is something the page would be LYING about, and no
+  acknowledgement can override one.** A warning is a judgement, acknowledged by
+  its own code, by a named person, at a recorded time, and re-asserted at
+  publication in the application AND in the database. There is deliberately no
+  control that accepts every warning at once.
+
+- ⓘ **Four block types are refused at publication —
+  `not_rendered_for_client`.** The approved team reading, the complete-results
+  inventory, the comparison explorer and the report-download control render
+  INTERNALLY as a description of what the client will get, and the client
+  renderer does not draw the thing itself. The first published client screen
+  printed those descriptions to the client, including *"El cliente los ve
+  plegados, para revisarlos si quiere."* Drawing the description is the product
+  lying about itself; drawing nothing silently loses work a consultant placed.
+  So publication refuses, names the block and says what to do. The download is
+  offered once, from the identity layer, wired to the real authenticated
+  report. **This is the milestone's stated limitation.**
+
+- ⓘ **Contract C11 needed two layers, and the second was found in a
+  screenshot.** `client-visibility.ts` decides which blocks reach a client;
+  `Audience.tsx` — a context defaulting to `internal` — lets the leaf renderers
+  in `Charts.tsx` and `BlockView.tsx` know who is reading, because three of
+  their sentences reached the first published client screen. A caveat about a
+  result the client IS shown stays: that is analytical honesty, not an
+  omission.
+
+- **A block's authored title is drawn now.** Every block type whose spec says it
+  carries copy offers a title, and only `section` and `cover` ever rendered
+  one — so a chart titled by a consultant reached the canvas, both previews and
+  a client's screen as an untitled picture.
+
+- **Automatic canvas fit, without taking the choice away.** A session that has
+  not chosen a scale gets `Ajustar al espacio` whenever the previewed width does
+  not fit; choosing any scale, 100 % included, stops the editor deciding for the
+  session. It recalculates from measurement, so hiding or restoring a panel
+  re-answers it. `--canvas-scale` makes the block chrome `44px / scale`, so a
+  drag handle measures 44 px on screen at every scale — verified live.
+
+- Gates: `npm run test:experience-publication` (**105**, inside `npm test`) and
+  `npm run test:publication-live` (**50**, inside `npm run gates:live`, after
+  `test:milestone-live`). The live gate writes one disposable study **inside the
+  client fixture's own tenant** — the boundary cannot be driven from a tenant no
+  client account belongs to — and deletes it. It writes 27 screenshots and
+  captions to `artifacts/publication/` (gitignored).
+
+- **The real study is untouched.** `La voz de las y los Nets de Cuicuilco`
+  remains at draft revision **72**, sha256
+  `f4063b7c89dde25ced80ac3ac15ca9b2ae6d7e4a6bd86fb275c8a56f3b40829b`, with 60
+  respondents, 3 282 quantitative answers and 31 comments — verified before the
+  migration, after the migration, after a full rollback/re-apply round trip, and
+  before and after every run of the live gate. It has **no composed
+  publication** and is served the legacy dashboard. Nothing in this milestone
+  published it, prepared a revision of it, or wrote to it.
+
+- **The migration's reverse was proved by running it.** With zero revisions in
+  existence, `supabase/rollbacks/0025_drop_experience_publication.sql` was
+  applied to the linked project and the schema returned to its 0023/0024 shape
+  exactly; re-applying 0025 produced a **byte-identical** column, grant,
+  function, trigger, policy, index and constraint inventory. `supabase db lint`
+  reports no schema errors; the security advisor names nothing on any
+  `study_experience` object.
+
 ## Experience Composer — recorridos, semáforo, the last drawings, and the cloud
 
 Standing reference: `docs/EXPERIENCE_COMPOSER.md`, **sections 38–44** for this

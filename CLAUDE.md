@@ -185,16 +185,15 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — the Experience Composer, schema v3; publication is next
+## Current work — the Experience Composer, published to clients
 
 The authoritative state is `docs/CURRENT_STATE.md`. Standing architecture
-reference: `docs/EXPERIENCE_COMPOSER.md`; **sections 38-44 are the current
-milestone**. Work from branch
-`claude/experience-builder-journeys-visuals-cloud`; verified implementation
-handoff: `e9fdd6268e16429be37498f389ad8f5bc706028d`. Its tested zero-traffic Worker
-artifact was built from `07d14b9`; the later commit only records that upload.
-Production traffic was not promoted and remains on the previously live Worker
-version recorded in `docs/CURRENT_STATE.md`.
+reference: `docs/EXPERIENCE_COMPOSER.md`; **sections 45-51 are the current
+milestone**. Work from branch `claude/experience-publication-versioning`, cut
+from `claude/experience-builder-journeys-visuals-cloud` at `b20c502` (the
+verified handoff `e9fdd62` plus a documentation refresh). Production traffic was
+not promoted and remains on the previously live Worker version recorded in
+`docs/CURRENT_STATE.md`.
 
 - ⓘ **A Server Action on the builder or the draft preview must never call
   `revalidatePath`.** It makes Next re-render the route inside the action's own
@@ -256,10 +255,10 @@ version recorded in `docs/CURRENT_STATE.md`.
 
 The original P8 product-experience programme is implementation-complete and
 owner-accepted. The active work has since advanced through the governed
-Experience Composer milestones above. **The composed document still drives only
-the builder canvas and internal draft preview.** The next bounded product unit
-is publication/version history/rollback and a client renderer; do not claim a
-saved draft changes the client experience until that bridge exists.
+Experience Composer milestones above. **A composed document can now reach a
+client, and only through a published revision.** Saving a draft still changes
+nothing a client sees; do not describe a saved draft as changing the client
+experience.
 
 - P0-P6 are implemented, technically accepted and human-accepted on synthetic
   data. P6E completed with 108 automated checks and 0 failures.
@@ -377,7 +376,10 @@ saved draft changes the client experience until that bridge exists.
   reintroduce a best-effort "we could not record this" success path.
 - ⓘ **Publication has exactly one surface.** `/studio/e/[studyId]/publicar`,
   reached from the client preview, is the only path that moves a study between
-  draft, published and archived. `updateStudyConfiguration` may only re-save the
+  draft, published and archived — and, since migration `0025`, the only path
+  that prepares, publishes or restores a composed revision. `publicar/historial`
+  and `publicar/revision/[revisionId]` sit BELOW it: they are the evidence and
+  the exact preview a decision rests on, not second decision surfaces. `updateStudyConfiguration` may only re-save the
   state that already holds, and `setStudyPublication` independently refuses a
   publication with no acknowledgement, an empty study or an archived client.
 - Preserve P7 authorization/input gates, all calculation outputs, ingestion,
@@ -388,8 +390,8 @@ saved draft changes the client experience until that bridge exists.
   real-data environment, or enable irreversible controls during synthetic P7
   work. Do not redirect the roadmap toward retention UI, new role tiers or an
   incidental feature question.
-- **The Experience Composer PERSISTS A DRAFT and PUBLISHES NOTHING.** Standing
-  reference: `docs/EXPERIENCE_COMPOSER.md`. The product direction is a governed
+- **The Experience Composer now PUBLISHES, over an immutable revision.**
+  Standing reference: `docs/EXPERIENCE_COMPOSER.md`. The product direction is a governed
   data-experience builder over the same canonical calculations, authorization,
   approved evidence and immutable snapshots — not an unrestricted query tool.
   `src/lib/experience/**` holds the current versioned experience definition
@@ -398,20 +400,52 @@ saved draft changes the client experience until that bridge exists.
   respondent, no nesting), the semantic/block/chart registries, a pure
   compatibility adapter, a canonical data resolver, the editor operations, and
   the builder at `/studio/e/[studyId]/construccion`. AI is out of scope.
-  Gates: `npm run test:experience-composer`, and the credential-bearing
-  `npm run test:experience-persistence-live` and
-  `npm run test:experience-builder-live`.
-- ⓘ **A draft is not a publication, and nothing bridges the two yet.**
-  Migrations `0023` and `0024` create `study_experience_draft` (one mutable
-  draft per study), `study_experience_revision` (immutable, refused an UPDATE by
-  trigger AND by privilege) and `study_experience_event`. RLS is enabled and
-  forced on all three, `anon` and `authenticated` are denied outright, and even
-  `service_role` holds only SELECT — every write goes through
-  `save_study_experience_draft`, which re-checks the internal role, derives the
-  tenant FROM THE STUDY ROW and refuses a document naming another study or
-  client. NOTHING writes a revision, no client-facing route reads a composed
-  definition, and saving a draft changes nothing a client sees. Do not add a
-  publication path without its own design and authorization review.
+  Gates: `npm run test:experience-composer` and
+  `npm run test:experience-publication`, plus the credential-bearing
+  `npm run test:experience-persistence-live`,
+  `npm run test:experience-builder-live` and
+  `npm run test:publication-live`.
+- ⓘ **A draft is not a publication, and the bridge between them is one
+  deliberate act.** Migrations `0023`/`0024` create the mutable draft, the
+  immutable revision and the event log; `0025` turns the revision into a
+  PREPARED snapshot, teaches the event log `revision_prepared` / `published` /
+  `restored`, and adds `study_experience_publication` — the per-study pointer at
+  whatever revision a client is served, and the only mutable object in the
+  model. RLS is enabled and forced on all four, `anon` and `authenticated` are
+  denied outright, `service_role` holds only SELECT, and the body the two
+  selection entry points share is executable by NOBODY. Saving a draft still
+  changes nothing a client sees; only `publish_`/`restore_` move the pointer.
+- ⓘ **A revision is never edited, and status is never stored on it.** A
+  `superseded` column would have to be UPDATEd on a table whose whole purpose is
+  that it is never updated. State is derived from the pointer and the event log.
+  Rollback APPENDS an event pointing at an older revision; it is not deletion,
+  it rewrites no history, and the revision it replaces stays and can be restored
+  back.
+- ⓘ **A publication stores CONFIGURATION and fingerprints, never a number.**
+  Every aggregate is computed at request time by the canonical engine, exactly
+  as the legacy dashboard computes it.
+- ⓘ **A blocker cannot be acknowledged; a warning is acknowledged by its exact
+  code.** Who, when, which codes — stored on the revision and re-asserted at
+  publication in the application AND in the database. There is deliberately no
+  control that accepts every warning at once.
+- ⓘ **Four block types are refused at publication** — the approved reading, the
+  complete-results inventory, the comparison explorer and the report-download
+  control. Each renders internally as a DESCRIPTION of what the client will get,
+  and the client renderer does not draw the thing itself; the first published
+  client screen printed those descriptions to the client. Refusing names the
+  block and says what to do, which is the only option that neither lies nor
+  silently drops somebody's work. This is a stated limitation, not a bug.
+- ⓘ **A client-facing surface never draws an author's instruction.**
+  `client-visibility.ts` decides which blocks reach a client;
+  `Audience.tsx` — a context defaulting to `internal` — lets the leaf renderers
+  know who is reading. A caveat about a result the client IS shown stays: that
+  is analytical honesty. Do not add an internal sentence to `BlockView` or
+  `Charts.tsx` without gating it on the audience.
+- ⓘ **A study is served the composed experience only when it has an ACTIVE
+  PUBLISHED REVISION this build can read.** Every other study keeps the legacy
+  dashboard. A published revision that cannot be read falls back to the legacy
+  dashboard rather than to an error page, and the failure is named on the
+  internal publication screen.
 - ⓘ **A lost update is SQLSTATE `55000`, never `40001`.** PostgREST retries a
   serialization failure, so a deliberate `40001` refusal never reaches the
   caller: measured at 125 s and an HTTP 504 with no message, against 148 ms for

@@ -324,6 +324,9 @@ export function TrafficLightChart({
    */
   scheme: BandScheme | null;
 }) {
+  // Read before any branch: a hook inside one changes its call order between
+  // renders, which is exactly what React's rule forbids.
+  const forClient = useIsClient();
   const cell = applyPolicy(data.overall, policy);
   if (cell.state === "no_data" || cell.state === "suppressed") {
     return <KpiChart data={data} policy={policy} />;
@@ -342,7 +345,7 @@ export function TrafficLightChart({
     // A client sees the number and no chip: "somebody has not written the
     // standard yet" is a message to the team about unfinished work, and C11
     // makes unfinished work silence rather than a caption.
-    if (useIsClient()) return <KpiChart data={data} policy={policy} showDetail={false} />;
+    if (forClient) return <KpiChart data={data} policy={policy} showDetail={false} />;
     return (
       <div className="min-w-0">
         <KpiChart data={data} policy={policy} showDetail={false} />

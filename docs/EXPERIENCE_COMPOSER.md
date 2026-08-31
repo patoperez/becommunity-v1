@@ -2011,3 +2011,318 @@ three on the preview, and finally asserts the **real** study's stored draft is
 at the same revision with the same `sha256` as before the run.
 
 Screenshots and captions land in `artifacts/milestone/`.
+
+---
+
+## 45. Publication — the five states, and where each one physically lives
+
+This is the bridge § 32 listed and § 11 refused to build early. A composed
+document now reaches a client, and the whole design is about making "what the
+client has" and "what somebody is working on" two things that cannot be
+confused.
+
+| State | Where it lives | What moves it |
+| --- | --- | --- |
+| **Borrador** | `study_experience_draft`, one row per study | `save_study_experience_draft` — unchanged |
+| **Revisión preparada** | one immutable row in `study_experience_revision` | `prepare_study_experience_revision` |
+| **Publicada** | `study_experience_publication.active_revision_id` points at it | `publish_study_experience_revision` |
+| **Sustituida** | nothing moves it — it is simply no longer the row the pointer names | a later event's `replaced_revision_id` records it |
+| **Restaurada** | a NEW `study_experience_event` of kind `restored` | `restore_study_experience_revision` |
+
+**Status is derived, never stored on the immutable row.** A `superseded` column
+would have to be UPDATEd on a table whose entire purpose is that it is never
+updated, and it would be wrong exactly once: the time somebody restores an older
+revision without the code path that maintains it. `revisionState()` reads the
+pointer and the event log, which cannot drift.
+
+**A publication never stores a number.** A revision freezes the CONFIGURATION —
+pages, blocks, queries by opaque handle, filters, journeys, band schemes, copy —
+plus the canonical hash and two fingerprints. Every aggregate a client is shown
+is computed at request time by the canonical engine over the study's own rows,
+exactly as the legacy dashboard computes it. A published revision carrying
+stored numbers would disagree with the data behind it the first time a
+correction was imported, and nobody would be told.
+
+### What a prepared revision carries
+
+`definition_sha256` (SHA-256 over the canonical key-sorted bytes),
+`source_draft_revision` (the exact draft it was frozen from),
+`study_fingerprint` (the registry stamp, the disclosure rule and the category
+grouping it was reviewed against), `acknowledged_warnings` with
+`acknowledged_by` and `acknowledged_at`, `prepared_by`, `prepared_at` and an
+optional 200-character internal note.
+
+`published_by` / `published_at` were **renamed** to `prepared_by` /
+`prepared_at` by migration 0025, on a table that had never held a row. The old
+names assumed a revision is written at the moment it is published; it is not,
+and the same revision can be published more than once, because that is what a
+rollback is. A single `published_at` on the revision row could only ever record
+one of several publications.
+
+---
+
+## 46. The three privileged writes, and what each one refuses
+
+Every write is a `security definer` function with a pinned empty `search_path`.
+`anon` and `authenticated` are denied outright on all four tables, `service_role`
+holds SELECT and nothing else, and the body the two selection entry points share
+— `select_study_experience_revision` — is executable by **nobody**, including
+`service_role`. Verified against the linked project after applying:
+
+```
+assert_experience_publisher        postgres=X/postgres,service_role=X/postgres
+prepare_study_experience_revision  postgres=X/postgres,service_role=X/postgres
+publish_study_experience_revision  postgres=X/postgres,service_role=X/postgres
+restore_study_experience_revision  postgres=X/postgres,service_role=X/postgres
+select_study_experience_revision   postgres=X/postgres
+```
+
+**`prepare`** re-checks the internal role, derives the tenant from the study
+row, refuses a document naming another study or client, refuses a preparation
+whose caller reports a blocking finding, and — the part that makes a snapshot
+provable — compares the document against the STORED DRAFT at the named revision
+as `jsonb`, under `for update`. A prepared revision is therefore the draft it
+claims to be even if every layer above the database were bypassed.
+
+**`publish`** additionally refuses a stale snapshot (the draft has moved on or
+its document changed), an acknowledgement that is not exactly the set the
+revision recorded, a revision belonging to another study, and a pointer
+somebody else has moved. Then it writes the event and moves the pointer in one
+transaction. If anything fails, the client keeps being served what they were
+being served.
+
+**`restore`** is the same minus the staleness rule — a deliberate return to
+something older is not stale — plus a required stated reason. It APPENDS an
+event and never rewrites one. Nothing is deleted, and the revision it replaces
+stays in the history and can be restored back.
+
+**Idempotency is a unique index**, not a read-then-write with a window in it:
+`(study_id, idempotency_key)`. The key is derived from the INTENT — which study,
+which draft revision, which document, which acknowledged warnings for a
+preparation; which study, which revision and what was active before it for a
+selection. A browser's automatic retry carries the key its first attempt used
+and finds that attempt's event; acknowledging one more warning is genuinely a
+different act and gets a different key.
+
+**A refusal is SQLSTATE `55000`.** The rule migration 0024 established holds
+here: PostgREST retries `40001` until the gateway gives up, so a deliberate
+refusal never reaches a browser. `42501` is an actor who may not do this,
+`P0002` a thing that does not exist, `22023` a request this study cannot accept.
+
+---
+
+## 47. Blockers versus warnings, and why there is no "ignore everything"
+
+The line is not severity.
+
+A **BLOCKER** is something the published page would be lying about. An unknown
+result. A chart that cannot represent what it was given. A semáforo colouring a
+number against a standard nobody finished writing. A percentage whose numerator
+was never chosen. A control the client can move that moves nothing. A cloud of
+themes nobody approved. A cover promising a client name it does not have. A
+schema the client renderer does not implement. A review whose draft has moved
+on. **No acknowledgement can make any of those true**, so none can be
+overridden, and the control that would prepare a revision is not drawn at all.
+
+A **WARNING** is a judgement somebody is entitled to make: a hidden page, empty
+explanatory copy, a result resting on four answers, a moment shown deliberately
+without a number, a mobile-fallback recommendation, one panel moving a great
+many blocks, something configured and never placed. Each is acknowledged **by
+its own code**, with its own checkbox, and the exact set is stored on the
+revision with who ticked it and when. Publication re-asserts that set in the
+application AND in the database: agreeing to three warnings never authorizes
+publishing a fourth.
+
+There is deliberately no control that accepts them all. What gets stored has to
+be which exact codes a named person agreed to; a blanket dismissal stores "they
+clicked something", and becomes meaningless the moment the list changes.
+
+### `not_rendered_for_client` — the milestone's stated limitation
+
+Four block types render internally as a bordered DESCRIPTION of what the client
+will get: the approved team reading, the complete-results inventory, the
+comparison explorer and the report-download control. The client renderer does
+not draw the thing itself.
+
+The first published client screen printed those descriptions to the client,
+including *"El cliente los ve plegados, para revisarlos si quiere."* — the
+product talking about the reader, to the reader. There were three ways out and
+one of them is honest: drawing the description is the product lying about
+itself; drawing nothing silently loses work a consultant placed; so publication
+REFUSES, names the block, and says what to do. The download is offered once,
+from the identity layer, wired to the real authenticated report.
+
+---
+
+## 48. The review, and what a reviewer actually reads
+
+`/studio/e/[studyId]/publicar` — still the ONE surface a study's client-facing
+state changes on, with the composed experience beside the study's own
+draft/published/archived controls rather than instead of them.
+
+It keeps three things apart, each with its own card, its own words and its own
+preview address, because confusing them is the failure this milestone exists to
+prevent:
+
+- **Borrador** — what is being built. Changes every save. Never seen.
+- **Revisión preparada** — an immutable snapshot of one exact draft revision.
+- **Publicada** — the revision the client is being served right now.
+
+It shows the exact draft revision under review and when it was saved, its
+canonical hash, what is published today and when, the pages and their visible
+and hidden blocks, what each block shows and how it is drawn and which filters
+move it, the filters and what each one moves, the recorridos and their moments,
+the semáforos and whether each is complete, where the qualitative content comes
+from, the disclosure rule, the identity, the configuration this build cannot
+draw, and a **human-readable structural diff** against what the client has.
+
+**No raw JSON is on that path.** `inventory.ts` describes an arrangement in
+sentences and `diff.ts` says what changed in sentences; the technical export
+stays where it was, internal and one deliberate click away.
+
+`/publicar/revision/[revisionId]` renders one immutable revision through the
+CLIENT'S OWN component, so what a reviewer judges is what a client receives
+rather than a second drawing of it. Its banner names which of the three views it
+is and links to the other two. A stale review is marked, cannot be published
+from the screen, and is refused by the database independently.
+
+`/publicar/historial` lists every revision with its hash, who prepared it and
+when, every publication and restoration of it, what replaced it, the active and
+superseded markers, a structural summary and a preview link. It pages, and it
+compares any two revisions structurally. **Nothing on it can edit a revision** —
+not because the markup omits a control, but because the table refuses an UPDATE
+and no role holds the privilege.
+
+---
+
+## 49. The client renderer, and the per-study compatibility boundary
+
+A study is served the composed experience when — and only when — it has an
+**active published revision this build can read**. Every other study, which
+before this milestone was every study, keeps the legacy dashboard byte for byte.
+No study moves because a draft was saved, because a revision was prepared, or
+because the composer gained a feature: moving one is a deliberate act on the
+publication surface, one study at a time.
+
+`/insights/e/[studyId]` and the internal client preview — which is one component
+behind both `/admin/preview/[studyId]` and `/studio/e/[studyId]/vista-cliente` —
+make the SAME selection through the same function, so the two cannot answer
+differently.
+
+**A published revision this build cannot read falls back to the legacy
+dashboard**, not to an error page. The client keeps a working screen with real
+numbers; the failure is named on the internal publication screen, because "we
+could not read what we published" is not a sentence a client should ever meet.
+
+**The numbers are the client's own.** Aggregates resolve over the rows
+`loadAuthorizedStudyData` returned, already narrowed by the profile's
+`data_scope`, and the registry is built from those same rows with the same pure
+functions the internal path uses. A reader with a restricted scope is offered
+filter values they have data for and no others.
+
+**One privileged read, after RLS has already answered.**
+`study_experience_revision` denies browser roles outright, so the definition is
+read with the admin client — scoped by both the revision id and the study id —
+only after the user's own session has proved through ordinary RLS that they may
+see this study.
+
+**A reader's selection is transient.** It is held in the page's state, mirrored
+into the address so a view can be refreshed or shared, and never written
+anywhere. The Server Action it goes to reads the active revision itself, so a
+request cannot describe an arrangement nobody published.
+
+### Contract C11, in two layers
+
+`client-visibility.ts` decides which BLOCKS reach a client: one whose numbers
+were never computed, one pointing at a result the study no longer has, one
+nobody answered, and one the disclosure rule withholds entirely all render as
+NOTHING — and the separators and section headings that would have framed the
+hole go with them.
+
+`Audience.tsx` is the second layer, and it exists because the first is not
+enough. `BlockView` and `Charts.tsx` are honest for an internal reader in the
+way an internal screen must be, and the first published client screen carried
+three of their sentences: *"Este bloque todavía no tiene texto. Escríbelo en la
+ficha del bloque"*, *"Falta configurar el rango"*, and the inventory's sentence
+about the reader. A context — defaulting to `internal`, set to `client` by the
+client renderer — lets the leaf renderers know who is reading. A prop would have
+been a dozen places to forget.
+
+**What is deliberately NOT silenced**: a caveat about a result the client IS
+shown. A small base, a suppressed segment, a missing value behind a visible
+number are analytical honesty, and hiding them would be the opposite failure.
+
+---
+
+## 50. Automatic fit, without taking the choice away
+
+The canvas drew the previewed width at full size and panned when there was no
+room. Right while somebody works on one block; wrong the moment an editor OPENS
+with both panels showing on a 1 280 px screen, where a 1 120 px canvas in
+roughly 700 px of room is a horizontal scroll of something whose shape nobody
+can see, beside a scale control nothing told them was there.
+
+A session that has not chosen a scale now gets `Ajustar al espacio` whenever the
+previewed width does not fit, and full size whenever it does. The moment
+somebody picks a scale — 100 % included — that choice is remembered for the
+session and the automatic decision stops applying. The control shows what is IN
+EFFECT and says when the editor chose it, because a select reading "100 %" over
+a canvas drawn at 62 % is a control that lies.
+
+It recalculates from MEASUREMENT: hiding a panel, restoring one, entering or
+leaving focus mode and resizing all re-answer it, because the room a canvas has
+depends on which panels are open and only measuring can tell.
+
+**And it no longer costs a target.** `transform: scale()` shrinks the editor's
+own controls with the drawing — at 0.4 a 44 px handle measured 18 px — so the
+canvas publishes its scale as `--canvas-scale` and the block chrome sizes itself
+as `44px / var(--canvas-scale)`: larger in canvas coordinates by exactly the
+factor the transform shrinks it by, so what a pointer meets is 44 px at every
+scale. Drag coordinates were already correct under scale and are untouched.
+Nothing here writes to the document.
+
+---
+
+## 51. The gates this milestone adds
+
+**Offline, credentials-free, inside `npm test`:**
+
+```
+npm run test:experience-publication   # 105 deterministic checks
+```
+
+It drives the pure modules rather than asserting that a comment says the right
+thing: the canonical hash's stability under key order and its agreement with the
+published SHA-256 of the empty string; idempotency keys that collapse a retry
+and separate a different acknowledgement; every blocker rule firing and the ones
+that are deliberately NOT blockers; the diff reporting by identifier and
+ignoring bookkeeping; contract C11 by driving the predicate through every
+outcome; migration 0025's STATEMENTS — a migration that explains what it does
+not do would otherwise fail its own check for doing it; the absence of
+`revalidatePath`; and the automatic fit's two conditions and its 44 px
+compensation.
+
+**Live, credential-bearing, inside `npm run gates:live`:**
+
+```
+npm run test:publication-live         # 50 checks in a real browser, 27 screenshots
+```
+
+It writes one disposable study inside the client fixture's own tenant — the
+boundary cannot be driven from a tenant no client account belongs to — and
+deletes it. **The real study is read only**, and its stored draft is asserted at
+the same revision with the same `sha256` before and after the run.
+
+The composition is written by the real editor and then enriched through
+`save_study_experience_draft`, the only write path a draft has. What the gate
+measures is everything after a draft exists: the legacy fallback, a blocker that
+cannot be prepared past, warnings acknowledged one code at a time, the prepared
+revision previewed through the client's own component, a draft moving on and the
+review going stale, a fresh preparation, publication, the client's screen
+switching, a draft edit that changes nothing for the client, the diff, the
+history, the comparison, the rollback, and the client's screen after it — plus,
+at the database, a retry that writes no second event, a lost pointer update, a
+fabricated acknowledgement, a client-role publisher, a cross-study revision, and
+an attempted UPDATE of a stored revision and of an event.
+
+Screenshots and captions land in `artifacts/publication/` (gitignored).

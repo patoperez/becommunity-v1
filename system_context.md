@@ -80,8 +80,9 @@ domain, a production Supabase environment, billing or full disaster recovery
 remain explicit go-live work; they are not silently treated as green.
 
 The active construction line is the governed **Experience Composer** on branch
-`claude/experience-builder-journeys-visuals-cloud`, with the verified
-implementation handoff at `e9fdd6268e16429be37498f389ad8f5bc706028d`.
+`claude/experience-publication-versioning`, cut from
+`claude/experience-builder-journeys-visuals-cloud` at
+`b20c502b7a99942fa012ff3a462b278beda5ba60`.
 Its schema version is 3. Internal
 staff can compose pages and filter panels, collapse either editor sidebar
 independently, define several reusable recorridos with exact awareness rules,
@@ -91,15 +92,25 @@ approved qualitative categories. The milestone's offline, production-browser
 and disposable-live-data gates passed; the real Cuicuilco draft remained at
 revision 72 with the same canonical hash.
 
-The Composer **stores a draft and publishes nothing**. It currently drives the
-builder canvas and internal draft preview only. The next bounded unit is the
-publication/version-history/rollback workflow plus a client renderer over an
-immutable published snapshot. Until that bridge exists, a saved composition
-must never be described as changing what the client sees.
+The Composer now **publishes**, and only over an immutable revision. A draft is
+frozen into a prepared revision of one exact draft revision, reviewed exactly as
+it would be served, and then selected atomically as the active client
+experience; a rollback appends a new event pointing at an older revision and
+deletes nothing. Saving a draft still changes nothing a client sees, and a study
+is served the composed experience only when it has an active published revision
+— every other study keeps the legacy dashboard, one study at a time.
 
-The milestone was uploaded as zero-traffic Cloudflare version
-`be070931-a316-4050-989d-2be724b50b38` from tested commit `07d14b9`; production
-traffic was not promoted. Manual uploads must keep `keep_vars = true`, pass both
+The decisions worth carrying forward: status is DERIVED from the pointer and the
+event log rather than stored on a row that is never updated; a publication
+freezes CONFIGURATION and fingerprints and never a number, so a corrected import
+still moves what a client reads; a blocker is something the page would be lying
+about and cannot be acknowledged, while a warning is acknowledged by its exact
+code, by a named person, at a recorded time; and the client renderer draws no
+sentence addressed to an author, which took two layers to get right and was
+found by looking at a screenshot rather than at the code.
+
+Each milestone is uploaded as a zero-traffic Cloudflare version and never
+promoted; the current one is recorded in `docs/CURRENT_STATE.md`. Manual uploads must keep `keep_vars = true`, pass both
 public Supabase text bindings while they remain version-only, and inherit the
 encrypted service-role secret without exposing it to a build or committed file.
 
@@ -107,7 +118,7 @@ Every P7 authorization, tenant-isolation, RLS, calculation and ingestion
 boundary remains in force. V2.5 content still follows authoritative documented
 business definitions; never invent formulas. For exact operational state read
 `docs/CURRENT_STATE.md`; for the Composer contract read
-`docs/EXPERIENCE_COMPOSER.md`, especially sections 38-44.
+`docs/EXPERIENCE_COMPOSER.md`, especially sections 45-51.
 
 ## 8. How we work with AI
 

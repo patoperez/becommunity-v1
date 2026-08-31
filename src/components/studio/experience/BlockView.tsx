@@ -230,11 +230,15 @@ function CoverBlock({ block, study }: BlockViewProps) {
 }
 
 function ProseBlock({ block }: { block: ExperienceBlock }) {
+  // Read before any branch: a hook called inside one is a hook whose order
+  // changes between renders, and React's rules exist because that corrupts
+  // every hook after it.
+  const forClient = useIsClient();
   if (!block.copy.body) {
     // A paragraph with no paragraph is unfinished work. `client-visibility.ts`
     // already keeps it off a client's page; this is the second line, so the
     // instruction below can never be the thing a client reads.
-    if (useIsClient()) return null;
+    if (forClient) return null;
     return (
       <div className={CONFIG_FRAME}>
         <p className="text-muted">
