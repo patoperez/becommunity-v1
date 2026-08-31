@@ -94,6 +94,16 @@ milestone. Branch `claude/experience-builder-journeys-visuals-cloud`, from
   `/studio/e/[studyId]/publicar`, and nothing in this milestone changes what a
   client sees.
 
+- **Uploaded as a zero-traffic Cloudflare version, not promoted.** Version
+  `be070931-a316-4050-989d-2be724b50b38`, tag `journeys-visuals-07d14b9`, at
+  `https://be070931-becommunity-v1.ollinagencyllc.workers.dev` — `/api/health`
+  and `/login` both answer 200. Live traffic is unchanged: 100 % still on
+  `e691ecd8-de9a-4a02-a8e3-13aad7e9e805` (`exec-preview-4b0af06`). The upload
+  passed `--var` for both public values, because they still exist only at the
+  version level; `SUPABASE_SERVICE_ROLE_KEY` was not passed and is inherited as
+  an encrypted secret. Account `b5717457dfde865f6e0b08b952586e90` (Ollin),
+  confirmed by a read-only deployment list before uploading.
+
 ## Experience Composer — filter capability, focus mode, and one Top-2-Box
 
 Standing reference: `docs/EXPERIENCE_COMPOSER.md`, **sections 33–37** for this
