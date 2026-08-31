@@ -61,6 +61,28 @@ export const studioStudyComposer = (studyId: string) => `/studio/e/${studyId}/co
  */
 export const studioStudyDraftPreview = (studyId: string) => `/studio/e/${studyId}/vista-previa`;
 
+/**
+ * THE PUBLICATION SURFACE'S OWN ADDRESSES, and why they are BELOW `publicar`
+ * rather than beside it.
+ *
+ * P8.2 established that publication has exactly one surface. That rule is about
+ * where a decision is MADE, and it still holds: `publicar` is the only place a
+ * study's client-facing state changes. History and a revision preview are not
+ * second decision surfaces — they are the evidence and the exact preview that
+ * decision rests on, and nesting them says so in the address bar.
+ *
+ * `revision` renders one IMMUTABLE revision exactly as it would be served. It
+ * is deliberately not `vista-previa`, which renders the mutable draft: telling
+ * "what I am working on" from "what I am about to send" is the whole point of a
+ * prepared revision, and two previews that looked alike would defeat it.
+ */
+export const studioStudyPublicationHistory = (studyId: string) =>
+  `/studio/e/${studyId}/publicar/historial`;
+export const studioStudyRevisionPreview = (studyId: string, revisionId: string) =>
+  `/studio/e/${studyId}/publicar/revision/${revisionId}`;
+export const studioStudyRevisionCompare = (studyId: string, aId: string, bId: string) =>
+  `/studio/e/${studyId}/publicar/historial?compare=${encodeURIComponent(aId)}&with=${encodeURIComponent(bId)}`;
+
 /** The legacy address each Studio surface continues to answer at. */
 export const ADMIN_ALIASES: { studio: string; admin: string }[] = [
   { studio: STUDIO_ROOT, admin: "/dashboard" },
