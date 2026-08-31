@@ -47,6 +47,7 @@ import {
 import {
   acknowledgementMatches,
   publicationPreflight,
+  CLIENT_UNSUPPORTED_BLOCKS,
   PUBLICATION_BLOCKER_CODES,
   PUBLICATION_WARNING_CODES,
 } from "../src/lib/experience/preflight.ts";
@@ -628,33 +629,58 @@ section("6. Contract C11 — absence is not a client-facing finding");
 
   // A download that does not exist is never offered.
   const download = baseDocument();
-  const downloadBlock = newBlock({ type: "report_download", seed: "dl", order: 1, registry });
-  if (downloadBlock) {
-    download.pages[0].blocks = [...download.pages[0].blocks, downloadBlock];
+  /*
+   * THE FOUR BLOCK TYPES THAT DESCRIBE THE CLIENT'S EXPERIENCE TO THE AUTHOR.
+   *
+   * Internally each renders as a bordered sentence about what the client will
+   * get. The first published client screen printed those sentences TO the
+   * client, including "El cliente los ve plegados, para revisarlos si quiere."
+   * They are refused at publication and, as a second line, never drawn here.
+   */
+  for (const type of CLIENT_UNSUPPORTED_BLOCKS) {
+    const describing = baseDocument();
+    const block = newBlock({ type, seed: `unsupported-${type}`, order: 1, registry });
+    if (!block) continue;
+    describing.pages[0].blocks = [...describing.pages[0].blocks, block];
     assert.equal(
-      blockReachesClient({
-        block: downloadBlock,
-        definition: download,
-        data: {},
-        evidence: { ...SUMMARY, reportAvailable: false },
-      }),
+      blockReachesClient({ block, definition: describing, data: {}, evidence: SUMMARY }),
       false,
-      "a download this study cannot produce was offered to the client",
+      `“${type}” describes the client's experience to the author and reached the client`,
     );
-    assert.equal(
-      blockReachesClient({
-        block: downloadBlock,
-        definition: download,
-        data: {},
-        evidence: { ...SUMMARY, reportAvailable: true },
-      }),
-      true,
-      "a download this study genuinely supports was hidden",
+    const report = publicationPreflight({ definition: describing, registry, evidence: EVIDENCE });
+    assert.ok(
+      report.blockerCodes.includes("not_rendered_for_client"),
+      `publishing a page carrying “${type}” was allowed`,
     );
-    ok("the report download is offered only where it is truthfully supported");
   }
+  ok("the four blocks that describe the client's experience are refused at publication, and drawn to nobody");
 
   // The frame around a hole goes with the hole.
+  const titledOnly = baseDocument();
+  const paragraph = newBlock({
+    type: "rich_text",
+    seed: "prose",
+    order: 1,
+    registry,
+    title: "Un encabezado sin texto",
+  });
+  if (paragraph) {
+    titledOnly.pages[0].blocks = [...titledOnly.pages[0].blocks, paragraph];
+    assert.equal(
+      blockReachesClient({ block: paragraph, definition: titledOnly, data: {}, evidence: SUMMARY }),
+      false,
+      "a paragraph block with a title and no paragraph reached the client",
+    );
+    const written = structuredClone(paragraph);
+    written.copy = { ...written.copy, body: "Lo que este estudio encontró." };
+    assert.equal(
+      blockReachesClient({ block: written, definition: titledOnly, data: {}, evidence: SUMMARY }),
+      true,
+      "a paragraph block with a paragraph was hidden from the client",
+    );
+    ok("a paragraph with no paragraph is unfinished work and renders as nothing, not as an instruction");
+  }
+
   const framed = baseDocument();
   const heading = newBlock({ type: "section", seed: "sec", order: 0, registry, title: "Sección" });
   const rule = newBlock({ type: "divider", seed: "div", order: 2, registry });
@@ -1024,6 +1050,22 @@ section("9. The routes and the actions");
   }
   assert.ok(!renderer.includes("definitionSha256"), "the client renderer prints a definition hash");
   ok("the client renderer prints no revision number, no hash and no internal vocabulary");
+
+  const renderers = await read("src/components/studio/experience/Charts.tsx");
+  const blockView = await read("src/components/studio/experience/BlockView.tsx");
+  assert.ok(
+    renderers.includes("if (useIsClient()) return null;"),
+    "the empty-state renderer still prints an author's instruction to a client",
+  );
+  assert.ok(
+    blockView.includes("useIsClient()"),
+    "the block renderer cannot tell who it is drawing for",
+  );
+  assert.ok(
+    renderer.includes('AudienceProvider audience="client"'),
+    "the client renderer does not declare who is reading",
+  );
+  ok("the leaf renderers know who is reading, and draw no author's instruction to a client");
 
   const publicationLib = await read("src/lib/experience/publication.ts");
   assert.ok(publicationLib.startsWith('import "server-only";'), "the publication reader is not server-only");
