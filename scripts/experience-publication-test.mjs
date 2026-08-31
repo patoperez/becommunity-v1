@@ -1127,14 +1127,41 @@ section("10. The canvas fits itself without taking the choice away");
     "the canvas does not publish its scale for its own controls to compensate for",
   );
   assert.ok(
-    builder.includes('minHeight: "calc(2.75rem / var(--canvas-scale, 1))"'),
+    builder.includes('minHeight: "calc(2.75rem / var(--canvas-scale, 1) + 1px)"'),
     "the editor's controls do not compensate for the canvas scale",
   );
   assert.ok(
-    builder.includes('minWidth: "calc(2.75rem / var(--canvas-scale, 1))"'),
+    builder.includes('minWidth: "calc(2.75rem / var(--canvas-scale, 1) + 1px)"'),
     "the editor's controls compensate in one dimension only",
   );
   ok("the block chrome sizes itself as 44 px divided by the scale, so a target stays 44 px on screen");
+
+  /*
+   * THE EXTRA PIXEL, CHECKED ARITHMETICALLY.
+   *
+   * A live sweep reported the drag handle at "44 x 44" and refused it, because
+   * 44 / 0.6125 x 0.6125 comes back as 43.99. The compensation has to clear the
+   * threshold rather than meet it, at every scale the fit can produce.
+   */
+  for (const scale of [0.4, 0.5, 0.6125, 0.75, 0.9, 1]) {
+    const physical = (44 / scale + 1) * scale;
+    assert.ok(physical >= 44, `a compensated target measures ${physical} at scale ${scale}`);
+  }
+  ok("the compensation clears 44 px at every scale the automatic fit can produce, not just meets it");
+
+  const explore = await readFile(
+    new URL("../src/components/studio/experience/ExploreViews.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    explore.includes("if (!onChange) {"),
+    "the canvas still draws a filter control as an operable form element",
+  );
+  assert.ok(
+    !/disabled=\{onChange === null\}/.test(explore),
+    "a disabled select is still drawn where nobody is exploring",
+  );
+  ok("a filter control with nobody exploring is drawn as a picture, not as a disabled form control");
 
   assert.ok(
     builder.includes("CHROME_PREFERENCE_KEY") && builder.includes("sessionStorage"),
