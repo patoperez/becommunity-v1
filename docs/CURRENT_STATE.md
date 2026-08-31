@@ -1,9 +1,98 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-30**.
+> Authoritative operational handoff. Last verified: **2026-08-31**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
+
+## Experience Composer — recorridos, semáforo, the last drawings, and the cloud
+
+Standing reference: `docs/EXPERIENCE_COMPOSER.md`, **sections 38–44** for this
+milestone. Branch `claude/experience-builder-journeys-visuals-cloud`, from
+`claude/experience-builder-filter-ux-focus` at `24f9680`.
+
+- **Schema version 3**, reached by a purely additive one-step migration.
+  `twoToThree` adds `bandSchemes`, per-block/journey/moment `bandSchemeId`,
+  a visualization `palette`, `themeCloud` on cloud blocks and `awareness` on
+  momentos. It DROPS the half-configured `unawareMetricId` / `unawareLabel`
+  pair rather than completing it: version 3 requires both halves of an
+  awareness mapping, and a migration that supplied the missing half would be
+  choosing a percentage's numerator on somebody's behalf. **No SQL migration
+  accompanies it** — the column, the table, the function and every grant are
+  unchanged, and the version lives inside the `jsonb` document.
+
+- ⓘ **A semáforo is written by a person or it does not exist.** Bands, their
+  edges and inclusivity, their colours, their shapes and what being in each one
+  MEANS are all authored. Nothing is derived from the distribution — no
+  percentile, no tercile, no "bottom third" — because each of those is a
+  property of who happened to answer and changes meaning every time somebody
+  new replies. A study with no configured scheme gets no colour: the block
+  shows the number and says which decision is missing. `schemeProblems()` names
+  gaps and overlaps by the exact value that breaks them, sorting by lower bound
+  because a semáforo is authored best-first.
+
+- **A complete semáforo that names the result it classifies becomes an ordinary
+  filterable characteristic.** Values are the band labels; a respondent's value
+  is whichever band their own answer falls in. It is a property of the
+  DOCUMENT, not of the study — two drafts can hold different standards — and
+  `registryWithDerivedBands` is the one pure function both the server and the
+  browser evaluate. This is the only honest way to offer "Desempeño: Verde /
+  Amarillo / Rojo" for a study that records a score and no category, which is
+  exactly the real study's shape.
+
+- **Several recorridos per study**, defined once beside the pages and shown
+  wherever they belong. Duplicating a BLOCK opens a second window onto the same
+  recorrido; duplicating the RECORRIDO makes a new one edited apart. Removing
+  one that a page still shows is refused, naming the blocks. "Quién no conocía
+  este momento" requires BOTH the result that measures it and the exact answers
+  that mean it; a blank counts as neither.
+
+- **`heatmap`, `bubble` and `treemap` are drawn.** They were declared and then
+  substituted with a bar chart under the same title. Each takes the number of
+  characteristics its geometry needs and only the aggregations it can honestly
+  carry (an area has no zero point, a rectangle's parts must add up), reads a
+  chosen palette, and carries the same numbers as a table.
+  `npm run test:renderer-parity` keeps the catalogue and the renderers from
+  disagreeing silently.
+
+- **A thematic cloud that is a cloud.** Sized by a stated basis (mentions or
+  people — different numbers, both carried), merged by the qualitative review's
+  own fold with the raw spellings as aliases, optionally per source so two
+  clouds can read two questions, deterministic, collision-free at the position
+  that is actually drawn, keyboard-operable, and exported as the SVG on screen.
+  It narrows the range between the smallest and largest word before it drops a
+  theme, and never below the configured floor. **The study's disclosure rule
+  applies to a word exactly as it applies to a number:** a withheld theme loses
+  its word and its count together and leaves nothing behind.
+
+- **Independent sidebar rails.** Each panel carries a collapse rail on its own
+  inner edge; each collapses ONE panel; the four combinations survive a reload
+  per side; each leaves a restore tab on the edge it went out of; focus mode
+  remains the one act for both, with a labelled way out and `Escape`. The rail
+  exists only where the panel is a column. Its control is 24 × 44 — WCAG 2.2's
+  minimum, under the equivalent-control exception, because the toolbar carries
+  a full-size button for the same act — and the gate exempts it by name and
+  then asserts that minimum separately.
+
+- Gates: `npm run test:experience-composer` (**168**) and
+  `npm run test:renderer-parity` (**15**), both inside `npm test`;
+  `npm run test:milestone-live` (**57**) inside `npm run gates:live`, after
+  `test:filter-ux-live`. The live gate mutates only a disposable client and
+  study it creates and deletes, and asserts the real study's stored draft is at
+  the same revision with the same `sha256` before and after the run. It writes
+  38 screenshots and captions to `artifacts/milestone/` (gitignored).
+
+- **The real study is untouched.** `La voz de las y los Nets de Cuicuilco`
+  remains at draft revision **72**, sha256
+  `f4063b7c89dde25ced80ac3ac15ca9b2ae6d7e4a6bd86fb275c8a56f3b40829b`, verified
+  before and after every run of the live gate. It opens unchanged under schema
+  version 3, with no semáforo and no second recorrido, because nobody
+  configured one: the migration adds capability, never content.
+
+- **Still not connected to clients.** The composed definition drives the
+  builder canvas and the internal draft preview only. Publication remains
+  `/studio/e/[studyId]/publicar`, and nothing in this milestone changes what a
+  client sees.
 
 ## Experience Composer — filter capability, focus mode, and one Top-2-Box
 

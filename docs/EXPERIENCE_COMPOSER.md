@@ -310,6 +310,11 @@ A composed journey normally declares one and is held to it.
 It is read through the compatibility adapter and is not migrated away or
 destroyed.
 
+> **Built in the journeys / visuals / cloud milestone.** §40 is the
+> implemented contract: the manager, the two distinct duplicate verbs, the
+> refusal to remove a recorrido a page still shows, and the awareness mapping
+> that requires both halves.
+
 ---
 
 ## 10. Theme-cloud contract
@@ -324,6 +329,12 @@ responsive bounds, an ordered list that remains the reference, and export.
 
 **The deployed client component is not replaced**, and no AI grouping is added: themes are grouped by the human category review, which already records
 who decided what.
+
+> **Built in the journeys / visuals / cloud milestone.** §43 is the implemented
+> contract, and it goes further than this sketch: the basis is a stored,
+> stated choice; the aliases are the review's own fold; a block may read one
+> source; the layout narrows its range before it drops a theme; and the
+> study's disclosure rule applies to a word exactly as it applies to a number.
 
 ---
 
@@ -457,6 +468,11 @@ exactly the same things. Nothing else is computed.
 ---
 
 ## 13. Renderers — fifteen drawn, three that say they are not
+
+> **Superseded.** All eighteen are drawn now. `heatmap`, `bubble` and
+> `treemap` were completed in the journeys / visuals / cloud milestone (§42),
+> and `test:renderer-parity` keeps the catalogue and the renderers from
+> disagreeing silently.
 
 `src/components/studio/experience/Charts.tsx`, dispatched by `BlockView.tsx`.
 No charting dependency was added: the drawings are inline SVG and CSS on the
@@ -1502,6 +1518,11 @@ in a real browser by `npm run test:filter-ux-live`.
 
 ## 35. Collapsible panels, focus mode, and a canvas that reflows
 
+> **Extended by §39.** Each panel now also carries a collapse rail on its own
+> inner edge, the two sides are independent per side across a reload, and the
+> rail is asserted to be ON THE SEAM rather than merely present — it was
+> resolving against the viewport.
+
 ### Hiding a panel gives the canvas the room
 
 A hidden `aside` inside an `[auto_…]` grid track left a zero-width column and
@@ -1621,7 +1642,7 @@ with each other.
 
 ---
 
-## 37. The gates this milestone adds
+## 37. The gates the filter-UX milestone added
 
 **Offline, inside `npm test`:**
 
@@ -1661,3 +1682,332 @@ is not a gate.
 
 It writes fifteen screenshots to `artifacts/filter-ux/`, with captions in
 `captions.json`.
+
+---
+
+## 38. Schema version 3, and the one-step migration that reaches it
+
+`EXPERIENCE_SCHEMA_VERSION` is **3**. `SUPPORTED_SCHEMA_VERSIONS` is `[1, 2, 3]`
+and the runner still applies exactly one step per version, forward only, in
+order — `oneToTwo`, then `twoToThree` — so a draft written under any supported
+version opens under the current one without a prompt and without a rewrite.
+
+`twoToThree` is **purely additive**. It gives a document the fields version 3
+requires and nothing else:
+
+| Added | To | Value |
+| --- | --- | --- |
+| `bandSchemes` | the document | `[]` — no study gains a standard it did not write |
+| `bandSchemeId` | every block, journey and moment | `null` |
+| `palette` | every visualization | `"auto"` |
+| `themeCloud` | every `theme_cloud` block, and only those | the block defaults |
+| `awareness` | every moment | `null` |
+| `body`, `variant` | every moment | `null` |
+
+It **drops** the half-configured `unawareMetricId` / `unawareLabel` pair rather
+than completing it. A version-2 draft could name a result that measures "no lo
+conocía" without naming which answers mean it, and version 3's `awareness`
+requires both. Turning half a mapping into a whole one means the migration
+would be inventing the missing half — and a percentage whose numerator the
+migration chose is a number nobody can defend. The half that existed was never
+rendered, so nothing visible is lost; what a person actually wrote stays exactly
+as they wrote it, and the mapping is completed by a person or not at all.
+
+**No SQL migration accompanies this.** The schema version is a property of a
+JSON document stored in a `jsonb` column; the column, the table, the function
+and every grant are unchanged. Writing a migration to record an
+application-level version bump would create a database change to review, apply
+and roll back for a change the database cannot see.
+
+---
+
+## 39. Two rails, and why the two sides are genuinely independent
+
+Each panel carries a **collapse rail on its own inner edge** — the seam where
+it meets the canvas. The rail is a 6 px guide with a real 24 × 44 `<button>` in
+it: reachable by keyboard, focusable in order, announced by name. A double-click
+on the guide does the same thing, as an accelerator for people who expect one
+from an editor, never as the only way in.
+
+**Each rail collapses ONE panel.** `onCollapse` for the left writes
+`{ left: false }` and nothing else; the right writes `{ right: false }`. The
+right panel's state is not read, not written, and cannot move as a side effect —
+which is the whole difference between two independent controls and one control
+with two labels. The four combinations are all reachable one rail at a time, all
+remembered per side across a reload, and all photographed by the live gate.
+
+**A panel that goes out leaves a way back on the edge it went out of.** The
+restore tab gets its own strip rather than floating over the canvas card, and
+each tab writes `focus: false` AND pins the other side to what is on screen
+right now — so restoring the pages panel out of focus mode cannot drag the
+inspector back with it.
+
+**`lg:relative`, not `lg:static`.** Both lay a grid item out identically and
+only one makes the panel a containing block. As `static`, the rail's
+`-right-4` resolved against the viewport: it was drawn sixteen pixels off the
+right edge of the window and pushed the whole page into a sideways scroll.
+`test:milestone-live` asserts the rail is on the seam — `|rail − panel edge| ≤
+24` — rather than merely that it renders, because a control that renders in the
+wrong place passes every check that only asks whether it exists.
+
+**The rail exists only where the panel is a column.** Below `lg` (left) and `xl`
+(right) the panel is a drawer with its own opener and its own close button; a
+6 px edge strip on a phone is a target nobody can hit. The gate asserts the
+absence at every width below the docking width, not just the presence above it.
+
+**The rail's control is 24 × 44, not 44 × 44**, and that is deliberate. It sits
+in the 16 px seam between the panel and the canvas, where a 44 px target cannot
+fit without covering one of the two things it sits between. WCAG 2.2's target
+minimum is 24 × 24, and its equivalent-control exception applies exactly here:
+the toolbar carries a full-size labelled button for the same act, present at
+every width, never hidden by focus mode. The gate exempts `[data-rail-control]`
+from its 44 px sweep by name, and separately asserts it is at least 24 × 24 —
+an exception you can see, not a hole in the sweep.
+
+---
+
+## 40. Several recorridos in one study
+
+A recorrido is a thing the **study** has, not a thing a page has, so it is
+defined once in the left panel beside the pages and the identity — never on the
+canvas. Up to eight per document, each with a stable minted id, a title, a
+description, ordered momentos, its eligible metric families, a drawing variant
+and an optional semáforo for all its momentos at once.
+
+**A block is a WINDOW onto a recorrido**, and the distinction the product has to
+keep straight is between two verbs that sound alike:
+
+| Act | Result |
+| --- | --- |
+| Duplicate the **block** | a second window onto the SAME recorrido — editing a momento in one changes both |
+| Duplicate the **recorrido** | a new recorrido with new ids, edited apart |
+
+Blurring those two is how somebody's edit silently rewrites a page they were not
+looking at. Both verbs are visible, both are labelled, and the inspector says
+which one it is offering.
+
+**Removing a recorrido that is still on a page is refused**, and the refusal
+names the blocks and the pages that still show it rather than failing silently.
+
+### "Quién no conocía este momento" is two answers, not one
+
+It is a question about **reach**, not about dissatisfaction, and the two can
+never be confused because they are computed from different halves of the same
+column:
+
+- **the numerator** is the people who answered with one of the exact values a
+  person named as meaning "no lo conocía";
+- **the denominator** is the people who ANSWERED at all;
+- **a blank is in neither half.** Not knowing something existed and not
+  answering the question are different facts.
+
+Both halves are required together. A study that records a 0/100 column looks
+like it is measuring awareness, and wiring it up on that resemblance is how a
+product invents a finding — so `setMomentAwareness` refuses to store a mapping
+with a result and no values, and the card says which half is missing while the
+person fills in the other. The card holds the in-progress choice itself: the
+store refusing half a mapping must not mean the second field never appears.
+
+---
+
+## 41. The semáforo: the consultant writes the standard, the product applies it
+
+`src/lib/experience/bands.ts`. A `BandScheme` is an ordered list of bands, each
+with a **name**, a **colour role**, a **shape**, a **meaning in words**, and
+either numeric bounds (with explicit inclusivity at each edge) or a list of
+category values. A document holds up to twelve schemes of up to eight bands.
+
+**Nothing here is derived from the distribution.** No percentile, no tercile, no
+"the bottom third". Every one of those is a property of who happened to answer
+rather than of what good looks like, and a colour derived from one changes
+meaning every time somebody new replies. A study with no configured scheme
+therefore gets **no colour at all**: the block shows the number, uncoloured, and
+says which decision is missing.
+
+`schemeProblems()` names what is unfinished, by the exact value that breaks it:
+
+- fewer than two bands;
+- a band with no name, or no statement of what being in it means;
+- a numeric scheme with no scale;
+- **a gap** — "Entre 50 y 60 no hay ninguna banda: un resultado ahí no tendría
+  color";
+- **an overlap**, and the two boundary cases where a value belongs to both bands
+  or to neither.
+
+The gap and overlap check sorts **by lower bound**, not by list order, because a
+semáforo is naturally authored best-first — verde, amarillo, rojo — which is
+descending. A check that assumed list order was ascending would report no gap on
+every scheme a person actually writes: a green light on a rule with a hole in it.
+
+**Colour is never the only signal.** Every classified value carries the band's
+colour, its SHAPE and its own words together. It is printed, photocopied, and
+read by people who do not distinguish green from red.
+
+### A semáforo as a filterable characteristic
+
+`src/lib/experience/band-filters.ts`. When a scheme names the result it
+classifies, it becomes an ordinary characteristic: the values are the band
+labels in the order the scheme lists them, and a respondent's value is whichever
+band their own answer falls in, written onto every row of that respondent and
+onto nobody else's. An unclassified answer gets the empty string and is filtered
+out rather than being put in the nearest band.
+
+This is the only honest way to offer "Desempeño: Verde / Amarillo / Rojo" for a
+study that records a score and no category — which is exactly the real study's
+shape: `desempeño` is a number and the word "Verde" appears nowhere in it.
+
+It is a property of the **document**, not of the study. Two drafts of one study
+can hold different standards, and the study's own registry never changes because
+somebody composed a page. `registryWithDerivedBands` is a pure function of the
+document and the study registry, evaluated on the server for what is saved and
+in the browser for what is being edited — one rule in two places, never two
+rules. Saying which result a scheme classifies also creates the filter
+definition for it in the same act, so a panel can offer it immediately; clearing
+that choice removes the definition and prunes every reference to it.
+
+---
+
+## 42. The three remaining drawings
+
+`heatmap`, `bubble` and `treemap` are drawn. They were previously declared and
+then quietly substituted with a bar chart under the same title; `alternative` is
+now `null` for all three and `rendererImplemented` is `true`, so the fallback
+path cannot be reached for them at all.
+
+| Drawing | Characteristics | Aggregations | Why |
+| --- | --- | --- | --- |
+| Mapa de calor | exactly 2 | any | a cell is one number about one crossing and claims nothing about summing |
+| Burbujas | exactly 2 | count, sum, share, top-box | an AREA cannot be negative and has no zero point; an NPS and a promedio have neither |
+| Rectángulos proporcionales | exactly 1 | count, sum, share | a rectangle's area is its share of a whole, so the parts have to add up |
+
+**The heat map draws an empty cell and a withheld cell differently** — a dash
+for "nobody answered", a dot for "too few answers to show" — because "nobody
+answered" and "everybody answered badly" are opposite findings and neither of
+them is the bottom of a colour scale. Intensity comes from each cell's OWN value
+against the whole range, never interpolated between neighbours: a smooth
+gradient across a grid invents readings between the ones that exist.
+
+**The bubble field encodes the quantity as AREA, not radius.** A radius
+proportional to the value overstates a big number by its square.
+
+**The treemap is laid out deterministically** — slice-and-dice, no randomness
+and no clock — so the same data always produces the same picture and a
+screenshot in a report keeps agreeing with the screen.
+
+All three read a **palette**, because a drawing that codes a quantity in colour
+has a scale and somebody should choose it. `auto`, `mono`, `cool`, `warm`,
+`diverging` and `categorical`; a rainbow suggests categories where there are
+degrees, which is why it is a decision and not a default.
+
+Each carries a `role="img"` with a sentence for a reader who cannot see it and
+the same numbers as a real table, exactly as every other drawing does.
+
+---
+
+## 43. A thematic cloud that is a cloud
+
+`src/lib/experience/theme-cloud.ts` plus the renderer in `Charts.tsx`. The
+deployed visualization placed up to nine words at nine hardcoded positions and
+printed each count beside it. This one is:
+
+**Sized by a basis somebody chose, and it says which.** Mentions and people are
+different counts of the same evidence — one person saying the same thing three
+times is 3 and 1 — so the basis is stored per block, printed on the drawing, and
+BOTH numbers are carried so the detail can show a widely-shared concern apart
+from a strongly-held one. Whichever sizes the word, the base a disclosure rule
+reads is always the number of **voices**.
+
+**Merged by the review that already happened.** Two differently-worded
+suggestions confirmed to the same theme are the same theme from then on, and
+those raw spellings are the theme's aliases. `suggested_theme` is read for that
+and nothing else; `quote` is not selected by any query on this path. A pending
+theme, an unapproved quote and a respondent identifier are each unreachable from
+a cloud, and the live gate plants one of each in the fixture to prove it.
+
+**Read per source.** A block may read one qualitative source, so one page can
+carry "lo que dijeron en la encuesta" beside "lo que dijeron en el focus group"
+without either being a filter of the other.
+
+**Deterministic.** Rotation is decided by POSITION, never by chance, and the two
+largest words stay flat in every mode — the ones read first should not be the
+ones a reader tilts their head for. A cloud that turned words at random would
+redraw differently on every reload, so a screenshot in a report and the screen
+would stop agreeing and no gate could assert a layout.
+
+**Collision-free, and provably so.** Three separate ways this could fail are
+closed: the reserved extent measures the text that will actually be DRAWN
+(including the count, when the block writes it); the selection plate is drawn at
+the reserved box rather than a few units outside it; and the candidate position
+is rounded BEFORE the collision test, so the position that is checked is the
+position that is drawn.
+
+**It narrows the range before it drops a theme.** When the words do not fit, the
+spread between the smallest and the largest is reduced in fixed deterministic
+steps — never below the floor the block was configured with, because that floor
+is the size somebody decided was readable. Dropping the smaller themes changes
+what the reader is looking at; drawing them closer in size changes only how it
+looks. A word that would be unplaceable when turned is drawn flat instead.
+Past the point where even the floor will not fit, what did not fit is COUNTED
+and stays in the reference list.
+
+**Operable without a mouse.** Every word is focusable, named, and says whether
+it is the selected one; Enter and Space select it. Selecting opens an aggregate
+detail — counts, aliases, sources — and never a person or a sentence somebody
+wrote. The ranked list is the reference, ordered by the same count that sizes
+the words, so the picture and the list cannot disagree. The export serializes
+the SVG that is on screen, so a filtered cloud exports the filtered cloud.
+
+**The study's disclosure rule applies to a word exactly as it applies to a
+number.** A theme is an aggregate over a base of voices, and a base of two under
+a `hide_below` rule is two identifiable people whether it is rendered as a cell
+or as a large word. A withheld theme loses its word AND its count together —
+publishing "oculto, 2 personas" hides the number and announces the base — and
+leaves nothing behind: no ghost word, no placeholder, no line in the list.
+
+---
+
+## 44. The gates this milestone adds
+
+**Offline, inside `npm test`:**
+
+```
+npm run test:renderer-parity        # 15 checks — what the catalogue promises is what it draws
+npm run test:experience-composer    # 168 checks (was 152)
+```
+
+`test:renderer-parity` exists because a catalogue and a renderer are two
+different files that can disagree silently. It asserts that every variant
+declaring `rendererImplemented` has a renderer, that no implemented variant
+carries an `alternative`, that an unimplemented one says so out loud rather than
+swapping in a different picture, and that the aggregations each drawing accepts
+are the ones its geometry can honestly carry.
+
+The composer gate gained the semáforo model (bands, gaps, overlaps, edge
+inclusivity, the best-first ordering), the semáforo as a derived characteristic
+(complete-only, per respondent, never from the distribution), and the cloud
+(mentions versus people, aliases from the review's own fold, two sources on one
+page, filtering and reset, determinism, collision-freedom, the fit rules, and
+the fact that nothing pending or personal is reachable).
+
+**Live, inside `npm run gates:live`:**
+
+```
+npm run test:milestone-live         # 57 checks in a real browser, 38 screenshots
+```
+
+It builds a document on a **disposable** study — thirty-six respondents dealt
+into an uneven cross so a heat map has a range to shade and a cell the
+disclosure rule withholds; forty confirmed observations shaped so mentions and
+people genuinely differ; one deliberately unreviewed observation carrying a
+quote, which must never appear — and then drives the whole milestone through it:
+four panel states one rail at a time and across a reload, focus mode and
+`Escape`, several recorridos with momentos and an awareness mapping completed in
+two halves, a semáforo written wrong and then corrected, a block that wears it,
+the same semáforo offered as a characteristic and narrowing a real number in the
+reader's preview, the three drawings each asked for what it actually needs, and
+two clouds reading two sources. Then it reopens the saved draft and checks every
+recorrido and semáforo came back by name, sweeps six widths on the builder and
+three on the preview, and finally asserts the **real** study's stored draft is
+at the same revision with the same `sha256` as before the run.
+
+Screenshots and captions land in `artifacts/milestone/`.
