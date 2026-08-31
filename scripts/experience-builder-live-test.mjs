@@ -332,7 +332,7 @@ const TARGETS = `(() => {
      * mode. The rail lives in the 16 px seam between the panel and the canvas,
      * where a 44 px target cannot fit without covering one of the two things it
      * sits between. It keeps 24 x 44, the WCAG 2.2 minimum, and it is never the
-     * only route. `test:milestone-live` measures it separately against that
+     * only route. the milestone gate measures it separately against that
      * minimum, so the exemption is an exception you can see rather than a hole.
      */
     .filter((el) => !el.hasAttribute('data-rail-control'))
