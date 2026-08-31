@@ -102,7 +102,7 @@ export function blockReachesClient(input: {
   data: BlockDataSet;
   evidence: ClientEvidenceSummary;
 }): boolean {
-  const { block, definition, data, evidence } = input;
+  const { block, definition, data } = input;
   if (!block.visible || !block.layout.desktop.visible) return false;
 
   switch (block.type) {
@@ -115,11 +115,23 @@ export function blockReachesClient(input: {
       return true;
 
     case "section":
+      // A heading is words. `visibleBlocksForClient` additionally drops one
+      // whose whole section came out empty.
+      return hasText(block.title);
+
     case "rich_text":
     case "finding":
-    case "interpretation":
     case "recommendation":
-      return blockHasCopy(block);
+      /*
+       * PROSE NEEDS PROSE, not just a title.
+       *
+       * A title alone renders internally as "Este bloque todavía no tiene
+       * texto. Escríbelo en la ficha del bloque." — an instruction to the
+       * author, which the first published client screen printed to the client.
+       * A paragraph block with no paragraph is unfinished work, and C11 makes
+       * unfinished work silence.
+       */
+      return Boolean(block.copy.body?.trim()) || block.copy.items.length > 0;
 
     case "cover":
       // Legacy only: version 2 moved identity into its own global layer and the
@@ -131,13 +143,23 @@ export function blockReachesClient(input: {
       return block.image !== null;
 
     case "report_download":
-      // Only where it is truthfully supported. Offering a download that does
-      // not exist is the most concrete possible version of the page lying.
-      return evidence.reportAvailable;
-
     case "all_results_disclosure":
     case "pivot_explorer":
-      return evidence.crossableResults > 0;
+    case "interpretation":
+      /*
+       * NOT DRAWN FOR A CLIENT, AND REFUSED BEFORE IT COULD BE.
+       *
+       * Each of these renders internally as a DESCRIPTION of what the client
+       * will get, which is right for somebody arranging a page and wrong in
+       * front of the reader it describes. `preflight.ts` refuses to publish a
+       * page carrying one — see `CLIENT_UNSUPPORTED_BLOCKS` for why refusing
+       * beats both drawing the description and silently dropping the block.
+       *
+       * This branch is the second line, not the first: a revision published
+       * before that rule existed, or one whose blocker was somehow bypassed,
+       * renders as nothing here rather than as an internal sentence.
+       */
+      return false;
 
     case "theme_cloud":
     case "qualitative_themes": {

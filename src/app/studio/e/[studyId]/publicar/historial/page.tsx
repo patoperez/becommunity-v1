@@ -140,7 +140,13 @@ export default async function PublicationHistoryPage({
           <p className="text-sm text-body">
             {history.total === 0
               ? "Todavía no se ha preparado ninguna revisión de la experiencia compuesta de este estudio."
-              : `${history.total} revisión${history.total === 1 ? "" : "es"} en total. Se muestran ${history.entries.length}.`}
+              : /*
+                 * "revisiones", not "revisiónes". The accent on the last
+                 * syllable of `revisión` disappears in the plural, so appending
+                 * a suffix to the singular produces a misspelling — the kind a
+                 * consultant reads on every visit to this screen.
+                 */
+                `${history.total} ${history.total === 1 ? "revisión" : "revisiones"} en total. Se muestran ${history.entries.length}.`}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Link href={studioStudyPublish(studyId)} className={reviewAction}>

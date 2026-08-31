@@ -1,5 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 
+import { useIsClient } from "./Audience";
+
 import { formatNumber } from "@/lib/calc/format";
 import type { DataCell, ResolvedBlockData, SeriesUnit, ThemeDatum } from "@/lib/experience/data";
 import type { ChartPalette, ChartVariant } from "@/lib/experience/charts";
@@ -110,6 +112,18 @@ export function ChartFrame({
 }
 
 export function EmptyChart({ title, detail }: { title: string; detail?: string }) {
+  /*
+   * FOR A CLIENT THIS IS NOTHING AT ALL.
+   *
+   * Every sentence this component draws is an instruction to an author — "elige
+   * una característica en la ficha del bloque", "este bloque todavía no apunta
+   * a un resultado". Contract C11 says what Be Community has not finished
+   * renders as silence on a client's screen: no card, no dashed box, no copy
+   * explaining the gap. The block that would have carried it is normally
+   * dropped before it gets here by `client-visibility.ts`; this is the second
+   * line, for the cases inside a block that does legitimately render.
+   */
+  if (useIsClient()) return null;
   return (
     <div className="min-w-0 rounded-lg border border-dashed border-line bg-surface-sunken px-4 py-5 text-sm [overflow-wrap:anywhere]">
       <p className="font-medium text-strong">{title}</p>
@@ -325,6 +339,10 @@ export function TrafficLightChart({
      * about. The block says WHAT is missing in three words; the card the
      * person opens to fix it says what to do about it, once.
      */
+    // A client sees the number and no chip: "somebody has not written the
+    // standard yet" is a message to the team about unfinished work, and C11
+    // makes unfinished work silence rather than a caption.
+    if (useIsClient()) return <KpiChart data={data} policy={policy} showDetail={false} />;
     return (
       <div className="min-w-0">
         <KpiChart data={data} policy={policy} showDetail={false} />
@@ -1370,6 +1388,16 @@ export function UnavailableRenderer({
 }) {
   const spec = CHART_SPECS[variant];
   const alternative = alternativeVariant(variant);
+  /*
+   * A CLIENT IS SHOWN NEITHER THE NOTICE NOR THE SUBSTITUTE.
+   *
+   * The notice is addressed to the team. Drawing the substitute WITHOUT it
+   * would be the one thing this component exists to prevent — a different
+   * picture under the title somebody chose, with nothing saying so. So for a
+   * client the block renders as nothing, and the internal review names the
+   * unsupported configuration by block before anybody publishes it.
+   */
+  if (useIsClient()) return null;
   return (
     <div className="min-w-0">
       <p className="rounded-lg border border-caution-line bg-caution-surface px-2.5 py-2 text-xs text-caution">
@@ -1612,6 +1640,9 @@ export function SemaforoUnconfigured({
   data: ResolvedBlockData;
   policy: SampleVisibilityPolicy;
 }) {
+  // The same rule as the range chip above: the number is real and is shown; the
+  // sentence about the missing standard is for the team.
+  if (useIsClient()) return <KpiChart data={data} policy={policy} />;
   return (
     <div className="min-w-0">
       <KpiChart data={data} policy={policy} showDetail={false} />

@@ -60,6 +60,56 @@ export const WIDE_PANEL_BLOCKS = 24;
 export const LOW_SAMPLE_RESPONSES = 5;
 
 /**
+ * THE FOUR BLOCK TYPES THE CLIENT RENDERER DOES NOT DRAW, and why that is a
+ * BLOCKER rather than a warning.
+ *
+ * On the builder's canvas and in the internal previews, each of these renders
+ * as a bordered DESCRIPTION of what the client will get — "el inventario
+ * completo de resultados", "el lector arma su propia comparación", "la lectura
+ * aprobada del equipo", "descargar el informe". That is the right drawing for a
+ * person arranging a page, and it is a sentence about the client rather than
+ * the thing itself.
+ *
+ * The first published client screen printed those descriptions to the client,
+ * including "El cliente los ve plegados, para revisarlos si quiere." — the
+ * product talking about the reader, to the reader. Found by looking at the
+ * screenshot.
+ *
+ * There are three ways out and only one of them is honest. Drawing the
+ * description to a client is the product lying about itself. Drawing NOTHING is
+ * silently losing content a consultant deliberately placed — the approved
+ * reading is real client-facing work, and a page that quietly drops it is worse
+ * than one that refuses to publish. So publication REFUSES, names the block,
+ * and says what to do: hide it, remove it, or wait for the renderer.
+ *
+ * `report_download` is on the list for a different reason: the download IS
+ * offered to a client, once, from the identity layer, which is wired to the
+ * real authenticated report. A second control describing the same download is
+ * a duplicate at best, and the identity switch is where that decision belongs.
+ */
+export const CLIENT_UNSUPPORTED_BLOCKS = [
+  "interpretation",
+  "pivot_explorer",
+  "all_results_disclosure",
+  "report_download",
+] as const;
+
+const CLIENT_UNSUPPORTED_ADVICE: Record<string, string> = {
+  interpretation:
+    "La lectura aprobada del equipo se publica hoy por la vía de “Interpretación”, no por este bloque. "
+    + "Quítalo u ocúltalo antes de publicar.",
+  pivot_explorer:
+    "La comparación libre todavía no se dibuja en la experiencia compuesta del cliente. Quítala u "
+    + "ocúltala antes de publicar.",
+  all_results_disclosure:
+    "El inventario completo todavía no se dibuja en la experiencia compuesta del cliente. Quítalo u "
+    + "ocúltalo antes de publicar.",
+  report_download:
+    "La descarga se le ofrece al cliente desde la portada, con su propio interruptor. Quita este "
+    + "bloque y enciéndela ahí si quieres ofrecerla.",
+};
+
+/**
  * Everything that stops a publication.
  *
  * The structural hard errors from `validate.ts` are included BY THEIR OWN
@@ -87,6 +137,12 @@ export const PUBLICATION_BLOCKER_CODES = [
   "unapproved_qualitative",
   /** The draft moved on after this revision was prepared. */
   "draft_moved_on",
+  /**
+   * A block type the composer can express and the CLIENT RENDERER does not
+   * draw. See `CLIENT_UNSUPPORTED_BLOCKS` for the four, and why this is a
+   * blocker rather than a warning.
+   */
+  "not_rendered_for_client",
 ] as const;
 export type PublicationBlockerCode = (typeof PUBLICATION_BLOCKER_CODES)[number];
 
@@ -289,6 +345,23 @@ export function publicationPreflight(input: PreflightInput): PreflightReport {
           + "Escríbelo o apaga esa parte de la portada.",
       });
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // 4b. Blocks the client renderer does not draw
+  // -------------------------------------------------------------------------
+  const unsupportedForClient = new Set<string>(CLIENT_UNSUPPORTED_BLOCKS);
+  for (const block of shown) {
+    if (!unsupportedForClient.has(block.type)) continue;
+    blockers.push({
+      code: "not_rendered_for_client",
+      where: { kind: "block", id: block.id },
+      label: blockName(block),
+      detail:
+        `“${blockName(block)}” se ve en la vista interna como una descripción de lo que recibiría el `
+        + `cliente, y la experiencia publicada todavía no lo dibuja. `
+        + (CLIENT_UNSUPPORTED_ADVICE[block.type] ?? ""),
+    });
   }
 
   // -------------------------------------------------------------------------

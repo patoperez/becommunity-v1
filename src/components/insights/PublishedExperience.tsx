@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
+import { AudienceProvider } from "@/components/studio/experience/Audience";
 import { BlockView } from "@/components/studio/experience/BlockView";
 import { IdentityLayer } from "@/components/studio/experience/ExploreViews";
 import type { BuilderEvidence } from "@/lib/experience/builder-workspace";
@@ -148,6 +149,16 @@ export function PublishedExperience({
   if (!current) return null;
 
   return (
+    /*
+     * EVERYTHING BELOW IS DRAWN FOR A CLIENT.
+     *
+     * `client-visibility.ts` decides which blocks reach this page at all. What
+     * it cannot do is reach inside a block that legitimately renders and
+     * silence a sentence addressed to its author — and the first published
+     * client screen carried three of those. `AudienceProvider` is how the leaf
+     * renderers know who is reading; see `Audience.tsx`.
+     */
+    <AudienceProvider audience="client">
     <div className="min-w-0 space-y-4">
       <IdentityLayer identity={definition.identity} onDownload={onDownload} />
 
@@ -219,5 +230,6 @@ export function PublishedExperience({
         </ul>
       </section>
     </div>
+    </AudienceProvider>
   );
 }

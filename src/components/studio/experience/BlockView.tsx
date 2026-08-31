@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 
+import { useIsClient } from "./Audience";
+
 import type { BlockType } from "@/lib/experience/blocks";
 import { CHART_SPECS, isRendererImplemented, alternativeVariant, type ChartVariant } from "@/lib/experience/charts";
 import {
@@ -95,7 +97,52 @@ export type BlockViewProps = {
 const CONFIG_FRAME =
   "rounded-lg border border-dashed border-line-strong bg-surface-sunken px-3 py-2.5 text-sm";
 
+/**
+ * THE TITLE SOMEBODY WROTE ON A BLOCK, DRAWN.
+ *
+ * Every block type whose spec says it carries copy offers a title in the
+ * composer, and until now only `section` and `cover` ever drew one: a chart
+ * titled "Mapa de calor por generación y antigüedad" reached the canvas, the
+ * previews and — the first time a composed experience was published — a
+ * client's screen, as an untitled picture. The author's own words for what a
+ * drawing is about were being collected and thrown away.
+ *
+ * Found by driving the published client screen and looking for the title that
+ * was supposed to be on it.
+ *
+ * `section` and `cover` are excluded because the title IS their content, and
+ * the spacing rules are excluded because they carry no words at all. Everything
+ * else gets the heading above whatever it draws.
+ */
+const TITLE_IS_THE_BLOCK = new Set<BlockType>([
+  // The title IS the content.
+  "section",
+  "cover",
+  // No words at all.
+  "divider",
+  "spacer",
+  // Draws its own heading, from the same `block.title`. Adding one above it
+  // printed "Explora los resultados" twice on the first published client
+  // screen — found in the screenshot, not in the code.
+  "filter_panel",
+]);
+
 export function BlockView(props: BlockViewProps) {
+  const { block } = props;
+  const title = block.title?.trim();
+  const body = <BlockBody {...props} />;
+  if (!title || TITLE_IS_THE_BLOCK.has(block.type as BlockType)) return body;
+  return (
+    <div className="min-w-0">
+      <h3 className="min-w-0 font-display text-sm font-semibold text-strong [overflow-wrap:anywhere]">
+        {title}
+      </h3>
+      <div className="mt-1.5 min-w-0">{body}</div>
+    </div>
+  );
+}
+
+function BlockBody(props: BlockViewProps) {
   const { block, definition } = props;
   const policy = resolveSamplePolicy(definition.sampleVisibilityPolicy, block.samplePolicy);
 
@@ -184,6 +231,10 @@ function CoverBlock({ block, study }: BlockViewProps) {
 
 function ProseBlock({ block }: { block: ExperienceBlock }) {
   if (!block.copy.body) {
+    // A paragraph with no paragraph is unfinished work. `client-visibility.ts`
+    // already keeps it off a client's page; this is the second line, so the
+    // instruction below can never be the thing a client reads.
+    if (useIsClient()) return null;
     return (
       <div className={CONFIG_FRAME}>
         <p className="text-muted">
