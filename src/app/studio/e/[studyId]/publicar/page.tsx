@@ -8,6 +8,8 @@ import { ConfirmAction } from "@/components/studio/ConfirmAction";
 import { setStudyPublication } from "@/app/admin/studies/actions";
 import { studioStudyCategories, studioStudyPreview, studioStudyPublish } from "@/lib/studio/routes";
 import { loadCategoryWorkspace } from "@/lib/categories/load";
+import { loadPublicationWorkspace } from "@/lib/experience/publication-workspace";
+import { ComposedPublicationSection } from "@/components/studio/publication/ComposedPublicationSection";
 
 export const metadata = { title: "Publicación · Be Community" };
 
@@ -42,6 +44,10 @@ export default async function StudioPublishPage({
   // Publication is a rare, deliberate act, so this screen can afford the full
   // category scan that the other study screens deliberately do not run.
   const categories = await loadCategoryWorkspace(admin, studyId);
+  // The composed experience's own review. Same justification as the category
+  // scan above: publication is a rare, deliberate act and this screen is the
+  // one place that can afford to assemble everything the decision rests on.
+  const publication = await loadPublicationWorkspace(admin, workspace);
   const query = await searchParams;
   const { study, readiness, counts } = workspace;
   const categoryGate = categories?.gate ?? null;
@@ -155,6 +161,8 @@ export default async function StudioPublishPage({
           </p>
         </section>
       ) : null}
+
+      <ComposedPublicationSection workspace={publication} />
 
       <section aria-labelledby="decidir" className="rounded-xl border border-line bg-surface p-5">
         <h2 id="decidir" className="text-base font-semibold text-strong">
