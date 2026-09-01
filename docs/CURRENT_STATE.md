@@ -662,16 +662,18 @@ The Cuicuilco workbook audit established that the existing row-oriented import
 cannot preserve stable people, participation cohorts, multiple instruments,
 contextual worksheet formatting, monthly performance, multiple journeys and
 curated pain-point relationships with full provenance. A new additive schema is
-therefore staged on the development branch in migrations `0022` and `0023`.
+therefore staged on the development branch in migrations `0022`, `0023` and
+`0024`.
 
 The schema and its rollback scripts are documented in
-`docs/CANONICAL_STUDY_MODEL.md`. All 34 new tables are service-only with RLS and
-FORCE RLS. Existing application tables and read paths remain active and no
-existing data is rewritten.
+`docs/CANONICAL_STUDY_MODEL.md`. Migration `0024` adds the transactional commit,
+its ownership ledger and its rollback. All 36 new tables are service-only with
+RLS and FORCE RLS. Existing application tables and read paths remain active and
+no existing data is rewritten.
 
-This entry records source state, not release state: the migrations have **not**
-been applied to Supabase, the Cuicuilco workbooks have **not** been loaded into
-the new model, and nothing has been deployed to Cloudflare.
+This entry records source state, not release state: none of `0022`, `0023` or
+`0024` has been applied to Supabase, the Cuicuilco workbooks have **not** been
+loaded into the new model, and nothing has been deployed to Cloudflare.
 
 ### Unit 2 — package parser and preflight (source only, local branch)
 
@@ -709,6 +711,76 @@ deterministic gate is `npm run test:canonical-package`, registered in
   count of spellings and coordinates, never the spellings themselves.
 - Confirmation is allowed if and only if there are zero blockers.
 
-The contract is documented in `docs/CANONICAL_STUDY_MODEL.md`. The next
-development unit (Unit 3) is the server-only transactional commit and rollback
-workflow.
+The contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
+
+### Unit 3 — server-only commit and rollback (source only, local branch)
+
+`src/lib/ingestion/canonical-commit/` projects a validated package into
+canonical records and writes them through one transactional RPC. Migration
+`0024_canonical_commit_and_rollback.sql` and its reverse script carry the
+schema. **Nothing was applied, deployed, uploaded or mutated:** no migration ran
+anywhere, no Supabase project was contacted, no Worker was built or promoted, no
+real workbook was uploaded, and no canonical row exists in any environment. The
+deterministic gate is `npm run test:canonical-commit` (220 checks), registered in
+`npm test`.
+
+The full contract is in `docs/CANONICAL_STUDY_MODEL.md`. What a reader needs
+before touching this unit:
+
+- **A privacy-safe report cannot be the persistence payload.** The Unit 2
+  preflight DTO was NOT widened. `CanonicalCommitPlan` is a separate internal
+  type that carries the real names, identifiers, answers and qualitative text a
+  commit needs, and it may travel to exactly one place: `p_plan` of
+  `commit_canonical_package`. The gate plants sentinels where private values
+  would be and fails if one reaches the preflight, the stored manifest, the
+  result or any error path.
+- **The write path is `server-only` and it is the only module that knows about
+  Supabase.** `flow.ts` holds the workflow behind an injected transport so the
+  whole order of operations is executable in a test; `adapter.ts` and
+  `server.ts` carry the marker; `index.ts` re-exports neither, so importing a
+  type cannot drag the write path into a client bundle. A browser has no
+  privilege regardless: both RPCs are granted only to `service_role`.
+- **Scope is derived from a LOCKED `import_job` row**, never accepted from the
+  payload. The payload states its own tenant and study so the database can
+  refuse a mismatch. Assets are cited by ROLE and resolved through the job's own
+  `import_job_asset` links.
+- **Counts are measured by the database**, family by family, with `ROW_COUNT`,
+  and compared against the plan's declared counts. A disagreement raises and the
+  transaction is discarded.
+- **`import_job_record` is the ownership ledger.** Rollback removes exactly the
+  rows this package CREATED, in reverse dependency order, and leaves rows it
+  merely REUSED alone. A person shared with another study is kept and counted.
+  `source_asset`, `import_job_asset` and the `import_job` audit row deliberately
+  survive a rollback.
+- **Retention does not touch `study_period_snapshot`.** That legacy aggregate
+  cannot represent an absent count and is a surface the current application
+  already reads, so Unit 3 writes its own `retention_period` table with each
+  source count and its state.
+- **No database message ever escapes.** A constraint violation quotes the
+  failing key values, which here are respondent data. Only a code the migration
+  raised itself is kept; everything else becomes `DATABASE_CONSTRAINT`.
+
+**What is NOT proved.** Sections [14]–[17] of the gate read migration 0024's
+SQL text; they are structural proof, not execution. No PostgreSQL statement in
+this unit has been executed anywhere — the development environment has
+`postgresql-client` only, with no server package and no container runtime.
+`scripts/canonical-commit-live-test.mjs` enumerates 16 database-executed checks
+(L1–L16), is registered as `npm run test:canonical-commit-live`, is deliberately
+kept OUT of `npm test`, refuses any connection string that is not a loopback
+database whose name contains `disposable`, and **has never been run**. Until it
+has, do not describe the subtransaction rollback, the concurrent-commit
+serialisation, the runtime `42501` denial for browser roles, or the
+apply-then-reverse catalogue equality as proved.
+
+**Real-workbook dry run.** `npm run test:canonical-commit-dry-run` runs the
+preflight and builds the plan in memory against the two real Cuicuilco
+workbooks, performs no database or network operation (it reads its own module
+graph and fails if any of it reaches a database), prints only approved
+aggregates, and asserts before printing that no plan value appears in its own
+output. It reconciled 60 identities, 28 active and 32 former participations, 4
+instruments, 62 items, 116 sessions (95 answered, 21 explicitly
+non-participating), 1 685 responses, 252 monthly observations across
+October 2025–June 2026, 6 retention periods all satisfying the count identity,
+18 journey stages, 10 organizational units, 20 culture dimensions, 7 curated
+performance dimensions, 50 pain points and 5 029 lineage rows citing all 16
+worksheets. Neither workbook, nor any output of that run, is in Git.

@@ -190,12 +190,28 @@ and hardening corrections through migration `0021`. The current bounded unit is
 an additive canonical model for the audited Cuicuilco workbook package; its
 contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 
-- Migrations `0022` and `0023` are source changes only until staging execution
-  is explicitly authorized and verified. Do not describe them as applied.
+- Migrations `0022`, `0023` and `0024` are source changes only until staging
+  execution is explicitly authorized and verified. Do not describe them as
+  applied.
 - **Unit 2 (`src/lib/ingestion/canonical-package/`) parses and validates only.**
   It writes nothing: no Supabase client, no insert, no RPC, no canonical row.
-  `npm run test:canonical-package` fails if one appears. Unit 3 adds the
-  server-only transactional commit and rollback.
+  `npm run test:canonical-package` fails if one appears.
+- **Unit 3 (`src/lib/ingestion/canonical-commit/`) is the server-only commit and
+  rollback.** Three rules govern it. (1) The privacy-safe preflight DTO is NOT
+  the persistence payload and must not be widened into one:
+  `CanonicalCommitPlan` is a separate internal type that carries real values and
+  may travel only to `p_plan` of `commit_canonical_package`. (2) `adapter.ts` and
+  `server.ts` carry `import "server-only"` and are the only modules that know
+  about Supabase; `index.ts` re-exports neither. (3) Tenant and study scope is
+  derived from a LOCKED `import_job` row and every count is measured by the
+  database — never taken from a payload. `npm run test:canonical-commit` (gate
+  in `npm test`) enforces all three.
+- **No PostgreSQL statement from `0024` has been executed anywhere.** Sections
+  [14]-[17] of that gate read the SQL text and are STRUCTURAL proof.
+  `npm run test:canonical-commit-live` is the database-executed gate, is
+  deliberately outside `npm test`, and has never been run. Do not describe the
+  subtransaction rollback, concurrent-commit serialisation or the runtime
+  browser-role denial as proved until it has.
 - The existing ingestion and client read paths remain authoritative. Do not
   switch them to the new tables until the deterministic package importer,
   reconciliation and compatibility tests exist.
