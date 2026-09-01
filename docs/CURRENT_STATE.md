@@ -687,6 +687,12 @@ deterministic gate is `npm run test:canonical-package`, registered in
   formula's text apart from the value it cached, and keeps style and merge
   evidence UNINTERPRETED. `readXlsx()` and `parseXlsx()` are unchanged, and the
   legacy gates plus the new gate's own legacy section pin that.
+- **XML namespace prefixes are honoured on each part independently.** The
+  relationships document is a separate part with its own declarations, so
+  `<rel:Relationship>` must resolve exactly as `<Relationship>` does; matching
+  only the unprefixed form produced an empty relationship map and every sheet
+  silently fell through to its ordinal part. Attributes are matched by local
+  name, which is what keeps `sheetId` from being read as the relationship id.
 - **A colour is never given a global meaning.** The reader records it; a
   configured, human-reviewed `visual_annotation` decides what it means.
 - Roles are resolved by **structural signature, never by file name**, and the

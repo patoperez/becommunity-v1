@@ -44,8 +44,21 @@ import type { ParsedFile, RawRow } from "./canonical";
  * writing. This is a read-only ingestion reader, not a spreadsheet library.
  */
 
-/** Optional namespace prefix: these files are written as `<x:sheet …>`. */
-const P = "(?:[A-Za-z0-9]+:)?";
+/**
+ * Optional namespace prefix on an ELEMENT name.
+ *
+ * A prefix is an XML NCName: it starts with a letter or an underscore and may
+ * then carry letters, digits, `_`, `.` and `-`. The pattern used to be
+ * `[A-Za-z0-9]+`, which was wrong in both directions — it accepted a leading
+ * digit, which XML forbids, and rejected `_`, `.` and `-`, which XML allows and
+ * writers do use. It is declared once and used for every element the reader
+ * matches, so the whole file agrees on what a prefix is.
+ *
+ * The prefix a writer picks carries no meaning: `<x:sheet>`, `<ss:sheet>` and
+ * `<sheet>` are the same element bound through different declarations, and one
+ * part of a package may prefix while another does not.
+ */
+const P = "(?:[A-Za-z_][A-Za-z0-9_.-]*:)?";
 const re = (body: string, flags = "g") => new RegExp(body, flags);
 
 /**
@@ -425,24 +438,63 @@ function relationshipTarget(target: string): string {
 }
 
 /**
- * The relationship id of a `<sheet>` element.
+ * One attribute's value, found by its LOCAL name.
  *
- * The attribute is conventionally `r:id`, but `r` is only the prefix a writer
- * happened to bind to the relationships namespace: `<x:sheet rel:id="rId1"/>`
- * is equally valid. The prefix is therefore optional here. `sheetId` must NOT
- * match — it is an unrelated internal number, and reading it as a relationship
- * id would resolve every sheet to nothing.
+ * WHY LOCAL NAME. `r:id` is the relationship id, but `r` is only the prefix a
+ * writer happened to bind to the relationships namespace; `rel:id` is the same
+ * attribute. Stripping the prefix and comparing the local name handles every
+ * binding without enumerating them.
+ *
+ * WHY THIS IS SAFE FOR `sheetId`. A `<sheet>` element carries BOTH `sheetId`
+ * (an unrelated internal number) and `r:id` (the relationship). The local name
+ * of `sheetId` is `sheetId`, never `id`, so it cannot be read as the
+ * relationship — which matters, because doing so would send every sheet to the
+ * wrong worksheet part rather than failing visibly. The comparison is
+ * case-insensitive, and that tolerance cannot reintroduce the confusion:
+ * "sheetid" is still not "id". The same reasoning keeps `TargetMode` from
+ * being read as `Target`.
+ *
+ * Attribute values cannot contain a raw `"` — XML requires it escaped — so the
+ * scan cannot lose alignment inside one. The pattern is built per call rather
+ * than shared: a `/g` regex carries `lastIndex`, and one stray `.test()` on a
+ * shared instance elsewhere would make this start reading from the middle of an
+ * element.
  */
-function relationshipId(element: string): string | null {
-  return element.match(/[\s"'](?:[A-Za-z0-9_.-]+:)?id="([^"]+)"/)?.[1] ?? null;
+function attributeValue(element: string, localName: string): string | null {
+  const attribute = /([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*"([^"]*)"/g;
+  const wanted = localName.toLowerCase();
+  for (const match of element.matchAll(attribute)) {
+    const name = match[1];
+    if (name.slice(name.lastIndexOf(":") + 1).toLowerCase() === wanted) return match[2];
+  }
+  return null;
 }
 
-/** Reads `<Relationship Id=… Target=…/>` in any attribute order. */
+/** The relationship id of a `<sheet>` element, under any prefix. */
+function relationshipId(element: string): string | null {
+  return attributeValue(element, "id") || null;
+}
+
+/**
+ * Reads `<Relationship Id=… Target=…/>`, in any attribute order and under any
+ * element prefix.
+ *
+ * The relationships document is a SEPARATE part with its own namespace
+ * declarations. Prefixing the workbook says nothing about it: a package may
+ * write `<x:workbook>` beside a plain `<Relationships>`, or a plain
+ * `<workbook>` beside `<rel:Relationships>`, and both are valid. Matching only
+ * the unprefixed element — which this did — silently produced an empty map, so
+ * every sheet fell through to its ordinal part and a workbook whose sheets are
+ * not in part order was read wrong with no error at all.
+ *
+ * `\b` after `Relationship` keeps the `<Relationships>` container out: the `s`
+ * that follows is a word character, so there is no boundary there.
+ */
 function relationshipMap(relsXml: string): Map<string, string> {
   const relationships = new Map<string, string>();
-  for (const element of relsXml.match(/<Relationship\b[^>]*?\/?>/g) ?? []) {
-    const id = element.match(/\bId="([^"]+)"/)?.[1];
-    const target = element.match(/\bTarget="([^"]+)"/)?.[1];
+  for (const element of relsXml.match(re(`<${P}Relationship\\b[^>]*?\\/?>`)) ?? []) {
+    const id = attributeValue(element, "Id");
+    const target = attributeValue(element, "Target");
     if (id && target) relationships.set(id, relationshipTarget(target));
   }
   return relationships;
@@ -450,7 +502,7 @@ function relationshipMap(relsXml: string): Map<string, string> {
 
 /** `state="hidden"` on a `<sheet>`; anything unrecognised reads as visible. */
 function sheetState(element: string): WorkbookSheet["state"] {
-  const raw = element.match(/\bstate="([^"]+)"/)?.[1];
+  const raw = attributeValue(element, "state");
   if (raw === "hidden") return "hidden";
   if (raw === "veryHidden") return "veryHidden";
   return "visible";
@@ -597,7 +649,7 @@ export async function readXlsxWorkbook(buffer: ArrayBuffer): Promise<ParsedWorkb
   }
 
   for (const [position, sheetElement] of sheetElements.entries()) {
-    const nameRaw = sheetElement.match(/\bname="([^"]+)"/)?.[1];
+    const nameRaw = attributeValue(sheetElement, "name");
     if (!nameRaw) {
       throw new Error(
         `La hoja en la posición ${position + 1} no tiene nombre. ` +

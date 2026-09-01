@@ -114,7 +114,7 @@ ExcelJS remains unreachable from `src/`. `readXlsx` and `parseXlsx` behave
 exactly as before; `test:xlsx-hardening`, `test:workers-ingestion` and the new
 gate's legacy section all pin that.
 
-Three reader corrections matter for meaning, not tidiness:
+Four reader corrections matter for meaning, not tidiness:
 
 1. **A cached value is now distinguishable from no value at all.**
    `WorkbookCell.cachedValue` is `null` when the cell stored nothing. On a
@@ -127,6 +127,18 @@ Three reader corrections matter for meaning, not tidiness:
 3. **A worksheet with no readable relationship is no longer skipped.** It falls
    back to its ordinal part and, failing that, is refused BY NAME — silently
    dropping it would report "the sheet is missing" for a file that has it.
+4. **Namespace prefixes are honoured on every part independently.** A
+   relationships document is its own part with its own declarations, so
+   `<rel:Relationship>` is as valid as `<Relationship>` and neither implies
+   anything about how the workbook part is written. Matching only the
+   unprefixed element produced an EMPTY relationship map rather than an error,
+   so every sheet fell through to its ordinal part — correct for a workbook
+   whose sheets happen to be in part order, and silently wrong for one that is
+   not. Element prefixes now use a single NCName pattern (`_`, `.` and `-`
+   included; a leading digit excluded), and the relationship id, `Id`, `Target`,
+   `name` and `state` attributes are matched by LOCAL name. That last point is
+   what keeps `sheetId` — an unrelated internal number on the same element as
+   `r:id` — from ever being read as a relationship.
 
 A workbook-wide cell counter and a sheet ceiling join the existing expansion
 ceilings. Every refusal is a Spanish sentence and is reached before any database

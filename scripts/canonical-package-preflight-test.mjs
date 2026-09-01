@@ -115,17 +115,44 @@ function cellXml(ref, cell, p) {
  * `sheets` is a list of `{ name, state?, rows, merges? }` where `rows` maps a
  * physical row number to a map of column letter -> cell. Nothing is inferred:
  * a row that is not listed does not exist, which is how a gap stays a gap.
+ *
+ * The namespace options are deliberately INDEPENDENT. `prefix` prefixes the
+ * workbook and worksheet parts; `relsPrefix` prefixes the relationships part.
+ * They are separate documents with separate declarations, so a fixture that
+ * prefixes one and not the other is not an exotic case — it is the ordinary
+ * one, and a test that moves them together cannot tell whether the reader ever
+ * looked at the relationships part's own naming.
+ *
+ * `relsTargetFor` decides which worksheet PART each sheet's relationship points
+ * at (null omits the relationship entirely, leaving a dangling id), and
+ * `relationshipIdFor` decides what that id is called. Together they let a test
+ * prove the reader follows the relationship rather than the sheet's position.
  */
-async function buildWorkbook({ sheets, prefix = "x", date1904 = false, styles = STYLES, omitRels = false }) {
+async function buildWorkbook({
+  sheets,
+  prefix = "x",
+  relsPrefix = "",
+  date1904 = false,
+  styles = STYLES,
+  omitRels = false,
+  omitSheetRelationshipId = false,
+  relsTargetFirst = false,
+  relsTargetFor = (index) => index + 1,
+  relationshipIdFor = (index) => `rId${index + 1}`,
+}) {
   const zip = new JSZip();
   const p = prefix ? `${prefix}:` : "";
+  const rp = relsPrefix ? `${relsPrefix}:` : "";
   const xmlns = prefix ? ` xmlns:${prefix}="${NS}"` : ` xmlns="${NS}"`;
+  const relsXmlns = relsPrefix ? ` xmlns:${relsPrefix}="${REL}/package"` : ` xmlns="${REL}/package"`;
 
   const sheetTags = sheets
     .map(
       (sheet, index) =>
         `<${p}sheet name="${escapeXml(sheet.name)}" sheetId="${index + 1}" ` +
-        `state="${sheet.state ?? "visible"}" r:id="rId${index + 1}" xmlns:r="${REL}"/>`,
+        `state="${sheet.state ?? "visible"}"` +
+        (omitSheetRelationshipId ? "" : ` r:id="${relationshipIdFor(index)}" xmlns:r="${REL}"`) +
+        `/>`,
     )
     .join("");
   zip.file(
@@ -136,16 +163,20 @@ async function buildWorkbook({ sheets, prefix = "x", date1904 = false, styles = 
 
   if (!omitRels) {
     const rels = sheets
-      .map(
-        (_, index) =>
-          `<Relationship Id="rId${index + 1}" Type="${REL}/worksheet" ` +
-          `Target="worksheets/sheet${index + 1}.xml"/>`,
-      )
+      .map((_, index) => {
+        const part = relsTargetFor(index);
+        if (part === null) return "";
+        const id = `Id="${relationshipIdFor(index)}"`;
+        const target = `Target="worksheets/sheet${part}.xml"`;
+        const type = `Type="${REL}/worksheet"`;
+        const attrs = relsTargetFirst ? `${type} ${target} ${id}` : `${id} ${type} ${target}`;
+        return `<${rp}Relationship ${attrs}/>`;
+      })
       .join("");
     zip.file(
       "xl/_rels/workbook.xml.rels",
       `<?xml version="1.0" encoding="utf-8"?>` +
-        `<Relationships xmlns="${REL}/package">${rels}</Relationships>`,
+        `<${rp}Relationships${relsXmlns}>${rels}</${rp}Relationships>`,
     );
   }
 
@@ -540,8 +571,136 @@ console.log("\n[3] A formula and the value it cached are separate facts");
   check(at("C2")?.cachedValue === "0" && at("C2")?.text === "0", "a real zero is still a real zero");
 }
 
-// ---- [4] Legacy behaviour is unchanged -------------------------------------
-console.log("\n[4] readXlsx and parseXlsx behave exactly as before");
+// ---- [4] XML namespace prefixes, part by part ------------------------------
+console.log("\n[4] Namespace prefixes are honoured on every part, independently");
+{
+  // A relationships document is its OWN part with its OWN declarations. A
+  // fixture that prefixes the workbook while leaving the relationships plain
+  // proves nothing about the relationships parser: that case passes whether or
+  // not the parser understands prefixes at all, which is exactly how a reader
+  // can claim optional-prefix support while matching only `<Relationship>`.
+  // Each part is therefore varied INDEPENDENTLY here, including the case where
+  // the two parts choose different prefixes — valid, and unreachable by any
+  // fixture that moves them together.
+  const trio = [
+    { name: "Uno", rows: { 1: { A: text("h1") }, 2: { A: text("v1") } } },
+    { name: "Dos", rows: { 1: { A: text("h2") }, 2: { A: text("v2") } } },
+    { name: "Tres", rows: { 1: { A: text("h3") }, 2: { A: text("v3") } } },
+  ];
+  const valueOf = (sheet) => sheet.cells.find((cell) => cell.address === "A2")?.text ?? null;
+
+  for (const [label, prefix, relsPrefix] of [
+    ["workbook x:, relationships plain (what real exporters write)", "x", ""],
+    ["workbook plain, relationships plain", "", ""],
+    ["workbook plain, relationships rel:", "", "rel"],
+    ["workbook x:, relationships rel: — different prefixes", "x", "rel"],
+    ["workbook ss:, relationships ss: — the same prefix on both parts", "ss", "ss"],
+    ["prefixes using _ . and -, which XML allows and the old pattern refused", "a_b.c-d", "r_1.2-3"],
+  ]) {
+    const workbook = await readXlsxWorkbook(await buildWorkbook({ sheets: trio, prefix, relsPrefix }));
+    check(
+      workbook.sheets.map((sheet) => sheet.name).join(",") === "Uno,Dos,Tres",
+      `${label}: all three sheets resolve, in workbook order`,
+    );
+    check(
+      workbook.sheets.map(valueOf).join(",") === "v1,v2,v3",
+      `${label}: each sheet carries its OWN worksheet part`,
+    );
+  }
+
+  const reordered = await buildWorkbook({
+    sheets: trio,
+    prefix: "x",
+    relsPrefix: "rel",
+    relsTargetFirst: true,
+  });
+  check(
+    (await readXlsxWorkbook(reordered)).sheets.map(valueOf).join(",") === "v1,v2,v3",
+    "a prefixed relationship with Target before Id still resolves — attributes have no order",
+  );
+
+  // Resolution must follow the RELATIONSHIP, not the sheet's position. With the
+  // targets reversed, the first sheet must load the third part. A reader that
+  // quietly fell back to position would pass every check above and still read
+  // the wrong data here, with no error at all.
+  const reversed = await buildWorkbook({
+    sheets: trio,
+    prefix: "x",
+    relsPrefix: "rel",
+    relsTargetFor: (index) => trio.length - index,
+  });
+  const followed = await readXlsxWorkbook(reversed);
+  check(
+    followed.sheets.map((sheet) => sheet.name).join(",") === "Uno,Dos,Tres" &&
+      followed.sheets.map(valueOf).join(",") === "v3,v2,v1",
+    "a prefixed relationship is followed to its own target, not to the sheet's position",
+  );
+
+  // `sheetId` is an unrelated internal number sitting on the same element as
+  // `r:id`. Reading it as the relationship would not fail loudly — it would
+  // resolve to a real but WRONG part. This trap names the relationships "1" and
+  // "2", matching the sheetIds, points them at the opposite parts, and removes
+  // `r:id` entirely, so a reader that confused the two would swap the sheets.
+  const trap = await buildWorkbook({
+    sheets: [trio[0], trio[1]],
+    prefix: "x",
+    relsPrefix: "rel",
+    omitSheetRelationshipId: true,
+    relationshipIdFor: (index) => String(index + 1),
+    relsTargetFor: (index) => 2 - index,
+  });
+  check(
+    (await readXlsxWorkbook(trap)).sheets.map(valueOf).join(",") === "v1,v2",
+    "sheetId is never read as the relationship id: each sheet falls back to its own ordinal part",
+  );
+
+  // A relationship that is absent falls back to the ordinal part, because
+  // dropping the sheet would report "falta la hoja X" for a file that has X.
+  const dangling = await buildWorkbook({
+    sheets: [trio[0], trio[1]],
+    prefix: "x",
+    relsPrefix: "rel",
+    relsTargetFor: (index) => (index === 1 ? null : index + 1),
+  });
+  const recovered = await readXlsxWorkbook(dangling);
+  check(
+    recovered.sheets.length === 2 && recovered.sheets.map(valueOf).join(",") === "v1,v2",
+    "a sheet whose relationship is missing falls back to its ordinal part instead of vanishing",
+  );
+
+  // A relationship that RESOLVES to a part that is not in the archive is a
+  // different thing, and must refuse rather than quietly read a neighbour.
+  const unresolvable = await refusal(async () =>
+    readXlsxWorkbook(
+      await buildWorkbook({ sheets: [trio[0]], prefix: "x", relsPrefix: "rel", relsTargetFor: () => 9 }),
+    ),
+  );
+  check(
+    unresolvable instanceof Error && /'Uno'/.test(unresolvable.message),
+    "a relationship pointing at a part that is not there refuses BY NAME rather than silently",
+  );
+
+  // The LEGACY reader shares this relationships parser, so it is exercised
+  // through a prefixed part too — and must produce exactly what it produces
+  // through the plain part real exporters write.
+  const legacyPlain = await readXlsx(
+    await buildWorkbook({ sheets: [trio[0], trio[1]], prefix: "x", relsPrefix: "" }),
+  );
+  const legacyPrefixed = await readXlsx(
+    await buildWorkbook({ sheets: [trio[0], trio[1]], prefix: "x", relsPrefix: "rel" }),
+  );
+  check(
+    JSON.stringify(legacyPlain) === JSON.stringify({ headers: ["h1"], rows: [{ h1: "v1" }] }),
+    `readXlsx reads the first sheet through a plain relationships part (got ${JSON.stringify(legacyPlain)})`,
+  );
+  check(
+    JSON.stringify(legacyPrefixed) === JSON.stringify(legacyPlain),
+    "and produces byte-identical output through a prefixed one",
+  );
+}
+
+// ---- [5] Legacy behaviour is unchanged -------------------------------------
+console.log("\n[5] readXlsx and parseXlsx behave exactly as before");
 {
   const legacy = await buildWorkbook({
     sheets: [
@@ -614,8 +773,8 @@ console.log("\n[4] readXlsx and parseXlsx behave exactly as before");
   check(workbookPrefixless.sheets.length === 1, "the multi-sheet reader also accepts an unprefixed workbook");
 }
 
-// ---- [5] The package contract ----------------------------------------------
-console.log("\n[5] A valid two-workbook package is recognised by structure");
+// ---- [6] The package contract ----------------------------------------------
+console.log("\n[6] A valid two-workbook package is recognised by structure");
 const baseline = await preflightCanonicalPackage([
   file("datos.xlsx", cleanBytes),
   file("dolores.xlsx", painBytes),
@@ -654,7 +813,7 @@ const baseline = await preflightCanonicalPackage([
   );
 }
 
-console.log("\n[6] Every count the approved mapping declares is reconciled");
+console.log("\n[7] Every count the approved mapping declares is reconciled");
 {
   const expected = [
     ["RECORDS_PERFIL_CLIENTE", 28],
@@ -702,7 +861,7 @@ console.log("\n[6] Every count the approved mapping declares is reconciled");
   );
 }
 
-console.log("\n[7] Identity is resolved by identifier and reconciled with the catalogue");
+console.log("\n[8] Identity is resolved by identifier and reconciled with the catalogue");
 {
   const swappedNames = await cleanWorkbook({
     idCliente: { mutate: (rows) => { rows[2].A = text("ZNOMBREPRIVOTRO"); } },
@@ -740,7 +899,7 @@ console.log("\n[7] Identity is resolved by identifier and reconciled with the ca
   check(has(overlapResult, "IDENTITY_COHORT_OVERLAP"), "one identity in two cohorts blocks");
 }
 
-console.log("\n[8] A package the product cannot describe unambiguously is refused");
+console.log("\n[9] A package the product cannot describe unambiguously is refused");
 {
   const onlyClean = await preflightCanonicalPackage([file("solo.xlsx", cleanBytes)]);
   check(has(onlyClean, "PACKAGE_ROLE_MISSING"), "a missing role blocks");
@@ -806,7 +965,7 @@ console.log("\n[8] A package the product cannot describe unambiguously is refuse
   );
 }
 
-console.log("\n[9] A moved header anchor is caught before any count is trusted");
+console.log("\n[10] A moved header anchor is caught before any count is trusted");
 {
   // The whole sheet shifted up one row: the counts would still look plausible.
   const shifted = await buildWorkbook({
@@ -846,7 +1005,7 @@ console.log("\n[9] A moved header anchor is caught before any count is trusted")
   check(has(shortResult, "ENTITIES_JOURNEY"), "and it blocks");
 }
 
-console.log("\n[10] A wrong count blocks, and says exactly which");
+console.log("\n[11] A wrong count blocks, and says exactly which");
 {
   const short = await buildWorkbook({
     sheets: cleanSheets().map((sheet) => {
@@ -874,8 +1033,8 @@ console.log("\n[10] A wrong count blocks, and says exactly which");
   check(expectationFor(domainResult, "CSAT_ITEMS_TOTAL")?.actual === 54, "and the CSAT total falls to 54 of 55");
 }
 
-// ---- [11] Absence, never zero ---------------------------------------------
-console.log("\n[11] Absence is never converted into a number");
+// ---- [12] Absence, never zero ---------------------------------------------
+console.log("\n[12] Absence is never converted into a number");
 {
   for (const [raw, status] of [
     ["", "missing"],
@@ -943,7 +1102,7 @@ console.log("\n[11] Absence is never converted into a number");
   );
 }
 
-console.log("\n[12] Counts that must agree with each other are checked");
+console.log("\n[13] Counts that must agree with each other are checked");
 {
   const broken = await cleanWorkbook({
     retencion: { mutate: (rows) => { rows[2].D = num(9999); } },
@@ -968,8 +1127,8 @@ console.log("\n[12] Counts that must agree with each other are checked");
   );
 }
 
-// ---- [13] Evidence ---------------------------------------------------------
-console.log("\n[13] Style, merges and formulas are recorded as evidence, not interpreted");
+// ---- [14] Evidence ---------------------------------------------------------
+console.log("\n[14] Style, merges and formulas are recorded as evidence, not interpreted");
 {
   const journey = baseline.visualEvidence.find((entry) => entry.sheet === "Journey");
   check(journey?.explicitFillCells > 0, `Journey reports explicitly filled cells (${journey?.explicitFillCells})`);
@@ -1017,8 +1176,8 @@ console.log("\n[13] Style, merges and formulas are recorded as evidence, not int
   );
 }
 
-// ---- [14] Idempotency ------------------------------------------------------
-console.log("\n[14] The package key comes from content and role, never from a name or an order");
+// ---- [15] Idempotency ------------------------------------------------------
+console.log("\n[15] The package key comes from content and role, never from a name or an order");
 {
   const reversed = await preflightCanonicalPackage([
     file("dolores.xlsx", painBytes),
@@ -1071,8 +1230,8 @@ console.log("\n[14] The package key comes from content and role, never from a na
   );
 }
 
-// ---- [15] Privacy ----------------------------------------------------------
-console.log("\n[15] No private source value reaches the report");
+// ---- [16] Privacy ----------------------------------------------------------
+console.log("\n[16] No private source value reaches the report");
 {
   const reports = [baseline];
   for (const mutation of [
@@ -1127,8 +1286,8 @@ console.log("\n[15] No private source value reaches the report");
   );
 }
 
-// ---- [16] Malformed input and resource ceilings ---------------------------
-console.log("\n[16] Malformed and oversized input is refused before anything else happens");
+// ---- [17] Malformed input and resource ceilings ---------------------------
+console.log("\n[17] Malformed and oversized input is refused before anything else happens");
 {
   const notAZip = await preflightCanonicalPackage([
     file("roto.xlsx", new TextEncoder().encode("esto no es un xlsx").buffer),
@@ -1204,8 +1363,8 @@ console.log("\n[16] Malformed and oversized input is refused before anything els
   );
 }
 
-// ---- [17] The Worker boundary and the write boundary ----------------------
-console.log("\n[17] The unit stays Workers-safe and writes nothing");
+// ---- [18] The Worker boundary and the write boundary ----------------------
+console.log("\n[18] The unit stays Workers-safe and writes nothing");
 {
   const walk = (dir) => {
     const out = [];
