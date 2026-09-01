@@ -655,3 +655,54 @@ Security/release work also runs the applicable live isolation and secret gates.
 Never mark an unexecuted check as passed, never alter expected calculations to
 make a test green, and never bypass the real application workflow by manually
 inserting acceptance rows.
+
+## Canonical multi-workbook study foundation (local branch, 2026-09-01)
+
+The Cuicuilco workbook audit established that the existing row-oriented import
+cannot preserve stable people, participation cohorts, multiple instruments,
+contextual worksheet formatting, monthly performance, multiple journeys and
+curated pain-point relationships with full provenance. A new additive schema is
+therefore staged on the development branch in migrations `0022` and `0023`.
+
+The schema and its rollback scripts are documented in
+`docs/CANONICAL_STUDY_MODEL.md`. All 34 new tables are service-only with RLS and
+FORCE RLS. Existing application tables and read paths remain active and no
+existing data is rewritten.
+
+This entry records source state, not release state: the migrations have **not**
+been applied to Supabase, the Cuicuilco workbooks have **not** been loaded into
+the new model, and nothing has been deployed to Cloudflare.
+
+### Unit 2 — package parser and preflight (source only, local branch)
+
+`src/lib/ingestion/canonical-package/` reads a multi-file package and validates
+it against a versioned specification. **It parses and validates only.** There is
+no Supabase client, no insert and no RPC anywhere in the module, no canonical
+row is written, no migration has been applied, and nothing was deployed. The
+deterministic gate is `npm run test:canonical-package`, registered in
+`npm test`.
+
+- `readXlsxWorkbook()` reads EVERY worksheet with physical coordinates, keeps
+  the exact worksheet name (one real source sheet ends in a space), keeps a
+  formula's text apart from the value it cached, and keeps style and merge
+  evidence UNINTERPRETED. `readXlsx()` and `parseXlsx()` are unchanged, and the
+  legacy gates plus the new gate's own legacy section pin that.
+- **A colour is never given a global meaning.** The reader records it; a
+  configured, human-reviewed `visual_annotation` decides what it means.
+- Roles are resolved by **structural signature, never by file name**, and the
+  package idempotency key is derived from the mapping version, the roles and the
+  file hashes sorted by role — so the same two files uploaded in either order
+  are the same package.
+- **Absence never becomes zero.** `NA`, `Sin dato`, `Sin información`, a blank
+  and a spreadsheet error are typed absence states; `No participó` is not an
+  answer; a participant with no numeric month stays `source_unavailable`.
+- **The preflight DTO carries no private value.** No name, answer, qualitative
+  text, category value or identifier appears in it — it is displayed, logged and
+  destined for `import_job.error_report`. Findings name the sheet and the
+  coordinate so a human can open the source. Alias candidates report a column, a
+  count of spellings and coordinates, never the spellings themselves.
+- Confirmation is allowed if and only if there are zero blockers.
+
+The contract is documented in `docs/CANONICAL_STUDY_MODEL.md`. The next
+development unit (Unit 3) is the server-only transactional commit and rollback
+workflow.

@@ -17,17 +17,16 @@ data-connected journey maps for the firm's clients (schools).
 
 **It is NOT a CRM.** No sales pipelines. The product is data → insight → client-facing story.
 
-- The P0-P6 V2 framework is deployed to a **synthetic-data test/beta Worker**.
-  P7 engineering is complete on `p7f-suites-b-c` at `b8fcfc4`, but that branch
-  is not yet merged into remote `main`; the P8 worktree intentionally descends
-  from it. This is not yet a real-client go-live environment, and deferred
-  go-live controls return only after the product experience is complete.
+- P0-P8 and the first P9 real-study hardening units are merged into `main`.
+  The provisional Worker and Supabase project are still not the final
+  production environment. Read `docs/CURRENT_STATE.md` before inferring what is
+  deployed, applied or safe to promote.
 - Full V2 architecture lives in `BeCommunity_V2_Technical_Architecture.docx` (reference only — consult, don't inline).
 - Project background and decisions live in `system_context.md`.
 
 ## Tech stack  *(verified against package.json + config, 2026-08-22)*
 
-- Framework: **Next.js 16.2.9** (App Router) + **React 19.2.4** + **TypeScript ^5, `strict: true`**.
+- Framework: **Next.js 16.3.2** (App Router) + **React 19.2.4** + **TypeScript ^5, `strict: true`**.
 - Styling: **TailwindCSS v4** (`@tailwindcss/postcss`).
 - Backend/DB: **Supabase Cloud** (`@supabase/supabase-js 2.108.2`, `@supabase/ssr 0.12.0`) — Postgres + Auth + Storage + RLS.
 - Deployment: **Cloudflare Worker via `@opennextjs/cloudflare 1.20.1`**, `nodejs_compat`. The full Next server runs on the **Node.js runtime** (not Edge); middleware uses the **Edge `middleware.ts` convention** because OpenNext rejects Node middleware. ⓘ **`nodejs_compat` is NOT a guarantee that a Node library works.** workerd's `unenv` shims throw on unimplemented APIs, and ExcelJS's Node entry dies on a module-level `process.umask()` (via `unzipper` → `fstream`). `.xlsx` therefore loads ExcelJS's **browser** build lazily — see `src/lib/ingestion/parse.ts` and the `test:workers-ingestion` gate.
@@ -114,7 +113,7 @@ npm run dev          # next dev (local dev server)
 npm run typecheck    # TypeScript strict check
 npm run build        # next build (must pass before any deploy)
 npm run lint         # eslint
-npm test             # complete deterministic suite (31 gates; P8.5 adds test:p8-acceptance)
+npm test             # complete deterministic suite; package.json is authoritative
 npm run gates        # gates:offline + gates:live (the complete release chain)
 npm run gates:offline # credentials-free: typecheck, lint, test, build, cf:build, suite:d
 npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:a -> suite:b -> suite:c
@@ -182,101 +181,38 @@ The template **framework** ships in V2; the template **content** (real formulas,
 named starter templates) is populated in V2.5 after the consultant's workflow is documented.
 Do not block V2 waiting for that documentation.
 
-## Current work — P8 closure delivery; do not skip ahead
+## Current work — canonical multi-workbook study model
 
 The authoritative state is `docs/CURRENT_STATE.md`.
 
-P8 is implementation-complete and owner-accepted on
-`p8f-responsive-accessibility-acceptance` at `b49df5d`. Deliver the closure
-record without reopening design scope. It is not merged or deployed; after
-delivery, the next bounded unit is go-live hardening for the final domain,
-production Supabase and operational prerequisites.
+P0-P8 are closed. `main` at `c76762f` also includes the P9 real-study ingestion
+and hardening corrections through migration `0021`. The current bounded unit is
+an additive canonical model for the audited Cuicuilco workbook package; its
+contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 
-- P0-P6 are implemented, technically accepted and human-accepted on synthetic
-  data. P6E completed with 108 automated checks and 0 failures.
-- The remaining P6 mobile-overflow and PDF-pagination defects were fixed in PR
-  #28, human-accepted, squash-merged and deployed. P6 is closed.
-- P7 engineering is concluded and merged (PR #38), and `main` is
-  `fd986940accae5a87170e3de0cb4b2f52dc9d7a9`. Do not reopen P7 correction loops
-  during P8. Deferred edge, production-environment,
-  backup/DR and operational controls return as a bounded go-live hardening pass
-  after the product is functionally and visually complete.
-- P8 discovery and visual comparison are complete on
-  `docs/p8-experience-discovery`. The A/B/C and provisional synthesis artifacts
-  are historical design evidence, not an instruction to build more prototypes.
-- The approved direction is an **Interactive Insight Experience**: client work
-  combines a guided `Recorrido` with bounded `Explorar`, structured as
-  question → visual evidence → consultant interpretation → action. Studio is a
-  separate no-code operational experience for non-technical internal users.
-- **P8-A is complete and owner-accepted** at `3659a38` (delivery PR #37): the
-  semantic foundation, sign-in, shells, client panorama and journey slice are
-  established. Do not reopen its visual-prototype loop.
-- **P8.2 is implementation-complete and owner-accepted in the final P8 pass on
-  2026-08-27.** Slice one
-  (owner-accepted, PR #39, `b1abfef`) delivered the no-code access-scope picker
-  and the guided import mapping and readable preview. The completion unit adds
-  the eleven `/studio/**` routes, the actionable home, the study work surface
-  and its process steps, the journey-metric and theme pickers, visible paging on
-  the qualitative review and the import history, publication reachable only
-  through the client preview, one accessible destructive-action dialog in place
-  of `window.confirm()`, and the account and client lifecycle. It is gated by
-  `npm run test:studio-completion` (48 checks) beside
-  `npm run test:studio-workflows` (22). Migration `0015` is applied to the
-  synthetic project only. On 2026-08-25 the canonical offline chain, the live
-  adversarial chain and the exact-ledger lifecycle acceptance passed at
-  `543889a`; cleanup left no disposable rows, Auth identities or Storage
-  objects, and the protected fixture remained unchanged. **One lifecycle item
-  remains deliberately unavailable:** permanent CLIENT deletion is disabled
-  and refused server-side until a recoverable cross-system deletion workflow
-  exists. No ordinary Studio workflow may ask for raw JSON, an internal
-  identifier or a metric key.
-- **P8.3 is implementation-complete and owner-accepted.**
-  `/insights/e/[studyId]` is the authorized client study route;
-  the dashboard remains its compatibility home. URL and PDF filters share the
-  exact `f.*` parser, the free comparison keeps the existing server allowlist,
-  fewer than four periods use a list while longer histories use a chart, and
-  every history has a table alternative.
-- **P8.4 is implementation-complete and owner-accepted.**
-  `/studio/e/[studyId]/interpretacion` owns the explicit draft → review →
-  approved → published workflow. A newer draft never replaces the client
-  snapshot until it is approved and published again. Client absence remains
-  silence. The study/client presentation controls are bounded, no-code and
-  inherited; templates are team-shared with author attribution and preserve
-  the configuration. Migrations `0017` and `0018` are applied to the synthetic
-  project only. Never invent interpretation copy or expose draft content.
-- **P8.5 is implementation-complete and owner-accepted; P8 closed on
-  2026-08-27.**
-  `test:p8-acceptance` covers the named state system, plain language, keyboard
-  affordances, unique word-cloud semantics and the declared six-width matrix.
-  `test:p8-acceptance-live` renders the authorized client and Studio route set
-  at 320/360/390/768/1024/1280 px without screenshots and rejects page-level
-  overflow, clipped text, duplicate IDs, unnamed graphics, missing alt text or
-  sub-24 px control targets. The owner completed and accepted the real-phone
-  pass after the LAN hydration, mobile account-row and relative-scale fixes at
-  `8a4437a` and `b49df5d`. Studio deliberately has no top-level
-  `loading.tsx`: its role check must finish before any streamed HTTP 200 UI.
-- **Every `/admin/**` address still answers.** Studio gained addresses; it
-  renamed none away. Bookmarks, emailed links, `docs/CURRENT_STATE.md` and the
-  frozen adversarial catalogue all depend on the old paths, and
-  `src/lib/studio/routes.ts` records the pairing so a gate can assert it.
-- ⓘ **No lifecycle action succeeds unrecorded.** Suspend, restore, archive and
-  restore refuse when the administrative record is unavailable, and undo
-  themselves if the record cannot be written after the change. Permanent user
-  deletion writes durable intent and checks that write BEFORE deleting. Do not
-  reintroduce a best-effort "we could not record this" success path.
-- ⓘ **Publication has exactly one surface.** `/studio/e/[studyId]/publicar`,
-  reached from the client preview, is the only path that moves a study between
-  draft, published and archived. `updateStudyConfiguration` may only re-save the
-  state that already holds, and `setStudyPublication` independently refuses a
-  publication with no acknowledgement, an empty study or an archived client.
-- Preserve P7 authorization/input gates, all calculation outputs, ingestion,
-  RLS, roles and publication boundaries. P8 changes presentation and guided
-  workflow first; migrations or authorization changes require a separate,
-  explicit design and review boundary.
-- Do not mutate real-production infrastructure, rotate credentials, create a
-  real-data environment, or enable irreversible controls during synthetic P7
-  work. Do not redirect the roadmap toward retention UI, new role tiers or an
-  incidental feature question.
+- Migrations `0022` and `0023` are source changes only until staging execution
+  is explicitly authorized and verified. Do not describe them as applied.
+- **Unit 2 (`src/lib/ingestion/canonical-package/`) parses and validates only.**
+  It writes nothing: no Supabase client, no insert, no RPC, no canonical row.
+  `npm run test:canonical-package` fails if one appears. Unit 3 adds the
+  server-only transactional commit and rollback.
+- The existing ingestion and client read paths remain authoritative. Do not
+  switch them to the new tables until the deterministic package importer,
+  reconciliation and compatibility tests exist.
+- `readXlsx()`/`parseXlsx()` are the LEGACY reader and their behaviour is
+  frozen — every existing study was imported through them. The canonical
+  multi-sheet reader is `readXlsxWorkbook()` in the same module; both must stay
+  JSZip-only so ExcelJS remains unreachable from `src/`.
+- Preserve source meaning: formatting is contextual evidence, missing states
+  never become zero, a person is distinct from a study participation, and
+  historical retention is distinct from the Oct 2025–Jun 2026 performance
+  cycle.
+- All canonical raw/internal tables remain service-only with RLS and FORCE RLS.
+  Client publication continues through reviewed aggregate surfaces.
+- No AI classification belongs in this unit. Build deterministic ingestion and
+  human-verifiable provenance first.
+- Never deploy, apply a migration, mutate Supabase or promote a Worker merely
+  because local source and static checks are complete.
 
 ## When unsure
 Ask. Do not guess on security, authorization, or calculations. A stopped task is
