@@ -45,7 +45,6 @@ import { join } from "node:path";
 
 import { readXlsxWorkbook } from "../src/lib/ingestion/xlsx-reader.ts";
 import { WorkbookView, columnLetters, columnNumber } from "../src/lib/ingestion/canonical-package/sheet-view.ts";
-import { fileHash } from "../src/lib/ingestion/canonical-package/fingerprint.ts";
 import { preflightCanonicalPackage } from "../src/lib/ingestion/canonical-package/preflight.ts";
 import { CUICUILCO_PACKAGE_SPEC_V1 } from "../src/lib/ingestion/canonical-package/spec.ts";
 import {
