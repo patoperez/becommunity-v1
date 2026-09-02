@@ -37,17 +37,32 @@
 //   because a structural break should fail offline too, but it never reports a
 //   database-executed result: read the live gate's output for that.
 //
-//   THE DATABASE GATE'S OWN REFUSALS (section [19], executed here). A rule that
-//   runs only when somebody remembers to run the database gate is not a rule, so
-//   every guard deciding which database that gate may touch is executed in
-//   `npm test`.
+//   THE DATABASE GATE'S OWN REFUSALS (sections [19] and [20], executed here). A
+//   rule that runs only when somebody remembers to run the database gate is not
+//   a rule, so every guard deciding which database that gate may touch — and
+//   which directory its provisioning script may delete — is executed in
+//   `npm test`. Section [20] runs the provisioning script's validation entry
+//   point against seventeen hostile roots inside a THROWAWAY home directory,
+//   and proves for each that nothing was created, nothing was removed and no
+//   process was signalled.
 //
 // Every fixture is BUILT HERE from synthetic values. No client workbook, name,
 // answer or identifier is committed to this repository.
 // =============================================================================
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 import { readXlsxWorkbook } from "../src/lib/ingestion/xlsx-reader.ts";
 import { WorkbookView } from "../src/lib/ingestion/canonical-package/sheet-view.ts";
@@ -1374,6 +1389,186 @@ console.log("\n[19] The database gate refuses every target that is not disposabl
   const covered = new Set(declared);
   const missing = Array.from({ length: 16 }, (_, i) => `L${i + 1}`).filter((id) => !covered.has(id));
   check(missing.length === 0, `it asserts all sixteen required behaviours${missing.length ? ` (missing ${missing.join(", ")})` : ""}`);
+}
+
+// ---- [20] The provisioning script cannot delete anything it should not ----
+// The provisioning script removes directories recursively and takes its root
+// from a configurable variable. These assertions run its VALIDATION entry point
+// (`--check-root`, which creates nothing, removes nothing and signals nothing)
+// against every hostile value, inside a FAKE home directory so that a rule
+// being wrong could still not reach anything real.
+//
+// The one destructive case is deliberately confined: a root the guard accepts,
+// inside that fake home, next to sentinels that must survive it.
+console.log("\n[20] The disposable-server script refuses every path that is not its own");
+{
+  const PROVISION = join(root, "scripts", "lib", "disposable-postgres-provision.sh");
+  const provisionSource = read("scripts/lib/disposable-postgres-provision.sh");
+
+  // A recursive listing, so "nothing was created" and "nothing was removed" are
+  // one comparison rather than a handful of spot checks.
+  const listTree = (dir) => {
+    const lines = [];
+    const walk = (current, prefix) => {
+      const entries = readdirSync(current, { withFileTypes: true }).sort((a, b) =>
+        a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+      );
+      for (const entry of entries) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        const full = join(current, entry.name);
+        if (entry.isSymbolicLink()) lines.push(`L ${relative}`);
+        else if (entry.isDirectory()) {
+          lines.push(`D ${relative}`);
+          walk(full, relative);
+        } else lines.push(`F ${relative} ${statSync(full).size}`);
+      }
+    };
+    walk(dir, "");
+    return lines.join("\n");
+  };
+
+  const fakeHome = mkdtempSync(join(tmpdir(), "bc-guard-home-"));
+  mkdirSync(join(fakeHome, "sentinel-dir"), { recursive: true });
+  writeFileSync(join(fakeHome, "sentinel-dir", "precious.txt"), "do not touch");
+  writeFileSync(join(fakeHome, "sentinel-file"), "do not touch either");
+  mkdirSync(join(fakeHome, "becommunity-pg-test-victim", "nested"), { recursive: true });
+  writeFileSync(join(fakeHome, "becommunity-pg-test-victim", "nested", "payload.json"), "{}");
+  let symlinkMade = true;
+  try {
+    symlinkSync(join(fakeHome, "sentinel-dir"), join(fakeHome, "becommunity-pg-test-link"), "dir");
+  } catch {
+    symlinkMade = false;
+  }
+  check(symlinkMade, "the fake home can hold a symbolic link, so the symlink refusal is testable");
+
+  // A live process, so "no process was killed" is observed rather than assumed.
+  const bystander = spawn("sleep", ["120"], { stdio: "ignore" });
+  const bystanderAlive = () => bystander.exitCode === null && bystander.signalCode === null;
+
+  const runGuard = (candidate, mode = "--check-root") =>
+    spawnSync("bash", [PROVISION, mode], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        ...(candidate === undefined ? {} : { BECOMMUNITY_PG_ROOT: candidate }),
+      },
+    });
+
+  const before = listTree(fakeHome);
+
+  const REFUSALS = [
+    ["an empty root", ""],
+    ["the filesystem root", "/"],
+    ["the home directory itself", fakeHome],
+    ["/home", "/home"],
+    ["/tmp", "/tmp"],
+    ["'.'", "."],
+    ["'..'", ".."],
+    ["a relative path", "relative/becommunity-pg"],
+    ["a path outside the home directory", "/var/tmp/becommunity-pg"],
+    ["an existing symbolic link", join(fakeHome, "becommunity-pg-test-link")],
+    ["an invalid basename", join(fakeHome, "something-else")],
+    ["an unexpanded variable", "$HOME/becommunity-pg"],
+    ["a glob", `${fakeHome}/becommunity-pg-test-*`],
+    ["a path nested below the home directory", join(fakeHome, "nested", "becommunity-pg")],
+    ["a traversal out of the root", join(fakeHome, "becommunity-pg", "..", "..", "etc")],
+    ["a bare 'becommunity-pg-test-'", join(fakeHome, "becommunity-pg-test-")],
+    ["a parent of the home directory", dirname(fakeHome)],
+  ];
+
+  let refusedAll = true;
+  let untouched = true;
+  let refusalNoise = [];
+  for (const [label, candidate] of REFUSALS) {
+    const result = runGuard(candidate);
+    const refused = result.status !== 0 && /^REFUSED: /m.test(result.stderr ?? "");
+    if (!refused) {
+      refusedAll = false;
+      refusalNoise.push(label);
+    }
+    if (listTree(fakeHome) !== before) untouched = false;
+    check(refused, `it refuses ${label} (exit ${result.status})`);
+  }
+  check(refusedAll, `all ${REFUSALS.length} hostile roots were refused${refusalNoise.length ? `: ${refusalNoise.join(", ")}` : ""}`);
+  check(untouched, "and not one of those refusals created or removed anything");
+  check(bystanderAlive(), "and not one of them signalled a running process");
+
+  // ---- accepted roots ------------------------------------------------------
+  const acceptedDefault = runGuard(join(fakeHome, "becommunity-pg"));
+  check(
+    acceptedDefault.status === 0 && acceptedDefault.stdout.trim() === join(fakeHome, "becommunity-pg"),
+    `the default root is accepted (${acceptedDefault.status})`,
+  );
+  const acceptedSibling = runGuard(join(fakeHome, "becommunity-pg-test-alpha"));
+  check(
+    acceptedSibling.status === 0 &&
+      acceptedSibling.stdout.trim() === join(fakeHome, "becommunity-pg-test-alpha"),
+    `an explicitly disposable sibling is accepted (${acceptedSibling.status})`,
+  );
+  const unsetDefault = runGuard(undefined);
+  check(
+    unsetDefault.status === 0 && unsetDefault.stdout.trim() === join(fakeHome, "becommunity-pg"),
+    "and leaving the variable unset resolves to that same default",
+  );
+  check(listTree(fakeHome) === before, "validating an accepted root still creates nothing");
+
+  // ---- the one destructive case, confined to a root the guard accepts ------
+  const destroy = runGuard(join(fakeHome, "becommunity-pg-test-victim"), "--destroy");
+  check(destroy.status === 0, `--destroy removes an accepted disposable root (${destroy.status})`);
+  const after = listTree(fakeHome);
+  check(!after.includes("becommunity-pg-test-victim"), "the validated root is gone");
+  check(
+    after.includes("D sentinel-dir") &&
+      after.includes("F sentinel-dir/precious.txt 12") &&
+      after.includes("F sentinel-file 19") &&
+      after.includes("L becommunity-pg-test-link"),
+    "and every sibling sentinel — directory, file and symlink — survived untouched",
+  );
+  check(
+    before.split("\n").filter((line) => !line.includes("becommunity-pg-test-victim")).join("\n") === after,
+    "nothing outside the validated root changed in any way",
+  );
+  check(bystanderAlive(), "and the running process was still not signalled");
+
+  bystander.kill("SIGKILL");
+  rmSync(fakeHome, { recursive: true, force: true });
+
+  // ---- the structural rules that make the above hold -----------------------
+  const stripped = provisionSource.replace(/(^|\s)#[^\n]*/g, "$1");
+  const removals = [...stripped.matchAll(/\brm\s+-rf\b/g)];
+  check(removals.length === 1, `the script contains exactly one 'rm -rf' (${removals.length})`);
+  check(
+    /rm -rf -- "\$\{resolved\}"/.test(stripped),
+    "and it deletes a fully resolved literal path, after '--'",
+  );
+  check(
+    /safe_rm\(\)\s*\{[\s\S]*?rm -rf/.test(stripped),
+    "and that one removal lives inside the guarded function",
+  );
+  check(
+    (stripped.match(/\bsafe_rm\s+"/g) ?? []).length >= 4,
+    "every destructive path in the script goes through safe_rm",
+  );
+  check(
+    /root_now="\$\(validate_root "\$\{RAW_ROOT\}"\)"/.test(stripped),
+    "safe_rm re-validates the root immediately before deleting, not only at start-up",
+  );
+  check(!/\bpkill\b/.test(stripped), "no pkill remains: a command-line pattern can match an unrelated server");
+  check(
+    /readlink -f "\/proc\/\$\{pid\}\/exe"/.test(stripped) && /grep -Fxq -- "\$\{PGDATA\}"/.test(stripped),
+    "termination identifies the process by its own executable and data directory",
+  );
+  check(
+    /\[ -n "\$\{BECOMMUNITY_PG_ROOT\+set\}" \]/.test(stripped),
+    "a variable that is SET BUT EMPTY is refused rather than silently defaulted",
+  );
+  check(
+    /resolve_within_root "the data directory"/.test(stripped) &&
+      /resolve_within_root "the socket directory"/.test(stripped) &&
+      /resolve_within_root "the binary directory"/.test(stripped),
+    "every derived path is proved to be a descendant of the validated root",
+  );
 }
 
 console.log("\n" + "=".repeat(70));

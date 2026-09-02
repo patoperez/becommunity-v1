@@ -220,6 +220,17 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   refusals are executed by `npm test`, so weakening one is a red offline gate.
   If a check there ever becomes a source-text match again, it has stopped being
   a database test: level 2 found five defects that level 1 could not see.
+- ⓘ **The disposable server's root is validated before anything is deleted.**
+  `scripts/lib/disposable-postgres-provision.sh` removes directories
+  recursively, so its root is canonicalised with `realpath -m` and must be a
+  direct child of the canonical home named `becommunity-pg` or
+  `becommunity-pg-test-*`. An empty override is refused, never defaulted. There
+  is exactly ONE `rm -rf`, inside a guarded function that re-validates the root
+  immediately before deleting; every other destructive path calls it. Process
+  termination identifies the postmaster through `/proc` — never with a
+  `pkill -f` pattern that could match an unrelated server. `--check-root`
+  validates and does nothing else, and section [20] of the offline gate proves
+  seventeen refusals inside a throwaway home.
 - The existing ingestion and client read paths remain authoritative. Do not
   switch them to the new tables until the deterministic package importer,
   reconciliation and compatibility tests exist.

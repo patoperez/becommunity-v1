@@ -721,7 +721,7 @@ canonical records and writes them through one transactional RPC. Migration
 schema. **Nothing was applied, deployed, uploaded or mutated:** no migration ran
 anywhere, no Supabase project was contacted, no Worker was built or promoted, no
 real workbook was uploaded, and no canonical row exists in any environment. The
-deterministic gate is `npm run test:canonical-commit` (267 checks), registered in
+deterministic gate is `npm run test:canonical-commit` (306 checks), registered in
 `npm test`.
 
 The full contract is in `docs/CANONICAL_STUDY_MODEL.md`. What a reader needs
@@ -762,7 +762,7 @@ before touching this unit:
 
 **Three levels of proof, and they are not interchangeable.**
 
-1. *Projection.* `npm run test:canonical-commit` (267 checks, gate 11 of
+1. *Projection.* `npm run test:canonical-commit` (306 checks, gate 11 of
    `npm test`) exercises the projector, the private/safe boundary, count
    reconciliation and the whole workflow against a fake transport, and executes
    the database gate's own refusal rules so a weakened guard fails `npm test`.

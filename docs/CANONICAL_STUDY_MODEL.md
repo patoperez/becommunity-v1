@@ -486,7 +486,7 @@ interchangeable. Every claim below states which one it is.
 | **2. Local transaction** | a disposable PostgreSQL cluster this repository creates and destroys | `npm run test:canonical-commit-live` |
 | **3. Hosted transport** | Supabase + PostgREST + the service-role key | **not performed** |
 
-### Level 1 — projection and boundaries (`npm run test:canonical-commit`, 267 checks)
+### Level 1 — projection and boundaries (`npm run test:canonical-commit`, 306 checks)
 
 Executed offline, in `npm test`:
 
@@ -607,9 +607,36 @@ alike, and `--destroy` removes the whole tree. On a machine that already runs
 PostgreSQL, skip the script and point the gate at that server: it only ever
 creates and drops databases with that prefix.
 
-**Repeatability.** The gate was executed six times from freshly created
-databases — four including the real package, two synthetic only — with identical
-results and no leftover database after any of them.
+**The provisioning script cannot delete anything but its own root.** It removes
+directories recursively and takes its root from `BECOMMUNITY_PG_ROOT`, so the
+root is canonicalised with `realpath -m` before anything happens and must be a
+DIRECT child of the canonical home directory named `becommunity-pg` or
+`becommunity-pg-test-<something>`. An empty value is refused rather than
+silently replaced by the default — `rm -rf "${PGROOT}/debs"` with an empty root
+is `rm -rf /debs`. `/`, the home directory itself, a parent of it, `/home`,
+`/tmp`, a relative path, `.`, `..`, a path outside the home, an existing
+symbolic link, an unexpanded `$`, a glob and an unrecognised basename are all
+refused. Every derived path — data, socket, binaries, logs, package staging — is
+re-resolved and proved to be a strict descendant. There is exactly ONE `rm -rf`
+in the script, inside a guarded function that re-validates the root immediately
+before deleting, refuses a glob or a symlink, and passes `rm` a resolved literal
+path after `--`. Process termination no longer pattern-matches a command line:
+it reads the pid file in our own data directory and kills that pid only when
+`/proc` shows the same user, our unpacked `postgres` binary, and our data
+directory as its `-D` argument.
+
+`--check-root` runs that validation and nothing else, which is how the offline
+gate proves each refusal without performing a dangerous deletion. Section [20]
+of `npm run test:canonical-commit` exercises seventeen hostile roots inside a
+throwaway home, asserting for each that the exit status is non-zero, that a
+recursive listing of that home is byte-identical before and after, and that a
+running process was not signalled. It then proves the two accepted roots, and
+destroys one of them next to a sentinel directory, file and symlink that must
+survive.
+
+**Repeatability.** The gate has been executed repeatedly from freshly created
+databases, including with the real package, with identical results and no
+leftover database, socket, scratch directory or server after any of them.
 
 ### What the database found that no amount of reading could
 
