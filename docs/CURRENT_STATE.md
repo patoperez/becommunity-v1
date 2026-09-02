@@ -721,7 +721,7 @@ canonical records and writes them through one transactional RPC. Migration
 schema. **Nothing was applied, deployed, uploaded or mutated:** no migration ran
 anywhere, no Supabase project was contacted, no Worker was built or promoted, no
 real workbook was uploaded, and no canonical row exists in any environment. The
-deterministic gate is `npm run test:canonical-commit` (220 checks), registered in
+deterministic gate is `npm run test:canonical-commit` (265 checks), registered in
 `npm test`.
 
 The full contract is in `docs/CANONICAL_STUDY_MODEL.md`. What a reader needs
@@ -760,17 +760,45 @@ before touching this unit:
   failing key values, which here are respondent data. Only a code the migration
   raised itself is kept; everything else becomes `DATABASE_CONSTRAINT`.
 
-**What is NOT proved.** Sections [14]–[17] of the gate read migration 0024's
-SQL text; they are structural proof, not execution. No PostgreSQL statement in
-this unit has been executed anywhere — the development environment has
-`postgresql-client` only, with no server package and no container runtime.
-`scripts/canonical-commit-live-test.mjs` enumerates 16 database-executed checks
-(L1–L16), is registered as `npm run test:canonical-commit-live`, is deliberately
-kept OUT of `npm test`, refuses any connection string that is not a loopback
-database whose name contains `disposable`, and **has never been run**. Until it
-has, do not describe the subtransaction rollback, the concurrent-commit
-serialisation, the runtime `42501` denial for browser roles, or the
-apply-then-reverse catalogue equality as proved.
+**Three levels of proof, and they are not interchangeable.**
+
+1. *Projection.* `npm run test:canonical-commit` (265 checks, gate 11 of
+   `npm test`) exercises the projector, the private/safe boundary, count
+   reconciliation and the whole workflow against a fake transport, and executes
+   the database gate's own refusal rules so a weakened guard fails `npm test`.
+2. *Local PostgreSQL transaction.* `npm run test:canonical-commit-live`
+   (**140 assertions, executed**) creates disposable databases, applies the
+   bootstrap and migrations 0000-0024 verbatim, drives `runCanonicalCommit` and
+   `runCanonicalRollback` through a `psql` transport, and asserts the resulting
+   database state — L1 to L16 plus the review's extra cases. It is deliberately
+   OUTSIDE `npm test`.
+3. *Hosted transport.* **Not performed.** Nothing has verified the unit against
+   Supabase or PostgREST: the request-size limit for a 2.6 MiB RPC body, the
+   supabase-js error shape, the service-role key path and hosted statement
+   timeouts all remain unproved. Do not describe them as verified.
+
+**The local server was obtained without installing anything.** `apt-get
+download` plus `dpkg-deb -x` place PostgreSQL 18.6 under the ordinary user's
+home — no dpkg entry, no system file, no service, no `sudo` (which is not
+available on this machine). The cluster listens on no TCP address at all, only a
+unix socket in that directory; each suite gets its own
+`becommunity_canonical_test_*` database, dropped on success and on failure; the
+whole tree is deleted afterwards.
+
+**Level 2 found five defects that level 1 could not**, all fixed at the root
+with regression coverage: record identifiers were scoped to the package and not
+the study, so the same files imported into a second study collided on every
+primary key; rollback deleted the external identifier of a person it retained,
+making that identity invisible to the reuse path; "created" was decided by
+comparing identifiers rather than by the identity lookup; a duplicated asset
+failed with a cardinality violation instead of a named code; and the reverse
+script would have dropped the ownership ledger while packages still owned rows.
+`docs/CANONICAL_STUDY_MODEL.md` records each one.
+
+**Measured for the real Cuicuilco package, without any content:** a 2.58 MiB
+plan; commit 1 431 ms of which the RPC was 716 ms; rollback 91 ms; 3 559
+canonical rows and 5 029 lineage rows written and then removed; the database
+independently measured 60 persons and 1 685 responses.
 
 **Real-workbook dry run.** `npm run test:canonical-commit-dry-run` runs the
 preflight and builds the plan in memory against the two real Cuicuilco

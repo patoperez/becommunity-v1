@@ -95,7 +95,10 @@ Reverse order:
 
 `0024`'s reverse script drops the ownership ledger, so a package that is still
 committed must be reversed through `rollback_canonical_package` FIRST. Dropping
-the ledger while rows are owned would leave canonical rows nothing can identify.
+the ledger while rows are owned would leave canonical rows nothing can identify,
+so the script REFUSES to run in that state and says which packages are holding
+it — it does not quietly orphan them. That refusal is executed by the database
+gate (X7).
 
 ## Unit 2 — package parser and preflight (source only)
 
@@ -288,8 +291,8 @@ granted only to `service_role`.
   PL/pgSQL block guarded by `exception when others`. When it raises, that block
   is rolled back and the outer transaction survives, so the job can be marked
   `failed` with certainty that the attempt left nothing behind. **This is the
-  one behaviour in the unit whose proof requires a running database — see
-  "What is proved and what is not" below.**
+  one behaviour in the unit whose proof requires a running database, and it has
+  now been executed — see "What is proved, and at which level" below (L4).**
 - **No database message ever escapes.** A constraint violation message quotes
   the failing key values, which here are respondent data. The handler keeps
   `message_text` only when it matches `^[A-Z][A-Z0-9_]{1,59}$` — a code this
@@ -472,16 +475,27 @@ consultant's eye, and are recorded here rather than buried in configuration:
    that no general CSAT exists, so the projection emits one CSAT and one TDP
    metric definition per CSAT item rather than one of each for the instrument.
 
-## What is proved and what is not
+## What is proved, and at which level
 
-### Executed offline (`npm run test:canonical-commit`, 220 checks)
+Three different things can be true of this unit, and they are not
+interchangeable. Every claim below states which one it is.
+
+| level | what it runs against | command |
+|---|---|---|
+| **1. Projection** | pure functions, no database at all | `npm run test:canonical-commit`, `npm run test:canonical-commit-dry-run` |
+| **2. Local transaction** | a disposable PostgreSQL cluster this repository creates and destroys | `npm run test:canonical-commit-live` |
+| **3. Hosted transport** | Supabase + PostgREST + the service-role key | **not performed** |
+
+### Level 1 — projection and boundaries (`npm run test:canonical-commit`, 265 checks)
+
+Executed offline, in `npm test`:
 
 - the synchronous SHA-256 matches `crypto.subtle` and the FIPS 180-4 vector;
-- derived identifiers are stable, uuid-shaped and separated by target table;
+- derived identifiers are stable, uuid-shaped, and disjoint across studies and
+  tenants — the regression test for the defect the database found;
 - the plan fingerprint is order-independent for object keys and sensitive to any
   changed source value;
-- every canonical family is emitted from a synthetic package, with the counts
-  the fixture implies;
+- every canonical family is emitted from a synthetic package;
 - every absence state survives; an answered zero survives; non-participation
   produces no answer; derived labels create no extra response;
 - colours become pending, uninterpreted evidence and the bands come from
@@ -494,32 +508,16 @@ consultant's eye, and are recorded here rather than buried in configuration:
   the manifest, the result or any error path;
 - count reconciliation fails on a short count, a missing family, an extra family
   and no counts at all;
-- the whole workflow runs against a fake transport: preflight before staging, no
-  database call at all for a blocked package, one commit call, a replay reported
-  as a replay, a count mismatch reverted, a failure reported with a
-  product-written sentence, and a hostile PostgreSQL message reduced to a code.
+- the whole workflow runs against a fake transport;
+- migration 0024's SQL carries the grants, empty search paths, `FOR UPDATE`
+  locks, `ROW_COUNT` measurement, ledger vocabulary and reverse counterpart it
+  claims — read from the text, and now confirmed by level 2;
+- **the database gate's own refusals** run here too: a remote host, a password in
+  a connection string, a Supabase host, a non-PostgreSQL URL, an ordinary
+  database name and a present `SUPABASE_SERVICE_ROLE_KEY` are each refused, so a
+  weakened guard fails `npm test` rather than waiting for a run nobody makes.
 
-### Structural only — read from the SQL, NOT executed
-
-Sections [14] to [17] of the gate read migration 0024's text: the grants, the
-empty search paths, the `FOR UPDATE` locks, the scope refusals, `ROW_COUNT`
-measurement, the exception handler's redaction, the ledger vocabulary, the
-rollback ordering against every `ON DELETE RESTRICT` edge in `0022`/`0023`, and
-an exact reverse counterpart for every object.
-
-### Requires a disposable database — NOT executed anywhere
-
-`scripts/canonical-commit-live-test.mjs` enumerates 16 database-executed checks
-(L1-L16) and **has never been run**: no PostgreSQL server was available in the
-development environment. Until it has run, treat as unproved:
-
-- that the subtransaction really discards the rows of a failed attempt;
-- that a failure halfway through leaves zero rows in every earlier family;
-- that two simultaneous commits serialise into exactly one commit;
-- that `anon` and `authenticated` are refused with `42501` at runtime;
-- that applying `0024` and then its reverse restores the exact catalogue state.
-
-### Real-workbook dry run
+### Level 1 — the real-workbook dry run
 
 `npm run test:canonical-commit-dry-run <clean.xlsx> <curated.xlsx>` runs the
 preflight and builds the plan IN MEMORY against the two real workbooks. It
@@ -536,6 +534,149 @@ satisfy the count identity, 18 journey stages, 10 organizational units, 20
 culture dimensions, 7 curated performance dimensions, 50 pain points and 5 029
 lineage rows citing all 16 worksheets. Neither workbook, nor any output of that
 run, is committed to this repository.
+
+### Level 2 — local PostgreSQL transaction (`npm run test:canonical-commit-live`, 140 assertions)
+
+**Executed.** `scripts/canonical-commit-live-test.mjs` creates disposable
+databases, applies the bootstrap and migrations 0000-0024 verbatim, drives the
+product's own `runCanonicalCommit` / `runCanonicalRollback` through a `psql`
+transport, and asserts the resulting database state. It is deliberately outside
+`npm test`, because a database is not always available and an unexecuted
+database test must never be counted among the offline results.
+
+What it proved, by executing it:
+
+| id | behaviour |
+|---|---|
+| L1 | the first commit writes every family; the database's own counts match, and the ledger accounts for all of them |
+| L2 | an exact replay writes not one row and is not a second attempt |
+| L3 | a changed payload under a committed identity is refused with `COMMITTED_PAYLOAD_DIFFERS` |
+| L4 | a failure injected at `pain_point` — after persons, sessions and responses — leaves **zero** rows in every earlier family, an empty ledger, no lineage, and a job marked `failed` with a safe code |
+| L5 | the retry then succeeds exactly once, as attempt 2 of the same job |
+| L6 | rollback removes only `created` rows; an unrelated study, the source assets and the job's asset links all survive, and the audit job survives as `rolled_back` |
+| L7 | a repeated rollback is a no-op reporting `replayed=true` |
+| L8 | the package commits again afterwards with no duplicate participation |
+| L9 | two genuinely concurrent psql sessions serialise on the locked job: one commits, the other replays, and the row counts equal a single commit |
+| L10 | a declared count that disagrees raises `COUNT_MISMATCH` and writes nothing |
+| L11 | a family that is not an array, and a plan that is not an object, are both refused |
+| L12 | a foreign tenant or study is refused and the foreign tenant is unchanged |
+| L13 | lineage citing a role the job does not carry raises `ASSET_ROLE_UNKNOWN` |
+| L14 | `anon` and `authenticated` are refused with SQLSTATE `42501` on all four functions AND on direct reads of `import_job_record`, `retention_period`, `person_private` and `survey_response`; `service_role` may execute the three server operations |
+| L15 | all four functions are `SECURITY DEFINER` with an empty `search_path`, grant EXECUTE to `service_role` alone, and leave nothing with `PUBLIC`; both new tables carry RLS, FORCE RLS and their deny policy |
+| L16 | a normalized catalogue snapshot taken after 0023 equals the snapshot taken after applying 0024 and then its reverse — tables, columns, constraints, indexes, policies, functions, grants and default privileges |
+
+And the cases the review added:
+
+| id | behaviour |
+|---|---|
+| X1 | every family declared in `expectedCounts` is measured by the database and represented consistently in the ledger |
+| X2 | two assets claiming one role, and one file claiming two roles, are both refused by NAME (`ASSET_SET_NOT_DISTINCT`) rather than by a cardinality violation whose message quotes a row |
+| X3 | a rollback that cannot finish leaves the job `committed`, its ledger intact and its rows in place — it never reports success it did not achieve |
+| X4 | a person shared by two studies of one tenant is reused, and is retained (with its identifier) when one study is reversed |
+| X5 | that study then commits again over the retained identities, reusing all of them |
+| X6 | every failure returned through the workflow carries a safe code and no respondent value, and neither does what is stored on the job |
+| X7 | the reverse script REFUSES while a committed package still owns rows, naming `CANONICAL_PACKAGES_STILL_OWNED`, drops nothing, and succeeds once the package is reversed |
+| X8 | the complete real Cuicuilco plan passes through the serialization boundary |
+
+**Measured for the real package, without any content:** a 2.58 MiB
+(2 704 662-byte) plan; whole commit 1 431 ms of which the RPC itself was 716 ms;
+rollback 91 ms; 3 559 canonical rows and 5 029 lineage rows written and then
+removed; the database independently measured 60 persons and 1 685 responses.
+
+**How to run it.**
+
+```bash
+bash scripts/lib/disposable-postgres-provision.sh          # prints the two variables
+CANONICAL_COMMIT_TEST_PGHOST="$HOME/becommunity-pg/socket" CANONICAL_COMMIT_TEST_PGUSER="$(id -un)"   npm run test:canonical-commit-live
+bash scripts/lib/disposable-postgres-provision.sh --destroy
+```
+
+Add `CANONICAL_COMMIT_TEST_CLEAN_XLSX` and `CANONICAL_COMMIT_TEST_PAIN_XLSX` to
+include the real-package boundary; without them that suite reports itself as
+skipped rather than passing.
+
+**How the database was obtained.** No PostgreSQL server was installed. The
+provisioning script downloads the server package with `apt-get download` and
+unpacks it with `dpkg-deb -x` into a directory under the ordinary user's home —
+no dpkg database entry, no system file, no service, and no `sudo`, which is not
+available on this machine anyway. The cluster is started with `-h ''`, so it
+opens NO TCP listener at all; the only way in is a unix socket inside that
+directory. Each suite runs in its own database named
+`becommunity_canonical_test_*`, dropped on the success and the failure path
+alike, and `--destroy` removes the whole tree. On a machine that already runs
+PostgreSQL, skip the script and point the gate at that server: it only ever
+creates and drops databases with that prefix.
+
+**Repeatability.** The gate was executed six times from freshly created
+databases — four including the real package, two synthetic only — with identical
+results and no leftover database after any of them.
+
+### What the database found that no amount of reading could
+
+Five defects survived a 220-check offline gate and a clean real-workbook dry run,
+and died on first contact with PostgreSQL. They are recorded because each one
+explains why level 2 is not optional.
+
+1. **Derived identifiers were scoped to the package, not to the study.** The
+   package key is a hash of the mapping version, the semantic roles and the file
+   hashes — deliberately, so the same two files in either order are the same
+   package. Every record id was derived from it, so importing the same package
+   into a SECOND study derived the same primary key for every row and collided
+   on the first insert. Fixed in `ids.ts` and `projector.ts`: the scope is now
+   the package key together with the tenant and the study. Regression test:
+   two studies of one tenant must share no record identifier.
+
+2. **Rollback orphaned a person it had decided to retain.** A person shared with
+   another study is kept — but the rollback still deleted the
+   `person_external_identifier` row that this package created. The commit path
+   finds a reusable person THROUGH that identifier, so the retained person
+   became invisible, and re-committing the same package tried to insert the
+   person it could no longer see. Fixed in `rollback_canonical_package`: an
+   identity is kept whole or removed whole, and the identifiers kept are
+   reported as `_retainedExternalIdentifiers`.
+
+3. **"Created" was decided by comparing identifiers.** A person counted as
+   created when the resolved id differed from the one the plan derived. Those
+   two tests agree until a rollback retains a person whose id THIS package
+   derived: the identity is then found and reused, the ids are equal, and the
+   comparison called it a creation. Fixed: creation is now decided by the
+   identity lookup itself, which is the question actually being asked.
+
+4. **A duplicated asset failed with a cardinality violation.** A request naming
+   the same file twice reached `on conflict … do update` with two rows for one
+   key. PostgreSQL refused it — correctly, but with an unnamed error whose
+   message quotes the offending row, which this product may not surface. Fixed:
+   `stage_canonical_package` refuses a non-distinct asset set up front with
+   `ASSET_SET_NOT_DISTINCT`.
+
+5. **The reverse script would have orphaned owned rows.** It dropped
+   `import_job_record` unconditionally. The ledger is the only record of which
+   canonical rows belong to which package, so dropping it while rows were owned
+   would have left that data in place with nothing able to identify, reverse or
+   audit it. Fixed: the script refuses with `CANONICAL_PACKAGES_STILL_OWNED` and
+   names the way out.
+
+A sixth was in the harness itself and mattered for privacy rather than
+correctness: `execFileSync` forwards a child's stderr to the parent unless
+`stdio` says otherwise, so PostgreSQL error text — which quotes the values that
+violated the constraint — was reaching the console. It is now captured and only
+its SQLSTATE is ever printed.
+
+### Level 3 — hosted transport: NOT performed
+
+Nothing in this repository has verified the unit against Supabase. In
+particular, these remain unproved:
+
+- that PostgREST accepts a 2.6 MiB RPC body under the project's request limits;
+- that supabase-js surfaces the function's JSON result and its errors in the
+  shape `flow.ts` expects from a hosted endpoint;
+- that the `service_role` key reaches the function with the privileges the local
+  `set role service_role` simulated;
+- that a hosted statement timeout accommodates a 716 ms commit under load.
+
+The local gate uses `psql` and `pg_read_file`, so it proves the SQL, the
+transaction, the privileges and the JSON parsing — not the HTTP transport in
+front of them. Do not describe hosted behaviour as verified until it has been.
 
 ## Deliberately outside Unit 3
 

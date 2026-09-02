@@ -44,6 +44,8 @@ export const COMMIT_ERROR_MESSAGES: Record<string, string> = {
   ASSET_ROLE_UNKNOWN: "El plan cita un archivo que este trabajo no tiene registrado.",
   ASSET_SET_INVALID: "El conjunto de archivos del paquete no es válido.",
   ASSET_SET_MISMATCH: "El trabajo ya está asociado a otro conjunto de archivos.",
+  ASSET_SET_NOT_DISTINCT:
+    "El paquete repite un archivo o un papel. Cada papel necesita exactamente un archivo y cada archivo un papel.",
   IDEMPOTENCY_KEY_INVALID: "La clave de idempotencia del paquete no tiene el formato esperado.",
   MAPPING_VERSION_INVALID: "La versión de mapeo no es válida.",
   REQUEST_NOT_OBJECT: "La solicitud de preparación no tiene la forma esperada.",

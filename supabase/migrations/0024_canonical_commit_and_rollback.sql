@@ -302,6 +302,19 @@ begin
     raise exception using errcode = '22023', message = 'ASSET_SET_INVALID';
   end if;
 
+  -- One file per role, one role per file. Without this, a request naming the
+  -- same file twice reaches `on conflict (study_id, sha256) do update` with two
+  -- rows for one key, and PostgreSQL refuses it with a cardinality violation
+  -- whose message quotes the offending row. That is both an unnamed failure and
+  -- a message this product may not surface, so the shape is refused up front.
+  if (
+    select count(distinct asset ->> 'sha256') <> count(*)
+        or count(distinct asset ->> 'role') <> count(*)
+    from jsonb_array_elements(p_request -> 'assets') as element(asset)
+  ) then
+    raise exception using errcode = '22023', message = 'ASSET_SET_NOT_DISTINCT';
+  end if;
+
   -- The study must exist AND belong to the tenant the caller named. Every later
   -- scope decision derives from the job row this creates, not from an argument.
   if not exists (
@@ -599,8 +612,16 @@ begin
      and existing.namespace = person.value ->> 'identityNamespace'
      and existing.normalized_value = person.value ->> 'identityNormalizedValue';
 
-    -- RETURNING is what makes ownership exact: the ledger records the rows this
-    -- statement really inserted, not the rows the payload hoped it would.
+    -- WHAT "CREATED" MEANS. A person is created when this tenant has NO identity
+    -- behind the same external identifier — never "when the resolved id differs
+    -- from the one this plan derived". Those two tests agree right up until a
+    -- rollback retains a person whose id THIS package derived: the identity is
+    -- then found and reused, the ids are equal, and an id-comparison would call
+    -- it a creation and insert a duplicate primary key. The database gate caught
+    -- exactly that, so the test is the identity lookup itself.
+    --
+    -- RETURNING keeps ownership exact: the ledger records the rows the statement
+    -- really inserted, not the rows the payload hoped it would.
     with inserted as (
       insert into public.person_private (
         id, tenant_id, display_name_private, normalized_name_private
@@ -610,7 +631,12 @@ begin
              person.value ->> 'displayName',
              person.value ->> 'normalizedName'
       from jsonb_array_elements(coalesce(p_plan -> 'persons', '[]'::jsonb)) as person
-      where (person_map ->> (person.value ->> 'key'))::uuid = (person.value ->> 'id')::uuid
+      where not exists (
+        select 1 from public.person_external_identifier existing
+        where existing.tenant_id = job.tenant_id
+          and existing.namespace = person.value ->> 'identityNamespace'
+          and existing.normalized_value = person.value ->> 'identityNormalizedValue'
+      )
       returning id
     )
     select coalesce(array_agg(id), '{}'::uuid[]) into new_person_ids from inserted;
@@ -621,13 +647,18 @@ begin
     );
     select count(*) into reused_people
     from jsonb_array_elements(coalesce(p_plan -> 'persons', '[]'::jsonb)) as person
-    where (person_map ->> (person.value ->> 'key'))::uuid <> (person.value ->> 'id')::uuid;
+    where exists (
+      select 1 from public.person_external_identifier existing
+      where existing.tenant_id = job.tenant_id
+        and existing.namespace = person.value ->> 'identityNamespace'
+        and existing.normalized_value = person.value ->> 'identityNormalizedValue'
+    );
     ledger_rows := ledger_rows + public.record_canonical_rows(
       job.id, job.tenant_id, job.study_id, 'person_private',
       array(
         select distinct (person_map ->> (person.value ->> 'key'))::uuid
         from jsonb_array_elements(coalesce(p_plan -> 'persons', '[]'::jsonb)) as person
-        where (person_map ->> (person.value ->> 'key'))::uuid <> (person.value ->> 'id')::uuid
+        where not ((person.value ->> 'id')::uuid = any (new_person_ids))
       ),
       'reused'
     );
@@ -677,7 +708,9 @@ begin
           on stored.tenant_id = job.tenant_id
          and stored.namespace = t."namespace"
          and stored.normalized_value = t."normalizedValue"
-        where stored.id <> t."id"
+        -- Not `stored.id <> t.id`: a retained identifier this package created
+        -- earlier has the id the plan derives, and it is still a REUSE.
+        where not (t."id" = any (new_id_rows))
       ),
       'reused'
     );
@@ -1348,6 +1381,7 @@ declare
   removed      jsonb := '{}'::jsonb;
   n            integer;
   retained     integer := 0;
+  retained_identifiers integer := 0;
   ledger_left  integer;
   -- Reverse dependency order. Every `on delete restrict` reference is removed
   -- before the row it points at. `person_private` is handled separately and
@@ -1362,8 +1396,7 @@ declare
     'survey_instrument', 'response_option', 'response_scale',
     'participant_attribute_value', 'attribute_definition',
     'membership_episode', 'study_participant',
-    'culture_dimension', 'organizational_unit', 'visual_annotation',
-    'person_external_identifier'
+    'culture_dimension', 'organizational_unit', 'visual_annotation'
   ];
 begin
   select * into job from public.import_job where id = p_import_job_id for update;
@@ -1407,9 +1440,37 @@ begin
     removed := removed || jsonb_build_object(target, n);
   end loop;
 
+  -- IDENTITY IS KEPT WHOLE OR REMOVED WHOLE.
+  --
   -- A person this package created may since have been given a participation in
-  -- another study, or another identifier. Deleting it would destroy a record
-  -- that is no longer only ours, so it is kept and reported.
+  -- another study. That person is retained — but so must their external
+  -- identifier be. Deleting the identifier of a retained person would leave an
+  -- identity nothing can look up: the commit path finds a reusable person
+  -- through `person_external_identifier`, so an orphaned person is invisible to
+  -- it, and re-committing this very package would then try to INSERT the person
+  -- it can no longer see and collide on the primary key it derived. That is not
+  -- hypothetical — it is what the database gate caught.
+  --
+  -- So the identifier is removed only when its person is also going.
+  delete from public.person_external_identifier stored
+  where stored.id in (
+    select target_record_id from public.import_job_record
+    where import_job_id = job.id
+      and target_table = 'person_external_identifier'
+      and ownership = 'created'
+  )
+  and not exists (select 1 from public.study_participant sp where sp.person_id = stored.person_id);
+  get diagnostics n = row_count;
+  removed := removed || jsonb_build_object('person_external_identifier', n);
+
+  select count(*) into retained_identifiers
+  from public.import_job_record
+  where import_job_id = job.id
+    and target_table = 'person_external_identifier'
+    and ownership = 'created'
+    and exists (select 1 from public.person_external_identifier x where x.id = target_record_id);
+
+  -- The person itself goes only when nothing references it any more.
   delete from public.person_private stored
   where stored.id in (
     select target_record_id from public.import_job_record
@@ -1439,6 +1500,7 @@ begin
       actual_counts   = jsonb_build_object(
         '_removed', removed,
         '_retainedSharedIdentities', retained,
+        '_retainedExternalIdentifiers', retained_identifiers,
         '_rolledBackBy', p_actor
       )
   where id = job.id;

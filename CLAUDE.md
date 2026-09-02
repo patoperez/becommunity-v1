@@ -206,12 +206,20 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   derived from a LOCKED `import_job` row and every count is measured by the
   database — never taken from a payload. `npm run test:canonical-commit` (gate
   in `npm test`) enforces all three.
-- **No PostgreSQL statement from `0024` has been executed anywhere.** Sections
-  [14]-[17] of that gate read the SQL text and are STRUCTURAL proof.
-  `npm run test:canonical-commit-live` is the database-executed gate, is
-  deliberately outside `npm test`, and has never been run. Do not describe the
-  subtransaction rollback, concurrent-commit serialisation or the runtime
-  browser-role denial as proved until it has.
+- **Three levels of proof, and they are not interchangeable.** (1) Projection:
+  `npm run test:canonical-commit`, in `npm test`. (2) Local PostgreSQL
+  transaction: `npm run test:canonical-commit-live`, 140 assertions, EXECUTED
+  against a disposable cluster, deliberately outside `npm test`. (3) Hosted
+  Supabase/PostgREST transport: **never performed** — the RPC body size limit,
+  the supabase-js error shape, the service-role key path and hosted statement
+  timeouts are all unproved. Never describe level 3 as verified.
+- ⓘ **The database gate must stay executable.** It creates disposable
+  `becommunity_canonical_test_*` databases on a loopback host or a unix socket,
+  applies migrations 0000-0024 verbatim, and refuses to run if a remote host, a
+  password, a Supabase host or a `SUPABASE_SERVICE_ROLE_KEY` is in scope. Those
+  refusals are executed by `npm test`, so weakening one is a red offline gate.
+  If a check there ever becomes a source-text match again, it has stopped being
+  a database test: level 2 found five defects that level 1 could not see.
 - The existing ingestion and client read paths remain authoritative. Do not
   switch them to the new tables until the deterministic package importer,
   reconciliation and compatibility tests exist.

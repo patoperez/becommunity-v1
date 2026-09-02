@@ -55,19 +55,26 @@ function formatUuidV8(bytes: Uint8Array): string {
 /**
  * A stable uuid for one canonical record.
  *
- * `packageKey` is the package idempotency key, so two different studies never
- * collide even when their natural keys read the same. `targetTable` separates
- * a participant from the person behind it. `naturalKey` is whatever makes the
- * record unique WITHIN its table — the same key the database's own unique
- * constraint uses, so a collision here would already have been a collision
- * there.
+ * `scopeKey` is the package idempotency key TOGETHER WITH the tenant and study
+ * the plan is for. The study is load-bearing: the package key is derived from
+ * the mapping version, the roles and the file hashes, so the same two files
+ * imported into a second study would otherwise derive the SAME primary key for
+ * every row and collide on the first insert. Scoping by study keeps each
+ * import's rows distinct while leaving genuinely shared records — a person, who
+ * is tenant-scoped — to be matched by their natural key at commit time, which
+ * is what the database's reuse path is for.
+ *
+ * `targetTable` separates a participant from the person behind it.
+ * `naturalKey` is whatever makes the record unique WITHIN its table — the same
+ * key the database's own unique constraint uses, so a collision here would
+ * already have been a collision there.
  */
 export function derivedRecordId(
-  packageKey: string,
+  scopeKey: string,
   targetTable: string,
   naturalKey: string,
 ): string {
-  const message = packageKey + SEPARATOR + targetTable + SEPARATOR + naturalKey;
+  const message = scopeKey + SEPARATOR + targetTable + SEPARATOR + naturalKey;
   return formatUuidV8(sha256Bytes(new TextEncoder().encode(message)));
 }
 

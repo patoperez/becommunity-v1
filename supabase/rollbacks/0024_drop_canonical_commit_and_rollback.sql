@@ -6,12 +6,41 @@
 -- This removes every object 0024 created and restores the exact
 -- `source_lineage` vocabulary migration 0023 left behind. It does not touch
 -- `source_asset`, `import_job_asset` or any row written by an earlier
--- migration: a package that was committed and then rolled back through
--- `rollback_canonical_package` already owns no canonical rows, and a package
--- that is still committed must be rolled back through that function first —
--- dropping the ledger would otherwise leave rows nothing can identify.
+-- migration.
 
 begin;
+
+-- -----------------------------------------------------------------------------
+-- 0. Refuse to run while a committed package still owns canonical rows
+-- -----------------------------------------------------------------------------
+-- The ledger is the ONLY record of which canonical rows belong to which
+-- package. Dropping it while rows are owned would leave that data in place with
+-- nothing able to identify, reverse or audit it — silent orphans that a later
+-- import would then trip over. So this script refuses, and names the way out:
+-- reverse each committed package through `rollback_canonical_package` first.
+--
+-- The guard is deliberately not `if exists (…) then return`: a no-op would let
+-- an operator believe the migration had been reversed when it had not.
+do $guard$
+declare
+  owned integer;
+  packages integer;
+begin
+  select count(*), count(distinct import_job_id)
+  into owned, packages
+  from public.import_job_record;
+
+  if owned > 0 then
+    raise exception using
+      errcode = '55000',
+      message = 'CANONICAL_PACKAGES_STILL_OWNED',
+      detail  = format(
+        '%s canonical row(s) across %s import job(s) are still owned by a committed package.',
+        owned, packages
+      ),
+      hint = 'Run public.rollback_canonical_package(import_job_id) for each committed package, then re-run this script.';
+  end if;
+end $guard$;
 
 drop function public.rollback_canonical_package(uuid, uuid);
 drop function public.commit_canonical_package(uuid, jsonb);

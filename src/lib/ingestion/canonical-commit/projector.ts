@@ -228,8 +228,14 @@ export function buildCanonicalCommitPlan(input: ProjectionInput): CommitPlanBuil
     return binding as SheetBinding & { spec: ColumnEntitySheetSpec };
   };
 
-  const id = (table: string, natural: string): string =>
-    derivedRecordId(packageIdempotencyKey, table, natural);
+  // The identity scope. The package key alone is NOT enough: it is derived from
+  // the mapping version, the roles and the file hashes, so importing the same
+  // two files into a second study would derive identical primary keys and
+  // collide on the first insert. Tenant and study make each import's rows its
+  // own; a record that genuinely IS shared — a person — is still matched by its
+  // natural key when the commit runs, which is what makes reuse work.
+  const scopeKey = `${packageIdempotencyKey}|${input.tenantId}|${input.studyId}`;
+  const id = (table: string, natural: string): string => derivedRecordId(scopeKey, table, natural);
 
   const lineage: PlanSourceLineage[] = [];
   const trace = (
