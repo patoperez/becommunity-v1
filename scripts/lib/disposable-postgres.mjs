@@ -72,6 +72,41 @@ export const FORBIDDEN_ENVIRONMENT = [
 
 export class DisposableTargetError extends Error {}
 
+/**
+ * Scratch directories to remove if the process ends without disposing them.
+ *
+ * `dispose()` is the cleanup path and runs in a `finally`; this exists for the
+ * paths a `finally` does not cover — an uncaught throw, a Ctrl-C, a terminated
+ * run. Each directory is created by `mkdtemp` with the process's own umask and
+ * holds files written 0600, but a payload full of respondent values must not
+ * outlive the run that made it under any exit.
+ */
+const scratchDirectories = new Set();
+let cleanupRegistered = false;
+
+function registerScratchForCleanup(directory) {
+  scratchDirectories.add(directory);
+  if (cleanupRegistered) return;
+  cleanupRegistered = true;
+  const sweep = () => {
+    for (const path of scratchDirectories) rmSync(path, { recursive: true, force: true });
+    scratchDirectories.clear();
+  };
+  process.on("exit", sweep);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => {
+      sweep();
+      process.exit(130);
+    });
+  }
+  process.on("uncaughtException", (error) => {
+    sweep();
+    // Re-thrown so the failure is still reported; the sweep only guarantees the
+    // payloads are gone first.
+    throw error;
+  });
+}
+
 const refuse = (reason) => {
   throw new DisposableTargetError(reason);
 };
@@ -184,6 +219,10 @@ export class DisposablePostgres {
     this.scratch = options.scratch ?? mkdtempSync(join(tmpdir(), "bc-canonical-"));
     this.ownsScratch = options.scratch === undefined;
     this.statementTimeoutMs = options.statementTimeoutMs ?? 120_000;
+    // A safety net, not the cleanup path. The scratch directory holds RPC
+    // payloads — for the real-package case, a 2.6 MiB plan full of respondent
+    // values — so it must not survive a crash between `mkdtemp` and `dispose`.
+    if (this.ownsScratch) registerScratchForCleanup(this.scratch);
   }
 
   connectionArgs(database = this.database) {
@@ -279,7 +318,9 @@ export class DisposablePostgres {
   }
 
   dispose() {
-    if (this.ownsScratch) rmSync(this.scratch, { recursive: true, force: true });
+    if (!this.ownsScratch) return;
+    rmSync(this.scratch, { recursive: true, force: true });
+    scratchDirectories.delete(this.scratch);
   }
 }
 

@@ -486,7 +486,7 @@ interchangeable. Every claim below states which one it is.
 | **2. Local transaction** | a disposable PostgreSQL cluster this repository creates and destroys | `npm run test:canonical-commit-live` |
 | **3. Hosted transport** | Supabase + PostgREST + the service-role key | **not performed** |
 
-### Level 1 — projection and boundaries (`npm run test:canonical-commit`, 265 checks)
+### Level 1 — projection and boundaries (`npm run test:canonical-commit`, 267 checks)
 
 Executed offline, in `npm test`:
 

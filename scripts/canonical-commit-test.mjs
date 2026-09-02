@@ -1357,6 +1357,15 @@ console.log("\n[19] The database gate refuses every target that is not disposabl
   );
   check(/create database/i.test(read("scripts/lib/disposable-postgres.mjs")), "and really creates one");
   check(/drop database if exists/i.test(read("scripts/lib/disposable-postgres.mjs")), "and drops it on both paths");
+  const harness = read("scripts/lib/disposable-postgres.mjs");
+  check(
+    /process\.on\("exit"/.test(harness) && /SIGINT/.test(harness),
+    "and removes its scratch payloads even when the run ends without disposing them",
+  );
+  check(
+    /mode: 0o600/.test(harness),
+    "every payload it writes is private to the invoking user",
+  );
   check(
     /L16\.2/.test(live) && /diffCatalogue/.test(live),
     "and compares the catalogue before and after the rollback",
