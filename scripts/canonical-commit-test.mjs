@@ -1365,9 +1365,10 @@ console.log("\n[19] The database gate refuses every target that is not disposabl
   check(sqlstateOf("55000") === "55000", "a bare state is returned as itself");
 
   const live = read("scripts/canonical-commit-live-test.mjs");
-  check(live.length > 5000, `the database gate is a real harness (${live.length} bytes)`);
+  const suite = read("scripts/lib/canonical-suite.mjs");
+  check(suite.length > 5000, `the database gate is a real harness (${suite.length} bytes)`);
   check(
-    /runCanonicalCommit/.test(live) && /runCanonicalRollback/.test(live) && /withDisposableDatabase/.test(live),
+    /runCanonicalCommit/.test(suite) && /runCanonicalRollback/.test(suite) && /withDisposableDatabase/.test(live),
     "that drives the product's own workflow against a database it creates",
   );
   check(/create database/i.test(read("scripts/lib/disposable-postgres.mjs")), "and really creates one");
@@ -1382,13 +1383,64 @@ console.log("\n[19] The database gate refuses every target that is not disposabl
     "every payload it writes is private to the invoking user",
   );
   check(
-    /L16\.2/.test(live) && /diffCatalogue/.test(live),
+    /L16\.2/.test(suite) && /diffCatalogue/.test(suite),
     "and compares the catalogue before and after the rollback",
   );
-  const declared = [...live.matchAll(/check\(\s*"(L\d+)[.\d]*"/g)].map((m) => m[1]);
+  const declared = [...suite.matchAll(/check\(\s*"(L\d+)[.\d]*"/g)].map((m) => m[1]);
   const covered = new Set(declared);
   const missing = Array.from({ length: 16 }, (_, i) => `L${i + 1}`).filter((id) => !covered.has(id));
   check(missing.length === 0, `it asserts all sixteen required behaviours${missing.length ? ` (missing ${missing.join(", ")})` : ""}`);
+
+  // ---- the suites are TRANSPORT-NEUTRAL, and a skip is not a pass ----------
+  // Level 3 exists to answer the same questions over a different transport. It
+  // can only do that if the assertions do not know how they reach PostgreSQL,
+  // and if an assertion a transport cannot execute is reported as SKIPPED
+  // rather than quietly vanishing from a passing total.
+  check(
+    !/disposable-postgres|psqlTransport|\bpsql\b|execFileSync|node:child_process/.test(suite),
+    "the assertions know nothing about psql, so a second transport can answer them",
+  );
+  check(
+    !/\bdb\.(run|json|applyFile|writePayload|connectionArgs)\b/.test(suite),
+    "and reach the database only through the transport contract",
+  );
+  const contract = read("scripts/lib/canonical-suite-transport.mjs");
+  check(
+    /skipped: true/.test(contract) && /executed\.filter\(\(r\) => r\.ok\)/.test(contract),
+    "the ledger counts passes among EXECUTED assertions only",
+  );
+  check(
+    /A capability is a promise the suite relies on/.test(contract),
+    "and a declared capability without its methods is a hard error before any assertion runs",
+  );
+  for (const [capability, ids] of [
+    ["ddl", ["L4.1", "L5.1", "X3.1", "X6b", "L16.1", "X7.1"]],
+    ["catalogue", ["L15.1", "L15.7"]],
+    ["roleSwitch", ["L14.1", "L14.2", "L14.3"]],
+    ["concurrentSessions", ["L9.1", "L9.5"]],
+  ]) {
+    // Every `needs(t, "<capability>", [ids], …)` block for this capability.
+    const listed = [...suite.matchAll(new RegExp(`"${capability}",\\s*\\[([^\\]]*)\\]`, "gs"))]
+      .map((match) => match[1])
+      .join(",");
+    const absent = ids.filter((id) => !suite.includes(`"${id}"`) || !listed.includes(`"${id}"`));
+    check(
+      absent.length === 0,
+      `every assertion that needs '${capability}' declares it${absent.length ? ` (${absent.join(", ")})` : ""}`,
+    );
+  }
+  const psqlTransport = read("scripts/lib/canonical-psql-transport.mjs");
+  check(
+    /ddl: true/.test(psqlTransport) &&
+      /catalogue: true/.test(psqlTransport) &&
+      /roleSwitch: true/.test(psqlTransport) &&
+      /concurrentSessions: true/.test(psqlTransport),
+    "the local transport declares every capability, which is why level 2 proves the most",
+  );
+  check(
+    /cannot prove anything about a request-body limit/.test(psqlTransport),
+    "and states plainly the one thing it structurally cannot prove",
+  );
 }
 
 // ---- [20] The provisioning script cannot delete anything it should not ----
