@@ -272,7 +272,7 @@ console.log("\n[4] The printable description of a target carries no credential")
   check(described.anonKeyPresent === true, "and that an anon key was too");
   check(
     Object.keys(described).sort().join(",") ===
-      "anonKeyPresent,apiOrigin,disposablePrefix,isLocal,ref,serviceKeyPresent",
+      "anonKeyPresent,apiOrigin,authenticatedKeyPresent,disposablePrefix,isLocal,ref,serviceKeyPresent",
     `it exposes exactly the safe fields (${Object.keys(described).sort().join(",")})`,
   );
   check(scanText(serialized).length === 0, "and the secret scanner finds nothing in it");
@@ -601,6 +601,83 @@ console.log("\n[9] Starting the hosted runner without authorization stops it");
   check(
     /ddl: false/.test(rest) && /catalogue: false/.test(rest) && /concurrentSessions: false/.test(rest),
     "and it declares the capabilities it does NOT have, so those assertions skip instead of vanishing",
+  );
+}
+
+// ---- [10] The local stack, and the second identity it mints ---------------
+// The local PostgREST substitute exists so level 3 can be exercised on a machine
+// with no container runtime. It is still a thing that starts a server and mints
+// credentials, so the same rules apply to it: nothing is read from a file,
+// nothing listens beyond loopback, and no key reaches a log or an artifact.
+console.log("\n[10] The local PostgREST substitute keeps the same promises");
+{
+  const stack = read("scripts/lib/local-postgrest-stack.mjs");
+  const driver = read("scripts/canonical-commit-local-stack.mjs");
+  const pkg = JSON.parse(read("package.json"));
+
+  check(
+    !/dotenv|--env-file|readFileSync|["'`][^"'`\n]*\.env["'`]/.test(stack),
+    "the stack module reads no environment file",
+  );
+  check(scanText(stack).length === 0 && scanText(driver).length === 0, "and neither carries a secret-shaped token");
+  check(
+    /randomBytes\(/.test(stack) && !/jwt-secret = "[A-Za-z0-9]{8,}"/.test(stack),
+    "the signing secret is generated per run, never a literal",
+  );
+  check(/mode: 0o600/.test(stack), "the config file that holds it is private to the invoking user");
+  check(
+    (stack.match(/server-host = "127\.0\.0\.1"/g) ?? []).length === 1 &&
+      /listen\(port, "127\.0\.0\.1"\)/.test(stack),
+    "PostgREST and the shim both listen on loopback only",
+  );
+  check(
+    /export function mintJwt/.test(stack) && /createHmac\("sha256"/.test(stack),
+    "the role tokens are HS256 JWTs minted with node:crypto, so no key is fetched from anywhere",
+  );
+  check(
+    !/console\.log\([^)]*serviceKey|console\.log\([^)]*anonKey|console\.log\([^)]*secret/.test(stack + driver),
+    "and no key or secret is ever printed",
+  );
+  check(
+    typeof pkg.scripts?.["test:canonical-commit-local-stack"] === "string",
+    "the local-stack driver has its own script",
+  );
+  check(
+    !(pkg.scripts?.test ?? "").includes("test:canonical-commit-local-stack"),
+    "and it is OUT of the offline chain too",
+  );
+
+  // The transport suite must never be reachable from the LOCAL gate: `psql`
+  // hands the server a file path, so it has no body to limit and no key to
+  // present, and reporting T1 as passed there would be a lie.
+  const localRunner = read("scripts/canonical-commit-live-test.mjs");
+  const hostedRunner = read("scripts/canonical-commit-hosted-test.mjs");
+  check(
+    !/canonical-transport-suite/.test(localRunner) && /canonical-transport-suite/.test(hostedRunner),
+    "the transport suite runs from the hosted runner only",
+  );
+  const transportSuiteSource = read("scripts/lib/canonical-transport-suite.mjs");
+  check(
+    /t\.kind !== "rest"/.test(transportSuiteSource),
+    "and it refuses to answer for a transport that is not HTTP, skipping instead",
+  );
+
+  // The optional second identity.
+  const guard = read("scripts/lib/hosted-target.mjs");
+  check(/ENV_AUTHENTICATED_KEY/.test(guard), "the guard knows about an optional authenticated-role key");
+  const withBoth = resolveHostedTarget(
+    base({ [ENV_ANON_KEY]: `${FAKE_KEY}-anon`, CANONICAL_HOSTED_AUTHENTICATED_KEY: `${FAKE_KEY}-auth` }),
+  );
+  const described = describeTarget(withBoth);
+  check(described.anonKeyPresent === true && described.authenticatedKeyPresent === true, "and reports both as present");
+  check(
+    !JSON.stringify(described).includes(FAKE_KEY),
+    "while the safe description still carries no key value of any kind",
+  );
+  const withoutEither = resolveHostedTarget(base());
+  check(
+    withoutEither.anonKey === null && withoutEither.authenticatedKey === null,
+    "an absent browser-role key is null, never a fallback to the service key",
   );
 }
 

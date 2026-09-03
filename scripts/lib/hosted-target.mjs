@@ -64,6 +64,7 @@ export const ENV_SERVICE_KEY = "CANONICAL_HOSTED_SERVICE_KEY";
 export const ENV_PREFIX = "CANONICAL_HOSTED_DISPOSABLE_PREFIX";
 export const ENV_API_URL = "CANONICAL_HOSTED_API_URL";
 export const ENV_ANON_KEY = "CANONICAL_HOSTED_ANON_KEY";
+export const ENV_AUTHENTICATED_KEY = "CANONICAL_HOSTED_AUTHENTICATED_KEY";
 
 export class HostedTargetError extends Error {}
 
@@ -204,9 +205,13 @@ export function resolveHostedTarget(env) {
     refuse(`${ENV_PREFIX} does not match the required U4-XXXXXX shape.`);
   }
 
-  const anonKey = typeof env[ENV_ANON_KEY] === "string" && env[ENV_ANON_KEY].trim() !== ""
-    ? env[ENV_ANON_KEY].trim()
-    : null;
+  // Two OPTIONAL browser-role keys. Each is a second identity, and each is what
+  // turns a privilege probe from a source-text claim into a real HTTP refusal.
+  // Absent means the probes that need them are SKIPPED, never assumed.
+  const optionalKey = (name) =>
+    typeof env[name] === "string" && env[name].trim() !== "" ? env[name].trim() : null;
+  const anonKey = optionalKey(ENV_ANON_KEY);
+  const authenticatedKey = optionalKey(ENV_AUTHENTICATED_KEY);
 
   return Object.freeze({
     ref,
@@ -217,6 +222,7 @@ export function resolveHostedTarget(env) {
     disposablePrefix,
     serviceKey: serviceKey.trim(),
     anonKey,
+    authenticatedKey,
   });
 }
 
@@ -232,6 +238,7 @@ export function describeTarget(target) {
     disposablePrefix: target.disposablePrefix,
     serviceKeyPresent: typeof target.serviceKey === "string" && target.serviceKey.length > 0,
     anonKeyPresent: target.anonKey !== null,
+    authenticatedKeyPresent: target.authenticatedKey !== null,
   };
 }
 

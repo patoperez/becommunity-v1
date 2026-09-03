@@ -48,6 +48,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+import { safeErrorCode } from "../../src/lib/ingestion/canonical-commit/result.ts";
+
 import { assertDisposableName } from "./hosted-target.mjs";
 
 export class RestTransportError extends Error {}
@@ -79,9 +81,11 @@ const clientFor = (target, key) =>
  * response body. `registry` collects the ids this run created so cleanup can
  * delete exactly those and nothing else.
  */
-export function restSuiteTransport(target, { journal, registry, censusTables } = {}) {
+export function restSuiteTransport(target, { journal, registry, censusTables, observedCodes } = {}) {
   const service = clientFor(target, target.serviceKey);
   const anon = target.anonKey ? clientFor(target, target.anonKey) : null;
+  const authenticated = target.authenticatedKey ? clientFor(target, target.authenticatedKey) : null;
+  const clients = { service_role: service, anon, authenticated };
   const created = registry ?? { tenants: [], studies: [], jobs: [] };
   const baseline = new Map();
   let sequence = 0;
@@ -100,7 +104,7 @@ export function restSuiteTransport(target, { journal, registry, censusTables } =
       ddl: false,
       catalogue: false,
       rawSql: false,
-      roleSwitch: anon !== null,
+      roleSwitch: anon !== null && authenticated !== null,
       concurrentSessions: false,
       rawErrorText: false,
     },
@@ -115,6 +119,38 @@ export function restSuiteTransport(target, { journal, registry, censusTables } =
      */
     absolute(table) {
       return absoluteCount(table);
+    },
+
+    /**
+     * A READ-ONLY inventory of the target, before anything is written.
+     *
+     * It records what the transport can actually see: the server banner
+     * PostgREST sends, and the presence or absence of each object migrations
+     * 0022-0024 add. The PostgreSQL version is NOT here, because PostgREST does
+     * not expose it and inventing it would be worse than recording its absence.
+     */
+    async inventory(tables, functions) {
+      const present = {};
+      for (const table of tables) {
+        const { error } = await service.from(table).select("*", { count: "exact", head: true });
+        present[table] = error ? `absent (${error.code ?? "no code"})` : "present";
+      }
+      const callable = {};
+      for (const fn of functions) {
+        const { error } = await service.rpc(fn.name, fn.rest);
+        // PGRST202 means PostgREST's schema cache has no such function.
+        callable[fn.name] = error?.code === "PGRST202" ? "absent" : "present";
+      }
+      let banner = null;
+      try {
+        const answer = await fetch(`${target.apiOrigin}/rest/v1/`, {
+          headers: { apikey: target.serviceKey, Authorization: `Bearer ${target.serviceKey}` },
+        });
+        banner = answer.headers.get("server");
+      } catch {
+        banner = null;
+      }
+      return { banner, postgresVersion: "not exposed through PostgREST", tables: present, functions: callable };
     },
 
     /** Count every census table once, BEFORE the run writes anything. */
@@ -144,7 +180,21 @@ export function restSuiteTransport(target, { journal, registry, censusTables } =
         // migration's `raise … using message = 'COUNT_MISMATCH'` is exactly the
         // sentinel `safeErrorCode` looks for. It is passed through unchanged and
         // never logged from here.
-        return { data: null, error: { message: error.message ?? "" } };
+        //
+        // Every refusal the WHOLE run sees is recorded as a code, so T5 can say
+        // which of the thirty codes actually survived the transport instead of
+        // only the handful the transport suite provokes itself.
+        const surfaced = { message: error.message ?? "" };
+        observedCodes?.add(safeErrorCode(surfaced));
+        return { data: null, error: surfaced };
+      }
+      // A refusal does not always arrive as an HTTP error. Migration 0024's
+      // subtransaction CATCHES most failures and returns them honestly as a
+      // 200 body of the shape { status: 'failed', code: '<CODE>' }, so a run
+      // that only watched `error` would report most of the thirty codes as
+      // never exercised when in fact they crossed the transport intact.
+      if (data && typeof data === "object" && data.status === "failed" && typeof data.code === "string") {
+        observedCodes?.add(data.code);
       }
       return { data, error: null };
     },
@@ -262,7 +312,7 @@ export function restSuiteTransport(target, { journal, registry, censusTables } =
     // ---- capability: roleSwitch --------------------------------------------
     /** The SQLSTATE a role gets when it calls a function, or null if it worked. */
     async probeFunctionExecute(role, fn, spec) {
-      const client = role === "service_role" ? service : anon;
+      const client = clients[role];
       if (!client) refuse(`no client is configured for the role '${role}'.`);
       const { error } = await client.rpc(fn, spec.rest);
       return error?.code ?? null;
@@ -270,7 +320,7 @@ export function restSuiteTransport(target, { journal, registry, censusTables } =
 
     /** The SQLSTATE a role gets when it reads a table, or null if it worked. */
     async probeTableRead(role, table) {
-      const client = role === "service_role" ? service : anon;
+      const client = clients[role];
       if (!client) refuse(`no client is configured for the role '${role}'.`);
       const { error } = await client.from(table).select("*").limit(1);
       return error?.code ?? null;
@@ -290,6 +340,30 @@ export function restSuiteTransport(target, { journal, registry, censusTables } =
 export async function deleteRunObjects(target, registry) {
   const service = clientFor(target, target.serviceKey);
   const removed = {};
+
+  // A suite that ends with a package still committed owns canonical rows in
+  // every family, and those rows are protected by ON DELETE RESTRICT. Deleting
+  // the study out from under them would fail — and SHOULD. So the package is
+  // reversed through the product's own rollback first, which is also the only
+  // thing that knows the correct reverse-dependency order.
+  const { data: live, error: liveError } = await service
+    .from("import_job")
+    .select("id,status")
+    .in("study_id", registry.studies.length > 0 ? [...new Set(registry.studies)] : ["00000000-0000-4000-8000-000000000000"]);
+  if (liveError) {
+    throw new RestTransportError(`listing this run's import jobs failed with ${liveError.code ?? "no code"}.`);
+  }
+  let reversed = 0;
+  for (const job of live ?? []) {
+    if (job.status !== "committed") continue;
+    const { error } = await service.rpc("rollback_canonical_package", {
+      p_import_job_id: job.id,
+      p_actor: null,
+    });
+    if (error) throw new RestTransportError(`reversing a package this run committed failed with ${error.code ?? "no code"}.`);
+    reversed += 1;
+  }
+  if (reversed > 0) removed.__packagesReversed = reversed;
 
   const del = async (table, column, values) => {
     if (values.length === 0) return;

@@ -43,6 +43,7 @@
 import { buildSyntheticPackage } from "./lib/canonical-fixtures.mjs";
 import { restSuiteTransport, deleteRunObjects } from "./lib/canonical-rest-transport.mjs";
 import { SUITES } from "./lib/canonical-suite.mjs";
+import { transportSuite } from "./lib/canonical-transport-suite.mjs";
 import { assertTransportShape, createLedger } from "./lib/canonical-suite-transport.mjs";
 import {
   ARTIFACTS,
@@ -98,7 +99,8 @@ console.log(`  evidence: ${evidenceDirectory}`);
 const journal = createTransportJournal();
 const registry = { tenants: [], studies: [], jobs: [] };
 const ledger = createLedger({ label: "rest" });
-const transport = assertTransportShape(restSuiteTransport(target, { journal, registry }));
+const observedCodes = new Set();
+const transport = assertTransportShape(restSuiteTransport(target, { journal, registry, observedCodes }));
 
 const { cleanBytes, painBytes } = await buildSyntheticPackage();
 const context = {
@@ -107,11 +109,21 @@ const context = {
   cleanFile: { fileName: "limpios.xlsx", bytes: cleanBytes },
   painFile: { fileName: "curado.xlsx", bytes: painBytes },
   realFiles: null, // synthetic fixtures only; the real workbooks never come here
+  observedCodes,
 };
 
 let censusBefore = null;
 let censusAfter = null;
 let cleanup = { attempted: false, removed: null, error: null };
+let inventory = null;
+
+/** The four functions migration 0024 adds, probed for presence only. */
+const INVENTORY_FUNCTIONS = [
+  { name: "record_canonical_rows", rest: { p_import_job_id: null, p_tenant_id: null, p_study_id: null, p_target_table: "person_private", p_ids: [], p_ownership: "created" } },
+  { name: "stage_canonical_package", rest: { p_tenant_id: null, p_study_id: null, p_request: {} } },
+  { name: "commit_canonical_package", rest: { p_import_job_id: null, p_plan: {} } },
+  { name: "rollback_canonical_package", rest: { p_import_job_id: null, p_actor: null } },
+];
 
 async function census() {
   const counts = {};
@@ -124,22 +136,58 @@ try {
   console.log("\n[census] counting every protected object — counts only, no row is read");
   censusBefore = await census();
   await transport.takeBaseline();
+  inventory = await transport.inventory(PROTECTED_TABLES, INVENTORY_FUNCTIONS);
+  const absentTables = Object.entries(inventory.tables).filter(([, state]) => state !== "present");
+  const absentFunctions = Object.entries(inventory.functions).filter(([, state]) => state !== "present");
   console.log(`  ${Object.keys(censusBefore).length} protected tables counted`);
+  console.log(`  server: ${inventory.banner ?? "unreported"}`);
+  console.log(
+    `  objects: ${Object.keys(inventory.tables).length - absentTables.length}/${Object.keys(inventory.tables).length} tables, ` +
+      `${Object.keys(inventory.functions).length - absentFunctions.length}/${Object.keys(inventory.functions).length} functions present`,
+  );
+  ledger.check(
+    "H0",
+    absentTables.length === 0 && absentFunctions.length === 0,
+    `migrations 0022-0024 are applied to this target${
+      absentTables.length + absentFunctions.length > 0
+        ? ` (missing ${[...absentTables, ...absentFunctions].map(([name]) => name).join(", ")})`
+        : ""
+    }`,
+  );
   writeArtifact(evidenceDirectory, ARTIFACTS[0], {
     stamp,
     target: describeTarget(target),
     protectedTables: PROTECTED_TABLES.length,
+    inventory,
     census: censusBefore,
   });
 
   // ---- [2b] the shared suites, over the hosted transport -------------------
-  for (const suite of SUITES) {
-    await suite.run(transport, context);
+  //
+  // The LOCAL gate gives each suite a database of its own, created and dropped
+  // around it. A hosted target has exactly one database, so that isolation has
+  // to be rebuilt: before each suite the baseline census is re-taken, and after
+  // it every object the suite created is reversed and deleted. Without this the
+  // suites would read each other's rows through the unfiltered counts, and
+  // "study A created no new person" would be measured against study A PLUS
+  // whatever the previous suite left behind.
+  for (const suite of [...SUITES, { label: "transport", run: transportSuite }]) {
+    await transport.takeBaseline();
+    try {
+      await suite.run(transport, context);
+    } finally {
+      const swept = await deleteRunObjects(target, registry);
+      registry.tenants.length = 0;
+      registry.studies.length = 0;
+      registry.jobs.length = 0;
+      const rows = Object.values(swept).reduce((n, value) => n + (typeof value === "number" ? value : 0), 0);
+      console.log(`  [${suite.label}] swept ${rows} row(s) this suite created`);
+    }
   }
 } catch (thrown) {
   ledger.bad("HARNESS", `the harness itself failed: ${thrown.message}`);
 } finally {
-  // ---- [2c] cleanup runs on EVERY path, including a failure ---------------
+  // ---- [2d] cleanup runs on EVERY path, including a failure ---------------
   console.log("\n[cleanup] deleting exactly what this run created");
   cleanup.attempted = true;
   try {
@@ -151,7 +199,7 @@ try {
   }
 }
 
-// ---- [2d] the census must be exactly where it started ---------------------
+// ---- [2e] the census must be exactly where it started ---------------------
 console.log("\n[census] counting the protected objects again");
 try {
   censusAfter = await census();
@@ -164,7 +212,7 @@ try {
 // ---------------------------------------------------------------------------
 // [3] Evidence
 // ---------------------------------------------------------------------------
-writeArtifact(evidenceDirectory, ARTIFACTS[1], { stamp, census: censusBefore });
+writeArtifact(evidenceDirectory, ARTIFACTS[1], { stamp, inventory, census: censusBefore });
 writeArtifact(evidenceDirectory, ARTIFACTS[2], { stamp, census: censusAfter });
 writeArtifact(evidenceDirectory, ARTIFACTS[3], { stamp, calls: journal.all(), summary: journal.summary() });
 writeArtifact(evidenceDirectory, ARTIFACTS[4], {

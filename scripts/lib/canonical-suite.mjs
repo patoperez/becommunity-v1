@@ -289,7 +289,7 @@ export async function coreSuite(t, ctx) {
   check("L2.2", replay.outcome.importJobId === jobId, "and resolves to the same import job");
   const after = await snapshotRowCounts(t);
   check("L2.3", JSON.stringify(before) === JSON.stringify(after), "and creates no row anywhere");
-  check("L2.4", await t.readJob(jobId).commit_attempts === 1, "and does not count as another attempt");
+  check("L2.4", (await t.readJob(jobId)).commit_attempts === 1, "and does not count as another attempt");
 
   // ---- L3: the same job may not be committed with a different payload ------
   const tampered = await tamperedCommit(t, ctx, jobId, scope);
@@ -342,7 +342,7 @@ export async function coreSuite(t, ctx) {
   const again = await runCanonicalRollback(t, jobId, null);
   check("L7.1", again.ok === true && again.replayed === true, "a repeated rollback reports replayed=true");
   check("L7.2", JSON.stringify(await snapshotRowCounts(t)) === JSON.stringify(countsAfterRollback), "and changes nothing");
-  check("L7.3", await t.readJob(jobId).rollback_count === 1, "and does not count as a second rollback");
+  check("L7.3", (await t.readJob(jobId)).rollback_count === 1, "and does not count as a second rollback");
 
   // ---- L8: committing again after a rollback -------------------------------
   const recommitted = await commitPackage(t, ctx, scope);
@@ -595,7 +595,7 @@ export async function sharingSuite(t, ctx) {
       check("L9.2", committedCount === 1, `exactly one session committed (${committedCount})`);
       check("L9.3", replayedCount === 1, `and the other replayed (${replayedCount})`);
       check("L9.4", await t.duplicateParticipations(raceScope.studyId) === 0, "and the row counts equal a single commit");
-      check("L9.5", await t.readJob(captured.jobId).commit_attempts === 1, "with one recorded attempt");
+      check("L9.5", (await t.readJob(captured.jobId)).commit_attempts === 1, "with one recorded attempt");
     },
   );
 }

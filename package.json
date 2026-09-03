@@ -22,6 +22,7 @@
     "test:canonical-commit-dry-run": "tsx scripts/canonical-commit-dry-run.mjs",
     "test:hosted-target-guard": "tsx scripts/hosted-target-guard-test.mjs",
     "test:canonical-commit-hosted": "tsx scripts/canonical-commit-hosted-test.mjs",
+    "test:canonical-commit-local-stack": "tsx scripts/canonical-commit-local-stack.mjs",
     "test:private-metadata": "tsx scripts/private-metadata-guard-test.mjs",
     "test:data-completeness": "tsx scripts/data-completeness-test.mjs",
     "test:segments": "tsx scripts/segment-canonicalization-test.mjs",
