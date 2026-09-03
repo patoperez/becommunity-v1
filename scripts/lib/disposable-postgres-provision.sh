@@ -306,6 +306,54 @@ case "${1:-start}" in
   *) die "unknown option '${1}'. Use --check-root, --stop, --destroy, or no argument." ;;
 esac
 
+# -----------------------------------------------------------------------------
+# Which runtime libraries each major needs, and where its server package lives
+# -----------------------------------------------------------------------------
+# The distribution archive carries exactly ONE PostgreSQL server major (18 on
+# Ubuntu 26.04). Any other major comes from the PostgreSQL project's own APT
+# pool as a plain file download whose SHA-256 is verified before it is unpacked
+# — still no apt source, no dpkg database entry, no service and no `sudo`.
+#
+# 17 exists here because `supabase/config.toml` declares `major_version = 17`:
+# a migration proved on 18 is not a migration proved on the engine the hosted
+# project runs. `liburing2` and `libnuma1` are 18's io_uring dependencies and 17
+# does not want them; 17 wants `libxslt1.1`, which 18 already has satisfied.
+case "${PGVERSION}" in
+  18)
+    PGLIBS="libnuma1 libicu78 liburing2"
+    PGDG_FILE=""
+    PGDG_SHA256=""
+    ;;
+  17)
+    PGLIBS="libicu78 libxslt1.1"
+    PGDG_FILE="postgresql-17_17.11-1.pgdg26.04+2_amd64.deb"
+    PGDG_SHA256="4b2abeefb22fdfb35b2d3dffd26305c07e61f7f9cc22007197819ccac2044585"
+    ;;
+  *)
+    PGLIBS="libicu78"
+    PGDG_FILE=""
+    PGDG_SHA256=""
+    ;;
+esac
+PGDG_POOL="https://apt.postgresql.org/pub/repos/apt/pool/main/p/postgresql-${PGVERSION}"
+
+# Fetch one .deb by URL and refuse it unless its digest is the pinned one. A
+# checksum that is checked AFTER unpacking would be a record of the mistake, so
+# the file is verified while it is still an inert blob.
+fetch_pinned_deb() {
+  local file="$1" want="$2" got
+  command -v curl >/dev/null 2>&1 || die "this major needs 'curl' to fetch its server package"
+  command -v sha256sum >/dev/null 2>&1 || die "this major needs 'sha256sum' to verify its server package"
+  curl -fSL --retry 2 -o "${file}" "${PGDG_POOL}/${file}" >/dev/null 2>&1 ||
+    die "could not download ${file} from the PostgreSQL APT pool"
+  got="$(sha256sum "${file}" | cut -d' ' -f1)"
+  if [ "${got}" != "${want}" ]; then
+    rm -f -- "${file}"
+    die "the downloaded ${file} does not have its pinned SHA-256; it was deleted unopened"
+  fi
+  echo "verified ${file} against its pinned SHA-256"
+}
+
 if [ ! -f "${PGSTAMP}" ]; then
   echo "fetching the server and its runtime libraries (nothing is installed)"
   safe_rm "${PGDEBS}"
@@ -313,7 +361,13 @@ if [ ! -f "${PGSTAMP}" ]; then
   mkdir -p "${PGDEBS}" "${PGUNPACK}"
   (
     cd "${PGDEBS}"
-    apt-get download "postgresql-${PGVERSION}" libnuma1 libicu78 liburing2 2>&1 | tail -2
+    if [ -n "${PGDG_FILE}" ]; then
+      fetch_pinned_deb "${PGDG_FILE}" "${PGDG_SHA256}"
+    else
+      apt-get download "postgresql-${PGVERSION}" 2>&1 | tail -1
+    fi
+    # shellcheck disable=SC2086
+    apt-get download ${PGLIBS} 2>&1 | tail -2
   )
   for deb in "${PGDEBS}"/*.deb; do
     [ -f "${deb}" ] || continue
