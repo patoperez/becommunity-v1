@@ -484,7 +484,15 @@ interchangeable. Every claim below states which one it is.
 |---|---|---|
 | **1. Projection** | pure functions, no database at all | `npm run test:canonical-commit`, `npm run test:canonical-commit-dry-run` |
 | **2. Local transaction** | a disposable PostgreSQL cluster this repository creates and destroys | `npm run test:canonical-commit-live` |
-| **3. Hosted transport** | Supabase + PostgREST + the service-role key | **not performed** |
+| **3. HTTP transport** | supabase-js over a real PostgREST, in front of the disposable cluster | `npm run test:canonical-commit-local-stack` — executed; **never against a hosted project** |
+
+Levels 2 and 3 run the SAME assertions. `scripts/lib/canonical-suite.mjs` holds
+them and reaches the database only through the contract in
+`scripts/lib/canonical-suite-transport.mjs`; the two runners supply a `psql`
+transport and a supabase-js transport respectively. A transport declares what it
+can do, and an assertion it cannot execute is recorded as **SKIPPED** naming the
+missing capability. A skip is never a pass, and the summary reports executed,
+passed, failed and skipped as four separate numbers.
 
 ### Level 1 — projection and boundaries (`npm run test:canonical-commit`, 306 checks)
 
@@ -535,7 +543,7 @@ culture dimensions, 7 curated performance dimensions, 50 pain points and 5 029
 lineage rows citing all 16 worksheets. Neither workbook, nor any output of that
 run, is committed to this repository.
 
-### Level 2 — local PostgreSQL transaction (`npm run test:canonical-commit-live`, 140 assertions)
+### Level 2 — local PostgreSQL transaction (`npm run test:canonical-commit-live`)
 
 **Executed.** `scripts/canonical-commit-live-test.mjs` creates disposable
 databases, applies the bootstrap and migrations 0000-0024 verbatim, drives the
@@ -543,6 +551,12 @@ product's own `runCanonicalCommit` / `runCanonicalRollback` through a `psql`
 transport, and asserts the resulting database state. It is deliberately outside
 `npm test`, because a database is not always available and an unexecuted
 database test must never be counted among the offline results.
+
+**The count depends on whether the real workbooks are supplied.** With
+`CANONICAL_COMMIT_TEST_CLEAN_XLSX` and `_PAIN_XLSX` set, the run executes **140**
+assertions. Without them the real-package case `X8` is SKIPPED and the run
+executes **135**, reporting `135 passed, 0 failed, 1 skipped`. The skip is
+reported as a skip; it is never counted among the passes.
 
 What it proved, by executing it:
 
@@ -689,21 +703,73 @@ correctness: `execFileSync` forwards a child's stderr to the parent unless
 violated the constraint — was reaching the console. It is now captured and only
 its SQLSTATE is ever printed.
 
-### Level 3 — hosted transport: NOT performed
+### Level 3 — the HTTP transport: executed locally, never against a hosted project
 
-Nothing in this repository has verified the unit against Supabase. In
-particular, these remain unproved:
+The same suites now run through **supabase-js over a real PostgREST**, and that
+answered four of the questions level 2 structurally cannot. It has still never
+been pointed at a hosted Supabase project.
 
-- that PostgREST accepts a 2.6 MiB RPC body under the project's request limits;
-- that supabase-js surfaces the function's JSON result and its errors in the
-  shape `flow.ts` expects from a hosted endpoint;
-- that the `service_role` key reaches the function with the privileges the local
-  `set role service_role` simulated;
-- that a hosted statement timeout accommodates a 716 ms commit under load.
+**How, on a machine that cannot run `supabase start`.** This workstation has no
+container runtime, no `sudo` and nothing may be installed on it, so the Supabase
+CLI stack is unavailable. The piece that decides level 3 is PostgREST itself, and
+that is a single static binary an ordinary user can run: the official
+PostgREST 16.2 Linux static release, in front of the same disposable cluster the
+level-2 gate creates, with HS256 role JWTs minted per run by `node:crypto`.
+supabase-js builds `${url}/rest/v1/rpc/<name>` and a bare PostgREST serves
+`/rpc/<name>`; on a real project the gateway strips that prefix, so a ~40-line
+loopback shim strips it here. **The product's own client construction is not
+adjusted** — a client bent to fit the harness would stop exercising the product.
 
-The local gate uses `psql` and `pg_read_file`, so it proves the SQL, the
-transaction, the privileges and the JSON parsing — not the HTTP transport in
-front of them. Do not describe hosted behaviour as verified until it has been.
+```
+BECOMMUNITY_PG_VERSION=17 bash scripts/lib/disposable-postgres-provision.sh
+npm run test:canonical-commit-local-stack
+```
+
+**Executed, against PostgreSQL 17.11 with PostgREST 16.2:** 102 assertions,
+102 passed, 0 failed, 66 skipped. All 41 protected tables and all 4 functions
+present; the protected-object census identical before and after the run.
+
+| id | result | measured |
+|---|---|---|
+| **T1** | proved **at the PostgREST layer only** | a 2 708 830-byte (2.58 MiB) plan body reached the function and was parsed, answering `JOB_NOT_FOUND` in 110 ms. The largest real commit body was 2 708 898 bytes at 441 ms. |
+| **T3** | proved | supabase-js returns the `jsonb` result unwrapped — a bare object, no array and no named envelope — carrying `importJobId`, `status`, `replayed`, `counts`, `commitAttempts` and `rollbackCount`. |
+| **T4** | proved | `COMMITTED_PAYLOAD_DIFFERS` survives PostgREST, supabase-js and `safeErrorCode` as that code, not as `CLIENT_TRANSPORT`. |
+| **T5** | proved for what the run raised | 9 of the 34 codes crossed the transport as themselves and none was flattened to `CLIENT_TRANSPORT`. The other 25 were never provoked over HTTP by this run and are recorded as SKIPPED, one per code. Most refusals travel as a **200 body** of the shape `{ status: 'failed', code }`, not as an HTTP error — migration 0024's subtransaction catches them. |
+| **T8** | proved | the service-role KEY executes all four functions (SQLSTATEs `none`, `22023`, `P0002`, `P0002` — business answers, never `42501`). |
+| **T9** | proved | anon and authenticated KEYS are refused `42501` on all four functions, and on `import_job_record`, `retention_period`, `person_private` and `survey_response`. |
+| **M1** | proved | migrations 0000-0024 apply cleanly, verbatim, on PostgreSQL **17.11** — the major `supabase/config.toml` pins. |
+| **M3** | proved **against an empty table** | 0023's CHECK constraints are created and accepted on 17. Validation against *existing* `study_period_snapshot` rows needs a populated table and stays hosted-only. |
+| **M6** | proved | `X7.1`/`X7.2`/`X7.5` on 17: the 0024 reverse refuses with `CANONICAL_PACKAGES_STILL_OWNED` while a package owns rows, and succeeds once it is reversed. It needs DDL, so it is a level-2 result, not an HTTP one. |
+| **L1-L16, X1-X8** | proved over HTTP except where a capability is absent | 102 executed. `L14` in full — 19 executions with real anon and authenticated JWTs. |
+
+**Skipped over HTTP, and why — 66 records.** `L4`, `L5`, `X6b`, `X6c` and `X3`
+need DDL to make a healthy database fail halfway through a commit; `L15`, `L16`
+and `X7` need `pg_catalog` or the execution of a migration file; `L9` needs one
+session to hold the job lock while another waits. Each is recorded as a SKIP
+naming the missing capability, and each is proved at level 2 instead. A skip is
+never counted as a pass.
+
+**Still unproved, and not to be described otherwise:**
+
+- **T2** — the hosted API gateway's own request-body limit. The 2.58 MiB body
+  proved here passed *PostgREST*; Kong/Envoy and Cloudflare in front of a hosted
+  project are a different limit that no local stack reproduces.
+- **T6** — the hosted `statement_timeout` for `service_role` under load.
+- **T7** — recovery from a timeout killed mid-commit.
+- **M2** — building 0022's index against a populated `respondent` table.
+- **M4** — catalogue parity where Supabase's own extensions, roles and default
+  privileges differ from a bare cluster.
+
+#### The runner and its guards
+
+| module | what it guarantees |
+|---|---|
+| `scripts/lib/hosted-target.mjs` | accepts exactly ONE named project. No default: an unset ref is a refusal. A second variable must spell that ref out inside `I-AUTHORIZE-MUTATION-OF-<ref>`. A supplied API URL that disagrees with the ref is a refusal. The service key is checked for PRESENCE only and never logged, returned or written. Every refusal names the RULE, never the value. No code path reads a `.env` file. |
+| `scripts/lib/hosted-evidence.mjs` | artifacts land outside the worktree and outside the main repository this worktree is linked to; every one is scanned by `secret-patterns.mjs` BEFORE it is written and a finding REFUSES the write rather than redacting it; the transport journal's field list cannot express an argument or a response body. No screenshots. |
+| `scripts/lib/canonical-rest-transport.mjs` | declares `ddl`, `catalogue`, `rawSql` and `concurrentSessions` as ABSENT, so those assertions skip visibly. Unfiltered counts are deltas against a baseline census, because a hosted database is not empty. |
+| `scripts/canonical-commit-hosted-test.mjs` | read-only inventory and a census of all 41 protected tables before and after (counts only, never a row); a disposable tenant and study stamped `U4-XXXXXX`; the shared suites with a per-suite baseline and sweep; reverse-then-delete in a `finally`; re-census; evidence. |
+| `scripts/lib/local-postgrest-stack.mjs` | generates its signing secret per run, writes its config `0600`, binds loopback only, prints no key, and leaves no process or file behind. |
+| `npm run test:hosted-target-guard` | **in `npm test`.** 153 assertions executing every refusal above, including starting the hosted runner with an unauthorized environment and watching it exit 2 without creating an evidence directory. |
 
 ## Deliberately outside Unit 3
 

@@ -767,19 +767,41 @@ before touching this unit:
    reconciliation and the whole workflow against a fake transport, and executes
    the database gate's own refusal rules so a weakened guard fails `npm test`.
 2. *Local PostgreSQL transaction.* `npm run test:canonical-commit-live`
-   (**140 assertions, executed**) creates disposable databases, applies the
-   bootstrap and migrations 0000-0024 verbatim, drives `runCanonicalCommit` and
+   (**executed**) creates disposable databases, applies the bootstrap and
+   migrations 0000-0024 verbatim, drives `runCanonicalCommit` and
    `runCanonicalRollback` through a `psql` transport, and asserts the resulting
    database state — L1 to L16 plus the review's extra cases. It is deliberately
-   OUTSIDE `npm test`.
-3. *Hosted transport.* **Not performed.** Nothing has verified the unit against
-   Supabase or PostgREST: the request-size limit for a 2.6 MiB RPC body, the
-   supabase-js error shape, the service-role key path and hosted statement
-   timeouts all remain unproved. Do not describe them as verified.
+   OUTSIDE `npm test`. **140 assertions with the real workbooks supplied; 135
+   executed and 1 skipped without them.** The skipped one is the real-package
+   serialization boundary, and it is reported as skipped, never as a pass.
+3. *HTTP transport.* **Executed locally; never against a hosted project.**
+   `npm run test:canonical-commit-local-stack` runs the same suites through
+   supabase-js and a real PostgREST 16.2, in front of a disposable
+   PostgreSQL 17.11 cluster: **102 assertions, 102 passed, 0 failed, 66
+   skipped**, with all 41 protected tables and 4 functions present and the
+   protected-object census identical before and after. It settled the
+   supabase-js result shape, the error shape, the service-role key path, and
+   that PostgREST parses a 2 708 830-byte plan body (110 ms; the largest real
+   commit body was 2 708 898 bytes at 441 ms). `npm run test:hosted-target-guard`
+   (153 assertions, IN `npm test`) executes every refusal that guards it.
+   **Still unproved by anything local, and not to be described otherwise:** the
+   hosted API gateway's own body limit, the hosted `statement_timeout` under
+   load, recovery from a timeout killed mid-commit, building 0022's index
+   against a populated `respondent` table, and catalogue parity with Supabase's
+   own extensions and default privileges.
+
+**Levels 2 and 3 run the same assertions.** `scripts/lib/canonical-suite.mjs`
+holds them and reaches the database only through the contract in
+`scripts/lib/canonical-suite-transport.mjs`; a transport declares what it can
+do, and an assertion it cannot execute is recorded as SKIPPED naming the missing
+capability. `npm run test:canonical-commit` fails if the suite learns about
+`psql` again, or if the ledger starts counting a skip among the passes.
 
 **The local server was obtained without installing anything.** `apt-get
-download` plus `dpkg-deb -x` place PostgreSQL 18.6 under the ordinary user's
-home — no dpkg entry, no system file, no service, no `sudo` (which is not
+download` plus `dpkg-deb -x` place PostgreSQL under the ordinary user's
+home — 18.6 by default, or the `supabase/config.toml` major with
+`BECOMMUNITY_PG_VERSION=17`, which is fetched from the PostgreSQL APT pool and
+verified against a pinned SHA-256 before it is unpacked — no dpkg entry, no system file, no service, no `sudo` (which is not
 available on this machine). The cluster listens on no TCP address at all, only a
 unix socket in that directory; each suite gets its own
 `becommunity_canonical_test_*` database, dropped on success and on failure; the

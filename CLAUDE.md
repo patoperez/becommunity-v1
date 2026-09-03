@@ -208,11 +208,43 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   in `npm test`) enforces all three.
 - **Three levels of proof, and they are not interchangeable.** (1) Projection:
   `npm run test:canonical-commit`, in `npm test`. (2) Local PostgreSQL
-  transaction: `npm run test:canonical-commit-live`, 140 assertions, EXECUTED
-  against a disposable cluster, deliberately outside `npm test`. (3) Hosted
-  Supabase/PostgREST transport: **never performed** — the RPC body size limit,
-  the supabase-js error shape, the service-role key path and hosted statement
-  timeouts are all unproved. Never describe level 3 as verified.
+  transaction: `npm run test:canonical-commit-live`, EXECUTED against a
+  disposable cluster, deliberately outside `npm test`. (3) HTTP transport:
+  `npm run test:canonical-commit-local-stack`, EXECUTED — supabase-js over a
+  real PostgREST 16.2 in front of a disposable PostgreSQL 17.11 cluster, 102
+  assertions passed. It settled the supabase-js result and error shapes, the
+  service-role key path, and that PostgREST accepts a 2.58 MiB RPC body.
+- ⓘ **A hosted Supabase project has still never been contacted, and five things
+  remain unproved by anything local.** The hosted API gateway's own body limit,
+  the hosted `statement_timeout` under load, recovery from a timeout killed
+  mid-commit, building 0022's index against a populated `respondent` table, and
+  catalogue parity with Supabase's own extensions and default privileges. A
+  green local-transport run must never be reported as a hosted one.
+- ⓘ **The level-2 count is 135 executed + 1 skipped without the real
+  workbooks, and 140 with them.** The real-package case (`X8`) needs
+  `CANONICAL_COMMIT_TEST_CLEAN_XLSX` and `_PAIN_XLSX`; without them it is
+  SKIPPED and reported as skipped, never as a pass. A run that quotes "140"
+  must say it supplied the workbooks. The suite reports executed, passed,
+  failed and skipped as four separate numbers for exactly this reason.
+- ⓘ **The assertions are transport-neutral and must stay so.**
+  `scripts/lib/canonical-suite.mjs` holds them; it reaches the database only
+  through the contract in `canonical-suite-transport.mjs`, so the local runner
+  (`canonical-commit-live-test.mjs`, psql) and the hosted runner
+  (`canonical-commit-hosted-test.mjs`, supabase-js) answer the SAME questions.
+  A transport DECLARES its capabilities and an assertion it cannot execute is
+  recorded as SKIPPED naming the missing capability — never dropped, never
+  counted as a pass. `npm run test:canonical-commit` fails if the suite learns
+  about psql again.
+- ⓘ **The hosted-target guard is the opposite of the disposable guard, and the
+  two must stay separate modules.** `scripts/lib/disposable-postgres.mjs`
+  refuses anything that looks like Supabase; `scripts/lib/hosted-target.mjs`
+  accepts exactly ONE named project and refuses everything else. There is no
+  default target, a second variable must spell the ref out inside a sentence
+  about mutation, and neither module reads a `.env` file.
+  `npm run test:hosted-target-guard` (in `npm test`) executes all 153
+  refusals — including starting the hosted runner with an unauthorized
+  environment and watching it exit 2 — so weakening a guard is a red offline
+  gate, not a surprise during a run against a live project.
 - ⓘ **The database gate must stay executable.** It creates disposable
   `becommunity_canonical_test_*` databases on a loopback host or a unix socket,
   applies migrations 0000-0024 verbatim, and refuses to run if a remote host, a
@@ -224,7 +256,11 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `scripts/lib/disposable-postgres-provision.sh` removes directories
   recursively, so its root is canonicalised with `realpath -m` and must be a
   direct child of the canonical home named `becommunity-pg` or
-  `becommunity-pg-test-*`. An empty override is refused, never defaulted. There
+  `becommunity-pg-test-*`. `BECOMMUNITY_PG_VERSION=17` pins the server to the
+  major `supabase/config.toml` declares; a major the distribution archive does
+  not carry is fetched from the PostgreSQL APT pool and its SHA-256 must match a
+  pinned value BEFORE it is unpacked. An empty override is refused, never
+  defaulted. There
   is exactly ONE `rm -rf`, inside a guarded function that re-validates the root
   immediately before deleting; every other destructive path calls it. Process
   termination identifies the postmaster through `/proc` — never with a
