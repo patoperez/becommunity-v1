@@ -716,6 +716,26 @@ console.log("\n[11] The hosted inventory writes nothing");
       !(pkg.scripts?.test ?? "").includes("test:canonical-hosted-inventory"),
     "it has its own script and is kept OUT of the offline chain",
   );
+
+  // The direct-connection diagnostic runs against a project holding real client
+  // data, over a connection that COULD write. That it only reads, and that it
+  // never emits respondent text, are properties this gate holds.
+  const diagnostic = read("scripts/lib/hosted-duplicate-study-diagnostic.sql");
+  const statements = diagnostic
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--") && line.trim() !== "");
+  check(
+    !statements.some((line) => /^\s*(insert|update|delete|alter|drop|create|truncate|grant|revoke|copy)\b/i.test(line)),
+    "the duplicate-study diagnostic contains no write statement — every one is a SELECT",
+  );
+  check(
+    /md5\(coalesce\(quote/.test(diagnostic) && /md5\(segments::text\)/.test(diagnostic),
+    "it compares qualitative quotes and respondent segments as DIGESTS, never as values",
+  );
+  check(
+    !/'quote'|'segments'|,\s*quote\b|,\s*segments\b/.test(diagnostic),
+    "and no quote or segment value is ever selected into its output",
+  );
 }
 
 console.log("\n" + "=".repeat(70));
