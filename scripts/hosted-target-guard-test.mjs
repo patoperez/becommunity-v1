@@ -681,6 +681,43 @@ console.log("\n[10] The local PostgREST substitute keeps the same promises");
   );
 }
 
+// ---- [11] The inventory script is READ-ONLY, and stays that way ------------
+// It is the step that runs against a real project BEFORE anything is applied,
+// so "it only reads" has to be a property this gate holds, not a promise in a
+// comment. A write verb appearing in it is a red offline gate.
+console.log("\n[11] The hosted inventory writes nothing");
+{
+  const inventory = read("scripts/canonical-hosted-inventory.mjs");
+  const pkg = JSON.parse(read("package.json"));
+
+  check(
+    !/\.insert\(|\.update\(|\.upsert\(|\.delete\(/.test(inventory),
+    "it performs no insert, update, upsert or delete",
+  );
+  check(
+    (inventory.match(/\.rpc\("([a-z_]+)"/g) ?? []).every((call) => call === '.rpc("rls_coverage_report"'),
+    "and calls exactly one function — 0014's metadata-only reporter — never a writer",
+  );
+  check(
+    /exposedRpc\(name\) \? "present" : "absent"/.test(inventory),
+    "function presence is read from the OpenAPI document, not by invoking the function",
+  );
+  check(
+    /Prefer: "count=exact"/.test(inventory) && /content-range/.test(inventory),
+    "counts come from a range request whose status is checked, so an absent table cannot pass as an empty one",
+  );
+  check(
+    /no study id, no study name and no/.test(inventory),
+    "the per-study distribution names no study and prints no id",
+  );
+  check(scanText(inventory).length === 0, "and it carries no secret-shaped token");
+  check(
+    typeof pkg.scripts?.["test:canonical-hosted-inventory"] === "string" &&
+      !(pkg.scripts?.test ?? "").includes("test:canonical-hosted-inventory"),
+    "it has its own script and is kept OUT of the offline chain",
+  );
+}
+
 console.log("\n" + "=".repeat(70));
 if (failures > 0) {
   console.error(`RESULT: ${failures} failure(s). GATE BLOCKED.`);
