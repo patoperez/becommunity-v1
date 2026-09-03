@@ -705,9 +705,10 @@ its SQLSTATE is ever printed.
 
 ### Level 3 — the HTTP transport: executed locally, never against a hosted project
 
-The same suites now run through **supabase-js over a real PostgREST**, and that
-answered four of the questions level 2 structurally cannot. It has still never
-been pointed at a hosted Supabase project.
+The same suites now run through **supabase-js over a real PostgREST**, which
+answers questions level 2 structurally cannot: the result shape, the error
+shape, the service-role key path, and whether a multi-megabyte body survives the
+wire at all. It has still never been pointed at a hosted Supabase project.
 
 **How, on a machine that cannot run `supabase start`.** This workstation has no
 container runtime, no `sudo` and nothing may be installed on it, so the Supabase
