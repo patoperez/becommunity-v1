@@ -834,6 +834,55 @@ console.log("\n[10] Orden determinista");
   const a = JSON.stringify(buildCanonicalStudyResults(baseSource()));
   const b = JSON.stringify(buildCanonicalStudyResults(baseSource()));
   check(a === b, "dos construcciones del mismo conjunto de registros son idénticas byte a byte");
+
+  // The SAME records in a DIFFERENT arrival order must produce the same
+  // NUMBERS. Two adapters legitimately read one package in different orders —
+  // the projector reads a worksheet column by column, a database reads a keyset
+  // over a uuid — and a few arrays in the document deliberately carry the
+  // source's own order (the instrument list, for one). What must never move is
+  // a value, a count or a base, so the two documents are compared with every
+  // array sorted by its own serialisation: presentation order is allowed to
+  // differ, arithmetic is not.
+  //
+  // The bandCounts assertion below is narrower and pins a real defect this
+  // check first exposed: `performance.bandCounts` was emitted in `Map`
+  // insertion order, so the semaphore's order depended on which respondent's
+  // score happened to be read first. It is now the band scheme's own display
+  // order, whatever order the observations arrive in.
+  {
+    const reversed = baseSource();
+    for (const [key, value] of Object.entries(reversed)) {
+      if (Array.isArray(value)) reversed[key] = value.slice().reverse();
+    }
+    const built = buildCanonicalStudyResults(reversed);
+    const orderInsensitive = (value) => {
+      if (Array.isArray(value)) {
+        return value
+          .map(orderInsensitive)
+          .sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1));
+      }
+      if (value && typeof value === "object") {
+        return Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, orderInsensitive(value[key])]),
+        );
+      }
+      return value;
+    };
+    check(
+      JSON.stringify(orderInsensitive(JSON.parse(a))) === JSON.stringify(orderInsensitive(built)),
+      "y el mismo conjunto en ORDEN INVERSO no mueve ningún número",
+    );
+    const bandsFrom = (document) =>
+      document.performance.dimensions
+        .flatMap((dimension) => dimension.periods)
+        .map((period) => period.bandCounts.map((entry) => `${entry.semanticColor}:${entry.count}`).join("|"));
+    check(
+      JSON.stringify(bandsFrom(JSON.parse(a))) === JSON.stringify(bandsFrom(built)),
+      "y el semáforo sale en el orden del esquema, no en el de llegada de las observaciones",
+    );
+  }
   const group = results.qualitative.groups.find((entry) => entry.key === "activos");
   eq("la nube ordena por conteo descendente", group.terms[0].label, "Categoría alfa");
   eq("y desempata por etiqueta", group.terms[1].label, "Categoría beta");

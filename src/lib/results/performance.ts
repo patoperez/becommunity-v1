@@ -36,6 +36,35 @@ const EXPLANATION =
   "El nivel de desempeño observado en el periodo, promediado sobre las personas de las que el " +
   "periodo tiene registro.";
 
+/**
+ * Put the observed bands into the SCHEME's declared display order.
+ *
+ * Two rules may legitimately share a semantic colour, so a colour takes the
+ * position of the FIRST rule that uses it and is emitted once. A colour no rule
+ * declares — `neutral`, the bucket an unbanded value falls into — is emitted
+ * after every declared one, ordered by codepoint so the tail is deterministic
+ * too. Only colours that actually occurred appear: an empty band is an absence,
+ * not a zero.
+ */
+function orderBands(
+  scheme: { rules: { semanticColor: SemanticColor; displayOrder: number }[] } | null | undefined,
+  counted: Map<SemanticColor, { label: string | null; count: number }>,
+): { semanticColor: SemanticColor; label: string | null; count: number }[] {
+  const declared: SemanticColor[] = [];
+  for (const rule of [...(scheme?.rules ?? [])].sort((a, b) => a.displayOrder - b.displayOrder)) {
+    if (!declared.includes(rule.semanticColor)) declared.push(rule.semanticColor);
+  }
+  const rest = [...counted.keys()]
+    .filter((color) => !declared.includes(color))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [...declared, ...rest]
+    .filter((color) => counted.has(color))
+    .map((semanticColor) => {
+      const entry = counted.get(semanticColor)!;
+      return { semanticColor, label: entry.label, count: entry.count };
+    });
+}
+
 export function buildPerformance(
   source: CanonicalResultSource,
   spec: StudyResultsSpec,
@@ -128,11 +157,17 @@ export function buildPerformance(
                     "Este periodo no tiene ninguna observación con valor en esta selección.",
                   )
                 : availableMetric(envelope, makeValue(average, "score", resolveSchemeBand(scheme, average))),
-            bandCounts: [...bandCounts.entries()].map(([semanticColor, entry]) => ({
-              semanticColor,
-              label: entry.label,
-              count: entry.count,
-            })),
+            // In the SCHEME's own display order, never in the order the values
+            // happened to arrive. A `Map` iterates by insertion, so emitting it
+            // directly made the semaphore's order depend on which respondent's
+            // score was read first — the same data in a different row order
+            // produced a different (equivalent) array. The counts never moved,
+            // but a document that is only deterministic for one input ordering
+            // is not deterministic, and the two adapters' outputs could not be
+            // compared. A colour with no rule — `neutral`, which is what an
+            // unbanded value falls into — has no place in that order and goes
+            // last, by codepoint.
+            bandCounts: orderBands(scheme, bandCounts),
           };
         });
 

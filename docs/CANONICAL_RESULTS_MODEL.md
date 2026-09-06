@@ -299,21 +299,33 @@ exactly what the canonical formatter produces.
 ## 7. Architecture
 
 ```
-canonical projection (Unit 3)          canonical tables (later)
-        │                                        │
-        └──► adapters/commit-plan.ts ──►  CanonicalResultSource  ◄── (later adapter)
-                    REDACTION                    │
-                                                 ▼
+canonical projection (Unit 3)                    canonical tables (hosted)
+        │                                                     │
+        │                                        canonical-source/read.ts
+        │                                        (paged, scoped, refuses)
+        │                                                     │
+        └──► results/adapters/commit-plan.ts ─┐   ┌── canonical-source/assemble.ts
+                    REDACTION                 │   │        REDACTION
+                                              ▼   ▼
+                                       CanonicalResultSource
+                                                  │
+                                                  ▼
                                    pure calculators, reusing src/lib/calc
                             population · recommendation · journey · renewal
                               retention · performance · qualitative
-                                                 │
-                                                 ▼
+                                                  │
+                                                  ▼
                                     buildCanonicalStudyResults
-                                                 │
-                                                 ▼
+                                                  │
+                                                  ▼
                                      CanonicalStudyResults  ──►  a future route
 ```
+
+**Both adapters land on the same seam, and that is now proved rather than
+intended.** `npm run test:canonical-import-rehearsal` imports the real package
+into a disposable PostgreSQL through the real commit RPC, reads it back through
+the database adapter, and requires the two read models to be DEEP-EQUAL and the
+two results documents to be BYTE-IDENTICAL. See §12.
 
 | file | role |
 |---|---|
@@ -327,6 +339,20 @@ canonical projection (Unit 3)          canonical tables (later)
 | `population.ts` `recommendation.ts` `journey.ts` `renewal.ts` `retention.ts` `performance.ts` `qualitative.ts` | the calculators |
 | `build.ts` | assembles the document and collects its configuration requirements |
 | `adapters/commit-plan.ts` | the in-memory adapter, and the redaction boundary |
+
+And, one folder away because the results layer must stay free of `server-only`
+and of any transport:
+
+| file | role |
+|---|---|
+| `canonical-source/rows.ts` | the canonical columns that are selected, and the four that never are |
+| `canonical-source/read.ts` | the paged, scoped read workflow with its transport injected, and every refusal |
+| `canonical-source/postgrest.ts` | the query shape and the composite keyset filter, described structurally |
+| `canonical-source/assemble.ts` | the database-backed adapter, and the same redaction boundary |
+| `canonical-source/normalize.ts` | the shared comparison order the two adapters are compared in |
+| `canonical-source/adapter.ts` | **server-only.** The one module that holds a Supabase client |
+| `canonical-source/server.ts` | **server-only.** The deliberate entry point |
+| `canonical-source/index.ts` | the safe barrel, which does NOT re-export the adapter |
 
 **Four boundaries, kept apart:** transport (absent here), canonical-record
 adaptation (`adapters/`), calculation (the calculators), and presentation DTO
@@ -619,10 +645,170 @@ sheet named `Hoja 1` — which is a further reason not to compute from it.
 
 ```
 npm run test:canonical-results          # synthetic, adversarial, in `npm test`
+npm run test:canonical-database-source  # the database adapter, offline, in `npm test`
 npm run test:canonical-results-parity <clean.xlsx> <curated.xlsx>
                                         # real-workbook golden parity, offline,
                                         # deliberately outside `npm test`
+npm run test:canonical-import-rehearsal # the whole chain against a disposable
+                                        # PostgreSQL and a real PostgREST
+npm run canonical-import                # the operator. Dry run unless --execute
+npm run canonical-database-parity       # golden parity FROM the canonical tables
 node scripts/canonical-golden-fixture-build.mjs <approved-dashboard-repo>
                                         # regenerate the fixture FROM THE
                                         # APPROVED DASHBOARD only
 ```
+
+---
+
+## 12. The database-backed adapter, and what it proves
+
+Unit 5 Phase 1 built the read model and one adapter over the in-memory
+projection. Phase 2 added the second adapter — the one that reads the canonical
+TABLES — and then used the pair to answer a question neither could answer
+alone: **did the import lose or invent anything?**
+
+### 12.1 Where it lives, and why not in `src/lib/results/`
+
+`src/lib/results/` must stay free of `server-only` and of every transport: that
+is what lets an offline gate run the real calculators over a real projection,
+and `npm run test:canonical-results` fails if a module there so much as names
+`node:`. A database adapter needs a client. So it lives one folder away, in
+`src/lib/canonical-source/`, and only two of its eight files know that a
+database exists:
+
+```
+rows.ts        the columns selected, and the four never selected
+read.ts        paging, ceilings, scope, and every refusal — transport INJECTED
+postgrest.ts   the query shape and the keyset filter, client described structurally
+assemble.ts    rows -> CanonicalResultSource, with the SAME redaction rules
+normalize.ts   the shared comparison order
+index.ts       the safe barrel — does NOT re-export the adapter
+adapter.ts     server-only. The one module that holds a SupabaseClient
+server.ts      server-only. The deliberate entry point
+```
+
+The split is what makes the interesting parts testable without a server:
+`npm run test:canonical-database-source` (60 checks, in `npm test`) exercises
+the paging, the refusals, the filter strings and the redaction against a fake
+transport and hand-written rows.
+
+### 12.2 Four columns that are never selected
+
+`person_private`, `person_external_identifier` and `source_lineage` are not
+read at all, and `pain_point.raw_text` / `normalized_text` are not in the row
+type. A name, a membership id, a raw cell and a consultant's prose therefore
+never enter the process — they are not filtered out later, which would mean
+they had been read.
+
+`merged` is the one review status the read model cannot represent, so a merged
+pain point is a REFUSAL (`CURATED_FINDING_MERGED_UNSUPPORTED`) rather than a
+finding silently counted as pending or silently dropped. Nothing this unit
+imports can create one.
+
+### 12.3 Completeness is proved, not assumed
+
+PostgREST caps every response at `max_rows` and applies the cap silently — a
+defect this repository has already paid for once (`src/lib/supabase/paginate.ts`).
+So every read here is a keyset page over a unique key, every page is verified to
+be strictly increasing before its last row becomes the next cursor, a short page
+ends the read, and a set larger than its declared ceiling THROWS instead of
+being truncated. Four of the tables have a two-column primary key and no `id`;
+their window is the lexicographic `a > A OR (a = A AND b > B)`, and every cursor
+value is re-checked against a strict uuid pattern immediately before it is
+placed into the filter string, so a value can never become filter syntax.
+
+Every read is scoped by BOTH `tenant_id` and `study_id`, applied before any
+window. That matters more than usual here: the connection is service-role and
+bypasses RLS, so the query IS the tenant boundary.
+
+A study with anything but exactly one committed package is a refusal
+(`NO_COMMITTED_PACKAGE` / `MULTIPLE_COMMITTED_PACKAGES`), because the union of
+two imports is not an answer.
+
+### 12.4 A third order, so the two adapters can be compared at all
+
+The in-memory adapter's array order is the projector's — worksheet by
+worksheet, column by column. The database adapter's is whatever a keyset over a
+uuid returns. Both are legitimate "source order"; neither converts into the
+other. `normalize.ts` defines a THIRD order — the natural business key of each
+family, by codepoint — and both sides are put into it before comparison, so
+"semantically identical" becomes deep equality instead of a judgement call.
+
+That this is safe is not assumed either: the gate builds the whole results
+document from the normalised source AND from the projector's own order and
+requires the two documents to be byte-identical. A calculator that ever started
+depending on array position would fail there.
+
+### 12.5 The import operator
+
+`scripts/canonical-import-operator.mjs` is the only way a real package is
+written, and it does not reimplement the commit: `runCanonicalCommit` (Unit 3)
+still preflights the exact bytes, projects, stages, commits, reconciles and
+reverts on a count disagreement. What the operator adds is everything around it.
+
+* **It defaults to refusing.** Without `--execute` it preflights, projects,
+  compares the fingerprint and inspects the target, then stops.
+* **The target is named three times**: a project ref, an acknowledgement that
+  spells the same ref out inside a sentence about importing, and `--project` on
+  the command line at the moment of the act.
+* **The tenant and the study are full uuids.** A prefix is not an identity —
+  this project has already had two studies whose rows were identical.
+* **The plan fingerprint is named in advance** and one differing character is a
+  refusal.
+* `scripts/lib/canonical-import-target.mjs` REFUSES the disposable acceptance
+  run's own `CANONICAL_HOSTED_DISPOSABLE_PREFIX`, because that variable means
+  "everything this run makes may be deleted again", which is the opposite of
+  what a real import means.
+* **Reconciliation is measured independently** of the commit's own answer: each
+  of the 30 study-scoped canonical tables is counted directly, and the ownership
+  ledger is counted per table and per ownership, and both must agree with the
+  plan's declared counts.
+* **A disagreement is answered by `rollback_canonical_package`.** There is no
+  manual-deletion path in the file; `.delete(` and `delete from` do not appear
+  in it, and the offline gate asserts that.
+* **The import-job id, the fingerprints and the counts are written outside every
+  Git repository**, through a directory the guard proves is neither the worktree
+  nor the main repository it is linked to, and the artifact is scanned for
+  secrets before it is written.
+* **Nothing private is printed.** Before it finishes it walks the finished plan
+  for every field that holds a source value and fails if one of them appears in
+  its own output.
+
+There is no browser-reachable import path. The operator is a command-line tool;
+no route imports it, and the offline gate proves that too.
+
+### 12.6 What comparing the two adapters actually found
+
+The comparison was not ceremonial. Putting the same package through both
+adapters and demanding byte-identical documents surfaced two things, one a
+defect and one a property of the contract.
+
+**A real defect, fixed: `performance.bandCounts` was ordered by arrival.**
+`buildPerformance` tallied each period's values into a `Map` keyed by semantic
+colour and emitted `[...map.entries()]`, so the semaphore came out in the order
+the FIRST value of each colour happened to be read. The counts were always
+right; their order depended on which respondent's score the adapter returned
+first. A document that is deterministic only for one arrival order is not
+deterministic, and the two adapters' outputs could not be compared at all.
+`bandCounts` is now emitted in the band scheme's own `displayOrder`, with a
+colour no rule declares (`neutral`, the bucket an unbanded value falls into)
+last and ordered by codepoint. **No count changed and no approved value moved:
+golden parity was 531/531 before and after**, and `performance` is not a section
+the fixture compares. Two checks in `npm run test:canonical-results` now pin it:
+reversing every array of the source must move no number, and the semaphore must
+come out in the scheme's order whatever order the observations arrive in.
+
+**A property, not a defect: `population.instruments` follows its source's own
+order.** `CanonicalResultSource` states that array order is the ADAPTER's
+responsibility and that every array arrives in its source's own order. The
+projector emits instruments in worksheet order (`csat`, `nps_activos`,
+`nps_desertores`, `cri`); the database adapter emits them in the shared
+comparison order (`cri`, `csat`, `nps_activos`, `nps_desertores`). The two
+documents therefore list the same four instrument bases in two different orders
+and are identical in every other respect. That is the contract working as
+written, so the parity gate states it rather than hiding it: it compares the two
+documents byte-for-byte in the SHARED order, and then compares the database
+document against the PROJECTOR-order document with every array sorted by its own
+serialisation, requiring that no value, count or base differs. The gate prints
+the paths where the two orders diverge — `results.population.instruments`, and
+nothing else.

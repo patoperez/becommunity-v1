@@ -48,9 +48,13 @@ import {
   buildCanonicalStudyResults,
   canonicalResultSourceFromCommitPlan,
 } from "../src/lib/results/index.ts";
+import {
+  REQUIRED_DASHBOARD_COMMIT,
+  evaluateGoldenParity,
+  formatGoldenSummary,
+  loadGoldenFixture,
+} from "./lib/canonical-golden-parity.mjs";
 
-const FIXTURE_PATH = join("scripts", "fixtures", "cuicuilco-golden-parity.v1.json");
-const REQUIRED_DASHBOARD_COMMIT = "a7248fdbccd139da80ed7c09daa70f006a62b9cf";
 const DISPOSABLE_TENANT = "00000000-0000-4000-8000-0000000000a1";
 const DISPOSABLE_STUDY = "00000000-0000-4000-8000-0000000000b2";
 
@@ -140,7 +144,7 @@ check(graph.length > 10, `el grafo inspeccionado tiene ${graph.length} módulos`
 
 // ---- the fixture -------------------------------------------------------------
 console.log("\n[2] El fixture dorado");
-const fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
+const fixture = loadGoldenFixture();
 check(fixture.specVersion === 1, `fixture versión ${fixture.specVersion}`);
 check(
   fixture.generatedFrom.commit === REQUIRED_DASHBOARD_COMMIT,
@@ -294,226 +298,15 @@ check(
 // ---- the comparison ----------------------------------------------------------
 console.log("\n[6] Paridad contra el tablero aprobado");
 
-const cohort = (key) => results.population.cohorts.find((entry) => entry.key === key) ?? null;
-const scopeFor = (key) => results.recommendation.scopes.find((entry) => entry.key === key) ?? null;
-const metricValue = (metric) => (metric && metric.status === "available" ? metric.value.value : undefined);
-const metricBand = (metric) =>
-  metric && metric.status === "available" && metric.value.band ? metric.value.band.semanticColor : undefined;
-
-const groupTouchpoints = (groupIndex) => {
-  const group = results.journey.groups[groupIndex];
-  if (!group) return [];
-  return group.touchpointKeys.map((key) => results.journey.touchpoints.find((tp) => tp.key === key));
-};
-const globalPositions = (groupIndex) => {
-  let offset = 0;
-  for (let index = 0; index < groupIndex; index += 1) {
-    offset += results.journey.groups[index]?.touchpointKeys.length ?? 0;
-  }
-  return groupTouchpoints(groupIndex).map((_, index) => offset + index);
-};
-
-const NOT_COMPARABLE = Symbol("not-comparable");
-
-function actualFor(expectation) {
-  const id = expectation.id;
-
-  if (id === "population.total") return results.population.total;
-  if (id === "population.measured") return results.population.measured;
-  if (id === "population.active") return cohort("active")?.total;
-  if (id === "population.former") return cohort("deserter")?.total;
-  if (id === "population.formerMeasured") return cohort("deserter")?.measured;
-  if (id === "population.formerAnswered") return cohort("deserter")?.responded;
-  if (id === "population.formerWithoutMeasuredData") {
-    const deserters = cohort("deserter");
-    return deserters ? deserters.total - deserters.measured : undefined;
-  }
-  if (id === "population.instrument.nps.responses") return scopeFor("combinado")?.score.base.valid;
-  if (id === "population.instrument.csat.responses") {
-    return results.population.instruments.find((entry) => entry.key === "csat")?.base.valid;
-  }
-  if (id === "population.instrument.cri.responses") return results.renewal.base.valid;
-
-  let match = /^retention\.(\d+)\.(\w+)$/.exec(id);
-  if (match) {
-    const period = results.retention.periods[Number(match[1])];
-    if (!period) return undefined;
-    switch (match[2]) {
-      case "starting":
-        return period.starting.count;
-      case "joined":
-        return period.joined.count;
-      case "ending":
-        return period.ending.count;
-      case "lost":
-        return period.lost.count;
-      case "retention":
-        return metricValue(period.retention);
-      case "churn":
-        return metricValue(period.attrition);
-      default:
-        return undefined;
-    }
-  }
-
-  match = /^nps\.([a-z]+)\.(\w+)$/.exec(id);
-  if (match) {
-    const scope = scopeFor(match[1]);
-    if (!scope) return undefined;
-    switch (match[2]) {
-      case "nps":
-        return metricValue(scope.score);
-      case "promoters":
-        return scope.distribution.promoters;
-      case "passives":
-        return scope.distribution.passives;
-      case "detractors":
-        return scope.distribution.detractors;
-      case "total":
-        return scope.score.base.valid;
-      default:
-        return undefined;
-    }
-  }
-
-  if (id === "cri.value") return metricValue(results.renewal.index);
-  if (id === "cri.total") return results.renewal.base.valid;
-  if (id === "cri.bandId") return metricBand(results.renewal.index);
-  if (id.startsWith("cri.distribution.")) {
-    return (results.renewal.distribution ?? []).find((entry) => entry.response === expectation.response)?.count;
-  }
-
-  if (id === "journey.touchpointCount") return results.journey.touchpoints.length;
-  if (id === "journey.groupCount") return results.journey.groups.length;
-
-  match = /^journey\.group\.(\d+)\.(size|positions)$/.exec(id);
-  if (match) {
-    const groupIndex = Number(match[1]);
-    return match[2] === "size"
-      ? results.journey.groups[groupIndex]?.touchpointKeys.length
-      : globalPositions(groupIndex);
-  }
-
-  match = /^journey\.(\d+)\.(\d+)\.(\w+)$/.exec(id);
-  if (match) {
-    const touchpoint = groupTouchpoints(Number(match[1]))[Number(match[2])];
-    if (!touchpoint) return undefined;
-    switch (match[3]) {
-      case "satisfied":
-        return touchpoint.counts.satisfied;
-      case "dissatisfied":
-        return touchpoint.counts.dissatisfied;
-      case "unaware":
-        return touchpoint.counts.unaware;
-      case "valid":
-        return touchpoint.counts.valid;
-      case "responses":
-        return touchpoint.counts.responses;
-      case "csat":
-        return metricValue(touchpoint.satisfaction);
-      case "tdp":
-        return metricValue(touchpoint.tdp);
-      case "band":
-        return metricBand(touchpoint.satisfaction);
-      default:
-        return undefined;
-    }
-  }
-
-  match = /^qualitative\.([a-z]+)\.(total|excludedCount)$/.exec(id);
-  if (match) {
-    const group = results.qualitative.groups.find((entry) => entry.key === match[1]);
-    if (!group) return undefined;
-    if (match[2] === "total") return group.total;
-    // The approved dashboard renames the excluded category for display
-    // («Sin razón aplicable») while the canonical model keeps the source's own
-    // token («No aplica»). The comparable quantity is how many people had no
-    // applicable reason, so the group's excluded counts are summed rather than
-    // matched by a display label the source never used.
-    return group.excluded.reduce((sum, entry) => sum + entry.count, 0);
-  }
-
-  if (id.startsWith("qualitative.") && expectation.termLabel) {
-    const group = results.qualitative.groups.find((entry) => entry.key === expectation.groupKey);
-    return group?.terms.find((term) => term.label === expectation.termLabel)?.count;
-  }
-
-  return NOT_COMPARABLE;
-}
-
-const sameValue = (expected, actual) => {
-  if (Array.isArray(expected)) {
-    return Array.isArray(actual) && expected.length === actual.length && expected.every((value, index) => value === actual[index]);
-  }
-  return Object.is(expected, actual);
-};
-
-// The contract's own categories, reported separately. `notApplicable` and
-// `configurationRequired` are ANSWERS - no approved value exists to compare,
-// or the content comes from configuration rather than a calculation - and
-// neither is a failed calculation nor a pass. `unresolved` is a genuine open
-// question, and none remain for this study.
-const outcome = {
-  offered: 0,
-  executed: 0,
-  passed: 0,
-  failed: 0,
-  skipped: 0,
-  unresolved: 0,
-  notApplicable: 0,
-  configurationRequired: 0,
-};
-const mismatches = [];
-const skipped = [];
-const classified = [];
-
-for (const expectation of fixture.expectations) {
-  outcome.offered += 1;
-  if (expectation.status === "unresolved") {
-    outcome.unresolved += 1;
-    classified.push(expectation);
-    continue;
-  }
-  if (expectation.status === "not_applicable") {
-    outcome.notApplicable += 1;
-    classified.push(expectation);
-    continue;
-  }
-  if (expectation.status === "configuration_required") {
-    outcome.configurationRequired += 1;
-    classified.push(expectation);
-    continue;
-  }
-  if (expectation.status !== "expected") {
-    bad(`estado de expectativa desconocido en ${expectation.id}: ${expectation.status}`);
-    continue;
-  }
-  const actual = actualFor(expectation);
-  if (actual === NOT_COMPARABLE || actual === undefined) {
-    outcome.skipped += 1;
-    skipped.push({ expectation, reason: actual === NOT_COMPARABLE ? "sin resolvedor" : "el documento no produce este valor" });
-    continue;
-  }
-  outcome.executed += 1;
-  if (sameValue(expectation.expected, actual)) {
-    outcome.passed += 1;
-  } else {
-    outcome.failed += 1;
-    mismatches.push({ expectation, actual });
-  }
-}
-
-const bySection = new Map();
-for (const expectation of fixture.expectations) {
-  const entry = bySection.get(expectation.section) ?? { offered: 0, failed: 0, classified: 0 };
-  entry.offered += 1;
-  if (expectation.status !== "expected") entry.classified += 1;
-  bySection.set(expectation.section, entry);
-}
-for (const mismatch of mismatches) {
-  const entry = bySection.get(mismatch.expectation.section);
-  if (entry) entry.failed += 1;
-}
+// The resolver and the tally both live in `scripts/lib/canonical-golden-parity.mjs`,
+// so this gate and the database-backed one compare the SAME expectations against
+// the SAME document shape. Two copies would let "531/531 from memory" and
+// "531/531 from the database" drift into two different claims.
+const { outcome, mismatches, skipped, classified, unknownStatuses, bySection } = evaluateGoldenParity(
+  results,
+  fixture,
+);
+for (const expectation of unknownStatuses) bad(`estado de expectativa desconocido en ${expectation.id}: ${expectation.status}`);
 for (const [section, entry] of [...bySection.entries()].sort()) {
   console.log(
     `  ${section.padEnd(16)} ofrecidas=${String(entry.offered).padStart(3)} ` +
@@ -572,11 +365,7 @@ check(
 
 // ---- summary -----------------------------------------------------------------
 console.log("\n" + "=".repeat(74));
-console.log(
-  `RESUMEN: ofrecidas=${outcome.offered} ejecutadas=${outcome.executed} aprobadas=${outcome.passed} ` +
-    `falladas=${outcome.failed} omitidas=${outcome.skipped} sin-resolver=${outcome.unresolved} ` +
-    `no-aplica=${outcome.notApplicable} requieren-configuración=${outcome.configurationRequired}`,
-);
+console.log(`RESUMEN: ${formatGoldenSummary(outcome)}`);
 console.log(`Comprobaciones estructurales: ${failures} fallo(s).`);
 
 if (failures > 0 || outcome.failed > 0 || outcome.skipped > 0) {
