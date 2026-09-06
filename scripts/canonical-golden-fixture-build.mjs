@@ -17,10 +17,21 @@
 // WHAT IT DELIBERATELY DOES NOT RECORD:
 //   - anything respondent-level: the snapshot has none, and this asserts it;
 //   - the curated pain-phrase cloud and the per-touchpoint pain phrases. Those
-//     are consultant prose, and the comparison is UNRESOLVED anyway: reproducing
-//     them needs a phrase-splitting rule and a touchpoint-to-stage mapping that
-//     no authority states. The fixture records the unresolved expectation and
-//     its reason, not the phrases.
+//     are consultant prose and, by the methodology owner's decision of
+//     2026-09-06, editorial content rather than a server-calculated metric. The
+//     fixture records that classification and its reason, not the phrases.
+//
+// FOUR STATUSES, AND ONLY THE FIRST IS COMPARED:
+//   expected                a value the product must reproduce
+//   not_applicable          no approved value exists to compare against, by a
+//                           contract rule or because the dashboard publishes
+//                           no such quantity
+//   configuration_required  the content is supplied by study configuration or
+//                           editorial review, not by a calculation
+//   unresolved              a genuine open question. NONE remain for Cuicuilco
+//
+// Neither of the middle two is a failed calculation, and neither is counted as
+// a pass.
 //
 // The output is `scripts/fixtures/cuicuilco-golden-parity.v1.json`.
 // =============================================================================
@@ -322,17 +333,21 @@ for (const group of snapshot.qualitative.groups) {
       id: "qualitative.recorrido",
       section: "qualitative",
       label: "Nube de frases curadas del recorrido",
-      unit: "unresolved",
+      unit: "configuration",
       expected: null,
       cohort: group.label,
       denominator: null,
       evidence: "snapshot.json#/qualitative/groups[id=recorrido]",
-      status: "unresolved",
-      unresolvedReason:
-        "Reproducir esta nube exige una regla de segmentación de frases y una correspondencia entre " +
-        "punto de contacto medido y etapa curada. Ninguna fuente autoritativa enuncia ninguna de las " +
-        "dos: el tablero aprobado resuelve la segunda con una tabla de alias escrita a mano en su " +
-        "propio script de construcción. Las frases curadas no se copian a este fixture.",
+      status: "configuration_required",
+      classificationReason:
+        "Contenido editorial curado, no un indicador calculado en servidor. Depende de una " +
+        "segmentación editorial de frases y de un mapeo de alias que no puede derivarse " +
+        "autoritativamente de las fuentes canónicas; el tablero aprobado resuelve el segundo con " +
+        "una tabla escrita a mano en su propio script de construcción, que es una implementación " +
+        "y no una autoridad. Resuelto así por la propiedad metodológica el 6 de septiembre de " +
+        "2026: no es un cálculo fallido ni un bloqueo. Las frases curadas no se copian a este " +
+        "fixture.",
+      suppliedBy: "Revisión editorial humana, y en su caso una configuración aprobada.",
       observedShape: { total: group.total, termCount: group.terms.length },
     });
     continue;
@@ -384,31 +399,34 @@ expect({
   id: "journey.stageEvidence",
   section: "journey",
   label: "Vínculo entre indicador y etapa del recorrido",
-  unit: "unresolved",
+  unit: "rule",
   expected: null,
   cohort: "n/a",
   denominator: null,
-  evidence: "documentación integral §7.2 y §4.1; proyección canónica journeyEvidence vacío",
-  status: "unresolved",
-  unresolvedReason:
-    "Ninguna fuente autoritativa enuncia qué indicador corresponde a qué etapa. El contrato canónico " +
-    "debe declararlo sin resolver y emitir un reporte de brechas; el tablero aprobado no cuenta como " +
-    "autoridad de cálculo en este punto.",
+  evidence: "documentación integral §7.2; decisión de la propiedad metodológica 2026-09-06",
+  status: "not_applicable",
+  classificationReason:
+    "No hay nada que comparar: por regla del contrato un punto de contacto posee directamente su " +
+    "CSAT, su TDP y la proporción auxiliar de desconocimiento, y ningún indicador de estudio se " +
+    "adscribe implícitamente a una etapa. El tablero aprobado tampoco publica un vínculo de ese " +
+    "tipo. Cualquier asociación adicional sería configuración explícita de un estudio futuro, no " +
+    "una paridad pendiente.",
 });
 expect({
-  id: "journey.unawareShare",
+  id: "journey.unawareShareOfResponses",
   section: "journey",
-  label: "Proporción de desconocimiento sobre todas las respuestas del punto",
-  unit: "unresolved",
+  label: "Proporción auxiliar de desconocimiento sobre todas las respuestas clasificadas",
+  unit: "count",
   expected: null,
   cohort: "Miembros activos",
-  denominator: "todas las respuestas del punto",
-  evidence: "docs/CALCULATION_CATALOG.md §5 y documentación integral §7.1",
-  status: "unresolved",
-  unresolvedReason:
-    "El tablero aprobado no publica esta cantidad: publica la razón sobre la base válida. Las dos " +
-    "están documentadas y el conflicto es de NOMBRE, no de fórmula, así que no hay valor aprobado " +
-    "contra el cual compararla.",
+  denominator: "todas las respuestas clasificadas del punto",
+  evidence: "documentación integral §7.1; decisión de la propiedad metodológica 2026-09-06",
+  status: "not_applicable",
+  classificationReason:
+    "El indicador oficial TDP es la razón sobre la base válida, y ésa SÍ se compara punto por " +
+    "punto contra el tablero aprobado. Esta proporción es una cantidad auxiliar con nombre y " +
+    "denominador propios que el tablero aprobado no publica, de modo que no existe valor aprobado " +
+    "contra el cual compararla. No es una paridad pendiente.",
 });
 
 const fixture = {
@@ -429,7 +447,11 @@ const fixture = {
       "un acierto.",
     "Un valor esperado no se modifica para que una prueba pase. Si el producto calcula distinto, la " +
       "compuerta se pone en rojo y la diferencia se documenta.",
-    "Una expectativa 'unresolved' no es ni un acierto ni un fallo, y se cuenta aparte.",
+    "Una expectativa que no es 'expected' no es ni un acierto ni un fallo, y se cuenta aparte. " +
+      "'not_applicable' significa que no existe valor aprobado contra el cual comparar, por regla " +
+      "del contrato o porque el tablero aprobado no publica esa cantidad. " +
+      "'configuration_required' significa que el contenido lo aporta una configuración de estudio " +
+      "o una revisión editorial, no un cálculo. Ninguna de las dos es un cálculo fallido.",
     "Este archivo no contiene datos personales ni respuestas cualitativas textuales.",
   ],
   expectations,

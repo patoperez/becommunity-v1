@@ -38,8 +38,8 @@ import {
   csatBand,
   criBand,
   npsBand,
-  processUnawarenessRate,
-  processUnawarenessRatio,
+  processUnawarenessTdp,
+  unawarenessShareOfResponses,
 } from "../src/lib/calc/business-metrics.ts";
 import {
   AUTHORITIES,
@@ -544,20 +544,81 @@ eq("CSAT del punto uno", touchpoint("csat_d").satisfaction.value.value, 60);
 eq("base válida del punto uno", touchpoint("csat_d").counts.valid, 5);
 eq("respuestas del punto uno", touchpoint("csat_d").counts.responses, 6);
 eq("desconocimiento del punto uno", touchpoint("csat_d").counts.unaware, 1);
+// TDP is the ratio over the VALID base. That is the official metric of that
+// name, settled by the methodology owner on 2026-09-06.
 eq(
-  "proporción de desconocimiento sobre todas las respuestas",
-  touchpoint("csat_d").unawareShare.value.value,
-  processUnawarenessRate(1, 6).value,
+  "TDP del punto uno, sobre la base válida",
+  touchpoint("csat_d").tdp.value.value,
+  processUnawarenessTdp(1, 5).value,
 );
 eq(
-  "razón de desconocimiento sobre la base válida",
-  touchpoint("csat_d").unawarenessRatio.value.value,
-  processUnawarenessRatio(1, 5).value,
+  "y su base declarada ES la base válida",
+  touchpoint("csat_d").tdp.base.valid,
+  touchpoint("csat_d").counts.valid,
+);
+eq(
+  "la proporción auxiliar va sobre todas las respuestas clasificadas",
+  touchpoint("csat_d").unawareShareOfResponses.value.value,
+  unawarenessShareOfResponses(1, 6).value,
+);
+eq(
+  "y su base declarada es más ancha, como su nombre dice",
+  touchpoint("csat_d").unawareShareOfResponses.base.valid,
+  touchpoint("csat_d").counts.responses,
 );
 check(
-  touchpoint("csat_d").unawareShare.value.value !== touchpoint("csat_d").unawarenessRatio.value.value,
-  "las dos cantidades de desconocimiento son distintas y se emiten por separado",
+  touchpoint("csat_d").tdp.value.value !== touchpoint("csat_d").unawareShareOfResponses.value.value,
+  "las dos cantidades son distintas y se emiten por separado",
 );
+{
+  // The auxiliary is never LABELLED TDP. Its provenance note may say the
+  // words "no es TDP" - that is the point - so the check reads the fields a
+  // consumer would render, not the internal caveat.
+  const auxiliary = touchpoint("csat_d").unawareShareOfResponses;
+  const rendered = [auxiliary.key, auxiliary.label, auxiliary.provenance.explanation].join(" ").toLowerCase();
+  check(!rendered.includes("tdp"), "la auxiliar no se llama TDP en ningún campo que un cliente vería");
+  const official = touchpoint("csat_d").tdp;
+  check(official.key.toLowerCase().startsWith("tdp"), "y el indicador oficial sí lleva ese nombre en su clave");
+}
+check(
+  touchpoint("csat_d").tdp.provenance.internal.notes.some((note) => note.includes("BASE VÁLIDA")),
+  "la procedencia del TDP declara su denominador",
+);
+check(
+  touchpoint("csat_d").unawareShareOfResponses.provenance.internal.notes.some((note) =>
+    note.includes("no es TDP"),
+  ),
+  "y la de la auxiliar dice explícitamente que no es TDP",
+);
+{
+  // A touchpoint almost nobody could judge: TDP exceeds 100 and is not clamped.
+  const mostlyUnaware = baseSource();
+  mostlyUnaware.answers = mostlyUnaware.answers.map((entry, index) =>
+    entry.itemKey === "csat_d" && index % 1 === 0
+      ? entry
+      : entry,
+  );
+  mostlyUnaware.answers = mostlyUnaware.answers.map((entry) =>
+    entry.itemKey === "csat_d"
+      ? {
+          ...entry,
+          numeric: entry.sessionId === "s-csat-a1" ? 5 : null,
+          optionRawValue: entry.sessionId === "s-csat-a1" ? "5" : UNAWARE_RAW,
+          derivedLabel: entry.sessionId === "s-csat-a1" ? "Satisfecho" : "Desconocimiento",
+        }
+      : entry,
+  );
+  const built = buildCanonicalStudyResults(mostlyUnaware);
+  const tp = built.journey.touchpoints.find((entry) => entry.key === "csat_d");
+  eq("una base válida de uno frente a cinco desconocimientos", tp.counts.valid, 1);
+  eq("TDP supera el cien por ciento y no se acota", tp.tdp.value.value, 500);
+  eq(
+    "mientras la proporción auxiliar sigue acotada",
+    tp.unawareShareOfResponses.value.value,
+    unawarenessShareOfResponses(5, 6).value,
+  );
+  check(tp.unawareShareOfResponses.value.value <= 100, "por debajo de cien, como su denominador exige");
+}
 eq("CSAT de cero es un resultado medido", touchpoint("csat_f").satisfaction.value.value, 0);
 eq("y su estado es disponible", touchpoint("csat_f").satisfaction.status, "available");
 eq("banda del CSAT de cero", touchpoint("csat_f").satisfaction.value.band.semanticColor, csatBand(0));
@@ -802,34 +863,95 @@ console.log("\n[11] Cualitativo: etiquetas y conteos, nunca palabras de nadie");
   );
 }
 
-console.log("\n[12] Estados sin resolver, explícitos y con procedencia");
-eq("el vínculo indicador↔etapa se declara sin resolver", results.journey.stageEvidence.status, "unresolved");
-eq("y la razón es que nadie lo enuncia", results.journey.stageEvidence.reason, "relationship_not_stated");
-eq("con una brecha por etapa curada", results.journey.stageEvidence.gaps.length, 2);
+console.log("\n[12] Lo que un punto de contacto posee, y lo que exige configuración");
+// A touchpoint DIRECTLY owns its satisfaction, its TDP and the auxiliary
+// share, each with its own base. No study-level metric is implicitly
+// attached to it. That is a contract rule, not an uncertainty.
+for (const tp of results.journey.touchpoints) {
+  const owns =
+    tp.satisfaction?.status !== undefined && tp.tdp?.status !== undefined && tp.unawareShareOfResponses?.status !== undefined;
+  if (!owns) bad(`el punto ${tp.key} no lleva sus tres resultados propios`);
+}
+ok(`los ${results.journey.touchpoints.length} puntos de contacto llevan CSAT, TDP y proporción auxiliar propios`);
 check(
-  results.journey.stageEvidence.gaps.every((gap) => gap.provenMetricKeys.length === 0),
-  "y ninguna brecha propone un indicador candidato: una lista de candidatos sería una conjetura disfrazada de dato",
-);
-check(results.journey.stageEvidence.wouldBeSettledBy.length > 20, "se declara qué lo resolvería");
-check(
-  results.unresolved.some((item) => item.key === "journey_stage_evidence"),
-  "el documento reúne la brecha del recorrido entre sus preguntas abiertas",
-);
-check(
-  results.unresolved.some((item) => item.key === "tdp_name_conflict" && item.reason === "authority_conflict"),
-  "y el conflicto de autoridad sobre el nombre TDP",
-);
-check(
-  results.unresolved.every((item) => item.authorities.length > 0 && item.wouldBeSettledBy.length > 0),
-  "cada pregunta abierta cita autoridades y dice qué la resolvería",
+  results.journey.touchpoints.every(
+    (tp) => tp.satisfaction.base.valid === tp.counts.valid && tp.tdp.base.valid === tp.counts.valid,
+  ),
+  "y cada uno lleva la base que su fórmula usa",
 );
 {
-  const withEvidence = baseSource({
+  // No study-level metric leaks onto a touchpoint or a stage.
+  const serialized = JSON.stringify(results.journey);
+  const leaked = ["nps_", "\"cri\"", "retention_", "attrition_", "ltv"].filter((key) =>
+    serialized.includes(key),
+  );
+  check(
+    leaked.length === 0,
+    `ningún indicador de estudio se adscribe al recorrido${leaked.length ? `: ${leaked.join(", ")}` : ""}`,
+  );
+}
+eq(
+  "el vínculo indicador↔etapa es una regla del contrato",
+  results.journey.stageEvidence.status,
+  "requires_explicit_configuration",
+);
+eq("y la regla se nombra", results.journey.stageEvidence.rule, "journey_stage_evidence_is_explicit_only");
+eq("sin ninguna configuración, no hay vínculos", results.journey.stageEvidence.links.length, 0);
+check(
+  !("gaps" in results.journey.stageEvidence),
+  "y no se emite un reporte de brechas por etapa: no falta nada que descubrir",
+);
+check(
+  results.journey.stageEvidence.configuredBy.length > 20,
+  "se declara quién aportaría un vínculo adicional",
+);
+check(
+  results.journey.stageEvidence.authorities.some((a) => a.id === "owner-decision-journey-metrics"),
+  "citando la decisión que lo estableció",
+);
+eq("el documento no carga ninguna pregunta abierta", results.unresolved.length, 0);
+check(
+  results.configurationRequired.some((item) => item.key === "journey_stage_evidence" && item.kind === "study_configuration"),
+  "una asociación adicional exige configuración explícita de estudio",
+);
+check(
+  results.configurationRequired.some((item) => item.key === "curated_journey_pain_cloud" && item.kind === "editorial_review"),
+  "y la nube curada del recorrido exige revisión editorial",
+);
+check(
+  results.configurationRequired.every((item) => item.authorities.length > 0 && item.suppliedBy.length > 10),
+  "cada requisito de configuración cita autoridades y dice quién lo aporta",
+);
+{
+  // A link a configuration DOES declare is carried through unchanged.
+  const configured = baseSource({
     journeyStageEvidence: [{ journeyStageKey: "etapa_01", metricKey: "csat_item_csat_d", itemKey: null, performanceDimensionKey: null, role: "primary" }],
   });
-  const built = buildCanonicalStudyResults(withEvidence);
-  eq("una relación que la fuente SÍ enuncia deja de ser brecha", built.journey.stageEvidence.gaps.length, 1);
-  eq("y la brecha restante es la etapa sin evidencia", built.journey.stageEvidence.gaps[0].stageKey, "etapa_02");
+  const built = buildCanonicalStudyResults(configured);
+  eq("una configuración explícita SÍ produce un vínculo", built.journey.stageEvidence.links.length, 1);
+  eq("con su etapa", built.journey.stageEvidence.links[0].stageKey, "etapa_01");
+  eq("y su indicador", built.journey.stageEvidence.links[0].metricKey, "csat_item_csat_d");
+  eq(
+    "el estado sigue siendo el de una regla explícita, no una inferencia",
+    built.journey.stageEvidence.status,
+    "requires_explicit_configuration",
+  );
+}
+{
+  // The curated journey cloud is never fabricated: no phrase splitting, no
+  // alias table, only counts a real foreign key supports.
+  const serialized = JSON.stringify(results.qualitative);
+  check(
+    !/split|phrase|alias|frase/i.test(JSON.stringify(results.qualitative.curatedFindingCounts)),
+    "los hallazgos curados se cuentan, no se segmentan ni se re-etiquetan",
+);
+  check(
+    results.qualitative.curatedFindingCounts.every(
+      (entry) => typeof entry.count === "number" && typeof entry.entityKey === "string",
+    ),
+    "y cada conteo cuelga de una entidad curada real",
+  );
+  check(!serialized.includes("recorrido"), "no se inventa una nube de frases del recorrido");
 }
 
 console.log("\n[13] El documento es agregado y no lleva nada de nadie");
@@ -1182,8 +1304,23 @@ console.log("\n[21] Las compuertas están registradas donde corresponde");
     "y cada una declara cohorte, denominador y evidencia",
   );
   check(
-    fixture.expectations.some((entry) => entry.status === "unresolved"),
-    "y distingue lo que no puede probarse todavía",
+    fixture.expectations.every((entry) => ["expected", "not_applicable", "configuration_required", "unresolved"].includes(entry.status)),
+    "y todo estado de expectativa pertenece al vocabulario del contrato",
+  );
+  check(
+    fixture.expectations.some((entry) => entry.status === "not_applicable") &&
+      fixture.expectations.some((entry) => entry.status === "configuration_required"),
+    "y distingue lo que no tiene contra qué compararse de lo que aporta una configuración",
+  );
+  check(
+    fixture.expectations.every((entry) => entry.status !== "unresolved"),
+    "sin dejar ninguna pregunta abierta: la propiedad metodológica las resolvió",
+  );
+  check(
+    fixture.expectations
+      .filter((entry) => entry.status !== "expected")
+      .every((entry) => typeof entry.classificationReason === "string" && entry.classificationReason.length > 40),
+    "y cada expectativa no comparable dice por qué",
   );
   const serializedFixture = JSON.stringify(fixture);
   check(

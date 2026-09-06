@@ -23,9 +23,13 @@
 // among the offline results. `npm run test:canonical-results` is the synthetic
 // gate that runs everywhere.
 //
-// FOUR NUMBERS, NOT ONE. Offered, executed, passed, failed and skipped are
-// reported separately, and an UNRESOLVED expectation is neither a pass nor a
-// failure — it is a question this unit is carrying rather than answering.
+// EVERY CATEGORY REPORTED SEPARATELY, never collapsed into one number:
+// offered, executed, passed, failed, skipped, unresolved, not-applicable and
+// configuration-required. The last three are not passes and not failures.
+// `not_applicable` means no approved value exists to compare against;
+// `configuration_required` means the content comes from study configuration
+// or editorial review rather than a calculation; `unresolved` means a genuine
+// open question, and none remain for this study.
 // =============================================================================
 
 import { readFileSync, statSync } from "node:fs";
@@ -408,7 +412,7 @@ function actualFor(expectation) {
       case "csat":
         return metricValue(touchpoint.satisfaction);
       case "tdp":
-        return metricValue(touchpoint.unawarenessRatio);
+        return metricValue(touchpoint.tdp);
       case "band":
         return metricBand(touchpoint.satisfaction);
       default:
@@ -444,16 +448,44 @@ const sameValue = (expected, actual) => {
   return Object.is(expected, actual);
 };
 
-const outcome = { offered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, unresolved: 0 };
+// The contract's own categories, reported separately. `notApplicable` and
+// `configurationRequired` are ANSWERS - no approved value exists to compare,
+// or the content comes from configuration rather than a calculation - and
+// neither is a failed calculation nor a pass. `unresolved` is a genuine open
+// question, and none remain for this study.
+const outcome = {
+  offered: 0,
+  executed: 0,
+  passed: 0,
+  failed: 0,
+  skipped: 0,
+  unresolved: 0,
+  notApplicable: 0,
+  configurationRequired: 0,
+};
 const mismatches = [];
 const skipped = [];
-const unresolvedEntries = [];
+const classified = [];
 
 for (const expectation of fixture.expectations) {
   outcome.offered += 1;
   if (expectation.status === "unresolved") {
     outcome.unresolved += 1;
-    unresolvedEntries.push(expectation);
+    classified.push(expectation);
+    continue;
+  }
+  if (expectation.status === "not_applicable") {
+    outcome.notApplicable += 1;
+    classified.push(expectation);
+    continue;
+  }
+  if (expectation.status === "configuration_required") {
+    outcome.configurationRequired += 1;
+    classified.push(expectation);
+    continue;
+  }
+  if (expectation.status !== "expected") {
+    bad(`estado de expectativa desconocido en ${expectation.id}: ${expectation.status}`);
     continue;
   }
   const actual = actualFor(expectation);
@@ -473,9 +505,9 @@ for (const expectation of fixture.expectations) {
 
 const bySection = new Map();
 for (const expectation of fixture.expectations) {
-  const entry = bySection.get(expectation.section) ?? { offered: 0, failed: 0, unresolved: 0 };
+  const entry = bySection.get(expectation.section) ?? { offered: 0, failed: 0, classified: 0 };
   entry.offered += 1;
-  if (expectation.status === "unresolved") entry.unresolved += 1;
+  if (expectation.status !== "expected") entry.classified += 1;
   bySection.set(expectation.section, entry);
 }
 for (const mismatch of mismatches) {
@@ -485,7 +517,7 @@ for (const mismatch of mismatches) {
 for (const [section, entry] of [...bySection.entries()].sort()) {
   console.log(
     `  ${section.padEnd(16)} ofrecidas=${String(entry.offered).padStart(3)} ` +
-      `falladas=${String(entry.failed).padStart(3)} sin-resolver=${String(entry.unresolved).padStart(2)}`,
+      `falladas=${String(entry.failed).padStart(3)} no-comparables=${String(entry.classified).padStart(2)}`,
   );
 }
 
@@ -502,32 +534,48 @@ if (skipped.length > 0) {
   console.log("\n  OMITIDAS (ni aprobadas ni falladas)");
   for (const { expectation, reason } of skipped) console.log(`    – ${expectation.id} :: ${reason}`);
 }
-if (unresolvedEntries.length > 0) {
-  console.log("\n  SIN RESOLVER (ni aprobadas ni falladas)");
-  for (const expectation of unresolvedEntries) {
-    console.log(`    ? ${expectation.id} :: ${expectation.unresolvedReason}`);
+if (classified.length > 0) {
+  console.log("\n  NO COMPARABLES (ni aprobadas ni falladas)");
+  for (const expectation of classified) {
+    const why = expectation.classificationReason ?? expectation.unresolvedReason ?? "(sin razón registrada)";
+    console.log(`    · [${expectation.status}] ${expectation.id} :: ${why}`);
   }
 }
 
 // ---- the unresolved states the DOCUMENT itself declares -----------------------
-console.log("\n[7] Estados sin resolver que el propio documento declara");
-for (const item of results.unresolved) {
-  console.log(`  ? ${item.key} (${item.section}/${item.reason})`);
+console.log("\n[7] Lo que el propio documento declara resuelto");
+check(
+  results.unresolved.length === 0,
+  `el documento no carga ninguna pregunta abierta (${results.unresolved.length})`,
+);
+for (const item of results.configurationRequired) {
+  console.log(`  · ${item.key} (${item.section}/${item.kind}) — lo aporta: ${item.suppliedBy}`);
 }
 check(
-  results.journey.stageEvidence.status === "unresolved",
-  `el vínculo indicador↔etapa se declara sin resolver, con ${results.journey.stageEvidence.gaps.length} brechas`,
+  results.journey.stageEvidence.status === "requires_explicit_configuration",
+  "el vínculo indicador↔etapa es una regla del contrato, no una incertidumbre",
 );
 check(
-  results.unresolved.some((item) => item.key === "tdp_name_conflict"),
-  "el conflicto de nombre sobre TDP se declara en el documento",
+  results.journey.stageEvidence.links.length === 0,
+  "y no se emite ningún vínculo porque ninguna configuración lo declara",
+);
+check(
+  results.journey.touchpoints.every(
+    (touchpoint) => touchpoint.tdp !== undefined && touchpoint.unawareShareOfResponses !== undefined,
+  ),
+  "cada punto de contacto lleva directamente su TDP y la proporción auxiliar",
+);
+check(
+  results.configurationRequired.some((item) => item.key === "curated_journey_pain_cloud"),
+  "la nube curada del recorrido se declara contenido editorial, no un cálculo fallido",
 );
 
 // ---- summary -----------------------------------------------------------------
 console.log("\n" + "=".repeat(74));
 console.log(
   `RESUMEN: ofrecidas=${outcome.offered} ejecutadas=${outcome.executed} aprobadas=${outcome.passed} ` +
-    `falladas=${outcome.failed} omitidas=${outcome.skipped} sin-resolver=${outcome.unresolved}`,
+    `falladas=${outcome.failed} omitidas=${outcome.skipped} sin-resolver=${outcome.unresolved} ` +
+    `no-aplica=${outcome.notApplicable} requieren-configuración=${outcome.configurationRequired}`,
 );
 console.log(`Comprobaciones estructurales: ${failures} fallo(s).`);
 
