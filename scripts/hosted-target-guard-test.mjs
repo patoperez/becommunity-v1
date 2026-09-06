@@ -752,12 +752,38 @@ console.log("\n[11] The hosted inventory writes nothing");
     "and refuses a destination inside the worktree or the linked main repository",
   );
   check(
-    /order=id\.asc/.test(exporter) && /id=gt\./.test(exporter) && !/offset=/.test(exporter),
+    /order=\$\{key\}\.asc/.test(exporter) && /\$\{key\}=gt\./.test(exporter) && !/offset=/.test(exporter),
     "every read is a keyset by primary key, never an offset",
   );
+  // Five of this project's tables do not key on `id`. Assuming `id` would have
+  // mis-paged them silently, so the key is DISCOVERED from PostgREST's own
+  // `<pk/>` marking, and a table it cannot key is read whole rather than paged.
   check(
-    /REFUSED TO CLAIM SUCCESS/.test(exporter) && /expected === rows\.length/.test(exporter),
+    /<pk\/>/.test(exporter) && /primaryKeys\[table\]/.test(exporter),
+    "and the key is discovered from the project's own declaration, never assumed to be 'id'",
+  );
+  check(
+    /readBounded/.test(exporter) && /BOUNDED_CEILING/.test(exporter),
+    "a table with a composite key or none is read in ONE request, which has no page boundary to mis-cross",
+  );
+  check(
+    /REFUSED TO CLAIM SUCCESS/.test(exporter) && /rows\.length === expected/.test(exporter),
     "and it compares what it wrote against the exact count, refusing to call a short read a backup",
+  );
+  // The list has to come from the database. A hand-written one backs up what its
+  // author remembered, and the tables that matter most here are the editorial
+  // ones a study delete would cascade through.
+  check(
+    /openapi\.paths/.test(exporter) && /rls_coverage_report/.test(exporter),
+    "the table list is ENUMERATED from the API document and cross-checked against 0014's reporter",
+  );
+  check(
+    /onlyInApi/.test(exporter) && /onlyInRls/.test(exporter),
+    "and a table the two enumerations disagree about is reported, never quietly resolved",
+  );
+  check(
+    /status: "unreadable"/.test(exporter) && /unreadable\.length > 0/.test(exporter),
+    "a table it cannot read is NAMED and fails the run — an unreported hole is worse than a named gap",
   );
   // The header EXPLAINS why it avoids the evidence writer, so the mention has to
   // be allowed in prose and forbidden in code.
