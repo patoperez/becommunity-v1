@@ -895,7 +895,16 @@ before touching this unit:
    supabase-js and a real PostgREST 16.2, in front of a disposable
    PostgreSQL 17.11 cluster: **102 assertions, 102 passed, 0 failed, 66
    skipped**, with all 41 protected tables and 4 functions present and the
-   protected-object census identical before and after. It settled the
+   protected-object census identical before and after.
+   ⓘ **Two runs, and only the second describes the chain now on disk.** The
+   figures above were first measured over the OLD `0000`-`0024` chain, before
+   the renumbering. The suite was RE-EXECUTED on 2026-09-06 over the reconciled
+   `0000`-`0028` chain — including the four imported migrations — and returned
+   the identical tally: **102 executed, 102 passed, 0 failed, 66 skipped**
+   (27 needing DDL the REST transport does not have, 25 error codes this run
+   never provoked over HTTP, 8 needing `pg_catalog`, 5 needing concurrent
+   sessions, and 1 needing the real workbooks, which were deliberately not
+   supplied). Neither run touched a hosted project. It settled the
    supabase-js result shape, the error shape, the service-role key path, and
    that PostgREST parses a 2 708 830-byte plan body (110 ms; the largest real
    commit body was 2 708 898 bytes at 441 ms). `npm run test:hosted-target-guard`

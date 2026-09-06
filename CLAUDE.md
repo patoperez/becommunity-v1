@@ -252,6 +252,12 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   real PostgREST 16.2 in front of a disposable PostgreSQL 17.11 cluster, 102
   assertions passed. It settled the supabase-js result and error shapes, the
   service-role key path, and that PostgREST accepts a 2.58 MiB RPC body.
+  ⓘ **RE-EXECUTED over the reconciled `0000`-`0028` chain** (2026-09-06), after
+  the renumbering. Same result — 102 executed, 102 passed, 0 failed, 66
+  skipped — so the renumbering and the four imported migrations cost the HTTP
+  transport nothing. The first run was over the old `0000`-`0024` chain and no
+  longer describes what is on disk; both are recorded in
+  `docs/CANONICAL_STUDY_MODEL.md` so neither is mistaken for the other.
   ⓘ **None of the three is hosted canonical execution.** Level 3 is a LOCAL
   PostgREST in front of a LOCAL cluster; it is not equivalent to running the
   canonical chain on the hosted project, and it must never be reported as if it

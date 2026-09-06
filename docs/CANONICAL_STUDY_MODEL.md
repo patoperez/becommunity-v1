@@ -885,6 +885,46 @@ npm run test:canonical-commit-local-stack
 102 passed, 0 failed, 66 skipped. All 41 protected tables and all 4 functions
 present; the protected-object census identical before and after the run.
 
+### The suite has run TWICE, over two different migration chains
+
+The table below and the figures above were measured on the FIRST run, over the
+old `0000`-`0024` chain, before the canonical migrations were renumbered. That
+chain no longer exists on disk, so that run alone could not speak for what this
+branch now carries.
+
+**Re-executed 2026-09-06 over the reconciled `0000`-`0028` chain**, which
+includes the four imported already-applied migrations and the canonical set at
+its new numbers. `[stack] applying the bootstrap and migrations 0000-0028`,
+`server: postgrest/16.2`, synthetic fixtures only:
+
+| | first run (old `0000`-`0024`) | re-run (reconciled `0000`-`0028`) |
+|---|---|---|
+| executed | 102 | **102** |
+| passed | 102 | **102** |
+| failed | 0 | **0** |
+| skipped | 66 | **66** |
+
+Identical, so the renumbering and the four imported migrations cost the HTTP
+transport nothing. The 66 skips are unchanged in composition: 27 need DDL the
+REST transport declares absent, 25 are error codes this run never provoked over
+HTTP (one `T5.2` entry each), 8 need `pg_catalog`, 5 need concurrent sessions,
+and 1 (`X8`) needs the real workbooks, which were deliberately NOT supplied.
+Every one is recorded as skipped and none is counted as a pass.
+
+The binary was the official PostgREST v16.2 linux-static-x86-64 release,
+archive SHA-256
+`4712595baae0f5d84a527d55a11166d6bf4d9b0f1d102505c5e9d59219787f08`, extracted
+binary SHA-256
+`35048dacdab509e9233d5abe2f99f6a2ba9e653088b3522e5f0eaefed20c1766`, confirmed
+by `postgrest --version` before use. It lives outside the repository at
+`~/becommunity-postgrest/` and is not tracked by git.
+
+⚠️ **This changes nothing about the hosted project.** The re-run is a LOCAL
+PostgREST in front of a LOCAL disposable cluster. Hosted execution of the
+canonical chain is still pending and separately authorized, and T3, T4 and T5
+remain pending re-proof on the hosted transport for the reason given above:
+it is a different PostgREST build.
+
 | id | result | measured |
 |---|---|---|
 | **T1** | proved **at the PostgREST layer only** | a 2 708 830-byte (2.58 MiB) plan body reached the function and was parsed, answering `JOB_NOT_FOUND` in 110 ms. The largest real commit body was 2 708 898 bytes at 441 ms. |
