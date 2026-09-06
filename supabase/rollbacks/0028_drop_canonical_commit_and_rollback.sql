@@ -1,10 +1,10 @@
--- Roll back 0024_canonical_commit_and_rollback.sql.
+-- Roll back 0028_canonical_commit_and_rollback.sql.
 --
--- Run BEFORE 0023_drop_canonical_analysis_model.sql and
--- 0022_drop_canonical_ingestion_foundation.sql.
+-- Run BEFORE 0027_drop_canonical_analysis_model.sql and
+-- 0026_drop_canonical_ingestion_foundation.sql.
 --
--- This removes every object 0024 created and restores the exact
--- `source_lineage` vocabulary migration 0023 left behind. It does not touch
+-- This removes every object 0028 created and restores the exact
+-- `source_lineage` vocabulary migration 0027 left behind. It does not touch
 -- `source_asset`, `import_job_asset` or any row written by an earlier
 -- migration.
 

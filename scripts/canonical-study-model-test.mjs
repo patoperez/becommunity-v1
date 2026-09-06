@@ -10,10 +10,10 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (path) => readFileSync(root + path, "utf8");
-const foundation = read("supabase/migrations/0022_canonical_ingestion_foundation.sql");
-const analysis = read("supabase/migrations/0023_canonical_analysis_model.sql");
-const foundationRollback = read("supabase/rollbacks/0022_drop_canonical_ingestion_foundation.sql");
-const analysisRollback = read("supabase/rollbacks/0023_drop_canonical_analysis_model.sql");
+const foundation = read("supabase/migrations/0026_canonical_ingestion_foundation.sql");
+const analysis = read("supabase/migrations/0027_canonical_analysis_model.sql");
+const foundationRollback = read("supabase/rollbacks/0026_drop_canonical_ingestion_foundation.sql");
+const analysisRollback = read("supabase/rollbacks/0027_drop_canonical_analysis_model.sql");
 
 const foundationTables = [
   "source_asset", "import_job", "import_job_asset", "visual_annotation",
@@ -46,8 +46,8 @@ const sameMembers = (actual, expected) =>
 console.log("Be Community — canonical study model gate");
 
 console.log("\n[1] The migrations create only the declared additive model");
-check(sameMembers(createdTables(foundation), foundationTables), "0022 creates the 18 declared ingestion tables");
-check(sameMembers(createdTables(analysis), analysisTables), "0023 creates the 16 declared analysis tables");
+check(sameMembers(createdTables(foundation), foundationTables), "0026 creates the 18 declared ingestion tables");
+check(sameMembers(createdTables(analysis), analysisTables), "0027 creates the 16 declared analysis tables");
 check(!/\b(update|delete\s+from|truncate)\b/i.test(foundation + analysis), "neither migration rewrites existing rows");
 check(!/\bdrop\s+table\b/i.test(foundation + analysis), "neither forward migration drops a table");
 check(
@@ -57,8 +57,8 @@ check(
 
 console.log("\n[2] Every new table is internal-only and FORCE-RLS protected");
 for (const [name, sql, tables] of [
-  ["0022", foundation, foundationTables],
-  ["0023", analysis, analysisTables],
+  ["0026", foundation, foundationTables],
+  ["0027", analysis, analysisTables],
 ]) {
   for (const table of tables) {
     check(new RegExp(`['\"]${escaped(table)}['\"]`).test(sql), `${name} registers ${table} in its security loop`);
@@ -96,13 +96,13 @@ check(/superseded_by_id is null or superseded_by_id <> id/i.test(analysis), "a p
 check(/num_nonnulls\(metric_definition_id, survey_item_id, performance_dimension_id\) = 1/i.test(analysis), "journey evidence has exactly one source");
 
 console.log("\n[5] Both migrations have complete reverse scripts");
-check(sameMembers(droppedTables(foundationRollback), foundationTables), "0022 rollback drops all 18 foundation tables");
-check(sameMembers(droppedTables(analysisRollback), analysisTables), "0023 rollback drops all 16 analysis tables");
-check(/drop index public\.respondent_id_tenant_study_uidx/i.test(foundationRollback), "0022 rollback removes its compatibility index");
+check(sameMembers(droppedTables(foundationRollback), foundationTables), "0026 rollback drops all 18 foundation tables");
+check(sameMembers(droppedTables(analysisRollback), analysisTables), "0027 rollback drops all 16 analysis tables");
+check(/drop index public\.respondent_id_tenant_study_uidx/i.test(foundationRollback), "0026 rollback removes its compatibility index");
 for (const column of ["series_key", "period_starts_on", "period_ends_on"]) {
-  check(new RegExp(`drop column ${column}`, "i").test(analysisRollback), `0023 rollback removes study_period_snapshot.${column}`);
+  check(new RegExp(`drop column ${column}`, "i").test(analysisRollback), `0027 rollback removes study_period_snapshot.${column}`);
 }
-check(/add constraint source_lineage_target_table_check/i.test(analysisRollback), "0023 rollback restores the 0022 lineage vocabulary");
+check(/add constraint source_lineage_target_table_check/i.test(analysisRollback), "0027 rollback restores the 0026 lineage vocabulary");
 
 console.log("\n" + "=".repeat(70));
 if (failures > 0) {

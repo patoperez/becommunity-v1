@@ -1,0 +1,21 @@
+-- =============================================================================
+-- Rollback for 0024 — restore the conflict code 0023 shipped.
+-- =============================================================================
+-- WHAT THIS DOES. Puts SQLSTATE `40001` back in place of `55000` for a revision
+-- conflict, by re-running migration 0023's version of the function.
+--
+-- WHAT IT COSTS, STATED PLAINLY. `40001` is retried by the Data API, so with
+-- this rollback applied a stale save does not produce a refusal at all: the
+-- request hangs until the gateway times it out (measured: 125 s, HTTP 504).
+-- The optimistic-concurrency check still protects the stored draft — nothing is
+-- overwritten — but the person is shown a timeout instead of an explanation.
+--
+-- There is therefore no good reason to run this. It exists because a migration
+-- without a reverse is a migration nobody can undo, and because saying what the
+-- reverse costs is more useful than pretending it is free.
+--
+--   \i supabase/migrations/0023_experience_definition_persistence.sql
+--
+-- Re-running 0023 is safe: every statement in it is `create ... if not exists`
+-- or `create or replace`, so it recreates only the function body.
+-- =============================================================================

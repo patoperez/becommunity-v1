@@ -1,9 +1,9 @@
 -- =============================================================================
 -- A normalized catalogue snapshot of the public schema
 -- =============================================================================
--- Returns ONE json document describing everything migration 0024 could possibly
+-- Returns ONE json document describing everything migration 0028 could possibly
 -- change, in a deterministic order, so two snapshots can be compared literally:
--- apply 0024, reverse it, and the result must equal the state 0023 left behind.
+-- apply 0028, reverse it, and the result must equal the state 0027 left behind.
 --
 -- Every part is read from the catalogue rather than from the migration text, so
 -- the comparison cannot be satisfied by a script that merely LOOKS symmetrical.

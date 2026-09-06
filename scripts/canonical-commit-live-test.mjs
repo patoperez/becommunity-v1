@@ -4,7 +4,7 @@
 //   CANONICAL_COMMIT_TEST_PGUSER=<user> \
 //     npx tsx scripts/canonical-commit-live-test.mjs
 // =============================================================================
-// This gate EXECUTES migration 0024 against a real PostgreSQL server and asserts
+// This gate EXECUTES migration 0028 against a real PostgreSQL server and asserts
 // the resulting database state. Nothing here is satisfied by reading SQL text:
 // every claim is a query or a mutation against a disposable database that this
 // script creates and destroys.
@@ -138,7 +138,7 @@ async function main() {
     console.error("RESULT: the database contradicts the contract. GATE BLOCKED.");
     process.exit(1);
   }
-  console.log("RESULT: migration 0024 behaves as documented against a real PostgreSQL. GATE PASSED.");
+  console.log("RESULT: migration 0028 behaves as documented against a real PostgreSQL. GATE PASSED.");
 }
 
 await main();

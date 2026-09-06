@@ -1,7 +1,7 @@
 -- =============================================================================
--- 0023 — canonical metrics, journeys and curated findings
+-- 0027 — canonical metrics, journeys and curated findings
 -- =============================================================================
--- Depends on 0022. Additive only: no legacy data is rewritten and no existing
+-- Depends on 0026. Additive only: no legacy data is rewritten and no existing
 -- dashboard or journey configuration is removed.
 --
 -- HUMAN-REVIEW ZONE: all new tables are internal-only with RLS + FORCE RLS.

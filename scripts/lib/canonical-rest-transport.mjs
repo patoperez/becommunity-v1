@@ -126,7 +126,7 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
      *
      * It records what the transport can actually see: the server banner
      * PostgREST sends, and the presence or absence of each object migrations
-     * 0022-0024 add. The PostgreSQL version is NOT here, because PostgREST does
+     * 0026-0028 add. The PostgreSQL version is NOT here, because PostgREST does
      * not expose it and inventing it would be worse than recording its absence.
      */
     async inventory(tables, functions) {
@@ -188,7 +188,7 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
         observedCodes?.add(safeErrorCode(surfaced));
         return { data: null, error: surfaced };
       }
-      // A refusal does not always arrive as an HTTP error. Migration 0024's
+      // A refusal does not always arrive as an HTTP error. Migration 0028's
       // subtransaction CATCHES most failures and returns them honestly as a
       // 200 body of the shape { status: 'failed', code: '<CODE>' }, so a run
       // that only watched `error` would report most of the thirty codes as
@@ -294,18 +294,18 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
     /**
      * A hosted target is already migrated. `prepare` therefore VERIFIES rather
      * than applies, and refuses any partial schema, because a suite that
-     * silently ran against migrations 0000-0023 would be measuring the wrong
+     * silently ran against migrations 0000-0027 would be measuring the wrong
      * database.
      */
-    async prepare(upTo = 24) {
-      if (upTo !== 24) {
+    async prepare(upTo = 28) {
+      if (upTo !== 28) {
         refuse(
           `this transport cannot roll the schema back to ${upTo}: it applies no migration and reverses none.`,
         );
       }
       for (const table of ["import_job_record", "retention_period"]) {
         const { error } = await service.from(table).select("*", { count: "exact", head: true });
-        if (error) refuse(`public.${table} is not reachable, so migration 0024 is not applied to this target.`);
+        if (error) refuse(`public.${table} is not reachable, so migration 0028 is not applied to this target.`);
       }
     },
 

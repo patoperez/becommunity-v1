@@ -1,5 +1,5 @@
--- Roll back 0023_canonical_analysis_model.sql.
--- Run before 0022_drop_canonical_ingestion_foundation.sql.
+-- Roll back 0027_canonical_analysis_model.sql.
+-- Run before 0026_drop_canonical_ingestion_foundation.sql.
 
 begin;
 

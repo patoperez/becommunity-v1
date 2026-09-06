@@ -117,7 +117,7 @@ let censusAfter = null;
 let cleanup = { attempted: false, removed: null, error: null };
 let inventory = null;
 
-/** The four functions migration 0024 adds, probed for presence only. */
+/** The four functions migration 0028 adds, probed for presence only. */
 const INVENTORY_FUNCTIONS = [
   { name: "record_canonical_rows", rest: { p_import_job_id: null, p_tenant_id: null, p_study_id: null, p_target_table: "person_private", p_ids: [], p_ownership: "created" } },
   { name: "stage_canonical_package", rest: { p_tenant_id: null, p_study_id: null, p_request: {} } },
@@ -148,7 +148,7 @@ try {
   ledger.check(
     "H0",
     absentTables.length === 0 && absentFunctions.length === 0,
-    `migrations 0022-0024 are applied to this target${
+    `migrations 0026-0028 are applied to this target${
       absentTables.length + absentFunctions.length > 0
         ? ` (missing ${[...absentTables, ...absentFunctions].map(([name]) => name).join(", ")})`
         : ""

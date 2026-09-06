@@ -1,5 +1,5 @@
 -- =============================================================================
--- 0022 — canonical multi-file ingestion foundation
+-- 0026 — canonical multi-file ingestion foundation
 -- =============================================================================
 -- Additive only. Existing study, respondent, response and import tables remain
 -- unchanged. These tables establish stable identity, typed attributes,

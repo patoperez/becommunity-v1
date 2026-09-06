@@ -28,10 +28,10 @@
 //   database error to a code and never carry its message.
 //
 //   THE TRANSACTION AND SECURITY CONTRACT (STRUCTURAL — read from the SQL, not
-//   executed HERE). Sections [14] to [17] read migration 0024's text: the
+//   executed HERE). Sections [14] to [17] read migration 0028's text: the
 //   grants, the empty search path, the FOR UPDATE lock, the subtransaction, the
 //   ledger vocabulary, the rollback ordering against every ON DELETE RESTRICT
-//   edge in 0022/0023, and the exact reverse script. Those statements ARE
+//   edge in 0026/0027, and the exact reverse script. Those statements ARE
 //   executed — by `scripts/canonical-commit-live-test.mjs`, against a
 //   disposable PostgreSQL cluster. This gate keeps its own reading of the SQL
 //   because a structural break should fail offline too, but it never reports a
@@ -93,10 +93,10 @@ const check = (condition, message) => (condition ? ok(message) : bad(message));
 const root = new URL("../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const read = (path) => readFileSync(join(root, path), "utf8");
 
-const FORWARD = read("supabase/migrations/0024_canonical_commit_and_rollback.sql");
-const REVERSE = read("supabase/rollbacks/0024_drop_canonical_commit_and_rollback.sql");
-const FOUNDATION = read("supabase/migrations/0022_canonical_ingestion_foundation.sql");
-const ANALYSIS = read("supabase/migrations/0023_canonical_analysis_model.sql");
+const FORWARD = read("supabase/migrations/0028_canonical_commit_and_rollback.sql");
+const REVERSE = read("supabase/rollbacks/0028_drop_canonical_commit_and_rollback.sql");
+const FOUNDATION = read("supabase/migrations/0026_canonical_ingestion_foundation.sql");
+const ANALYSIS = read("supabase/migrations/0027_canonical_analysis_model.sql");
 
 import {
   DISPOSABLE_DATABASE_PATTERN,
@@ -479,7 +479,7 @@ console.log("\n[8] Lineage keeps the exact worksheet spelling and the coordinate
   const unrepresentable = [...targets].filter((table) => !vocabulary.has(table));
   check(
     unrepresentable.length === 0,
-    `migration 0024's lineage vocabulary can name every target the projector writes${unrepresentable.length ? `: ${unrepresentable.join(", ")}` : ""}`,
+    `migration 0028's lineage vocabulary can name every target the projector writes${unrepresentable.length ? `: ${unrepresentable.join(", ")}` : ""}`,
   );
 }
 
@@ -842,8 +842,8 @@ console.log("\n[13] The workflow preflights, stages, commits, reconciles and rev
   );
 }
 
-// ---- [14] Migration 0024: the security contract of the RPCs ----------------
-console.log("\n[14] STRUCTURAL — migration 0024's security contract (SQL text, not executed)");
+// ---- [14] Migration 0028: the security contract of the RPCs ----------------
+console.log("\n[14] STRUCTURAL — migration 0028's security contract (SQL text, not executed)");
 const FUNCTIONS = [
   ["record_canonical_rows", "uuid, uuid, uuid, text, uuid\\[\\], text"],
   ["stage_canonical_package", "uuid, uuid, jsonb"],
@@ -852,7 +852,7 @@ const FUNCTIONS = [
 ];
 {
   const created = [...FORWARD.matchAll(/create or replace function public\.([a-z_]+)\(/g)].map((m) => m[1]);
-  check(created.length === 4, `0024 creates exactly 4 functions (${created.length})`);
+  check(created.length === 4, `0028 creates exactly 4 functions (${created.length})`);
   check(
     FUNCTIONS.every(([name]) => created.includes(name)),
     "and they are the four the unit declares",
@@ -915,7 +915,7 @@ const FUNCTIONS = [
   );
 }
 
-// ---- [15] Migration 0024: scope, counts and failure recording --------------
+// ---- [15] Migration 0028: scope, counts and failure recording --------------
 const LEDGER_VOCABULARY = (
   FORWARD.match(/target_table\s+text not null check \(target_table in \(([\s\S]*?)\)\),/)?.[1] ?? ""
 )
@@ -1034,7 +1034,7 @@ console.log("\n[15] STRUCTURAL — scope is derived, counts are measured, failur
   );
 }
 
-// ---- [16] Migration 0024: ownership and rollback ---------------------------
+// ---- [16] Migration 0028: ownership and rollback ---------------------------
 console.log("\n[16] STRUCTURAL — the ownership ledger and the rollback order");
 {
   check(LEDGER_VOCABULARY.length === 31, `the ledger names 31 canonical tables (${LEDGER_VOCABULARY.length})`);
@@ -1044,7 +1044,7 @@ console.log("\n[16] STRUCTURAL — the ownership ledger and the rollback order")
   );
   check(
     !/delete from public\.(source_asset|import_job_asset|import_job)\b/.test(FORWARD),
-    "and nothing in 0024 ever deletes an asset, an asset link or the audit job itself",
+    "and nothing in 0028 ever deletes an asset, an asset link or the audit job itself",
   );
   check(
     /ownership\s+text not null check \(ownership in \('created', 'reused'\)\)/.test(FORWARD),
@@ -1095,7 +1095,7 @@ console.log("\n[16] STRUCTURAL — the ownership ledger and the rollback order")
     "the audit job survives with an honest final status, timestamp and count",
   );
 
-  // The delete order must respect every ON DELETE RESTRICT edge in 0022/0023:
+  // The delete order must respect every ON DELETE RESTRICT edge in 0026/0027:
   // the referencing table has to go before the table it points at.
   const restrictEdges = [];
   for (const sql of [FOUNDATION, ANALYSIS]) {
@@ -1108,7 +1108,7 @@ console.log("\n[16] STRUCTURAL — the ownership ledger and the rollback order")
       }
     }
   }
-  check(restrictEdges.length >= 12, `0022 and 0023 declare ${restrictEdges.length} ON DELETE RESTRICT edges`);
+  check(restrictEdges.length >= 12, `0026 and 0027 declare ${restrictEdges.length} ON DELETE RESTRICT edges`);
   const position = new Map(
     [...ordered, "person_external_identifier", "person_private"].map((table, index) => [table, index]),
   );
@@ -1138,8 +1138,8 @@ console.log("\n[16] STRUCTURAL — the ownership ledger and the rollback order")
   );
 }
 
-// ---- [17] Migration 0024 has an exact reverse ------------------------------
-console.log("\n[17] STRUCTURAL — every object 0024 creates has a reverse counterpart");
+// ---- [17] Migration 0028 has an exact reverse ------------------------------
+console.log("\n[17] STRUCTURAL — every object 0028 creates has a reverse counterpart");
 {
   for (const [name, signature] of FUNCTIONS) {
     check(
@@ -1179,7 +1179,7 @@ console.log("\n[17] STRUCTURAL — every object 0024 creates has a reverse count
       .join(",");
   check(
     vocabularyOf(REVERSE) === vocabularyOf(ANALYSIS),
-    "and the reverse restores migration 0023's lineage vocabulary exactly",
+    "and the reverse restores migration 0027's lineage vocabulary exactly",
   );
   check(!/drop table/i.test(FORWARD), "the forward migration drops no table");
   check(
@@ -1625,7 +1625,7 @@ console.log("\n[20] The disposable-server script refuses every path that is not 
 
 console.log("\n" + "=".repeat(70));
 console.log(
-  "NOTE: sections [14] to [17] read migration 0024's SQL. They are STRUCTURAL proof,\n" +
+  "NOTE: sections [14] to [17] read migration 0028's SQL. They are STRUCTURAL proof,\n" +
     "      and this gate reports no database-executed result of its own.\n" +
     "      Execution lives in scripts/canonical-commit-live-test.mjs, which needs a\n" +
     "      disposable PostgreSQL server:\n" +

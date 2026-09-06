@@ -793,7 +793,7 @@ const baseline = await preflightCanonicalPackage([
   check(baseline.mappingVersion === CUICUILCO_PACKAGE_SPEC_V1.mappingVersion, "the mapping version is reported");
   check(
     typeof baseline.packageIdempotencyKey === "string" && /^sha256:[0-9a-f]{64}$/.test(baseline.packageIdempotencyKey),
-    "the package idempotency key has the shape migration 0022 enforces",
+    "the package idempotency key has the shape migration 0026 enforces",
   );
   check(
     baseline.assets.every((asset) => /^sha256:[0-9a-f]{64}$/.test(asset.sha256)),

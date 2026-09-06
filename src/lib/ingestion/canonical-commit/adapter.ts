@@ -16,8 +16,8 @@ import type { CanonicalCommitOutcome, CanonicalRollbackOutcome } from "./result"
  *
  * WHAT A BROWSER STILL CANNOT DO, even if this module leaked. Both RPCs are
  * revoked from `public`, `anon` and `authenticated` and granted only to
- * `service_role` (migration 0024), and every canonical table denies browser
- * roles outright with RLS and FORCE RLS (0022, 0023, 0024). A browser holding
+ * `service_role` (migration 0028), and every canonical table denies browser
+ * roles outright with RLS and FORCE RLS (0026, 0027, 0028). A browser holding
  * this code and a session token still has no privilege to execute either
  * function or to read or write a single canonical row.
  *

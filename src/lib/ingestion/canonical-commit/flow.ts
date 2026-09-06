@@ -28,7 +28,7 @@ import { commitErrorMessage, refusal, safeErrorCode } from "./result";
  * It does NOT weaken the boundary. This module holds no Supabase client, no
  * credentials and no privilege; the only implementation that reaches a database
  * lives in `adapter.ts`, which is `server-only`. And a browser holding a
- * transport of its own still has nothing to call: migration 0024 revokes both
+ * transport of its own still has nothing to call: migration 0028 revokes both
  * functions from `public`, `anon` and `authenticated` and grants them solely to
  * `service_role`, and every canonical table denies browser roles under RLS and
  * FORCE RLS.

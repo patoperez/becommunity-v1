@@ -12,7 +12,7 @@
 // would get.
 //
 // It creates one disposable database, applies the bootstrap and migrations
-// 0000-0024 verbatim, starts PostgREST and the path shim, then executes
+// 0000-0028 verbatim, starts PostgREST and the path shim, then executes
 // `scripts/canonical-commit-hosted-test.mjs` as a child process with the
 // environment that gate demands — so the gate's own authorization guard is
 // exercised for real rather than bypassed.
@@ -70,7 +70,7 @@ console.log(`  postgrest binary: ${BINARY}`);
 let exitCode = 1;
 
 await withDisposableDatabase(target, "localstack", async (db) => {
-  console.log("\n[stack] applying the bootstrap and migrations 0000-0024");
+  console.log("\n[stack] applying the bootstrap and migrations 0000-0028");
   psqlSuiteTransport(db).prepare();
 
   console.log("[stack] starting PostgREST and the /rest/v1 path shim");
@@ -107,7 +107,7 @@ await withDisposableDatabase(target, "localstack", async (db) => {
 console.log(
   "\nNOTE: this is the local substitute for `supabase start`, not a hosted run.\n" +
     "      The gateway body limit, the hosted statement timeout, timeout recovery,\n" +
-    "      0022's index against a populated respondent table and catalogue parity\n" +
+    "      0026's index against a populated respondent table and catalogue parity\n" +
     "      with Supabase's own extensions remain UNPROVED.",
 );
 process.exit(exitCode);

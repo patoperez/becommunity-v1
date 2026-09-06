@@ -192,13 +192,13 @@ let distribution = null;
 }
 
 // ---------------------------------------------------------------------------
-// [3c] The tables migrations 0022 and 0023 ALTER — the ones that are NOT additive
+// [3c] The tables migrations 0026 and 0027 ALTER — the ones that are NOT additive
 // ---------------------------------------------------------------------------
-// 0022 builds a unique index on `respondent`; 0023 adds three columns, two CHECK
+// 0026 builds a unique index on `respondent`; 0027 adds three columns, two CHECK
 // constraints and an index to `study_period_snapshot`, and its reverse DROPS
 // those columns. So the "before" for both is a row count that must not move, and
 // for `study_period_snapshot` it is also the table whose reverse is lossy.
-console.log("\n[altered] the pre-existing tables 0022 and 0023 change");
+console.log("\n[altered] the pre-existing tables 0026 and 0027 change");
 const alteredTables = {};
 for (const table of ["respondent", "study_period_snapshot"]) {
   if (!exposedTable(table)) {

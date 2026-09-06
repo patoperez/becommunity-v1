@@ -92,7 +92,7 @@ export const PROTECTED_TABLES = Object.freeze([
   "respondent",
   "quant_response",
   "qual_observation",
-  // Migration 0022 — ingestion foundation (18).
+  // Migration 0026 — ingestion foundation (18).
   "source_asset",
   "import_job",
   "import_job_asset",
@@ -111,7 +111,7 @@ export const PROTECTED_TABLES = Object.freeze([
   "survey_session",
   "survey_response",
   "source_lineage",
-  // Migration 0023 — analysis model (16).
+  // Migration 0027 — analysis model (16).
   "performance_dimension",
   "performance_observation",
   "band_scheme",
@@ -128,7 +128,7 @@ export const PROTECTED_TABLES = Object.freeze([
   "pain_point_organizational_unit",
   "pain_point_performance_dimension",
   "pain_point_culture_dimension",
-  // Migration 0024 — commit, ownership and rollback (2).
+  // Migration 0028 — commit, ownership and rollback (2).
   "retention_period",
   "import_job_record",
 ]);

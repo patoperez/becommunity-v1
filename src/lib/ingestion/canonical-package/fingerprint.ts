@@ -11,7 +11,7 @@ import { normalizeWhitespace } from "./values";
  * structure resolved to, never from what the operator called the file or the
  * order in which the browser handed the files over.
  *
- * Everything is `sha256:<64 hex>`, the exact shape migration 0022 enforces on
+ * Everything is `sha256:<64 hex>`, the exact shape migration 0026 enforces on
  * `source_asset.sha256` and `import_job.idempotency_key`.
  */
 

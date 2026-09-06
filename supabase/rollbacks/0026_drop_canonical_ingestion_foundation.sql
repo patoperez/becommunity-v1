@@ -1,5 +1,5 @@
--- Roll back 0022_canonical_ingestion_foundation.sql.
--- If 0023 was applied, roll back 0023 first.
+-- Roll back 0026_canonical_ingestion_foundation.sql.
+-- If 0027 was applied, roll back 0027 first.
 
 begin;
 

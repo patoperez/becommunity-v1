@@ -9,7 +9,7 @@ import "server-only";
  * database, and its own `server-only` marker fails the build if it is ever
  * pulled into a client bundle — even indirectly.
  *
- * Neither function is reachable from a browser in any case: migration 0024
+ * Neither function is reachable from a browser in any case: migration 0028
  * revokes both RPCs from `public`, `anon` and `authenticated` and grants them
  * only to `service_role`, and every canonical table denies browser roles with
  * RLS and FORCE RLS. This boundary is the first of the two, not the only one.

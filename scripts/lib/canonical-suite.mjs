@@ -75,7 +75,7 @@ export const FAMILY_TABLE = {
   painPointCultureDimensions: "pain_point_culture_dimension",
 };
 
-/** The four functions migration 0024 adds, with args for a privilege probe. */
+/** The four functions migration 0028 adds, with args for a privilege probe. */
 const FUNCTIONS = [
   {
     name: "record_canonical_rows",
@@ -675,7 +675,7 @@ export async function securitySuite(t, ctx) {
 // ---- L16 plus the rollback-refusal case ------------------------------------
 export async function catalogueSuite(t, ctx) {
   const { check, needs, skip } = ctx.ledger;
-  const ROLLBACK_FILE = "0024_drop_canonical_commit_and_rollback.sql";
+  const ROLLBACK_FILE = "0028_drop_canonical_commit_and_rollback.sql";
 
   await needs(
     t,
@@ -686,16 +686,16 @@ export async function catalogueSuite(t, ctx) {
       if (!t.capabilities.catalogue) {
         for (const id of ["L16.1", "L16.2", "X7.4"]) skip(id, "catalogue", "a catalogue comparison needs pg_catalog");
       }
-      console.log("\n[catalogue] 0024 applied, reversed, and compared to the 0023 state");
-      await t.prepare(23);
+      console.log("\n[catalogue] 0028 applied, reversed, and compared to the 0027 state");
+      await t.prepare(27);
       const before = t.capabilities.catalogue ? await t.catalogueSnapshot() : null;
-      await t.applyMigration("0024");
+      await t.applyMigration("0028");
       if (t.capabilities.catalogue) {
         const withUnit3 = await t.catalogueSnapshot();
         check(
           "L16.1",
           JSON.stringify(before) !== JSON.stringify(withUnit3),
-          "applying 0024 actually changes the catalogue",
+          "applying 0028 actually changes the catalogue",
         );
       }
 
@@ -706,13 +706,13 @@ export async function catalogueSuite(t, ctx) {
         check(
           "L16.2",
           differences.length === 0,
-          `reversing 0024 restores the exact 0023 catalogue${differences.length ? ` (${differences.slice(0, 4).join("; ")})` : ""}`,
+          `reversing 0028 restores the exact 0027 catalogue${differences.length ? ` (${differences.slice(0, 4).join("; ")})` : ""}`,
         );
       }
 
       // EXTRA: the reverse script must refuse while a package still owns rows.
       console.log("\n[catalogue] the reverse script refuses to orphan owned rows");
-      await t.applyMigration("0024");
+      await t.applyMigration("0028");
       const scope = await t.createStudy("guard");
       const committed = await commitPackage(t, ctx, scope);
       check("X7.0", committed.outcome.ok === true, `a package is committed (${committed.outcome.ok ? "ok" : committed.outcome.code})`);

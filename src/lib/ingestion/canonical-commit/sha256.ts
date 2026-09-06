@@ -118,7 +118,7 @@ export function sha256Hex(text: string): string {
   return toHex(sha256Bytes(new TextEncoder().encode(text)));
 }
 
-/** The `sha256:<64 hex>` form migrations 0022 and 0024 enforce in the database. */
+/** The `sha256:<64 hex>` form migrations 0026 and 0028 enforce in the database. */
 export function sha256Prefixed(text: string): string {
   return `sha256:${sha256Hex(text)}`;
 }

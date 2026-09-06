@@ -1,7 +1,7 @@
 -- =============================================================================
--- 0024 — canonical package commit, ownership ledger and rollback
+-- 0028 — canonical package commit, ownership ledger and rollback
 -- =============================================================================
--- Depends on 0022 and 0023. Additive only: it creates two tables, adds columns
+-- Depends on 0026 and 0027. Additive only: it creates two tables, adds columns
 -- to `import_job` and to the four pain-point link tables, widens the
 -- `source_lineage` vocabulary, and creates the server-only transactional
 -- functions that write and reverse a validated canonical package.
@@ -199,7 +199,7 @@ alter table public.source_lineage
   ));
 
 -- -----------------------------------------------------------------------------
--- 6. Security for the two new tables — identical to 0022/0023
+-- 6. Security for the two new tables — identical to 0026/0027
 -- -----------------------------------------------------------------------------
 do $security$
 declare
