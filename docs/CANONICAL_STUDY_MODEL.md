@@ -40,6 +40,25 @@ Supabase tracks applied migrations BY VERSION NUMBER, so applying this branch's
 already-applied or conflicts — and both outcomes are quiet enough to be mistaken
 for success.
 
+### The ledger has now been read directly, and it agrees
+
+`supabase_migrations.schema_migrations` was read over a direct connection on
+2026-09-06. It records **26 versions, 0000 through 0025**, ending:
+
+    0022  semantic_category_review
+    0023  experience_definition_persistence
+    0024  experience_draft_conflict_code
+    0025  experience_publication
+
+The ledger AGREES with the object-level evidence gathered over REST: every one of
+those four is recorded AND its objects exist. There is no disagreement to resolve
+— the collision is real and confirmed from both directions.
+
+⚠️ **The ledger records NO timestamp.** Its columns are `version text`,
+`statements text[]`, `name text` — nothing more. "When was 0022 applied" cannot
+be answered from it, and any plan that depends on ordering migrations by
+application time needs a different source.
+
 ### The renumbering floor is 0026, not 0025
 
 ⚠️ **An earlier recommendation in this work to renumber to 0025-0027 is WITHDRAWN.**

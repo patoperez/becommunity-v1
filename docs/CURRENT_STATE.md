@@ -32,10 +32,16 @@ reader, or the real BNI Cuicuilco study.
   supported way to return an automated qualitative confirmation to the human
   review queue. It records itself in the same transaction, and only
   `service_role` may execute it.
-- **The Cuicuilco study's 31 qualitative observations are `pending`**, awaiting a
-  real human editorial review. Their text and the generated suggestions are
-  preserved; no theme is confirmed, no quote is approved, and nothing
-  qualitative is client-visible. The study is `draft`.
+- ⓘ **STALE, corrected 2026-09-06: the Cuicuilco study's observations are NOT
+  all pending.** Measured directly against the project: **23 of 31 carry a
+  confirmed theme and 8 are pending.** The reset this section records did
+  happen; editorial review then resumed and is partly done. That confirmed
+  work exists on ONE study only — see the duplicate below — which is what
+  makes the two copies non-interchangeable.
+  What still holds from the original claim: the observation text and the
+  generated suggestions are preserved, no quote is approved, nothing qualitative
+  is client-visible, and the study is `draft`. What no longer holds is "no theme
+  is confirmed" — 23 are.
 - **The live suites refuse to run on an incoherent build or with stale synthetic
   accounts.** `/admin/upload` carries two upload forms, so the harness scopes
   its locators to the form that owns the control it will click; a first-match
@@ -45,6 +51,31 @@ reader, or the real BNI Cuicuilco study.
   answers, 31 qualitative answers, 123 metric keys, zero discrepancies across
   every key and every segment value — and remains `draft`. Re-prove it with
   `scripts/real-study-verify.mjs`.
+
+### The real study exists TWICE, in two different tenants
+
+Measured 2026-09-06, counts and digests only:
+
+| study | tenant | created | resp / quant / qual | qualitative review |
+|---|---|---|---|---|
+| `cd4d6acd` | BNI Cuicuilco | 2026-08-27 | 60 / 3282 / 31 | **23 confirmed, 8 pending** |
+| `066457f3` | BNI Cuicuilco — PRUEBA DESDE CERO | 2026-08-28 | 60 / 3282 / 31 | 0 confirmed, 31 pending |
+
+All 31 qualitative quote digests and all 56 distinct respondent segment digests
+are shared between them, so the row data is the same import. Both were built from
+the same two source files — `import_batch.source_signature` `4fea5c66cfcf` and
+`dec59dbf98a7` — and each study's counts reconcile exactly as the sum of its two
+committed batches.
+
+**They are NOT interchangeable.** The human editorial work — 23 confirmed themes
+— exists only on `cd4d6acd`. Whatever is decided about the copy, that asymmetry
+is the fact that matters.
+
+The second is named as a test throughout ("PRUEBA DESDE CERO", "PRUEBA FINAL
+DESDE CERO") and sits in its own tenant, so it reads as a deliberate re-import
+rather than an accidental duplicate. `/studio/estudios` applies no status filter
+(`src/app/studio/estudios/page.tsx:67`), so an internal user currently sees all
+six studies side by side with nothing distinguishing the real one.
 
 ## Product and roadmap boundary
 
