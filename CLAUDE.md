@@ -217,20 +217,25 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `docs/CANONICAL_STUDY_MODEL.md`.
 - ⓘ **The hosted project's schema is AHEAD of `main`, which is the same drift
   `0016` was written to remove.** The hosted ledger
-  (`supabase_migrations.schema_migrations`) records 26 versions, 0000-0025,
+  (`supabase_migrations.schema_migrations`) recorded 26 versions, 0000-0025,
   ending in `semantic_category_review`, `experience_definition_persistence`,
   `experience_draft_conflict_code` and `experience_publication` — none of which
-  is on `main`. `study_experience_event` holds 86 rows written under numbers this
+  is on `main`. It now records **29 versions, 0000-0028**: the canonical chain
+  was applied there on 2026-09-06. `study_experience_event` holds 86 rows written under numbers this
   branch also used, so the database made that numbering a fait accompli and the
   canonical branch was the cheap side to move. **This branch now carries those
   four migrations too**, so the repository describes the schema the project
   actually has; the drift is reconciled in source, not merely documented. The
   ledger records no timestamp, so "when was 0022 applied" needs a different
   source.
-- Migrations `0026`, `0027` and `0028` are source changes only until staging
-  execution is explicitly authorized and verified. Do not describe them as
-  applied. (`0022`-`0025` are the opposite case: applied on the hosted project,
-  never applied by this branch.)
+- ⓘ **Migrations `0026`, `0027` and `0028` ARE APPLIED to the hosted project**
+  (`ontvqazsqiwisdddblif`), on 2026-09-06, through `supabase db push` so the
+  official ledger recorded them — no entry was hand-written. Each was applied
+  and verified separately: 8.19 s, 7.91 s, 8.26 s. The ledger is now 0000-0028,
+  29 rows, no duplicate. A fresh verified backup was taken immediately before
+  and is **retained**. Nothing was seeded, no earlier migration was reapplied or
+  repaired, and no auth or storage schema was touched. **No real workbook has
+  been imported: all 36 canonical tables are empty.**
 - **Unit 2 (`src/lib/ingestion/canonical-package/`) parses and validates only.**
   It writes nothing: no Supabase client, no insert, no RPC, no canonical row.
   `npm run test:canonical-package` fails if one appears.
@@ -261,11 +266,13 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   ⓘ **None of the three is hosted canonical execution.** Level 3 is a LOCAL
   PostgREST in front of a LOCAL cluster; it is not equivalent to running the
   canonical chain on the hosted project, and it must never be reported as if it
-  were. Hosted execution of `0026`-`0028` is still pending and separately
-  authorized.
-- ⓘ **The hosted project runs a DIFFERENT PostgREST build, and the result
-  shape, error shape and code round trip (T3, T4, T5) are therefore PENDING
-  RE-PROOF there, not proved.** The local substitute reports `16.2` (upstream
+  were — and the hosted run is now a SEPARATE, EXECUTED result (79 executed,
+  79 passed, 0 failed, 70 skipped), recorded in `docs/CANONICAL_STUDY_MODEL.md`.
+  Neither substitutes for the other.
+- ⓘ **The hosted project runs a DIFFERENT PostgREST build. T3, T4 and T5 have
+  now been RE-PROVED there** by executing the same assertions over the hosted
+  transport rather than by arguing from the local ones. The local substitute
+  reports `16.2` (upstream
   release numbering); the hosted project reports `v14.15` in the CLI's
   `rest-version` metadata and `14.5` in its own OpenAPI `info.version`. Those
   two hosted numbers disagree with each other, so neither maps onto the local
@@ -278,15 +285,21 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   The correct Cuicuilco study — 60 people, 3 282 quantitative answers and its
   reviewed qualitative work including 23 confirmed themes — is intact and was
   verified after the deletion. **The backup is retained and must not be
-  deleted**, and neither may any diagnostic evidence. Nothing else has been
-  written there, and NO canonical migration has been applied there.
-- ⓘ **Five things remain unproved by anything local.** The hosted API gateway's
-  own body limit, the hosted `statement_timeout` under load, recovery from a
-  timeout killed mid-commit, building `0026`'s `respondent_id_tenant_study_uidx`
-  against a populated `respondent` table, and catalogue parity with Supabase's
-  own extensions and default privileges. A green local-transport run must never
-  be reported as a hosted one, and read-only contact is not proof of a write
-  path.
+  deleted**, and neither may any diagnostic evidence. Since then the canonical
+  migrations were applied there, and a synthetic acceptance run created and then
+  deleted its own `U4-` records. Every one of the 41 protected table counts was
+  identical before and after that run, and the Cuicuilco study still reads
+  60 / 3 282 / 31 / 23 confirmed / 8 pending.
+- ⓘ **Of the five things nothing local could prove, three are now proved on the
+  hosted project and two are not.** PROVED there: the hosted API gateway accepts
+  the canonical RPC body (2 708 898 bytes reached `commit_canonical_package`);
+  the hosted statement timeout is not hit by a real commit (slowest 3 482 ms);
+  and `0026`'s `respondent_id_tenant_study_uidx` built against the populated
+  `respondent` table and reports `indisvalid`. STILL UNPROVED: recovery from a
+  timeout killed mid-commit, and catalogue parity with Supabase's own extensions
+  and default privileges — `pg_catalog` is not reachable over PostgREST, so
+  those assertions skip on that transport and remain level-2 results. A green
+  local-transport run must still never be reported as a hosted one.
 - ⓘ **The level-2 count is 135 executed + 1 skipped without the real
   workbooks, and 140 with them.** The real-package case (`X8`) needs
   `CANONICAL_COMMIT_TEST_CLEAN_XLSX` and `_PAIN_XLSX`; without them it is

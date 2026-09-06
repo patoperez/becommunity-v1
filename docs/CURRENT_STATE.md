@@ -109,11 +109,15 @@ produced a wrong claim in this file. Stated precisely:
 3. **The correct Cuicuilco study remains intact** — 60 people, 3 282
    quantitative answers, 31 qualitative answers, 23 confirmed themes — and was
    verified after the deletion.
-4. **NO canonical migration has been applied there.** `0026`, `0027` and `0028`
-   have never run against any hosted project.
-5. **No real workbook has been imported into canonical tables**, anywhere.
-6. **Hosted execution of the canonical migration chain is still PENDING** and
-   requires separate explicit authorization.
+4. **The canonical migrations `0026`-`0028` ARE APPLIED there**, on 2026-09-06,
+   through `supabase db push`. The ledger is 0000-0028, 29 rows, no duplicate.
+   All 36 canonical tables exist and are EMPTY.
+5. **No real workbook has been imported into canonical tables**, anywhere. The
+   only rows those tables have ever held are synthetic `U4-` fixtures, created
+   and deleted by the acceptance run.
+6. **Hosted execution of the canonical migration chain is DONE**; what remains
+   pending is the real Cuicuilco canonical import and the read-path switch,
+   both of which need separate explicit authorization.
 7. **The backup is retained and must not be deleted**, and neither may any
    diagnostic evidence.
 8. **The old application read paths remain authoritative.** Nothing reads the
@@ -773,10 +777,11 @@ rename changed no executable SQL, and the authoritative hashes are in
 `docs/CANONICAL_STUDY_MODEL.md`; `npm run test:migration-chain` enforces the
 result.
 
-This entry records source state, not release state: no canonical migration —
-`0026`, `0027` or `0028` — has been applied to any Supabase project, the
-Cuicuilco workbooks have **not** been loaded into the new model, and nothing has
-been deployed to Cloudflare. The hosted project DOES record applied migrations
+⚠️ **Superseded on 2026-09-06: `0026`-`0028` are now APPLIED to the hosted
+project** (`ontvqazsqiwisdddblif`), and the ledger reads 0000-0028. What this
+entry still records correctly is that the **Cuicuilco workbooks have not been
+loaded into the new model** — the canonical tables are empty — and that nothing
+has been deployed to Cloudflare. The hosted project also records migrations
 numbered 0022-0025; those are the imported `semantic_category_review` and
 `experience_*` migrations from other branches, not this branch's work.
 
@@ -823,15 +828,16 @@ The contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 `src/lib/ingestion/canonical-commit/` projects a validated package into
 canonical records and writes them through one transactional RPC. Migration
 `0028_canonical_commit_and_rollback.sql` and its reverse script carry the
-schema. **No canonical migration has been applied and no canonical row exists in
-any environment:** none of `0026`, `0027` or `0028` has run anywhere, no Worker
-was built or promoted, and no real workbook was uploaded.
+schema. When this entry was written, none of `0026`-`0028` had run anywhere.
 
-⚠️ **The hosted project HAS been contacted since this entry was first written,
-and one mutation was executed there** — a read-only inventory, a read-only
-diagnostic, a verified retained backup, and the fail-closed deletion of the
-duplicate study recorded above. None of that wrote a canonical row or applied a
-canonical migration. The deterministic gate is `npm run test:canonical-commit`
+⚠️ **Superseded on 2026-09-06.** The hosted project has been contacted
+repeatedly since — a read-only inventory, a read-only diagnostic, two verified
+retained backups, the fail-closed deletion of the duplicate study recorded
+above, and then the application of `0026`-`0028` followed by a synthetic
+acceptance run. What still holds: **no canonical row from real data exists in
+any environment**, no Worker was built or promoted, and no real workbook was
+uploaded. The canonical tables have only ever held synthetic `U4-` fixtures,
+which the run deleted. The deterministic gate is `npm run test:canonical-commit`
 (306 checks), registered in `npm test`.
 
 The full contract is in `docs/CANONICAL_STUDY_MODEL.md`. What a reader needs

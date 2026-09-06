@@ -54,10 +54,14 @@
 //       it is asserted directly, alongside the object inventory and the
 //       transaction contract each canonical file must still declare.
 //
-//   [7] THE DOCUMENTATION DOES NOT LIE. No document may claim the canonical
-//       migrations have been applied, may still hand them 0022-0024, or may
-//       repeat the withdrawn claim that a hosted project has never been
-//       contacted.
+//   [7] THE DOCUMENTATION DOES NOT LIE. No document may still hand the
+//       canonical migrations 0022-0024, or repeat the withdrawn claim that a
+//       hosted project has never been contacted. Since 2026-09-06 the canonical
+//       chain IS applied to the hosted project, so the claim this section
+//       guards has inverted with the fact: every governing document must now
+//       RECORD that application, none may call it pending, and none may claim
+//       the step that has NOT happened — a real workbook imported into the
+//       canonical tables.
 //
 // It contacts nothing. It reads files.
 // =============================================================================
@@ -524,30 +528,36 @@ console.log("\n[7] The documentation does not claim an application that never ha
   const DOCS = ["CLAUDE.md", "docs/CURRENT_STATE.md", "docs/CANONICAL_STUDY_MODEL.md"];
   const canonicalSlugs = canonical.map((e) => e.slug);
 
-  // A document may say the canonical migrations are NOT applied — it has to.
-  // It may not say they ARE. The negation can sit anywhere in the clause ("no
-  // canonical migration has been applied", "none of 0026-0028 has been
-  // applied", "…is not applied"), so the window is widened to take in the
-  // subject and then rejected if it carries any negator.
+  // THE FACT THIS CHECK GUARDS INVERTED ON 2026-09-06, AND SO DID THE CHECK.
+  //
+  // Until then, 0026-0028 had never been applied anywhere, and the rule was
+  // that no document may claim otherwise. They are now applied to the hosted
+  // project and recorded in its ledger, so the same rule stated against the
+  // same fact becomes its mirror: every governing document must SAY they are
+  // applied, and none may regress to calling that work pending.
+  //
+  // What has NOT changed is the thing worth protecting — a document must never
+  // describe a step as done that has not happened. The real-workbook import is
+  // still not done, so it is guarded here in exactly the way the migration
+  // application used to be.
   const NEGATOR = /\b(?:not|never|no|none|nothing|neither|nor|pending|until|unless|without|cannot)\b/i;
-  const SUBJECT = /\bcanonical migrations?\b|\b0026\b[^.]{0,40}\b0028\b/i;
-  const APPLIED = /\b(?:has|have|was|were|is|are)\s+(?:been\s+)?applied\b/i;
-
-  /**
-   * Sentences that say the canonical migrations ARE applied.
-   *
-   * The negation is looked for INSIDE the sentence and nowhere else. An earlier
-   * version scanned a fixed window of preceding characters and was defeated by
-   * an unrelated "not" in the previous paragraph — it passed a document that
-   * had been given the sentence "The canonical migrations have been applied to
-   * the hosted project."
-   */
-  const appliedClaims = (text) =>
+  const sentences = (text) =>
     text
       .split(/(?<=[.:;!?])\s+|\n\s*\n|\n\s*[-*|]\s*|\n#+\s*/)
       .map((s) => s.replace(/\s+/g, " ").trim())
-      .filter((s) => SUBJECT.test(s) && APPLIED.test(s) && !NEGATOR.test(s))
-      .map((s) => s.slice(0, 110));
+      .filter(Boolean);
+
+  /** Sentences asserting the canonical chain IS applied — now required. */
+  const APPLIED_SUBJECT = /\bcanonical (?:migrations?|chain)\b|\b0026\b[^.]{0,40}\b0028\b/i;
+  const APPLIED_VERB = /\b(?:has|have|was|were|is|are)\s+(?:been\s+)?applied\b|\bARE APPLIED\b/i;
+  const assertsApplied = (text) =>
+    sentences(text).filter((s) => APPLIED_SUBJECT.test(s) && APPLIED_VERB.test(s) && !NEGATOR.test(s));
+
+  /** Sentences claiming a real workbook has been imported — still forbidden. */
+  const IMPORT_SUBJECT = /\breal (?:workbook|package)s?\b|\bCuicuilco workbooks?\b/i;
+  const IMPORT_VERB = /\b(?:has|have|was|were|is|are)\s+(?:been\s+)?(?:imported|loaded|uploaded)\b/i;
+  const claimsRealImport = (text) =>
+    sentences(text).filter((s) => IMPORT_SUBJECT.test(s) && IMPORT_VERB.test(s) && !NEGATOR.test(s));
 
   // Claims the hosted work of this unit has already withdrawn. Each was true
   // when written and is false now; leaving one in place tells the next session
@@ -563,8 +573,26 @@ console.log("\n[7] The documentation does not claim an application that never ha
   for (const doc of DOCS) {
     const text = read(doc);
 
-    const claims = appliedClaims(text);
-    check(claims.length === 0, `${doc} never claims the canonical migrations were applied${claims.length ? ` — "…${claims[0]}"` : ""}`);
+    const applied = assertsApplied(text);
+    check(
+      applied.length > 0,
+      `${doc} records that the canonical migrations ARE applied to the hosted project${applied.length ? "" : " — it does not, and they are"}`,
+    );
+
+    const stillPending = sentences(text).filter((s) =>
+      /\bhosted (?:execution|application|run)\b|\bcanonical (?:migrations?|chain)\b/i.test(s) &&
+      /\b(?:is|are|remains?|stays?)\s+(?:still\s+)?(?:PENDING|pending)\b/.test(s) &&
+      !/real (?:workbook|Cuicuilco)|read[- ]path|import\b/i.test(s));
+    check(
+      stillPending.length === 0,
+      `${doc} no longer calls the hosted migration application pending${stillPending.length ? ` — "…${stillPending[0].slice(0, 90)}"` : ""}`,
+    );
+
+    const imported = claimsRealImport(text);
+    check(
+      imported.length === 0,
+      `${doc} never claims a real workbook was imported into canonical tables${imported.length ? ` — "…${imported[0].slice(0, 90)}"` : ""}`,
+    );
 
     for (const [pattern, why] of WITHDRAWN) {
       check(!pattern.test(text), `${doc} does not repeat a withdrawn claim (${why})`);
@@ -613,5 +641,5 @@ console.log(
   "RESULT: one contiguous migration chain, no duplicate number, the applied slots\n" +
     "        pinned by content, the canonical set above them with matching rollbacks,\n" +
     "        no runner skipping a file, no migration number in executable SQL, and no\n" +
-    "        document claiming an application that has not happened. GATE PASSED.",
+    "        document misdescribing what has and has not been applied. GATE PASSED.",
 );

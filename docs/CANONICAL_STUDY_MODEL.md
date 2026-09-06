@@ -919,11 +919,87 @@ binary SHA-256
 by `postgrest --version` before use. It lives outside the repository at
 `~/becommunity-postgrest/` and is not tracked by git.
 
-⚠️ **This changes nothing about the hosted project.** The re-run is a LOCAL
-PostgREST in front of a LOCAL disposable cluster. Hosted execution of the
-canonical chain is still pending and separately authorized, and T3, T4 and T5
-remain pending re-proof on the hosted transport for the reason given above:
-it is a different PostgREST build.
+⚠️ **That re-run was still LOCAL** — a local PostgREST in front of a local
+disposable cluster. It never spoke for the hosted project. The hosted execution
+that does is recorded in the next section.
+
+---
+
+## The canonical chain is APPLIED to the hosted project (2026-09-06)
+
+`0026`, `0027` and `0028` were applied to project `ontvqazsqiwisdddblif`
+(`be-community-dev`, PostgreSQL 17.6), which holds the real Cuicuilco data. They
+were applied with `supabase db push` (CLI v2.115.0) against a **session**
+connection — never the transaction pooler — so the official
+`supabase_migrations.schema_migrations` ledger recorded each one. **No ledger
+entry was hand-written**, nothing was seeded, no earlier migration was reapplied
+or repaired, and no auth or storage schema was touched.
+
+**Before anything.** A read-only preflight verified all thirteen required facts,
+including that the ledger held exactly 0000-0025 with no duplicate, that the four
+hosted-applied names matched the artifacts imported into Git, that none of the 36
+canonical tables or 4 RPCs existed, that no earlier `U4-` object was left over,
+that `respondent` had 82 rows with **zero duplicate `(id, tenant_id, study_id)`
+triples** — the index `0026` builds — and that `study_period_snapshot`'s 6 rows
+would satisfy `0027`'s new CHECKs. A fresh backup was then taken and
+**rehearsed**: restored into a throwaway local PostgreSQL 17 database where all
+24 table counts and the 26-row ledger matched the source exactly.
+
+**The dry run proposed exactly three files and nothing else** — no reapplication
+of 0022-0025, no history repair, no seed.
+
+| migration | duration | verified immediately after |
+|---|---|---|
+| `0026_canonical_ingestion_foundation` | 8.19 s | 18 tables; `respondent_id_tenant_study_uidx` built against the populated table and `indisvalid`; legacy counts unchanged; all 18 new tables empty; RLS + FORCE RLS + deny policy on all 18; **zero** browser grants |
+| `0027_canonical_analysis_model` | 7.91 s | 16 tables; `study_period_snapshot` gained its three columns and both CHECKs **validated** against the existing 6 rows, whose values are unchanged; all 16 new tables empty; RLS + FORCE RLS + deny policy on all 16 |
+| `0028_canonical_commit_and_rollback` | 8.26 s | `import_job_record` and `retention_period` exist with RLS + FORCE RLS; all four RPCs exist, every one `SECURITY DEFINER` with `search_path=""`; EXECUTE held only by `service_role` (and the owning `postgres` role); `anon` and `authenticated` cannot execute any of them; all 36 canonical tables present and **empty** |
+
+The ledger is now **29 rows, 0000-0028, no duplicate**.
+
+### Hosted synthetic acceptance
+
+`npm run test:canonical-commit-hosted` ran against the same project with the
+disposable prefix `U4-P4A7K2` and synthetic fixtures only. The real workbooks
+were deliberately not supplied.
+
+**102 assertions offered: 79 executed, 79 passed, 0 failed, 70 skipped.**
+
+All **41** protected table counts were **identical before and after**. Measured
+over the hosted transport, sizes and durations only:
+
+| RPC | calls | largest body | slowest |
+|---|---|---|---|
+| `commit_canonical_package` | 17 | 2 708 898 bytes | 3 482 ms |
+| `stage_canonical_package` | 20 | 23 295 bytes | 440 ms |
+| `rollback_canonical_package` | 4 | 73 bytes | 520 ms |
+
+**What the hosted run settled**, and what it did not:
+
+| id | status | note |
+|---|---|---|
+| **T1** | proved on hosted | the gateway accepted and parsed a 2 708 898-byte plan body |
+| **T2** | proved on hosted | a real commit finished in 3 482 ms, well inside the hosted statement timeout |
+| **T3, T4, T5** | **re-proved on hosted** | result shape, error shape and code round trip hold on the hosted PostgREST build (`v14.15`/`14.5`), not merely on the local `16.2` substitute. 25 of the 34 codes were never provoked over HTTP by this run and are recorded as SKIPPED, one per code |
+| **T6** | proved on hosted | deterministic commit, retry/replay, count reconciliation, rollback and repeated rollback all held |
+| **T8** | proved on hosted | the service-role key executes all four functions |
+| **T9** | **SKIPPED** | the transport declares `roleSwitch` only when BOTH an anon and an authenticated key are supplied. No `authenticated` key exists in the configured environment, so the HTTP privilege probes did not run. The denial itself is **not** unproved: `has_function_privilege` shows `anon` and `authenticated` cannot execute any of the four RPCs — that is a catalogue proof taken directly on the hosted project, not an HTTP one |
+| **M2** | proved on hosted | `0026`'s index built against the populated `respondent` table |
+| **M3** | **proved on hosted, against populated rows** | `0027`'s CHECKs are `convalidated` against the 6 existing `study_period_snapshot` rows — the case the local gate could only test against an empty table |
+| **M4** | **SKIPPED** | catalogue parity with Supabase's own extensions and default privileges needs `pg_catalog`, which PostgREST does not expose; it remains a level-2 result |
+
+The 70 skips break down as: 27 needing DDL the REST transport does not have,
+25 error codes never provoked over HTTP, 8 needing `pg_catalog`, 5 needing
+concurrent sessions, 4 needing a second role identity, and 1 needing the real
+workbooks. Every one is reported as skipped and **none is counted as a pass**.
+
+### What is still NOT done
+
+**No real workbook has been imported.** The canonical tables have only ever held
+synthetic `U4-` fixtures, and the acceptance run deleted them: all 36 are empty,
+verified independently after the run. The Cuicuilco study is untouched at
+60 / 3 282 / 31 / 23 confirmed / 8 pending, `draft`. The old application read
+paths remain authoritative and nothing reads the canonical tables. Recovery from
+a timeout killed mid-commit remains unproved anywhere.
 
 | id | result | measured |
 |---|---|---|
