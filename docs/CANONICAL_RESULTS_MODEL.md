@@ -33,7 +33,13 @@ a real formula and stays quiet on a bar width.
 
 ## 2. What the contract carries
 
-`src/lib/results/contract.ts`, `CANONICAL_RESULTS_CONTRACT_VERSION = "1.0.0"`.
+`src/lib/results/contract.ts`, `CANONICAL_RESULTS_CONTRACT_VERSION = "2.0.0"`.
+
+> **2.0.0** carries the methodology owner's decisions of 2026-09-06. The
+> touchpoint's authoritative unawareness metric is now `tdp`, the auxiliary
+> proportion sits beside it under an explicit name, and the journey's
+> stage-evidence result is a settled contract rule rather than an open
+> question. Field renames make it breaking, so the major moved.
 
 Two versions, two questions, answered separately: the **contract version**
 changes when the SHAPE changes; `calculationVersion` (carried on every result)
@@ -48,10 +54,11 @@ changes when a FORMULA changes.
 | `recommendation` | NPS per scope, with promoter / passive / detractor counts and shares |
 | `renewal` | the churn-risk index and its five-rung distribution |
 | `retention` | per period: four source counts with their states, retention, attrition |
-| `journey` | groups, ordered touchpoints, CSAT, two unawareness quantities, exclusions, the curated stage model, and the stage-evidence gap report |
+| `journey` | groups, ordered touchpoints, each owning its CSAT, its TDP and the auxiliary unawareness share, plus exclusions, the curated stage model and the stage-evidence rule |
 | `performance` | per dimension and period: the mean and the band counts |
 | `qualitative` | curated category counts per cohort, and curated-finding counts per curated entity |
-| `unresolved` | every open question, gathered in one place |
+| `unresolved` | every open question. EMPTY for Cuicuilco: all three were settled on 2026-09-06 |
+| `configurationRequired` | what is deliberately supplied by study configuration or editorial review |
 
 ### Three states, and they are not interchangeable
 
@@ -62,7 +69,13 @@ changes when a FORMULA changes.
   cross*. A base of zero is **never** a measured zero.
 - **`unresolved`** — the authorities disagree, or the relationship the result
   would assert has not been stated by anyone. Neither a pass nor a failure: a
-  question carried in the data instead of guessed.
+  question carried in the data instead of guessed. **Empty for Cuicuilco**,
+  and empty is the healthy state.
+
+Beside them, `configurationRequired` records what the contract deliberately
+leaves to a study configuration or to editorial review. That is an ANSWER, not
+an open question — it names who supplies the thing and in what artefact — and
+conflating the two makes a working design read as a permanent defect.
 
 ### An empty base never publishes a zero
 
@@ -118,7 +131,7 @@ red gate.
 
 ---
 
-## 3. Authority order, and how conflicts are handled
+## 3. Authority order, and how the conflicts were resolved
 
 1. the documented Be Community methodology, and explicit recorded decisions;
 2. the complete source-workbook structure;
@@ -126,46 +139,52 @@ red gate.
 4. the legacy application, as compatibility evidence only.
 
 **An expected result is never altered to make a test pass.** Where two
-authorities genuinely conflict, the conflict is recorded and only the affected
-metric stops.
+authorities genuinely conflicted, this layer recorded the conflict and stopped
+only the affected metric rather than picking a winner. The methodology owner
+then decided, on **2026-09-06**, and the decisions are recorded below and in
+the authority register (`owner-decision-*` in `src/lib/results/authorities.ts`).
+**Not one approved number moved:** golden parity was 531 / 531 before and after.
 
-### Conflict 1 — what "TDP" names (UNRESOLVED, both quantities emitted)
+### RESOLVED — what "TDP" names
 
-Two documents give the same name to two different quantities:
+Two documents had given the same name to two different quantities:
 
 | authority | denominator | bounded? |
 |---|---|---|
 | `Documentacion_Integral_Proceso_Be_Community` §4.1 | «respuestas con categoría de Satisfecho y Insatisfecho» — the VALID base, excluding the unaware answers that form the numerator | **no**, may exceed 100 |
-| `docs/CALCULATION_CATALOG.md` §5 | «total de respuestas del punto» — every response, unaware included | yes, 0–100 |
+| `docs/CALCULATION_CATALOG.md` §5, as it then read | «total de respuestas del punto» — every response, unaware included | yes, 0–100 |
 
-The process documentation contradicts itself as well: §7.1 specifies a stacked
-"% que conoce / % que no conoce" chart, whose two bars only sum to 100 under the
-catalogue's denominator. The approved dashboard implements the §4.1 ratio.
+**Decision: TDP is the §4.1 ratio**, which is also what the CEO-approved
+dashboard computes. `docs/CALCULATION_CATALOG.md` §5 has been corrected, with
+the previous definition and the reason for the change recorded there rather
+than quietly overwritten.
 
-**Resolution: none, deliberately.** Both quantities are documented, both are
-legitimate, and only the NAME is contested — so the contract emits both under
-unambiguous names, each with its own base:
+| quantity | contract field | canonical function | denominator |
+|---|---|---|---|
+| **TDP** — the official metric | `touchpoint.tdp` | `processUnawarenessTdp` | valid base (satisfied + dissatisfied); may exceed 100, never clamped |
+| auxiliary proportion | `touchpoint.unawareShareOfResponses` | `unawarenessShareOfResponses` | every classified response; bounded 0–100 |
 
-- `unawareShare` — the proportion of a touchpoint's responses that reported not
-  knowing it. `processUnawarenessRate`, bounded 0–100.
-- `unawarenessRatio` — the §4.1 ratio over the valid base.
-  `processUnawarenessRatio`, may exceed 100 and is deliberately not clamped:
-  clamping would erase exactly the cases the measure exists to surface.
+The auxiliary survives because it is the complement of the "% who know this
+process" bar in §7.1's stacked chart, and that pair only closes at a hundred
+under its denominator. It is **never called TDP** — not in its key, not in its
+label, not in its client-safe explanation, and the gate checks all three — it
+never replaces TDP, and its denominator is stated on its own base.
 
-`results.unresolved` carries `tdp_name_conflict` with both authorities and what
-would settle it. **A human must decide which document is wrong**; this layer
-will not decide it, and neither document was edited to hide the disagreement.
-
-### Conflict 2 — Esfera × CRI (REFUSED, with provenance)
+### RESOLVED — Esfera × CRI
 
 §5.2 says «OJO: La esfera no se debe cruzar en este KPI», and
-`docs/CALCULATION_CATALOG.md` §9 repeats the exclusion. **The approved dashboard
-offers that cross anyway** — `esfera` is one of its CRI cube dimensions.
+`docs/CALCULATION_CATALOG.md` §9 repeats the exclusion. The approved dashboard
+offers that cross anyway — `esfera` is one of its CRI cube dimensions.
 
-The canonical layer refuses it: the dimension declares the section it may not
-cross, and a caller that constrains it receives `cross_not_permitted` rather
-than a number. This is a deviation of the approved dashboard from the
-methodology, recorded here for a human to resolve.
+**Decision: §5.2 is authoritative.** The emergency dashboard offering the cross
+is a reference-dashboard deviation, not a methodological override. Esfera is
+not permitted as a CRI filter or segmentation cross, anywhere.
+
+The canonical layer refuses it and always did: the dimension declares the
+section it may not cross, a caller that constrains it receives
+`cross_not_permitted` citing the authority, and neither a distribution nor a
+base computed over that cross is published — `distribution` is `null` and the
+base is emptied.
 
 ### Reconciliation — «No aplica» as a category and as an absence
 
@@ -177,7 +196,6 @@ nothing in CSAT — the satisfaction block's only non-numeric option is
 appear there at all — but it does hide the documented "not a reason" category in
 the renewal-reason column. The category's count is recovered from the absence
 state, which is exact rather than approximate: only that one token maps to it.
-
 ### Not conflicts, once the workbook is consulted
 
 - **NPS scale.** §3.2 describes a 1–10 instrument; §4.1's recode says «0 a 6»
@@ -263,8 +281,8 @@ round at:
 |---|---|---|
 | `nps` | 1 | `beCommunityNps` |
 | `index` | 1 | `churnRiskIndex` |
-| `percent` | 1 | `touchpointCsat`, `processUnawarenessRate`, `retentionRate`, `churnRate` |
-| `ratio` | 1 | `processUnawarenessRatio` |
+| `percent` | 1 | `touchpointCsatOnScale`, `unawarenessShareOfResponses`, `retentionRate`, `churnRate` |
+| `ratio` | 1 | `processUnawarenessTdp` |
 | `score` | 2 | `mean` |
 | `count` | 0 | counts |
 
@@ -307,7 +325,7 @@ canonical projection (Unit 3)          canonical tables (later)
 | `filters.ts` | filter dimensions and evaluation, over people, before aggregation |
 | `lookup.ts` | indices, built once, preserving source order |
 | `population.ts` `recommendation.ts` `journey.ts` `renewal.ts` `retention.ts` `performance.ts` `qualitative.ts` | the calculators |
-| `build.ts` | assembles the document and collects the open questions |
+| `build.ts` | assembles the document and collects its configuration requirements |
 | `adapters/commit-plan.ts` | the in-memory adapter, and the redaction boundary |
 
 **Four boundaries, kept apart:** transport (absent here), canonical-record
@@ -354,21 +372,28 @@ workbooks, it reports itself SKIPPED rather than passing.
 ### Result, executed 2026-09-06
 
 ```
-ofrecidas=534  ejecutadas=531  aprobadas=531  falladas=0  omitidas=0  sin-resolver=3
+ofrecidas=534  ejecutadas=531  aprobadas=531  falladas=0  omitidas=0
+sin-resolver=0  no-aplica=2  requieren-configuración=1
 Comprobaciones estructurales: 0 fallo(s).
 ```
+
+Every category is reported separately and none is folded into another. The
+**531 comparable approved results have not moved** across the owner's
+decisions: what changed is the classification of the three that were never
+comparable, from one open question each to two `not_applicable` and one
+`configuration_required`.
 
 Plan fingerprint
 `sha256:a226b70c7ddc314424adadd5563a7da4a11bdc096b3bb64994dbc01df436e388`.
 
-| section | offered | executed | passed | failed | unresolved |
-|---|---:|---:|---:|---:|---:|
-| journey | 452 | 450 | 450 | 0 | 2 |
-| retention | 36 | 36 | 36 | 0 | 0 |
-| recommendation | 15 | 15 | 15 | 0 | 0 |
-| qualitative | 13 | 12 | 12 | 0 | 1 |
-| population | 10 | 10 | 10 | 0 | 0 |
-| renewal | 8 | 8 | 8 | 0 | 0 |
+| section | offered | executed | passed | failed | not applicable | configuration required |
+|---|---:|---:|---:|---:|---:|---:|
+| journey | 452 | 450 | 450 | 0 | 2 | 0 |
+| retention | 36 | 36 | 36 | 0 | 0 | 0 |
+| recommendation | 15 | 15 | 15 | 0 | 0 | 0 |
+| qualitative | 13 | 12 | 12 | 0 | 0 | 1 |
+| population | 10 | 10 | 10 | 0 | 0 | 0 |
+| renewal | 8 | 8 | 8 | 0 | 0 | 0 |
 
 **Exactly what was matched.** Population: study total, measured, both cohort
 sizes, former-measured, former-answered, former-without-data, and the three
@@ -378,7 +403,7 @@ detractors + valid base. Renewal: index, valid base, zone, and all five category
 counts. Journey: touchpoint count, group count, four group sizes, four group
 membership-and-order sequences expressed as source positions, and all 55
 touchpoints × satisfied + dissatisfied + unaware + valid base + responses +
-CSAT + unawareness ratio + band. Qualitative: both closed-coded cohort clouds ×
+CSAT + TDP + band. Qualitative: both closed-coded cohort clouds ×
 total + excluded count + every category count.
 
 **No mismatch remains.** Two were found and both were defects in this layer, not
@@ -386,24 +411,32 @@ in the approved dashboard, and both were fixed: the excluded renewal-reason
 category was not being recovered from its absence state, and the privacy scan
 was treating filter-option vocabulary as respondent data.
 
-### The three unresolved comparisons
+### The three comparisons that are not parity targets
 
-1. **`journey.stageEvidence`** — no authority states which metric belongs to
-   which journey stage. See §9.
-2. **`qualitative.recorrido`** — the approved dashboard's 79-term curated phrase
-   cloud is not reproducible. It needs a rule for splitting a curated cell into
-   phrases, and a mapping from each measured touchpoint to the curated stage it
-   draws phrases from. No authority states either; the approved dashboard
-   resolves the second with a hand-written alias table in its own build script,
-   which is an implementation and not an authority. The contract emits curated
-   **finding counts per curated entity** instead, which real foreign keys
-   support. The curated phrases are not copied into the fixture.
-3. **`journey.unawareShare`** — the approved dashboard publishes only the §4.1
-   ratio, so there is no approved value against which to compare the catalogue's
-   proportion. See the TDP conflict in §3.
+None of these is a failed calculation, and none is counted as a pass.
 
-A skipped or unresolved check is neither a pass nor a failure, and the summary
-reports the five numbers separately for exactly that reason.
+1. **`journey.stageEvidence` — `not_applicable`.** By contract rule a
+   touchpoint directly owns its CSAT, its TDP and the auxiliary share, and no
+   study-level metric is implicitly attached to a stage. The approved dashboard
+   publishes no such link either, so there is nothing to compare. See §9.
+2. **`qualitative.recorrido` — `configuration_required`.** The approved
+   dashboard's 79-term curated phrase cloud is editorial content, not a
+   server-calculated metric: reproducing it needs a phrase-splitting rule and a
+   mapping from each measured touchpoint to the curated stage it draws phrases
+   from, and the approved dashboard resolves the second with a hand-written
+   alias table in its own build script — an implementation, not an authority.
+   The contract emits curated **finding counts per curated entity** instead,
+   which real foreign keys support. The curated phrases are not copied into the
+   fixture, no phrase-splitting rule is invented, and no alias is copied into
+   the calculation layer.
+3. **`journey.unawareShareOfResponses` — `not_applicable`.** TDP itself IS
+   compared, touchpoint by touchpoint, and matches. The auxiliary proportion is
+   a separate quantity with its own denominator that the approved dashboard
+   does not publish, so no approved value exists to compare it against.
+
+A check that is skipped, not applicable, configuration-required or unresolved is
+neither a pass nor a failure, and the summary reports all eight numbers
+separately for exactly that reason.
 
 ### What an adversarial review changed, and what it did not
 
@@ -434,6 +467,16 @@ including the three base invariants above, filter-invariance of the exclusion
 decision, and the empty-base and refused-cross cases — none of which anything
 had been checking.
 
+### The authority-resolution amendment, 2026-09-06
+
+The methodology owner resolved the two conflicts and the journey rule. The
+amendment renamed the two unawareness functions and the two touchpoint fields,
+corrected  §5 and §9, replaced the stage-evidence
+gap report with a settled contract rule, and reclassified the three
+non-comparable expectations. **No formula changed its arithmetic and no
+expected value was edited:** golden parity stayed at 531 / 531 executed and
+passed, and the synthetic gate grew from 210 checks to 233.
+
 ### The gates discriminate — proved, not asserted
 
 Executed 2026-09-06, then restored byte-identically (verified by SHA-256):
@@ -445,32 +488,47 @@ Executed 2026-09-06, then restored byte-identically (verified by SHA-256):
 
 ---
 
-## 9. The journey relationship that is still unresolved
+## 9. What a touchpoint owns, and what needs configuration
 
-**`journeyStageEvidenceLinks` is empty and stays empty.** Re-investigated
-against the full methodology document and the complete workbook context:
+**This is a contract rule, decided by the methodology owner on 2026-09-06, and
+not an uncertainty about Cuicuilco.**
+
+A journey touchpoint DIRECTLY owns:
+
+- its **CSAT** result and the valid base behind it;
+- its **TDP** result and the same valid base;
+- the **auxiliary unawareness share** and its wider base.
+
+NPS, CRI, retention, attrition, LTV and every other study-level metric are
+**not** implicitly attached to a touchpoint or a stage, and no generic
+metric-to-stage association is ever inferred. The evidence agrees with the
+rule:
 
 - §7.2: «Las etapas son puntos de contacto o touchpoints.» The methodology
   collapses stage and touchpoint into ONE level, so there is no intermediate
-  layer above a touchpoint for any metric to attach to.
+  layer above a touchpoint for a metric to attach to.
 - §7.2: «Cada cliente puede tener un recorrido diferente, los puntos de inicio y
   final son fijos en general.» The journey is client-specific by design.
 - §4.1: only CSAT carries a positional qualifier — «CSAT de cada punto de
-  contacto…». NPS, TDP, CRI, retention, attrition and LTV are defined with no
+  contacto…». NPS, CRI, retention, attrition and LTV are defined with no
   positional qualifier at all.
 - §7.3's report ORDER and §6.3's hedged display suggestion («valdría la pena»)
   are co-presentation, not stage membership.
 
-**The single defensible relation, with provenance: CSAT ↔ touchpoint**, and
-touchpoints ARE the stages. Everything else is refused, and the refusal is
-itself evidenced.
+`journeyStageEvidenceLinks` therefore stays in the contract and stays EMPTY
+unless an explicit configuration supplies a link. `journey.stageEvidence`
+reports `requires_explicit_configuration` with the rule id
+`journey_stage_evidence_is_explicit_only`, an empty `links` array and a
+statement of who would supply one. There is **no per-stage gap report**: the
+eighteen "unknown candidate" entries the earlier contract emitted described a
+working design as a permanent defect, and they are gone.
 
-The contract emits `journey.stageEvidence` as `unresolved` with a **mapping-gap
-report**: one entry per curated stage (18 for Cuicuilco), each stating that no
-authority links a metric to it. `provenMetricKeys` is empty and stays empty — a
-list of "likely" metrics would be a guess wearing a data structure, and a
-consultant could not tell it apart from a relationship somebody actually made.
-
+A future study that genuinely has such a relationship declares it in study or
+template configuration, with provenance; the canonical projection carries it
+through unchanged and the contract publishes it. Nothing infers one, and the
+approved dashboard's hand-written alias table is not copied into production
+code. The gate proves both halves: with no configuration `links` is empty, and
+with one supplied the link appears exactly as declared.
 ### What IS proven about the journey
 
 **Grouping and ordering are the workbook's, and they are exact.** The
@@ -540,19 +598,20 @@ sheet named `Hoja 1` — which is a further reason not to compute from it.
    publication-boundary work that implies. Nothing reads the canonical tables
    today.
 3. **The real import**, which is a separate authorized act.
-4. **Two human decisions**, neither of which this layer may make:
-   - which quantity the name "TDP" belongs to, and the correction of whichever
-     document is wrong;
-   - whether Esfera × CRI is genuinely forbidden, given that the approved
-     dashboard offers it.
+4. ~~Two human decisions~~ — **both taken on 2026-09-06.** TDP is the §4.1
+   ratio and the catalogue is corrected; Esfera × CRI is forbidden and the
+   canonical refusal stands. Nothing further is needed from a methodologist for
+   either.
 5. **A short touchpoint label.** The projection records the satisfaction sheet's
    short label column as the answer's derived label, not as the item's name, so
    `JourneyTouchpointResult.shortLabel` is null and `label` is the full question.
    A projection revision should record the label column's own header; deriving
    one by cutting the question text apart would be a transformation nobody
    documented.
-6. **A phrase-segmentation rule and an approved touchpoint-to-curated-stage
-   mapping**, if the curated phrase cloud is to be reproduced.
+6. **Editorial input for the curated journey cloud** — a phrase-segmentation
+   rule and an approved touchpoint-to-curated-stage mapping — IF that cloud is
+   ever to be reproduced. It is editorial content by decision, so this is a
+   configuration item and not a blocker on the canonical import.
 
 ---
 

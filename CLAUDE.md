@@ -354,7 +354,7 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 - ⓘ **The server-side results layer EXISTS: `src/lib/results/`.** Unit 5 Phase 1
   built the versioned, aggregate-only contract a future dashboard receives, plus
   its in-memory adapter over the canonical projection. Its rules, its two open
-  authority conflicts and its unresolved journey relationship are documented in
+  resolved authority decisions and its journey-ownership rule are documented in
   `docs/CANONICAL_RESULTS_MODEL.md` — read it before touching that folder.
   Nothing in it defines a formula: every number delegates to
   `src/lib/calc/metrics.ts` / `business-metrics.ts`. `npm run test:canonical-results`
@@ -365,15 +365,22 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   offline, and deliberately OUTSIDE `npm test` because its inputs are
   machine-specific; run without workbooks it reports itself SKIPPED, never as a
   pass. Executed 2026-09-06: 534 offered, 531 executed, 531 passed, 0 failed,
-  0 skipped, 3 unresolved. **No real workbook was imported and the canonical
-  tables are still empty.**
-- ⓘ **Two authority conflicts are open and must NOT be resolved in code.**
-  (1) The process documentation §4.1 and `docs/CALCULATION_CATALOG.md` §5 give
-  the name "TDP" to two different quantities with different denominators; both
-  are emitted under unambiguous names and the conflict is recorded, because
-  never altering an expected result to make a test pass cuts both ways.
-  (2) §5.2 forbids Esfera × CRI and the approved dashboard offers it anyway; the
-  canonical layer refuses the cross. Both need a methodological decision.
+  0 skipped, 0 unresolved, 2 not-applicable, 1 configuration-required. **No real
+  workbook was imported and the canonical tables are still empty.**
+- ⓘ **The authority questions are RESOLVED (2026-09-06). Do not reopen them.**
+  (1) **TDP is the §4.1 ratio** — unawareness over the VALID base (satisfied +
+  dissatisfied); it may exceed 100 and is never clamped. `processUnawarenessTdp`
+  is the implementation and `docs/CALCULATION_CATALOG.md` §5 was corrected. The
+  proportion over all classified responses survives as an auxiliary under its
+  own name, `unawarenessShareOfResponses`, and must never be called TDP.
+  (2) **Esfera × CRI is forbidden** (§5.2). The approved dashboard offering it
+  is a reference-dashboard deviation. Do not add or enable that cross anywhere.
+  (3) **A touchpoint directly owns its CSAT, TDP and auxiliary share; no
+  study-level metric attaches to a stage implicitly.** `journeyStageEvidenceLinks`
+  stays empty unless explicit study/template configuration supplies a link.
+  (4) **The curated journey pain cloud is editorial content**, not a calculation
+  and not a blocker. Never copy the approved dashboard's alias table into
+  production code, and never invent a phrase-splitting rule.
 - ⓘ **The approved future dashboard is REFERENCE ONLY, and calculations stay on
   the server.** `C:\dev\becommunity-software\becommunity-bni-cuicuilco-demo` at
   `a7248fdbccd139da80ed7c09daa70f006a62b9cf` is the approved visual and numerical

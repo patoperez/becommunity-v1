@@ -1,6 +1,8 @@
 # Catálogo de cálculos de Be Community
 
-> **Estado:** reglas de negocio confirmadas al 19 de agosto de 2026.
+> **Estado:** reglas de negocio confirmadas al 19 de agosto de 2026, con la
+> corrección del denominador del TDP y la resolución de Esfera × CRI
+> registradas por la propiedad metodológica el 6 de septiembre de 2026 (§5, §9).
 >
 > Este documento es la fuente autoritativa para las métricas propias de Be
 > Community. `CALCULATION_POLICY.md` gobierna precisión y redondeo; este catálogo
@@ -86,48 +88,63 @@ Bandas de presentación:
 TDP acompaña a cada punto de contacto evaluado mediante CSAT.
 
 ```text
-TDP = (respuestas de desconocimiento / total de respuestas del punto) × 100
+TDP = (respuestas de desconocimiento / respuestas válidas satisfechas e insatisfechas) × 100
 ```
 
-El denominador incluye respuestas satisfechas, insatisfechas y de
-desconocimiento. Por ejemplo, siete respuestas numéricas y tres de
-desconocimiento producen `3 / 10 = 30%`, no `3 / 7`.
+El denominador es la **base válida** del punto: las respuestas que expresaron
+satisfacción o insatisfacción. **Excluye** las respuestas de desconocimiento,
+que son el numerador. Por ejemplo, siete respuestas numéricas y tres de
+desconocimiento producen `3 / 7 = 42.9%`.
+
+Dos consecuencias son deliberadas y no deben “corregirse”:
+
+- **el resultado puede superar 100 %.** Un proceso que cuatro personas
+  pudieron evaluar y veinte nunca conocieron da 500 %, y ésa es la lectura
+  honesta de un proceso que casi nadie ha encontrado. Acotarlo borraría
+  justamente los casos que la medida existe para mostrar;
+- **sin base válida no hay tasa**, nunca un cero medido. El numerador se
+  conserva, de modo que puede decirse “nadie pudo evaluarlo, y N personas
+  declararon no conocerlo”.
 
 “No lo conozco”, “No lo he utilizado”, “No he interactuado” y “No aplica” son
 variantes configurables de la categoría Desconocimiento.
 
-### ⚠️ CONFLICTO DE AUTORIDAD ABIERTO — a qué cantidad le corresponde el nombre TDP
+La documentación integral no define bandas para este indicador, así que el
+modelo canónico no emite ninguna.
 
-**No resuelto. Requiere una confirmación explícita de la responsable
-metodológica, y la corrección del documento que quede equivocado.**
+Implementación canónica: `processUnawarenessTdp`
+(`src/lib/calc/business-metrics.ts`).
 
-La documentación integral del proceso enuncia el denominador al revés de esta
-sección, §4.1, textual:
+### Cantidad auxiliar — proporción de desconocimiento sobre las respuestas
 
-> «TDP = (Número de eventos reportados por desconocimiento / Número total de
-> respuestas con categoría de Satisfecho y Insatisfecho) × 100»
+```text
+Proporción de desconocimiento = (respuestas de desconocimiento / todas las respuestas clasificadas del punto) × 100
+```
 
-Ese denominador **excluye** las respuestas de desconocimiento que forman el
-numerador, de modo que el resultado puede superar 100. El tablero aprobado por
-la dirección calcula exactamente esa razón. Esta sección, en cambio, define una
-**proporción** sobre todas las respuestas del punto, acotada entre 0 y 100.
+Ésta **no es el TDP** y no debe llamarse así en ninguna superficie. Es el
+complemento del “% que conoce” del gráfico apilado de §7.1 de la documentación
+integral, que sólo cierra en cien con este denominador, y por eso se conserva
+como cantidad auxiliar útil. Está acotada entre 0 y 100, nunca sustituye al
+TDP, y su denominador debe permanecer explícito allí donde se publique.
 
-La propia documentación integral se contradice: §7.1 pide «barras apiladas
-mostrando el % que conoce / % que no conoce», y ese par sólo suma 100 con el
-denominador de ESTA sección.
+Implementación canónica: `unawarenessShareOfResponses`.
 
-Las dos cantidades están documentadas y ambas son legítimas; lo único en disputa
-es el NOMBRE. Mientras nadie lo resuelva:
+### Corrección registrada — 6 de septiembre de 2026
 
-- `processUnawarenessRate` implementa la **proporción** de esta sección;
-- `processUnawarenessRatio` implementa la **razón** de §4.1;
-- el modelo canónico de resultados emite **las dos**, bajo nombres inequívocos y
-  con su base declarada, y registra el conflicto como estado sin resolver.
+Hasta esa fecha esta sección definía el TDP con el **otro** denominador (sobre
+todas las respuestas del punto), en contradicción con §4.1 de la documentación
+integral y con el tablero aprobado por la dirección, que calculan la razón
+sobre la base válida. El modelo canónico emitía ambas cantidades y registraba
+el desacuerdo como conflicto de autoridad abierto, sin elegir ganador.
 
-Ninguna de las dos fórmulas se cambió para que un número cuadrara. Detalle
-completo en `docs/CANONICAL_RESULTS_MODEL.md` §3.
+**La propiedad metodológica lo resolvió:** el indicador oficial llamado TDP es
+la razón de §4.1. Esta sección queda corregida en consecuencia; la otra
+cantidad permanece disponible bajo un nombre descriptivo propio. Ninguna
+fórmula se cambió para que un número cuadrara, y ningún resultado aprobado se
+movió: la paridad dorada seguía en 531 de 531 antes y después de la
+corrección. Detalle en `docs/CANONICAL_RESULTS_MODEL.md` §3.
 
-### ⚠️ Nota de reconciliación — “No aplica” como categoría y como ausencia
+### Nota de reconciliación — “No aplica” como categoría y como ausencia
 
 El clasificador canónico de valores (`src/lib/ingestion/canonical-package/values.ts`)
 convierte el token “No aplica” en el estado de ausencia `not_applicable` antes de
@@ -210,12 +227,15 @@ resultado siempre se recalcula dentro del segmento filtrado. La documentación
 actual excluye específicamente **Esfera × CRI**; las demás combinaciones deben
 pasar por la lista permitida de la plantilla, no construirse libremente en código.
 
-> ⚠️ **Desviación registrada.** El tablero aprobado por la dirección **sí ofrece**
-> `esfera` como dimensión de filtro del CRI. La documentación integral §5.2 dice
-> «OJO: La esfera no se debe cruzar en este KPI». El modelo canónico de
-> resultados **rechaza** ese cruce y devuelve `cross_not_permitted` citando la
-> autoridad, en lugar de calcular un número que una autoridad prohíbe. La
-> discrepancia queda para revisión humana; ver `docs/CANONICAL_RESULTS_MODEL.md` §3.
+> **RESUELTO — 6 de septiembre de 2026.** El tablero aprobado por la dirección
+> ofrece `esfera` como dimensión de filtro del CRI; la documentación integral
+> §5.2 dice «OJO: La esfera no se debe cruzar en este KPI». La propiedad
+> metodológica confirmó que §5.2 es autoritativa y que el tablero de emergencia
+> es una desviación del tablero de referencia, no una anulación metodológica.
+> **Esfera no se permite como filtro ni como cruce de segmentación del CRI.** El
+> modelo canónico rechaza el cruce con `cross_not_permitted` citando la
+> autoridad, en lugar de calcular un número que una autoridad prohíbe, y no
+> publica distribución ni base alguna calculada sobre ese cruce.
 
 ## 10. Políticas de producto
 

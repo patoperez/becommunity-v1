@@ -971,12 +971,13 @@ worksheets. Neither workbook, nor any output of that run, is in Git.
 `src/lib/results/` is the first authoritative, server-side results layer: one
 versioned, aggregate-only document (`CANONICAL_RESULTS_CONTRACT_VERSION 1.0.0`)
 that a future dashboard RECEIVES rather than computes. Its contract, authority
-rules, conflicts and open questions are documented in
+rules, resolved authority decisions and configuration requirements are documented in
 `docs/CANONICAL_RESULTS_MODEL.md`; read that before touching any of it.
 
 ⚠️ **Nothing changed outside the new folder except three additions and two
 documentation corrections.** `src/lib/calc/business-metrics.ts` gained
-`processUnawarenessRatio` and the confirmed CRI vocabulary; every existing
+`processUnawarenessTdp`, the auxiliary `unawarenessShareOfResponses`, an
+explicit-scale CSAT wrapper and the confirmed CRI vocabulary; every existing
 function, signature and behaviour is untouched. No existing read path, route,
 component or client-visible calculation was changed, and the legacy dashboard
 still computes through `src/lib/dashboard/view.ts` with its own small-sample
@@ -1006,37 +1007,51 @@ projection in memory from the two real workbooks and compares against
 `scripts/fixtures/cuicuilco-golden-parity.v1.json`, derived only from the
 approved dashboard at `a7248fdbccd139da80ed7c09daa70f006a62b9cf`:
 
-    ofrecidas=534  ejecutadas=531  aprobadas=531  falladas=0  omitidas=0  sin-resolver=3
+    ofrecidas=534  ejecutadas=531  aprobadas=531  falladas=0  omitidas=0
+    sin-resolver=0  no-aplica=2  requieren-configuración=1
 
 Plan fingerprint `sha256:a226b70c7ddc314424adadd5563a7da4a11bdc096b3bb64994dbc01df436e388`.
 It is deliberately OUTSIDE `npm test` — its inputs are machine-specific, and an
 unexecuted gate must never be counted among the offline results. Without the
 workbooks it reports itself SKIPPED, never as a pass. `npm run test:canonical-results`
-is the 210-check synthetic gate that runs everywhere and IS in `npm test`.
+is the 233-check synthetic gate that runs everywhere and IS in `npm test`.
 
 **Both gates were proved to discriminate**, then restored byte-identically:
 changing the CSAT satisfied threshold turned parity red with 88 failures, and
 moving one expected value by 0.1 turned it red with one.
 
-**Three things are recorded as UNRESOLVED and are questions for a human:**
+**Three things were recorded as UNRESOLVED, and the methodology owner RESOLVED
+all three on 2026-09-06. Not one approved number moved: golden parity was
+531/531 before and after.**
 
-- ⓘ **What "TDP" names.** The process documentation §4.1 gives the name to a
-  RATIO over the valid base (may exceed 100); `docs/CALCULATION_CATALOG.md` §5
-  gives it to a PROPORTION over all responses (0–100); §7.1 of the same process
-  document describes a chart that only closes under the proportion. The approved
-  dashboard implements the ratio. **Both quantities are emitted under
-  unambiguous names with their bases declared, and neither document was edited
-  to hide the disagreement.** No formula was changed to make a number match.
-- ⓘ **Esfera × CRI.** §5.2 forbids it and the catalogue repeats the exclusion;
-  the approved dashboard offers it anyway. The canonical layer REFUSES the cross
-  with `cross_not_permitted`, citing the authority.
-- ⓘ **Metric ↔ journey stage.** Re-investigated against the full methodology and
-  workbook context and still not provable: §7.2 collapses stage into touchpoint,
-  and only CSAT carries a positional qualifier. `journeyStageEvidenceLinks` stays
-  empty and the contract emits a mapping-gap report, one entry per curated stage,
-  with no candidate list. The approved dashboard's touchpoint-to-stage
-  attachment rests on a hand-written alias table in its own build script, which
-  is an implementation and not an authority.
+- ⓘ **TDP is the §4.1 RATIO over the valid base**, which is also what the
+  approved dashboard computes. It may exceed 100 and is never clamped.
+  `docs/CALCULATION_CATALOG.md` §5 defined the other denominator and has been
+  CORRECTED, with the previous definition and the reason kept on the page. The
+  other quantity survives as an auxiliary proportion under its own explicit
+  name (`unawarenessShareOfResponses` / `touchpoint.unawareShareOfResponses`),
+  is never called TDP, never replaces it and always states its denominator.
+  Canonical implementation: `processUnawarenessTdp`.
+- ⓘ **Esfera × CRI is FORBIDDEN.** §5.2 is authoritative; the emergency
+  dashboard offering the cross is a reference-dashboard deviation, not a
+  methodological override. The canonical layer refuses it with
+  `cross_not_permitted` and publishes neither a distribution nor a base
+  computed over that cross. Do not add or enable it anywhere.
+- ⓘ **A touchpoint DIRECTLY owns its CSAT, its TDP and the auxiliary
+  unawareness share, with their bases. No study-level metric is implicitly
+  attached to a touchpoint or a stage, and no generic association is ever
+  inferred.** That is a CONTRACT RULE, not an uncertainty about Cuicuilco.
+  `journeyStageEvidenceLinks` stays in the contract and stays empty unless an
+  explicit study/template configuration supplies a link with provenance;
+  `journey.stageEvidence` reports `requires_explicit_configuration`. The
+  eighteen-entry "unknown candidate" gap report is GONE — it described a
+  working design as a permanent defect. The approved dashboard's hand-written
+  alias table is not copied into production code.
+- ⓘ **The curated journey pain cloud is editorial content**, supplied by human
+  review and configuration, not a server-calculated metric and not a blocker on
+  the canonical import. The contract emits curated finding counts per curated
+  entity instead, which real foreign keys support; no phrase-splitting rule is
+  invented and no alias is copied into the calculation layer.
 
 **The `Capitanes` / `ref.` exclusion, resolved.** The clean workbook — the
 canonical source — carries that touchpoint ONCE, populated, at `CSAT!AY2`, and
