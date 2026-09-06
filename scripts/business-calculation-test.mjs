@@ -5,7 +5,8 @@ import {
   criBand,
   csatBand,
   npsBand,
-  processUnawarenessRate,
+  processUnawarenessTdp,
+  unawarenessShareOfResponses,
   retentionRate,
   touchpointCsat,
 } from "../src/lib/calc/business-metrics.ts";
@@ -47,10 +48,22 @@ eq("fractional CSAT responses are invalid", touchpointCsat([4.5, 4]).total, 1);
 eq("CSAT without valid responses is no data", touchpointCsat([0, 6]), null);
 
 console.log("\n[2] TDP and CRI");
-const tdp = processUnawarenessRate(3, 10);
-eq("TDP 3 unknown of 10 total", tdp.value, 30);
-eq("TDP denominator includes unknown responses", tdp.denominator, 10);
-eq("TDP empty population is no data", processUnawarenessRate(0, 0).value, null);
+// TDP is the ratio over the VALID base (satisfied + dissatisfied), per the
+// process documentation 4.1 and the owner decision of 2026-09-06. It may
+// exceed 100 and is deliberately not clamped.
+const tdp = processUnawarenessTdp(3, 7);
+eq("TDP 3 unaware over a valid base of 7", tdp.value, 42.9);
+eq("TDP denominator EXCLUDES the unaware responses", tdp.denominator, 7);
+eq("TDP may exceed 100 when unawareness outweighs the valid base", processUnawarenessTdp(16, 12).value, 133.3);
+eq("TDP without a valid base is no data", processUnawarenessTdp(3, 0).value, null);
+eq("and still reports how many said they did not know", processUnawarenessTdp(3, 0).numerator, 3);
+
+// The auxiliary proportion is a DIFFERENT quantity with a different
+// denominator, and it is never called TDP.
+const unawareShare = unawarenessShareOfResponses(3, 10);
+eq("unawareness share 3 of 10 classified responses", unawareShare.value, 30);
+eq("its denominator INCLUDES the unaware responses", unawareShare.denominator, 10);
+eq("unawareness share with no responses is no data", unawarenessShareOfResponses(0, 0).value, null);
 
 const cri = churnRiskIndex(["nada", "algo", "extremadamente"]);
 eq("CRI [Nada, Algo, Extremadamente]", cri.value, 50);
@@ -61,7 +74,7 @@ console.log("\n[3] Retention and churn");
 eq("retention (94 ending - 20 new) / 100 starting", retentionRate(100, 94, 20).value, 74);
 eq("churn 26 lost / 100 starting", churnRate(100, 26).value, 26);
 eq("retention empty starting population is no data", retentionRate(0, 0, 0).value, null);
-throws("TDP unknown > total", () => processUnawarenessRate(4, 3));
+throws("unawareness share numerator > denominator", () => unawarenessShareOfResponses(4, 3));
 throws("retention new > ending", () => retentionRate(10, 2, 3));
 throws("churn lost > starting", () => churnRate(2, 3));
 

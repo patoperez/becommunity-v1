@@ -158,37 +158,16 @@ export function touchpointCsat(scores: number[], decimals = DECIMALS.percent): C
 }
 
 /**
- * The PROPORTION of a touchpoint's responses that reported not knowing it.
- *
- * Denominator: every response the touchpoint received — satisfied, dissatisfied
- * and unaware alike (`docs/CALCULATION_CATALOG.md` §5, and the stacked
- * "% que conoce / % que no conoce" chart of the process documentation §7.1,
- * whose two bars sum to 100). Bounded 0..100 by construction, which is why it
- * goes through `rate()`.
- *
- * This is NOT the same quantity as `processUnawarenessRatio` below. The two
- * differ in denominator, they answer different questions, and the two governing
- * documents disagree about which of them the name "TDP" belongs to. Read the
- * conflict note on `processUnawarenessRatio` before using either.
- */
-export function processUnawarenessRate(
-  unknownResponses: number,
-  totalResponses: number,
-  decimals = DECIMALS.percent,
-): RateResult {
-  return rate(unknownResponses, totalResponses, decimals);
-}
-
-/**
- * TDP — Tasa de Desconocimiento de Proceso, as the process documentation states it.
+ * TDP — Tasa de Desconocimiento de Proceso. THE Be Community metric of that name.
  *
  * `Documentacion_Integral_Proceso_Be_Community` §4.1, verbatim:
  *
  *   «TDP = (Número de eventos reportados por desconocimiento / Número total de
  *    respuestas con categoría de Satisfecho y Insatisfecho) × 100»
  *
- * The denominator is the touchpoint's VALID base and therefore EXCLUDES the
- * unaware responses that form the numerator. Two consequences are deliberate:
+ * The denominator is the touchpoint's VALID base — satisfied plus dissatisfied —
+ * and therefore EXCLUDES the unaware responses that form the numerator. Two
+ * consequences are deliberate and must not be "fixed":
  *
  *   - **The result may exceed 100.** A process four people could judge and
  *     twenty had never met scores 500%. That is the honest reading of a process
@@ -199,15 +178,15 @@ export function processUnawarenessRate(
  *     carries the unawareness count, so a caller can say "nobody could judge it,
  *     and N people said they did not know it".
  *
- * ⓘ **AUTHORITY CONFLICT — do not resolve this in code.** `docs/CALCULATION_CATALOG.md`
- * §5 gives the name "TDP" to the PROPORTION over all responses
- * (`processUnawarenessRate`), and the process documentation gives the same name
- * to the RATIO over the valid base (this function). Both quantities are
- * documented; only the NAME is contested. The canonical results layer therefore
- * emits BOTH, under unambiguous names, and records the conflict on the result
- * instead of picking a winner. See `docs/CANONICAL_RESULTS_MODEL.md`.
+ * ⓘ **RESOLVED, 2026-09-06.** `docs/CALCULATION_CATALOG.md` §5 previously
+ * defined TDP with the OTHER denominator — over every response the touchpoint
+ * received. The methodology owner has settled it: the name TDP belongs to the
+ * §4.1 ratio implemented here, which is also what the CEO-approved dashboard
+ * computes. The catalogue has been corrected. The other quantity remains
+ * available as an auxiliary proportion under an explicit name
+ * (`unawarenessShareOfResponses`) and is NOT called TDP anywhere.
  */
-export function processUnawarenessRatio(
+export function processUnawarenessTdp(
   unknownResponses: number,
   validBase: number,
   decimals = DECIMALS.percent,
@@ -219,6 +198,28 @@ export function processUnawarenessRatio(
     numerator: unknownResponses,
     denominator: validBase,
   };
+}
+
+/**
+ * AUXILIARY — the share of a touchpoint's responses that reported not knowing it.
+ *
+ * Denominator: every classified response the touchpoint received — satisfied,
+ * dissatisfied and unaware alike. Bounded 0..100 by construction, which is why
+ * it goes through `rate()`. The name says the denominator out loud precisely so
+ * this can never be mistaken for the metric above.
+ *
+ * ⓘ **This is NOT TDP.** It is the complement of the "% que conoce" bar in the
+ * stacked chart of process documentation §7.1, and it is useful for exactly
+ * that: a pair that closes at a hundred. It never replaces TDP, is never
+ * labelled TDP, and is never published without its denominator stated beside
+ * it. See `processUnawarenessTdp` above.
+ */
+export function unawarenessShareOfResponses(
+  unknownResponses: number,
+  totalClassifiedResponses: number,
+  decimals = DECIMALS.percent,
+): RateResult {
+  return rate(unknownResponses, totalClassifiedResponses, decimals);
 }
 
 /** CRI: arithmetic mean of the confirmed per-response risk weights. */
