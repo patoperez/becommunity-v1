@@ -726,6 +726,26 @@ BECOMMUNITY_PG_VERSION=17 bash scripts/lib/disposable-postgres-provision.sh
 npm run test:canonical-commit-local-stack
 ```
 
+> **T3, T4 and T5 are PENDING RE-PROOF on the hosted transport.** They were
+> measured against the PostgREST the local substitute runs, and the hosted
+> project runs a different build. The two are not comparable yet, and the gap
+> is not yet quantified:
+>
+> | where | what reported it | value |
+> |---|---|---|
+> | local substitute | `postgrest --version`, from the upstream release tagged `v16.2` | **16.2** |
+> | hosted project | Supabase CLI metadata, `supabase/.temp/rest-version` | **`v14.15`** |
+> | hosted project | the running service's own OpenAPI document, `info.version` | **`14.5`** |
+>
+> The two hosted numbers DISAGREE WITH EACH OTHER, so at least one of them is
+> not an upstream PostgREST release number, and neither can be mapped onto the
+> numbering that produced `16.2` locally. Do NOT describe the hosted build as
+> "older", "two majors behind", or comparable in any direction until the
+> numbering scheme is established. What is certain is only that they are
+> different builds — which is enough to make the result-shape, error-shape and
+> code round-trip findings non-transferable. Phase 2.3 re-proves all three
+> against the hosted transport directly, so this costs no extra work.
+
 **Executed, against PostgreSQL 17.11 with PostgREST 16.2:** 102 assertions,
 102 passed, 0 failed, 66 skipped. All 41 protected tables and all 4 functions
 present; the protected-object census identical before and after the run.
@@ -733,9 +753,9 @@ present; the protected-object census identical before and after the run.
 | id | result | measured |
 |---|---|---|
 | **T1** | proved **at the PostgREST layer only** | a 2 708 830-byte (2.58 MiB) plan body reached the function and was parsed, answering `JOB_NOT_FOUND` in 110 ms. The largest real commit body was 2 708 898 bytes at 441 ms. |
-| **T3** | proved | supabase-js returns the `jsonb` result unwrapped — a bare object, no array and no named envelope — carrying `importJobId`, `status`, `replayed`, `counts`, `commitAttempts` and `rollbackCount`. |
-| **T4** | proved | `COMMITTED_PAYLOAD_DIFFERS` survives PostgREST, supabase-js and `safeErrorCode` as that code, not as `CLIENT_TRANSPORT`. |
-| **T5** | proved for what the run raised | 9 of the 34 codes crossed the transport as themselves and none was flattened to `CLIENT_TRANSPORT`. The other 25 were never provoked over HTTP by this run and are recorded as SKIPPED, one per code. Most refusals travel as a **200 body** of the shape `{ status: 'failed', code }`, not as an HTTP error — migration 0024's subtransaction catches them. |
+| **T3** | proved on the LOCAL substitute; **pending re-proof on hosted** | supabase-js returns the `jsonb` result unwrapped — a bare object, no array and no named envelope — carrying `importJobId`, `status`, `replayed`, `counts`, `commitAttempts` and `rollbackCount`. |
+| **T4** | proved on the LOCAL substitute; **pending re-proof on hosted** | `COMMITTED_PAYLOAD_DIFFERS` survives PostgREST, supabase-js and `safeErrorCode` as that code, not as `CLIENT_TRANSPORT`. |
+| **T5** | proved on the LOCAL substitute for what that run raised; **pending re-proof on hosted** | 9 of the 34 codes crossed the transport as themselves and none was flattened to `CLIENT_TRANSPORT`. The other 25 were never provoked over HTTP by this run and are recorded as SKIPPED, one per code. Most refusals travel as a **200 body** of the shape `{ status: 'failed', code }`, not as an HTTP error — migration 0024's subtransaction catches them. |
 | **T8** | proved | the service-role KEY executes all four functions (SQLSTATEs `none`, `22023`, `P0002`, `P0002` — business answers, never `42501`). |
 | **T9** | proved | anon and authenticated KEYS are refused `42501` on all four functions, and on `import_job_record`, `retention_period`, `person_private` and `survey_response`. |
 | **M1** | proved | migrations 0000-0024 apply cleanly, verbatim, on PostgreSQL **17.11** — the major `supabase/config.toml` pins. |

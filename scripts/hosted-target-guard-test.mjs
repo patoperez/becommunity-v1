@@ -736,6 +736,45 @@ console.log("\n[11] The hosted inventory writes nothing");
     !/'quote'|'segments'|,\s*quote\b|,\s*segments\b/.test(diagnostic),
     "and no quote or segment value is ever selected into its output",
   );
+
+  // ---- the safety-net export: the one script that writes REAL CLIENT DATA ---
+  // It is the opposite case from the evidence writer, and the rules that make it
+  // safe are different ones: not "refuse anything that looks like data", but
+  // "never land inside a repository, never read by offset, never claim success
+  // on a short read".
+  const exporter = read("scripts/canonical-hosted-export.mjs");
+  check(
+    /CANONICAL_HOSTED_EXPORT_DIR is not set/.test(exporter),
+    "the export has NO default destination — it writes real data only where it was told to",
+  );
+  check(
+    /is inside the worktree/.test(exporter) && /main repository this worktree is linked to/.test(exporter),
+    "and refuses a destination inside the worktree or the linked main repository",
+  );
+  check(
+    /order=id\.asc/.test(exporter) && /id=gt\./.test(exporter) && !/offset=/.test(exporter),
+    "every read is a keyset by primary key, never an offset",
+  );
+  check(
+    /REFUSED TO CLAIM SUCCESS/.test(exporter) && /expected === rows\.length/.test(exporter),
+    "and it compares what it wrote against the exact count, refusing to call a short read a backup",
+  );
+  // The header EXPLAINS why it avoids the evidence writer, so the mention has to
+  // be allowed in prose and forbidden in code.
+  const exporterCode = exporter.replace(/^\s*\/\/.*$/gm, "");
+  check(
+    !/writeArtifact/.test(exporterCode) && /deliberately does not use/i.test(exporter),
+    "it does NOT route real data through the evidence writer, whose scanner would rightly refuse it",
+  );
+  check(
+    /mode: 0o600/.test(exporter) && /mode: 0o700/.test(exporter),
+    "the file is 0600 inside a 0700 directory",
+  );
+  check(
+    typeof pkg.scripts?.["canonical-hosted-export"] === "string" &&
+      !(pkg.scripts?.test ?? "").includes("canonical-hosted-export"),
+    "and it is registered but kept OUT of the offline chain",
+  );
 }
 
 console.log("\n" + "=".repeat(70));

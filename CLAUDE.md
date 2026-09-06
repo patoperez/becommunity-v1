@@ -214,6 +214,14 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   real PostgREST 16.2 in front of a disposable PostgreSQL 17.11 cluster, 102
   assertions passed. It settled the supabase-js result and error shapes, the
   service-role key path, and that PostgREST accepts a 2.58 MiB RPC body.
+- ⓘ **The hosted project runs a DIFFERENT PostgREST build, and the result
+  shape, error shape and code round trip (T3, T4, T5) are therefore PENDING
+  RE-PROOF there, not proved.** The local substitute reports `16.2` (upstream
+  release numbering); the hosted project reports `v14.15` in the CLI's
+  `rest-version` metadata and `14.5` in its own OpenAPI `info.version`. Those
+  two hosted numbers disagree with each other, so neither maps onto the local
+  one. Never call the hosted build "older" or "two majors behind" — only
+  "different", until the numbering is established.
 - ⓘ **A hosted Supabase project has still never been contacted, and five things
   remain unproved by anything local.** The hosted API gateway's own body limit,
   the hosted `statement_timeout` under load, recovery from a timeout killed
