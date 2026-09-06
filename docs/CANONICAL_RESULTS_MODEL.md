@@ -605,10 +605,14 @@ sheet named `Hoja 1` — which is a further reason not to compute from it.
 
 **Not done, and not to be described otherwise:**
 
-- **No real workbook has been imported.** All 36 canonical tables remain empty.
-  The parity gate reads the workbooks into memory, calculates and exits; it
-  writes nothing anywhere.
-- **No hosted service was contacted** by any part of this unit.
+- ~~**No real workbook has been imported.**~~ **DONE in Phase 2, 2026-09-06.**
+  The real Cuicuilco package is in the hosted canonical tables and the results
+  calculated from those tables reproduce the approved dashboard 531/531. §12
+  describes the adapter and the operator; `docs/CURRENT_STATE.md` records the
+  import itself. The in-memory parity gate is unchanged: it still reads the
+  workbooks into memory, calculates and exits, and writes nothing anywhere.
+- ~~**No hosted service was contacted.**~~ Phase 2 contacted exactly one, named
+  three times before it could write anything.
 - **No existing read path changed.** The legacy dashboard still computes through
   `src/lib/dashboard/view.ts` and `src/lib/calc/*` exactly as before, including
   its own small-sample suppression.

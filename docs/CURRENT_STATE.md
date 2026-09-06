@@ -104,25 +104,31 @@ produced a wrong claim in this file. Stated precisely:
    PostgREST inventory, a read-only nine-section diagnostic over a direct
    connection, and a full data export whose row counts were verified against the
    project's own counts per table.
-2. **One duplicate legacy study was deleted**, through the rehearsed,
-   fail-closed transaction described above. That is the only write.
+2. **Two writes have been executed, and only two.** The duplicate legacy study
+   was deleted through the rehearsed, fail-closed transaction described above;
+   and the real Cuicuilco canonical package was imported (Unit 5 Phase 2,
+   below). Nothing else has ever been written.
 3. **The correct Cuicuilco study remains intact** — 60 people, 3 282
    quantitative answers, 31 qualitative answers, 23 confirmed themes — and was
-   verified after the deletion.
+   verified after the deletion AND again after the canonical import.
 4. **The canonical migrations `0026`-`0028` ARE APPLIED there**, on 2026-09-06,
    through `supabase db push`. The ledger is 0000-0028, 29 rows, no duplicate.
-   All 36 canonical tables exist and are EMPTY.
-5. **No real workbook has been imported into canonical tables**, anywhere. The
-   only rows those tables have ever held are synthetic `U4-` fixtures, created
-   and deleted by the acceptance run.
-6. **Hosted execution of the canonical migration chain is DONE**; what remains
-   pending is the real Cuicuilco canonical import and the read-path switch,
-   both of which need separate explicit authorization.
-7. **The backup is retained and must not be deleted**, and neither may any
-   diagnostic evidence.
+   All 36 canonical tables exist, and all 36 still carry RLS and FORCE RLS.
+5. **The real Cuicuilco package IS IMPORTED**, on 2026-09-06, as import job
+   `1886a359-f2c9-483a-8b5e-979931841a71` — 8 588 canonical rows across 32
+   families, reconciled three ways, replayed idempotently, and read back through
+   the database adapter at 531/531 golden parity. Read Unit 5 Phase 2 below
+   before saying anything about what those tables hold. **They are populated
+   and UNREAD**: nothing in the application queries them.
+6. **Hosted execution of the canonical migration chain is DONE, and so is the
+   real import**; what remains pending is the read-path switch, which needs
+   separate explicit authorization.
+7. **Every backup is retained and must not be deleted**, and neither may any
+   diagnostic or import evidence.
 8. **The old application read paths remain authoritative.** Nothing reads the
-   canonical tables yet, and nothing should until the deterministic package
-   importer, reconciliation and compatibility tests exist.
+   canonical tables, and nothing should until the read-path switch is
+   separately authorized. A gate in `npm test` fails if a route or a component
+   ever imports one.
 
 A ninth distinction matters as much: a green **local** PostgREST run is not
 hosted canonical execution. See level 3 below.
@@ -1073,6 +1079,227 @@ base nesting rule (`valid <= responded <= eligible`), the accounting partition
 and the subset-of-answered rule on EVERY base in the document. The full table is
 in `docs/CANONICAL_RESULTS_MODEL.md` §8.
 
-**Still not done, and not to be described otherwise:** no real workbook has been
-imported, all 36 canonical tables remain empty, no hosted service was contacted
-by this unit, no read path was switched, and no dashboard UI exists.
+**Still not done AT THE END OF PHASE 1, and true only of that phase:** no real
+workbook had been imported, all 36 canonical tables were empty, no hosted
+service had been contacted by that unit, no read path was switched, and no
+dashboard UI existed. Phase 2, below, changed the first three of those.
+
+### Unit 5 Phase 2 — the real Cuicuilco canonical import (EXECUTED, 2026-09-06)
+
+**The two real workbooks are imported into the hosted canonical tables, and the
+results calculated FROM THOSE TABLES reproduce the CEO-approved dashboard
+531/531.** Nothing client-facing changed: the application still reads through
+`src/lib/dashboard/view.ts`, no route imports either canonical path, the study
+is still `draft`, no qualitative approval moved, and every legacy count is
+exactly what it was.
+
+#### The commits
+
+| commit | what |
+|---|---|
+| `2450bc5005763db9a273d457b789e9fe769fa85c` | source only — the database-backed adapter, the operator, the gates. **This is the commit that performed the import.** |
+| this one | documentation and evidence only |
+
+#### Two fingerprints, and they are not the same number
+
+The plan fingerprint covers the WHOLE plan, and every derived record id is
+derived from the package key TOGETHER WITH the tenant and the study
+(`canonical-commit/ids.ts`). A plan for a different study is therefore a
+different plan with a different fingerprint, by construction. Both were verified
+immediately before the write.
+
+| what | value | scope |
+|---|---|---|
+| package idempotency key | `sha256:bb9a4a98497ef38f6e2d1962de0d8596e5b968e1987ad8b8eceb6ad6df8b3097` | **scope-free** — mapping version, asset roles and file hashes only |
+| plan fingerprint, placeholder scope | `sha256:a226b70c7ddc314424adadd5563a7da4a11bdc096b3bb64994dbc01df436e388` | the disposable tenant/study the dry-run and golden-parity gates use |
+| plan fingerprint, **IMPORTED** | `sha256:099863e8bd0a74477611ae0e35f29eb83cccf912c5de7a56b0c07952970e7bfc` | tenant `e63b2092…`, study `cd4d6acd…` |
+
+The source bytes, by content — the revised CSV was NOT imported and remains
+structural reference only:
+
+| role | sha256 | bytes |
+|---|---|---|
+| `clean_study_data` | `sha256:8d7afdb479208d47e4cd2b08fac5d480f3f945edcf448f52eb588a41e167bca5` | 62 894 |
+| `curated_pain_map` | `sha256:bd0e70d7fbb73a6834c8e4cfd5ad768ea6c3db6ffcf0682179fe58fcc3fbc890` | 143 362 |
+
+#### The import
+
+- **Project** `ontvqazsqiwisdddblif` (`be-community-dev`), **tenant**
+  `e63b2092-244e-4751-b7e9-19172a9f6b41` (BNI Cuicuilco), **study**
+  `cd4d6acd-88b9-4804-829f-75b6d91a32b7` («La voz de las y los Nets de
+  Cuicuilco»), resolved from the database by full uuid, never by a prefix.
+- **Import job `1886a359-f2c9-483a-8b5e-979931841a71`**, `committed`
+  2026-09-06 21:36:00.772508+00, `rolled_back_at` null, 1 commit attempt, 0
+  rollbacks. `runCanonicalCommit` end to end: **6 232 ms**; the plan body was
+  2 704 594 bytes.
+- **8 588 plan rows across 32 families**, reconciled THREE ways and in
+  agreement: the plan's declared counts, the database's own measurement inside
+  the commit, and an independent per-table count afterwards. The ownership
+  ledger holds **3 559** rows, every one `created`; **60 persons created, 0
+  reused; 60 external identifiers created, 0 reused**.
+
+| table | rows | table | rows |
+|---|---|---|---|
+| `person_private` | 60 | `band_scheme` | 4 |
+| `person_external_identifier` | 60 | `band_rule` | 13 |
+| `study_participant` | 60 | `retention_period` | 6 |
+| `membership_episode` | 60 | `metric_definition` | 116 |
+| `attribute_definition` | 24 | `metric_item_link` | 114 |
+| `participant_attribute_value` | 716 | `journey_model` | 1 |
+| `response_scale` | 3 | `journey_stage` | 18 |
+| `response_option` | 21 | `journey_stage_evidence_link` | 0 |
+| `survey_instrument` | 4 | `organizational_unit` | 10 |
+| `study_domain` | 4 | `culture_dimension` | 20 |
+| `survey_item` | 62 | `pain_point` | 50 |
+| `survey_session` | 116 | `pain_point_journey_stage` | 15 |
+| `survey_response` | 1 685 | `pain_point_organizational_unit` | 8 |
+| `visual_annotation` | 22 | `pain_point_performance_dimension` | 7 |
+| `performance_dimension` | 8 | `pain_point_culture_dimension` | 20 |
+| `performance_observation` | 252 | `source_lineage` | 5 029 |
+| | | `import_job_record` | 3 559 |
+
+- **Idempotent replay proved.** The same request was executed a second time: the
+  database reported `replayed = true`, reused the SAME import job, wrote no
+  row, and left every table count, every ownership count and the commit-attempt
+  counter unchanged (`2 542 ms`).
+- **No canonical row belongs to any other study.** `study_participant`,
+  `survey_response`, `source_lineage`, `import_job` and `import_job_record` all
+  count 0 outside `cd4d6acd…`.
+
+#### Parity, read exclusively through the database-backed adapter
+
+`npm run canonical-database-parity` reads the committed package back out of the
+canonical tables — paged, scoped by tenant AND study, 4 858 ms — and:
+
+- **A.** all **20 read-model families are deep-equal** to the in-memory
+  projection's, once both are put into the shared comparison order, and the
+  source identity matches.
+- **B.** the two results documents are **byte-identical** (533 302 bytes,
+  contract `2.0.0`). Compared again against the document built in the
+  PROJECTOR's own order, **no value, count or base differs**; the only paths
+  that differ are the twenty leaves of `results.population.instruments`, whose
+  order the contract explicitly delegates to the adapter.
+- **C.** golden parity against the approved dashboard, **from the database**:
+
+      ofrecidas=534  ejecutadas=531  aprobadas=531  falladas=0  omitidas=0
+      sin-resolver=0  no-aplica=2  requieren-configuración=1
+
+  The three resolved classifications are preserved exactly: two
+  `not_applicable` (`journey.stageEvidence`, `journey.unawareShareOfResponses`)
+  and one `configuration_required` (`qualitative.recorrido`).
+
+**Every invariant the owner named, confirmed on the DATABASE document:**
+population 60; active 28; former 32; instrument bases distinct and separately
+reported (`cri` 28, `csat` 28, `nps_activos` 28, `nps_desertores` 11); NPS bases
+correct (`combinado` 39, `activos` 28, `desertores` 11) and each respecting
+valid ≤ responded; CSAT per touchpoint with its own base, 55 touchpoints in four
+groups covering all 55; TDP over the valid base, maximum **133.3**, one
+touchpoint above 100 and **not clamped**; the auxiliary unawareness share
+carried separately under its own name; Esfera × CRI **executed and refused** —
+`cross_not_permitted`, distribution withdrawn whole, base emptied; the populated
+`Capitanes` touchpoint present exactly once (`csat_ax`, 28 responses, 27 valid)
+and NOT excluded; the broken all-`#REF!` duplicate absent because the revised
+CSV was never imported; **zero** small-sample suppression; the journey cloud
+still declared editorial content; no open question in the document.
+
+#### The backup and its restore rehearsal
+
+Taken immediately before the import, into a NEW timestamped directory. No
+previous backup was touched.
+
+```
+/home/patop/becommunity-backups/u5p2-pre-import-20260906T195207Z
+  database.dump  660 331 bytes  sha256=52f788838bbc7d95f62de77f20780bc6f7ae35a9fd93d5e82eaee7eae933b6f3
+  schema.sql     351 569 bytes  sha256=bfd5557c19b8c92cbdae7bd5919e0cb06dddb15b6cbb11337f846ee3fbb9a502
+```
+
+`pg_dump` custom format, compress 9, `--no-owner` (GRANTs and POLICYs kept
+deliberately), schemas `public` and `supabase_migrations`, over the **session
+pooler on port 5432** — the direct host did not resolve, and the transaction
+pooler on 6543 was not used. Directory `0700`, files `0600`, outside every Git
+repository. TOC: 773 entries, 120 TABLE definitions, 60 TABLE DATA blocks, 59
+FUNCTIONs, 54 POLICYs, 80 INDEXes, 306 CONSTRAINTs.
+
+Restored into a throwaway PostgreSQL 17 database on a unix socket and compared
+against the hosted project: **60 tables compared, 0 mismatches**; the migration
+ledger identical (29 rows, 0000-0028); `policies=54`, `functions=28`,
+`rls_forced=59`, `tables=59` all equal; all 36 canonical tables present. The
+throwaway database was dropped; the backup was not.
+
+ⓘ **One statement of the restore did not replay, and it is not data.**
+`pg_restore` exited 1 with exactly one error: `GRANT USAGE ON SCHEMA public TO
+postgres, anon, …` failed because the role `postgres` does not exist in the
+throwaway cluster. Every table, row count, policy, function and ledger entry
+restored and matched. A restore into a real Supabase project, where that role
+exists, does not hit it — but that has not been executed, and must not be
+described as if it had.
+
+#### Legacy, before and after — identical
+
+| | before | after |
+|---|---|---|
+| Cuicuilco respondents / quant / qual | 60 / 3 282 / 31 | 60 / 3 282 / 31 |
+| Cuicuilco qualitative review | 23 confirmed, 8 pending, 0 rejected, 0 quote-approved | identical |
+| Cuicuilco study status | `draft`, period «Abril a Julio 2026» | identical |
+| project `tenant` / `study` | 7 / 5 | 7 / 5 |
+| project `respondent` / `quant_response` / `qual_observation` | 82 / 3 364 / 33 | 82 / 3 364 / 33 |
+| `segment_dimension` / `import_batch` / `profiles` | 1 / 6 / 4 | 1 / 6 / 4 |
+| `study_experience_event` / `_draft` / `_publication` | 86 / 2 / 0 | 86 / 2 / 0 |
+| `study_period_snapshot` | 6 | 6 |
+| migration ledger | 29 rows, 0000-0028 | 29 rows, 0000-0028 |
+| RLS / FORCE RLS on the 36 canonical tables | 36 / 36 | 36 / 36 |
+
+**No study was published, no qualitative approval changed, no draft was
+touched, no migration was applied, no authentication was altered and no
+Cloudflare Worker was built or deployed.**
+
+#### What the hosted run proved that no local run could
+
+The hosted API gateway accepted the 2 704 594-byte RPC body; the hosted
+`statement_timeout` was not reached by a real commit (6 232 ms end to end);
+`limit=0` with `count=exact` is answered correctly by the hosted PostgREST, so
+the operator can measure a table without transferring a row of it. **Still
+unproved, and not to be described otherwise:** recovery from a timeout killed
+mid-commit, and catalogue parity with Supabase's own extensions and default
+privileges.
+
+#### Skipped, and residual risk
+
+- **The restore rehearsal's one un-replayed GRANT**, above. Named, not resolved.
+- **`npm run test:secrets` was not executed** in this phase: it plants the
+  service key as a canary and scans the build output, and it is a
+  credential-bearing gate outside `gates:offline`. The diff was scanned instead,
+  with the same `secret-patterns.mjs` the evidence writer uses, plus explicit
+  e-mail / JWT / connection-string / secret-key patterns: **20 changed files, 0
+  findings**, and no staged file carries a control byte.
+- **`npm run gates:live` (suites A/B/C) was not executed**: it drives a real
+  browser against a running application and nothing in this phase changed a
+  route, a component or a policy.
+- ⓘ **A credential briefly reached a file on disk and was destroyed.** While
+  writing a read-only SQL runner, an unquoted heredoc expanded the connection
+  string into `~/u5p2/run-sql.sh`. The file was removed immediately and the
+  runner rewritten so the value is only ever an environment variable inside the
+  process. Nothing was committed, logged or transmitted; the file never left
+  the machine. The owner has authorized the configured credentials and did not
+  make rotation a precondition, so none was performed.
+
+#### Evidence, all outside every Git repository
+
+```
+/home/patop/u5p2/evidence/import-<job>-<timestamp>.json   the operator's own artifact, secret-scanned before writing
+/home/patop/u5p2/evidence/logs/                           preflight, import, replay, parity, post-check,
+                                                          backup, restore rehearsal and local rehearsal logs
+/home/patop/becommunity-backups/u5p2-pre-import-20260906T195207Z
+```
+
+ⓘ The artifact retained for the import job describes the REPLAY, because both
+runs shared the job id and the first was overwritten. The first commit's own
+numbers are in `logs/hosted-import.log`. The operator now stamps the filename
+with the finish time so a replay can no longer overwrite the run it repeats.
+
+#### The application still reads the legacy path
+
+Nothing in `src/app` or `src/components` imports `canonical-source` or
+`canonical-commit/server`, and a gate in `npm test` fails if one ever does. The
+canonical tables are populated and unread. **The read-path switch is separate,
+later, separately authorized work.**

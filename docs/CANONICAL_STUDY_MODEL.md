@@ -350,10 +350,14 @@ Confirmation is allowed if and only if there are zero blockers.
 - nothing was written to any canonical table.
 
 ⚠️ **Scope note.** These statements are about Units 1-3 and remain true of them.
-They are NOT a claim about the hosted project in general: Unit 4 inventoried it,
+They are NOT a claim about the hosted project in general. Unit 4 inventoried it,
 backed it up and deleted one duplicate legacy study through a rehearsed
-fail-closed transaction. No canonical migration and no canonical row was part of
-that. See the hosted project status in `docs/CURRENT_STATE.md`.
+fail-closed transaction, and then applied the canonical migrations. **Unit 5
+Phase 2 then imported the real Cuicuilco package into the canonical tables**
+(2026-09-06, import job `1886a359-f2c9-483a-8b5e-979931841a71`), so "nothing was
+written to any canonical table" is a statement about Units 1-3 and is FALSE of
+the project today. See the hosted project status and the Unit 5 Phase 2 record
+in `docs/CURRENT_STATE.md`.
 
 
 ## Migration 0028: commit, ownership and rollback
@@ -992,14 +996,22 @@ The 70 skips break down as: 27 needing DDL the REST transport does not have,
 concurrent sessions, 4 needing a second role identity, and 1 needing the real
 workbooks. Every one is reported as skipped and **none is counted as a pass**.
 
-### What is still NOT done
+### What was still NOT done AT THE END OF UNIT 3
 
-**No real workbook has been imported.** The canonical tables have only ever held
-synthetic `U4-` fixtures, and the acceptance run deleted them: all 36 are empty,
-verified independently after the run. The Cuicuilco study is untouched at
-60 / 3 282 / 31 / 23 confirmed / 8 pending, `draft`. The old application read
-paths remain authoritative and nothing reads the canonical tables. Recovery from
-a timeout killed mid-commit remains unproved anywhere.
+⚠️ **This subsection describes the state AFTER the synthetic acceptance run and
+BEFORE the real import. It is history, not current state.** At that point the
+canonical tables had only ever held synthetic `U4-` fixtures, the acceptance run
+had deleted them, and all 36 were empty.
+
+**The real Cuicuilco package was imported on 2026-09-06** — import job
+`1886a359-f2c9-483a-8b5e-979931841a71`, 8 588 rows across 32 families, plan
+fingerprint `sha256:099863e8bd0a74477611ae0e35f29eb83cccf912c5de7a56b0c07952970e7bfc`.
+The Cuicuilco study is still untouched at 60 / 3 282 / 31 / 23 confirmed /
+8 pending, `draft`; the old application read paths remain authoritative and
+nothing reads the canonical tables. See `docs/CURRENT_STATE.md` §"Unit 5
+Phase 2" and `docs/CANONICAL_RESULTS_MODEL.md` §12.
+
+Still unproved anywhere: recovery from a timeout killed mid-commit.
 
 | id | result | measured |
 |---|---|---|
@@ -1043,6 +1055,40 @@ never counted as a pass.
 | `scripts/lib/local-postgrest-stack.mjs` | generates its signing secret per run, writes its config `0600`, binds loopback only, prints no key, and leaves no process or file behind. |
 | `npm run test:hosted-target-guard` | **in `npm test`.** 153 assertions executing every refusal above, including starting the hosted runner with an unauthorized environment and watching it exit 2 without creating an evidence directory. |
 
+## Unit 5 Phase 2 — the real import, through this unit's own workflow
+
+**2026-09-06.** The real Cuicuilco package was imported into
+`ontvqazsqiwisdddblif`, tenant `e63b2092-244e-4751-b7e9-19172a9f6b41`, study
+`cd4d6acd-88b9-4804-829f-75b6d91a32b7`, as import job
+`1886a359-f2c9-483a-8b5e-979931841a71`. Plan fingerprint
+`sha256:099863e8bd0a74477611ae0e35f29eb83cccf912c5de7a56b0c07952970e7bfc`,
+package key `sha256:bb9a4a98497ef38f6e2d1962de0d8596e5b968e1987ad8b8eceb6ad6df8b3097`.
+
+**Nothing in Unit 3 changed to make it possible.** `runCanonicalCommit` ran
+exactly as this document describes it: it preflighted the exact bytes, projected,
+staged the fingerprint, committed once, and reconciled. 6 232 ms end to end for a
+2 704 594-byte body; 8 588 rows across the 32 families; 3 559 ownership rows, all
+`created`; 60 persons and 60 external identifiers created, none reused. The same
+request replayed reported `replayed = true`, reused the same job and wrote
+nothing.
+
+What Unit 5 Phase 2 ADDED around it is an operator
+(`scripts/canonical-import-operator.mjs`) and a third target guard
+(`scripts/lib/canonical-import-target.mjs`), described in
+`docs/CANONICAL_RESULTS_MODEL.md` §12.5. The operator counts every canonical
+table itself after the commit, so the plan's declared counts, the database's own
+measurement inside the commit and an independent per-table count all had to
+agree — and did. It has no manual-deletion path: a disagreement is answered by
+`rollback_canonical_package`, which was not needed.
+
+The full record — counts per table, parity, the backup and its restore
+rehearsal, the legacy before/after and every skipped check — is in
+`docs/CURRENT_STATE.md` §"Unit 5 Phase 2".
+
+⚠️ **T7 is still unproved**: recovery from a timeout killed mid-commit. This
+commit did not come near the timeout, which is evidence about THIS package and
+not about the failure mode.
+
 ## Deliberately outside Unit 3
 
 - no Supabase project was changed and no migration was applied anywhere;
@@ -1054,7 +1100,11 @@ never counted as a pass.
 - nothing was written to any canonical table, in any environment.
 
 ⚠️ **Scope note.** These statements are about Units 1-3 and remain true of them.
-They are NOT a claim about the hosted project in general: Unit 4 inventoried it,
+They are NOT a claim about the hosted project in general. Unit 4 inventoried it,
 backed it up and deleted one duplicate legacy study through a rehearsed
-fail-closed transaction. No canonical migration and no canonical row was part of
-that. See the hosted project status in `docs/CURRENT_STATE.md`.
+fail-closed transaction, and then applied the canonical migrations. **Unit 5
+Phase 2 then imported the real Cuicuilco package into the canonical tables**
+(2026-09-06, import job `1886a359-f2c9-483a-8b5e-979931841a71`), so "nothing was
+written to any canonical table" is a statement about Units 1-3 and is FALSE of
+the project today. See the hosted project status and the Unit 5 Phase 2 record
+in `docs/CURRENT_STATE.md`.

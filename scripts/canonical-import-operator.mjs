@@ -543,7 +543,12 @@ const findings = scanText(serialized);
 if (findings.length > 0) {
   bad(`la evidencia NO se escribió: el escáner encontró ${findings.map((f) => `${f.count}x ${f.id}`).join(", ")}`);
 } else {
-  const path = join(target.evidenceDirectory, `import-${importJobId}.json`);
+  // The finish time is in the NAME, not only in the body: a replay of the same
+  // package reuses the same import job, so a name keyed on the job alone would
+  // let the second run silently overwrite the first run's evidence — which is
+  // exactly the run somebody would later want to read.
+  const stamp = evidence.finishedAt.replace(/[:.]/g, "-");
+  const path = join(target.evidenceDirectory, `import-${importJobId}-${stamp}.json`);
   writeFileSync(path, serialized, { mode: 0o600 });
   say(`  ${path}`);
 }

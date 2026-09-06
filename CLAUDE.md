@@ -234,8 +234,9 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   and verified separately: 8.19 s, 7.91 s, 8.26 s. The ledger is now 0000-0028,
   29 rows, no duplicate. A fresh verified backup was taken immediately before
   and is **retained**. Nothing was seeded, no earlier migration was reapplied or
-  repaired, and no auth or storage schema was touched. **No real workbook has
-  been imported: all 36 canonical tables are empty.**
+  repaired, and no auth or storage schema was touched. The canonical tables were
+  EMPTY at that point; the real Cuicuilco package was imported into them later
+  the same day — see the Unit 5 Phase 2 bullet below.
 - **Unit 2 (`src/lib/ingestion/canonical-package/`) parses and validates only.**
   It writes nothing: no Supabase client, no insert, no RPC, no canonical row.
   `npm run test:canonical-package` fails if one appears.
@@ -365,8 +366,59 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   offline, and deliberately OUTSIDE `npm test` because its inputs are
   machine-specific; run without workbooks it reports itself SKIPPED, never as a
   pass. Executed 2026-09-06: 534 offered, 531 executed, 531 passed, 0 failed,
-  0 skipped, 0 unresolved, 2 not-applicable, 1 configuration-required. **No real
-  workbook was imported and the canonical tables are still empty.**
+  0 skipped, 0 unresolved, 2 not-applicable, 1 configuration-required.
+- ⓘ **The DATABASE-BACKED read adapter EXISTS: `src/lib/canonical-source/`.**
+  It lands on the SAME neutral `CanonicalResultSource` seam as the in-memory
+  adapter, so no calculator, contract or document changed when it arrived. It is
+  one folder away from `src/lib/results/` on purpose — that folder must stay
+  free of `server-only` and of every transport — and only `adapter.ts` and
+  `server.ts` are `server-only`, only `adapter.ts` names a Supabase client, and
+  `index.ts` re-exports neither. `person_private`, `person_external_identifier`
+  and `source_lineage` are never read at all and `pain_point`'s two text columns
+  are not in the row type: a name, a membership id, a raw cell and a
+  consultant's prose never enter the process. Every read is a keyset page over a
+  unique key, scoped by tenant AND study before any window, and a set larger
+  than its declared ceiling THROWS instead of being truncated — PostgREST's
+  silent 1000-row cap has been paid for here once already. §12 of
+  `docs/CANONICAL_RESULTS_MODEL.md` is the contract; read it before touching the
+  folder. `npm run test:canonical-database-source` (60 checks, in `npm test`)
+  enforces it.
+- ⓘ **`scripts/canonical-import-operator.mjs` is the ONLY way a real package is
+  written, and it defaults to refusing.** It does not reimplement the commit:
+  `runCanonicalCommit` still preflights the exact bytes, projects, stages,
+  commits, reconciles and reverts on a count disagreement. The operator adds the
+  target guard, the fingerprint gate, the study's state before the write, an
+  INDEPENDENT count of all 32 families and of the ownership ledger, evidence
+  written outside every Git repository, and a rollback path that goes through
+  the product's own RPC — `.delete(` and `delete from` do not appear in the file
+  and a gate asserts that. `--execute` additionally requires `--project <ref>`
+  naming, on the command line, the same project the environment named.
+  `scripts/lib/canonical-import-target.mjs` is the THIRD guard in that folder
+  and must stay separate from the other two: it REFUSES the disposable
+  acceptance run's own `CANONICAL_HOSTED_DISPOSABLE_PREFIX`, because that
+  variable means "everything this run makes may be deleted again".
+- ⓘ **THE REAL CUICUILCO PACKAGE IS IMPORTED into the hosted project**
+  (`ontvqazsqiwisdddblif`), on 2026-09-06, as import job
+  `1886a359-f2c9-483a-8b5e-979931841a71`: 8 588 canonical rows across 32
+  families, reconciled three ways, replayed idempotently without writing a row,
+  and read back through the database adapter at 531/531 golden parity with the
+  approved dashboard. A fresh backup was taken and restore-rehearsed first, and
+  it is **retained**. Every legacy count is unchanged — Cuicuilco is still
+  60 / 3 282 / 31 / 23 confirmed / 8 pending, `draft`. **The canonical tables
+  are populated and UNREAD**: nothing in `src/app` or `src/components` imports
+  either canonical path, a gate in `npm test` fails if one ever does, and the
+  application still computes through `src/lib/dashboard/view.ts`. The read-path
+  switch is separate, later, separately authorized work. Read
+  `docs/CURRENT_STATE.md` §"Unit 5 Phase 2" before describing any of it.
+- ⓘ **Two fingerprints, and they are not the same number.** The plan fingerprint
+  covers the whole plan and every derived record id is derived from the package
+  key TOGETHER WITH the tenant and the study, so a plan for a different study is
+  a different plan. `sha256:a226b70c…` is the fingerprint the dry-run and
+  golden-parity gates produce under their DISPOSABLE placeholder scope;
+  `sha256:099863e8…` is the one actually imported, under tenant `e63b2092…` and
+  study `cd4d6acd…`. The scope-free anchor is the package idempotency key
+  `sha256:bb9a4a98…`, which is mapping version, asset roles and file hashes
+  only. Never treat one as a substitute for another.
 - ⓘ **The authority questions are RESOLVED (2026-09-06). Do not reopen them.**
   (1) **TDP is the §4.1 ratio** — unawareness over the VALID base (satisfied +
   dissatisfied); it may exceed 100 and is never clamped. `processUnawarenessTdp`
