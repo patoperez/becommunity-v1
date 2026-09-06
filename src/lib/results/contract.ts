@@ -40,8 +40,16 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-/** The SHAPE version. Bump when a field is added, removed or re-typed. */
-export const CANONICAL_RESULTS_CONTRACT_VERSION = "1.0.0";
+/**
+ * The SHAPE version. Bump when a field is added, removed or re-typed.
+ *
+ * 2.0.0 — the methodology owner resolved the questions 1.0.0 was carrying, and
+ * the shape moved with them: the touchpoint's authoritative unawareness metric
+ * is now `tdp` (the ratio over the valid base) with the auxiliary proportion
+ * beside it under an explicit name, and the journey's stage-evidence result is
+ * a settled contract rule rather than an open question. Breaking, so major.
+ */
+export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.0.0";
 
 /**
  * The unit a number lives in. Presentation may style it; it may not change it.
@@ -263,6 +271,26 @@ export type UnresolvedItem = {
   authorities: AuthorityReference[];
 };
 
+/**
+ * Something the contract deliberately leaves to configuration or to editorial
+ * review — settled, not open.
+ *
+ * The difference from `UnresolvedItem` is the whole point. An unresolved item
+ * is a question nobody has answered; a configuration requirement is an answer:
+ * "this is not calculated, and here is who supplies it." Reporting the second
+ * as the first turns a working design into a permanent-looking defect.
+ */
+export type ConfigurationRequirement = {
+  key: string;
+  section: string;
+  /** Whether a study/template configures it, or a human curates the content. */
+  kind: "study_configuration" | "editorial_review";
+  detail: string;
+  /** Who supplies it, and in what artefact. */
+  suppliedBy: string;
+  authorities: AuthorityReference[];
+};
+
 /* -------------------------------------------------------------------------- */
 /* population                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -459,11 +487,30 @@ export type JourneyTouchpointResult = {
   groupKey: string;
   /** Position inside its group, from the source's own column order. */
   order: number;
+  /**
+   * The touchpoint's own satisfaction result.
+   *
+   * A touchpoint DIRECTLY OWNS this and the two unawareness results below,
+   * together with their bases. No other study metric attaches to it: see
+   * `JourneyStageEvidenceResult`.
+   */
   satisfaction: MetricResult;
-  /** The share of responses that reported not knowing the process. */
-  unawareShare: MetricResult;
-  /** The methodology's Tasa de Desconocimiento de Proceso. A ratio; may exceed 100. */
-  unawarenessRatio: MetricResult;
+  /**
+   * TDP — Tasa de Desconocimiento de Proceso. THE metric of that name.
+   *
+   * Unawareness over the VALID base (satisfied + dissatisfied), per process
+   * documentation §4.1 and the owner decision of 2026-09-06. A ratio: it may
+   * exceed 100, and is deliberately not clamped.
+   */
+  tdp: MetricResult;
+  /**
+   * AUXILIARY — unawareness over every classified response of the touchpoint.
+   *
+   * A different quantity with a different denominator, kept because it is the
+   * complement of "% who know this process" and that pair closes at a hundred.
+   * It is never called TDP and never replaces it.
+   */
+  unawareShareOfResponses: MetricResult;
   counts: {
     satisfied: number;
     dissatisfied: number;
@@ -496,21 +543,39 @@ export type JourneyExclusion = {
 };
 
 /** One curated journey stage with no proven metric behind it. */
-export type JourneyStageGap = {
+/** One stage-to-evidence link, present only when configuration supplies it. */
+export type JourneyStageEvidenceLink = {
   stageKey: string;
-  stageLabel: string;
-  stageOrder: number;
-  /** Empty. A candidate list would be a guess wearing a data structure. */
-  provenMetricKeys: string[];
-  detail: string;
+  metricKey: string | null;
+  itemKey: string | null;
+  performanceDimensionKey: string | null;
+  role: "primary" | "supporting" | "context";
 };
 
+/**
+ * How a journey stage relates to a metric — a SETTLED CONTRACT RULE, not an
+ * open question.
+ *
+ * A touchpoint directly owns its satisfaction result and its two unawareness
+ * results, with their bases. Study-level metrics — recommendation, renewal
+ * risk, retention, attrition, LTV — are NOT implicitly attached to any
+ * touchpoint or stage, and no generic association is ever inferred. That is the
+ * rule, decided by the methodology owner on 2026-09-06, and it is the correct
+ * answer for this study rather than a gap in it.
+ *
+ * `links` is therefore empty unless a study or template EXPLICITLY configures
+ * one, with provenance. `requires_explicit_configuration` names exactly that:
+ * nothing is missing, and anything further is a configuration act.
+ */
 export type JourneyStageEvidenceResult = {
-  status: "unresolved";
-  reason: UnresolvedReason;
+  status: "requires_explicit_configuration";
+  /** The stable id of the contract rule, so a reader can look it up. */
+  rule: "journey_stage_evidence_is_explicit_only";
   detail: string;
-  wouldBeSettledBy: string;
-  gaps: JourneyStageGap[];
+  /** What a future study must declare for a link to exist. */
+  configuredBy: string;
+  /** Links a configuration actually supplied. Empty for Cuicuilco v1. */
+  links: JourneyStageEvidenceLink[];
   authorities: AuthorityReference[];
 };
 
@@ -635,6 +700,14 @@ export type CanonicalStudyResults = {
   journey: JourneyResult;
   performance: { dimensions: PerformanceDimensionResult[] };
   qualitative: { groups: QualitativeGroupResult[]; curatedFindingCounts: CuratedFindingCount[] };
-  /** Every open question in the document, gathered in one place. */
+  /**
+   * Every open question in the document, gathered in one place.
+   *
+   * EMPTY is the healthy state, and for Cuicuilco it is empty: what this array
+   * once carried was resolved by the methodology owner on 2026-09-06 and now
+   * appears either as a settled rule or in `configurationRequired`.
+   */
   unresolved: UnresolvedItem[];
+  /** What is deliberately supplied by configuration or editorial review. */
+  configurationRequired: ConfigurationRequirement[];
 };

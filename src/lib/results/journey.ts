@@ -12,28 +12,31 @@
  *   workbook does. Group membership is therefore workbook evidence, and column
  *   order on the header row is the order inside a group.
  *
- *   The METRIC-TO-STAGE LINK is not proven, and this module refuses it. The
- *   methodology collapses the two levels outright — «Las etapas son puntos de
- *   contacto o touchpoints» — so there is no stage layer above a touchpoint for
- *   a metric to attach to, and no document assigns recommendation, renewal
- *   risk, retention or attrition to a position in the journey. The curated
- *   eighteen-stage model the pain map carries is kept SEPARATE from the
- *   measured touchpoints, and every one of its stages is reported as a gap.
+ *   WHAT A TOUCHPOINT OWNS is settled, and it is a rule rather than a gap. A
+ *   touchpoint DIRECTLY owns its satisfaction result, its TDP and the auxiliary
+ *   unawareness share, each with its own base. Study-level metrics —
+ *   recommendation, renewal risk, retention, attrition, LTV — are NOT
+ *   implicitly attached to a touchpoint or a stage, and no generic association
+ *   is ever inferred. The methodology owner decided this on 2026-09-06, and it
+ *   agrees with §7.2, which collapses stage into touchpoint outright: «Las
+ *   etapas son puntos de contacto o touchpoints».
  *
- *   Adjacency is not evidence. Two labels that sound alike are not evidence.
- *   The approved dashboard resolves this with a hand-written alias table inside
- *   its own build script, which is an implementation and not an authority.
+ *   Anything further is a CONFIGURATION ACT. A future study may declare a
+ *   stage-to-metric link explicitly, with provenance, and the contract carries
+ *   it; nothing infers one. Adjacency is not evidence, two labels that sound
+ *   alike are not evidence, and the approved dashboard's hand-written alias
+ *   table is an implementation rather than an authority — it is not copied here.
  *
- * TWO DIFFERENT UNAWARENESS QUANTITIES, both documented, both emitted. See
- * `processUnawarenessRate` and `processUnawarenessRatio` for the conflict over
- * which of them owns the name "TDP". This module does not resolve it.
+ * TWO UNAWARENESS QUANTITIES, and the name is settled. `processUnawarenessTdp`
+ * IS the Tasa de Desconocimiento de Proceso; `unawarenessShareOfResponses` is a
+ * useful auxiliary proportion over a wider denominator and is never called TDP.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import {
-  processUnawarenessRate,
-  processUnawarenessRatio,
+  processUnawarenessTdp,
   touchpointCsatOnScale,
+  unawarenessShareOfResponses,
 } from "../calc/business-metrics";
 import { normalizeToken } from "../ingestion/canonical-package/values";
 import { authorities } from "./authorities";
@@ -43,7 +46,7 @@ import type {
   JourneyModelResult,
   JourneyResult,
   JourneyStageEvidenceResult,
-  JourneyStageGap,
+  JourneyStageEvidenceLink,
   JourneyTouchpointResult,
   MetricResult,
 } from "./contract";
@@ -140,11 +143,11 @@ function tallyTouchpoint(
 
 const CSAT_EXPLANATION =
   "Qué proporción de las personas que pudieron evaluar este punto de contacto quedó satisfecha con él.";
-const UNAWARE_SHARE_EXPLANATION =
-  "Qué proporción de quienes respondieron sobre este punto de contacto declaró no conocerlo o no haberlo usado.";
-const UNAWARE_RATIO_EXPLANATION =
+const TDP_EXPLANATION =
   "Cuánto pesa el desconocimiento de este punto de contacto frente a las personas que sí pudieron evaluarlo. " +
   "Puede superar el cien por ciento cuando quienes no lo conocen son más que quienes lo evaluaron.";
+const UNAWARE_SHARE_EXPLANATION =
+  "Qué proporción de quienes respondieron sobre este punto de contacto declaró no conocerlo o no haberlo usado.";
 
 export function buildJourney(
   source: CanonicalResultSource,
@@ -265,49 +268,51 @@ export function buildJourney(
       // accounting is the same records with a different denominator.
       const unawareBase = makeBase(eligible, tally.records, responses, tally.accounting);
 
-      const unawareShareEnvelope = {
-        key: `unaware_share_${item.key}`,
+      const tdpEnvelope = {
+        key: `tdp_${item.key}`,
+        label: item.label,
+        base,
+        provenance: makeProvenance({
+          calculationVersion: spec.calculationVersion,
+          explanation: TDP_EXPLANATION,
+          metricKey: lookup.metricByKey.has(`tdp_item_${item.key}`) ? `tdp_item_${item.key}` : null,
+          sources: ["survey_response", "response_option"],
+          authorityIds: ["methodology-4-1-tdp", "catalog-5-tdp", "owner-decision-tdp", "approved-dashboard"],
+          notes: [
+            "TDP: razón sobre la BASE VÁLIDA (satisfechas más insatisfechas), tal como la enuncia la " +
+              "documentación integral §4.1 y como la calcula el tablero aprobado. Puede superar cien " +
+              "y no se acota: acotarla borraría justamente los casos que la medida existe para mostrar.",
+            "Resuelto el 6 de septiembre de 2026 por la propiedad metodológica. La documentación " +
+              "integral no define bandas para esta razón, así que no se emite ninguna.",
+          ],
+        }),
+      };
+
+      // The auxiliary base is every classified response the touchpoint
+      // received, so its accounting is the same records with a wider
+      // denominator.
+      const shareEnvelope = {
+        key: `unaware_share_of_responses_${item.key}`,
         label: item.label,
         base: unawareBase,
         provenance: makeProvenance({
           calculationVersion: spec.calculationVersion,
           explanation: UNAWARE_SHARE_EXPLANATION,
           sources: ["survey_response", "response_option"],
-          authorityIds: ["catalog-5-tdp", "methodology-7-1-conocimiento"],
+          authorityIds: ["methodology-7-1-conocimiento", "owner-decision-tdp"],
           notes: [
-            "Proporción sobre TODAS las respuestas del punto (satisfechas, insatisfechas y de " +
-              "desconocimiento). Acotada entre cero y cien. Es la lectura de docs/CALCULATION_CATALOG.md §5 " +
-              "y la que hace sumar cien al gráfico de «% que conoce / % que no conoce» de §7.1.",
-            "CONFLICTO DE AUTORIDAD sobre el NOMBRE: docs/CALCULATION_CATALOG.md §5 llama TDP a esta " +
-              "proporción, mientras la documentación integral §4.1 llama TDP a la razón sobre la base " +
-              "válida. Ambas cantidades están documentadas; el nombre no está resuelto y no se " +
-              "resuelve aquí.",
+            "Cantidad AUXILIAR, no es TDP. Proporción sobre TODAS las respuestas clasificadas del " +
+              "punto (satisfechas, insatisfechas y de desconocimiento), acotada entre cero y cien. " +
+              "Es el complemento de «% que conoce» del gráfico apilado de §7.1, que sólo cierra en " +
+              "cien con este denominador.",
+            "Se publica junto al TDP y nunca en su lugar; su denominador va declarado en la base " +
+              "del propio resultado.",
           ],
         }),
       };
 
-      const unawareRatioEnvelope = {
-        key: `unawareness_ratio_${item.key}`,
-        label: item.label,
-        base,
-        provenance: makeProvenance({
-          calculationVersion: spec.calculationVersion,
-          explanation: UNAWARE_RATIO_EXPLANATION,
-          metricKey: lookup.metricByKey.has(`tdp_item_${item.key}`) ? `tdp_item_${item.key}` : null,
-          sources: ["survey_response", "response_option"],
-          authorityIds: ["methodology-4-1-tdp", "approved-dashboard"],
-          notes: [
-            "Razón sobre la base válida (satisfechas más insatisfechas), tal como la enuncia la " +
-              "documentación integral §4.1 y como la calcula el tablero aprobado. Puede superar cien " +
-              "y no se acota: acotarla borraría justamente los casos que la medida existe para mostrar.",
-            "CONFLICTO DE AUTORIDAD sobre el NOMBRE: ver la nota equivalente en la proporción de " +
-              "desconocimiento. La documentación integral no define bandas para esta razón.",
-          ],
-        }),
-      };
-
-      const unawareShareRate = processUnawarenessRate(tally.unaware, responses);
-      const unawareRatio = processUnawarenessRatio(tally.unaware, valid);
+      const tdpRate = processUnawarenessTdp(tally.unaware, valid);
+      const shareRate = unawarenessShareOfResponses(tally.unaware, responses);
 
       const satisfaction: MetricResult =
         csat === null
@@ -321,23 +326,23 @@ export function buildJourney(
               makeValue(csat.csat, "percent", resolveBand(source, spec.bandSchemeKeys.csat, "csat", csat.csat)),
             );
 
-      const unawareShare: MetricResult =
-        unawareShareRate.value === null
+      const tdp: MetricResult =
+        tdpRate.value === null
           ? unavailableMetric(
-              unawareShareEnvelope,
+              tdpEnvelope,
+              reasonForEmptyBase(base, scope.filtered),
+              "Nadie de esta selección pudo evaluar este punto de contacto, así que no hay base válida contra la cual medir el desconocimiento.",
+            )
+          : availableMetric(tdpEnvelope, makeValue(tdpRate.value, "ratio"));
+
+      const unawareShareOfResponses: MetricResult =
+        shareRate.value === null
+          ? unavailableMetric(
+              shareEnvelope,
               reasonForEmptyBase(unawareBase, scope.filtered),
               "Este punto de contacto no recibió respuesta alguna en esta selección.",
             )
-          : availableMetric(unawareShareEnvelope, makeValue(unawareShareRate.value, "percent"));
-
-      const unawarenessRatio: MetricResult =
-        unawareRatio.value === null
-          ? unavailableMetric(
-              unawareRatioEnvelope,
-              reasonForEmptyBase(base, scope.filtered),
-              "Nadie de esta selección pudo evaluar este punto de contacto, así que no hay base contra la cual medir el desconocimiento.",
-            )
-          : availableMetric(unawareRatioEnvelope, makeValue(unawareRatio.value, "ratio"));
+          : availableMetric(shareEnvelope, makeValue(shareRate.value, "percent"));
 
       touchpoints.push({
         key: item.key,
@@ -346,8 +351,8 @@ export function buildJourney(
         groupKey: domain.key,
         order,
         satisfaction,
-        unawareShare,
-        unawarenessRatio,
+        tdp,
+        unawareShareOfResponses,
         counts: {
           satisfied: tally.satisfied,
           dissatisfied: tally.dissatisfied,
@@ -402,48 +407,50 @@ function buildCuratedModels(source: CanonicalResultSource): JourneyModelResult[]
  * would be a guess wearing a data structure, and a consultant reading it would
  * have no way to tell it apart from a relationship somebody actually made.
  */
+/**
+ * The journey stage-evidence result — a SETTLED CONTRACT RULE.
+ *
+ * A touchpoint owns its satisfaction and its two unawareness results directly.
+ * No study-level metric is implicitly attached to a touchpoint or a stage, and
+ * no generic association is ever inferred. That is the answer, not a gap in
+ * one: reporting it as an unresolved question per curated stage described a
+ * working design as a permanent defect, and it stopped doing that on
+ * 2026-09-06 when the methodology owner settled the rule.
+ *
+ *  carries exactly what a study or template EXPLICITLY configured, with
+ * provenance. For Cuicuilco v1 the projection supplies none, so it is empty —
+ * and empty is correct, not incomplete.
+ */
 export function buildStageEvidence(source: CanonicalResultSource): JourneyStageEvidenceResult {
-  const proven = new Map<string, string[]>();
-  for (const link of source.journeyStageEvidence) {
-    const keys = proven.get(link.journeyStageKey) ?? [];
-    if (link.metricKey) keys.push(link.metricKey);
-    proven.set(link.journeyStageKey, keys);
-  }
-
-  const gaps: JourneyStageGap[] = source.journeyStages
-    .slice()
-    .sort((a, b) => a.stageOrder - b.stageOrder)
-    .filter((stage) => (proven.get(stage.key) ?? []).length === 0)
-    .map((stage) => ({
-      stageKey: stage.key,
-      stageLabel: stage.label,
-      stageOrder: stage.stageOrder,
-      provenMetricKeys: [],
-      detail:
-        "Ninguna fuente autoritativa enuncia qué indicador corresponde a esta etapa curada. " +
-        "La documentación integral colapsa etapa y punto de contacto, de modo que no existe una " +
-        "capa de etapas por encima de los puntos a la que un indicador pudiera adscribirse.",
-    }));
+  const links: JourneyStageEvidenceLink[] = source.journeyStageEvidence.map((link) => ({
+    stageKey: link.journeyStageKey,
+    metricKey: link.metricKey,
+    itemKey: link.itemKey,
+    performanceDimensionKey: link.performanceDimensionKey,
+    role: link.role,
+  }));
 
   return {
-    status: "unresolved",
-    reason: "relationship_not_stated",
+    status: "requires_explicit_configuration",
+    rule: "journey_stage_evidence_is_explicit_only",
     detail:
-      "No se emite ningún vínculo entre indicador y etapa del recorrido. Lo único que las fuentes " +
-      "sostienen es que el CSAT se calcula POR PUNTO DE CONTACTO y que las etapas SON los puntos de " +
-      "contacto; nadie adscribe recomendación, riesgo de renovación, retención ni deserción a una " +
-      "posición del recorrido. Un vínculo inferido por parecido de etiquetas o por vecindad visual " +
-      "sería una relación que nadie hizo.",
-    wouldBeSettledBy:
-      "Una confirmación explícita de la responsable metodológica, o un artefacto de mapeo aprobado " +
-      "que nombre indicador y etapa en la misma fila. Ninguno de los dos existe hoy en el paquete.",
-    gaps,
+      "Un punto de contacto posee directamente su CSAT, su TDP y la proporción auxiliar de " +
+      "desconocimiento, cada uno con su base. Los indicadores de estudio —recomendación, riesgo " +
+      "de renovación, retención, deserción, LTV— NO se adscriben implícitamente a un punto de " +
+      "contacto ni a una etapa, y no se infiere ninguna asociación genérica. La documentación " +
+      "integral §7.2 colapsa etapa y punto de contacto, de modo que no existe una capa " +
+      "intermedia a la que un indicador pudiera adscribirse por sí solo. Esto es una regla del " +
+      "contrato, no una incertidumbre del estudio.",
+    configuredBy:
+      "Configuración explícita de estudio o plantilla, con procedencia, que nombre indicador y " +
+      "etapa en la misma declaración. La proyección canónica la transporta tal cual; nada la " +
+      "deduce, y la tabla de alias escrita a mano del tablero de emergencia no se copia aquí.",
+    links,
     authorities: authorities(
+      "owner-decision-journey-metrics",
       "methodology-7-2-journey",
       "methodology-4-1-csat",
-      "methodology-4-1-categorias-csat",
       "canonical-model-projection",
-      "approved-dashboard",
     ),
   };
 }

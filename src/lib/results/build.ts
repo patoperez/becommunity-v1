@@ -17,8 +17,8 @@ import {
   CANONICAL_RESULTS_CONTRACT_VERSION,
   type AppliedFilter,
   type CanonicalStudyResults,
+  type ConfigurationRequirement,
   type StudyPeriod,
-  type UnresolvedItem,
 } from "./contract";
 import { applyFilters } from "./filters";
 import { buildJourney } from "./journey";
@@ -53,75 +53,57 @@ function specFor(source: CanonicalResultSource, override?: StudyResultsSpec): St
 }
 
 /**
- * The open questions, gathered where a reader will actually find them.
+ * What this document deliberately leaves to configuration or editorial review.
  *
- * Every one of these is carried in the data instead of being resolved by this
- * layer. Two of them are conflicts between documents that both count as
- * authorities; the third is a relationship no authority states at all.
+ * These are ANSWERS, not open questions. Each one says who supplies the thing
+ * and in what artefact, so a reader can tell a working design from a defect —
+ * which is exactly what an `unresolved` entry could not do for them.
+ *
+ * The methodology owner settled all three of this study's former open
+ * questions on 2026-09-06. `unresolved` is consequently empty for Cuicuilco,
+ * and empty is the healthy state.
  */
-function collectUnresolved(results: {
-  journeyGapCount: number;
-  hasTouchpoints: boolean;
+function collectConfigurationRequirements(results: {
   hasCuratedFindings: boolean;
-}): UnresolvedItem[] {
-  const items: UnresolvedItem[] = [];
+  hasJourneyStages: boolean;
+}): ConfigurationRequirement[] {
+  const items: ConfigurationRequirement[] = [];
 
-  items.push({
-    key: "journey_stage_evidence",
-    section: "journey",
-    reason: "relationship_not_stated",
-    detail:
-      `No se emite vínculo alguno entre indicador y etapa del recorrido; ${results.journeyGapCount} ` +
-      "etapas curadas quedan sin indicador probado. La documentación integral colapsa etapa y punto " +
-      "de contacto, de modo que no existe una capa de etapas a la que un indicador pudiera adscribirse, " +
-      "y ninguna fuente adscribe recomendación, riesgo de renovación, retención ni deserción a una " +
-      "posición del recorrido.",
-    wouldBeSettledBy:
-      "Una confirmación explícita de la responsable metodológica, o un artefacto de mapeo aprobado que " +
-      "nombre indicador y etapa en la misma fila.",
-    authorities: authorities("methodology-7-2-journey", "methodology-4-1-csat", "canonical-model-projection"),
-  });
-
-  if (results.hasTouchpoints) {
+  if (results.hasJourneyStages) {
     items.push({
-      key: "tdp_name_conflict",
+      key: "journey_stage_evidence",
       section: "journey",
-      reason: "authority_conflict",
+      kind: "study_configuration",
       detail:
-        "Dos documentos autoritativos dan el nombre «TDP» a dos cantidades distintas. " +
-        "La documentación integral §4.1 lo da a la RAZÓN sobre la base válida (satisfechas más " +
-        "insatisfechas), que puede superar cien; docs/CALCULATION_CATALOG.md §5 lo da a la PROPORCIÓN " +
-        "sobre todas las respuestas del punto, acotada entre cero y cien. El propio §7.1 de la " +
-        "documentación integral describe un gráfico apilado de «% que conoce / % que no conoce», que " +
-        "sólo cierra con el denominador de la proporción. Ambas cantidades se emiten, bajo nombres " +
-        "inequívocos y con su base declarada; el nombre no se resuelve aquí.",
-      wouldBeSettledBy:
-        "Una confirmación explícita de la responsable metodológica sobre a cuál de las dos cantidades " +
-        "corresponde el nombre TDP, y la corrección del documento que quede equivocado.",
-      authorities: authorities("methodology-4-1-tdp", "catalog-5-tdp", "methodology-7-1-conocimiento", "approved-dashboard"),
+        "Un punto de contacto ya posee directamente su CSAT, su TDP y la proporción auxiliar de " +
+        "desconocimiento. Ningún indicador de estudio se adscribe implícitamente a una etapa, y " +
+        "no se infiere ninguna asociación genérica: es una regla del contrato. Un vínculo extra " +
+        "existe únicamente si una configuración lo declara.",
+      suppliedBy:
+        "Configuración explícita de estudio o plantilla, con procedencia, transportada tal cual " +
+        "por la proyección canónica.",
+      authorities: authorities("owner-decision-journey-metrics", "methodology-7-2-journey"),
     });
   }
 
   if (results.hasCuratedFindings) {
     items.push({
-      key: "curated_pain_phrase_cloud",
+      key: "curated_journey_pain_cloud",
       section: "qualitative",
-      reason: "source_incomplete",
+      kind: "editorial_review",
       detail:
-        "La nube de frases del recorrido que muestra el tablero aprobado no es reproducible desde el " +
-        "modelo canónico. Necesita dos cosas que ninguna fuente enuncia: una regla para partir la celda " +
-        "curada en frases sueltas, y una correspondencia entre cada punto de contacto medido y la etapa " +
-        "curada de la que toma sus frases. El tablero aprobado resuelve la segunda con una tabla de " +
-        "alias escrita a mano en su propio script de construcción, que es una implementación y no una " +
-        "autoridad. Este contrato emite en su lugar el conteo de hallazgos curados por entidad curada, " +
-        "que sí está sostenido por claves foráneas reales.",
-      wouldBeSettledBy:
-        "Una regla de segmentación de frases aprobada, y un mapeo aprobado entre punto de contacto y " +
-        "etapa curada.",
-      authorities: authorities("approved-dashboard", "canonical-model-projection", "methodology-7-2-journey"),
+        "La nube de frases del recorrido del tablero aprobado es contenido editorial curado, no " +
+        "un indicador calculado en servidor: depende de una segmentación editorial de frases y de " +
+        "un mapeo de alias que no puede derivarse autoritativamente de las fuentes canónicas. " +
+        "Este contrato emite en su lugar el conteo de hallazgos curados por entidad curada, que " +
+        "sí está sostenido por claves foráneas reales. No es un cálculo fallido ni un bloqueo " +
+        "para la importación canónica futura.",
+      suppliedBy:
+        "Revisión editorial humana, y en su caso una configuración aprobada de segmentación de " +
+        "frases y de correspondencia entre punto de contacto y etapa curada.",
+      authorities: authorities("owner-decision-journey-cloud", "approved-dashboard"),
     });
   }
-
   return items;
 }
 
@@ -164,10 +146,12 @@ export function buildCanonicalStudyResults(
       groups: buildQualitativeGroups(source, spec, scope, lookup),
       curatedFindingCounts,
     },
-    unresolved: collectUnresolved({
-      journeyGapCount: journey.stageEvidence.gaps.length,
-      hasTouchpoints: journey.touchpoints.length > 0,
+    // Empty, and empty is the healthy state: every question this document
+    // once carried was settled by the methodology owner on 2026-09-06.
+    unresolved: [],
+    configurationRequired: collectConfigurationRequirements({
       hasCuratedFindings: curatedFindingCounts.length > 0,
+      hasJourneyStages: source.journeyStages.length > 0,
     }),
   };
 }

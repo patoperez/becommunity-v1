@@ -153,9 +153,70 @@ export const AUTHORITIES: Record<string, RegisteredAuthority> = {
     document: "docs/CALCULATION_CATALOG.md",
     section: "§5 — TDP",
     statement:
-      "«TDP = (respuestas de desconocimiento / total de respuestas del punto) × 100». " +
-      "«El denominador incluye respuestas satisfechas, insatisfechas y de desconocimiento.» " +
-      "Este denominador CONTRADICE el de §4.1 de la documentación integral.",
+      "Corregido el 6 de septiembre de 2026: «TDP = (respuestas de desconocimiento / respuestas " +
+      "válidas satisfechas e insatisfechas) × 100», el mismo denominador de §4.1 de la " +
+      "documentación integral. Puede superar 100. La proporción sobre todas las respuestas del " +
+      "punto se conserva como cantidad auxiliar con nombre propio y NO se llama TDP.",
+  },
+  "owner-decision-tdp": {
+    id: "owner-decision-tdp",
+    rank: 1,
+    document: "Decisión registrada de la propiedad metodológica",
+    section: "2026-09-06 — significado de TDP",
+    statement:
+      "El indicador oficial llamado TDP es la razón de §4.1 y del tablero aprobado: respuestas de " +
+      "desconocimiento sobre respuestas válidas satisfechas e insatisfechas. Puede superar 100 %. " +
+      "La cantidad alternativa (desconocimiento sobre todas las respuestas clasificadas) puede " +
+      "conservarse como proporción auxiliar útil, pero no puede llamarse TDP, debe llevar un " +
+      "nombre descriptivo inequívoco, no sustituye al TDP autoritativo y su denominador debe " +
+      "permanecer explícito.",
+  },
+  "owner-decision-esfera-cri": {
+    id: "owner-decision-esfera-cri",
+    rank: 1,
+    document: "Decisión registrada de la propiedad metodológica",
+    section: "2026-09-06 — Esfera × CRI",
+    statement:
+      "Esfera NO se permite como filtro ni como cruce de segmentación del CRI. La documentación " +
+      "integral §5.2 es autoritativa; que el tablero de emergencia ofrezca el cruce es una " +
+      "desviación del tablero de referencia, no una anulación metodológica. Se conserva el " +
+      "rechazo canónico y la cuestión queda RESUELTA.",
+  },
+  "owner-decision-journey-metrics": {
+    id: "owner-decision-journey-metrics",
+    rank: 1,
+    document: "Decisión registrada de la propiedad metodológica",
+    section: "2026-09-06 — relaciones del recorrido",
+    statement:
+      "Un punto de contacto posee DIRECTAMENTE su CSAT y sus resultados de desconocimiento con " +
+      "sus bases. NPS, CRI, retención, deserción, LTV y demás indicadores de estudio NO se " +
+      "adscriben implícitamente a un punto de contacto, y no puede inferirse ninguna asociación " +
+      "genérica indicador-etapa. Cualquier asociación adicional en un estudio futuro debe venir " +
+      "de configuración explícita de estudio o plantilla, con procedencia. Esto es una REGLA DEL " +
+      "CONTRATO, no una incertidumbre metodológica.",
+  },
+  "owner-decision-capitanes": {
+    id: "owner-decision-capitanes",
+    rank: 1,
+    document: "Decisión registrada de la propiedad metodológica",
+    section: "2026-09-06 — Capitanes / #REF!",
+    statement:
+      "La implementación vigente es correcta: se conserva el punto de contacto canónico " +
+      "«Capitanes de Esfera» poblado, se excluye únicamente la columna duplicada cuyos registros " +
+      "son todos source_unavailable/#REF!, y se mantiene la regla general de exclusión basada en " +
+      "evidencia. RESUELTO.",
+  },
+  "owner-decision-journey-cloud": {
+    id: "owner-decision-journey-cloud",
+    rank: 1,
+    document: "Decisión registrada de la propiedad metodológica",
+    section: "2026-09-06 — nube cualitativa del recorrido",
+    statement:
+      "La nube de puntos de dolor del recorrido depende de una segmentación editorial de frases y " +
+      "de un mapeo de alias escrito a mano que no puede derivarse autoritativamente de las " +
+      "fuentes canónicas actuales. Se trata como contenido editorial curado y configurado, NO " +
+      "como un indicador calculado en servidor. No es un cálculo fallido ni un bloqueo para la " +
+      "importación canónica futura.",
   },
   "catalog-6-cri": {
     id: "catalog-6-cri",
