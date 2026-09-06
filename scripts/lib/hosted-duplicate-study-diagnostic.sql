@@ -171,6 +171,34 @@ select json_build_object(
     'study_category_snapshot', (select count(*) from public.study_category_snapshot))
 );
 
+-- ---- [8b] WHEN the drift arrived, against when the second study arrived ---
+-- Two findings are open: a duplicated study, and schema applied to the project
+-- under migration numbers no `main` migration explains. If the experience and
+-- category work landed around the same dates as the second Cuicuilco import,
+-- the two may have ONE cause rather than two. Timestamps and counts only; no row
+-- content, and each table names its own time column because they differ.
+select json_build_object(
+  'section', '8b-drift-timeline',
+  'study_experience_draft', (select json_build_object('rows', count(*),
+     'first', min(created_at), 'last', max(created_at),
+     'last_updated', max(updated_at)) from public.study_experience_draft),
+  'study_experience_event', (select json_build_object('rows', count(*),
+     'first', min(occurred_at), 'last', max(occurred_at)) from public.study_experience_event),
+  'study_experience_publication', (select json_build_object('rows', count(*)) from public.study_experience_publication),
+  'study_experience_revision', (select json_build_object('rows', count(*)) from public.study_experience_revision),
+  'category_decision', (select json_build_object('rows', count(*),
+     'first', min(decided_at), 'last', max(decided_at)) from public.category_decision),
+  'study_category_snapshot', (select json_build_object('rows', count(*)) from public.study_category_snapshot),
+  -- The comparison points: when each study was created, and when each import ran.
+  'studies_created', coalesce((
+    select json_agg(json_build_object('study_id', id, 'created_at', created_at) order by created_at)
+    from public.study), '[]'::json),
+  'imports_created', coalesce((
+    select json_agg(json_build_object('batch_id', id, 'study_id', study_id,
+      'created_at', created_at, 'committed_at', committed_at, 'status', status) order by created_at)
+    from public.import_batch), '[]'::json)
+);
+
 -- ---- [8] Server facts the REST transport cannot see -----------------------
 select json_build_object(
   'section', '8-server',

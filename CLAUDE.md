@@ -190,6 +190,22 @@ and hardening corrections through migration `0021`. The current bounded unit is
 an additive canonical model for the audited Cuicuilco workbook package; its
 contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 
+- ⓘ **Migrations `0022`, `0023` and `0024` CANNOT be applied under their current
+  numbers — all three collide.** `origin/main` is at 0021; above it, other
+  branches claim `0022_semantic_category_review` (9 branches),
+  `0023_experience_definition_persistence` and
+  `0024_experience_draft_conflict_code` (5 branches each) and
+  `0025_experience_publication` (1). Supabase tracks applied migrations by
+  NUMBER, so applying this branch's `0022` to a project already recording one
+  is skipped or conflicts — both quiet enough to look like success. **The
+  renumbering floor is 0026, not 0025**; any recommendation of 0025-0027 is
+  withdrawn. The full map is in `docs/CANONICAL_STUDY_MODEL.md`.
+- ⓘ **The hosted project's schema is AHEAD of `main`, which is the same drift
+  `0016` was written to remove.** The `semantic_category_review` and
+  `experience_*` migrations are applied to the project and none of them is on
+  `main`. `study_experience_event` holds 86 rows written under numbers this
+  branch also uses, so the database has made that numbering a fait accompli
+  and the canonical branch is the cheap side to move.
 - Migrations `0022`, `0023` and `0024` are source changes only until staging
   execution is explicitly authorized and verified. Do not describe them as
   applied.

@@ -19,6 +19,59 @@ This layer is designed around four rules:
 4. Every derived metric, journey link and curated finding can be traced back to
    the source package that produced it.
 
+## BLOCKING: the migration numbers 0022, 0023 and 0024 all collide
+
+**None of these three migrations may be applied to the hosted project under its
+current number.** All three numbers are already claimed by other branches, and
+two of those claims have already been APPLIED to the project.
+
+`origin/main` tops out at **0021**. Above it, every migration that exists on any
+remote branch:
+
+| number | this branch | other branches | on the hosted project? |
+|---|---|---|---|
+| **0022** | `canonical_ingestion_foundation` | `semantic_category_review` — **9** `claude/*` branches | **the other one is applied** — `category_decision` (2 rows), `study_category_snapshot` (0) |
+| **0023** | `canonical_analysis_model` | `experience_definition_persistence` — **5** `claude/experience-*` branches | **the other one is applied** — `study_experience_draft` (2), `study_experience_event` (**86 rows**) |
+| **0024** | `canonical_commit_and_rollback` | `experience_draft_conflict_code` — the same 5 branches | **the other one is applied** — `study_experience_revision` (0) |
+| **0025** | — | `experience_publication` — `claude/experience-publication-versioning` | `study_experience_publication` (0) |
+
+Supabase tracks applied migrations BY VERSION NUMBER, so applying this branch's
+`0022` to a project that already records a `0022` is either skipped as
+already-applied or conflicts — and both outcomes are quiet enough to be mistaken
+for success.
+
+### The renumbering floor is 0026, not 0025
+
+⚠️ **An earlier recommendation in this work to renumber to 0025-0027 is WITHDRAWN.**
+It was made when only the `0022` collision was visible, and it is wrong:
+`0025_experience_publication` already exists on
+`claude/experience-publication-versioning`. The lowest free number is **0026**,
+so the range would be **0026-0028** — and only after confirming no branch has
+claimed those in the meantime. The owner decides the target range; this document
+records the floor, not the decision.
+
+### The canonical branch is the one that renumbers
+
+Not because its numbering is worse, but because the database has already made
+the other numbering a fait accompli: `study_experience_event` holds 86 rows
+written under `0023`/`0024` as the experience branches define them. Renumbering
+those would mean reconciling a ledger against rows that already exist. This
+branch has written nothing to the project, so it is the cheap side to move.
+
+### This is the SECOND instance of the drift 0016 was written to remove
+
+`0016_remove_untracked_private_policy_experiment.sql` exists because the project
+carried RLS policies and a `private` helper schema that appeared in **no tracked
+migration** — schema in the database that nothing on `main` explained. Its header
+records the cost: one policy referenced a table that did not exist, so
+`public.tenant` could not be read by any authenticated role.
+
+The same class of divergence is here again. The `semantic_category_review` and
+`experience_*` migrations are applied to the project and **none of them is on
+`main`** — `main` is at 0021. Whatever is decided about numbering, the standing
+problem is that the project's schema is ahead of the branch that is supposed to
+explain it, and 0016 is the precedent for how expensive that gets.
+
 ## Migration 0022: ingestion foundation
 
 `0022_canonical_ingestion_foundation.sql` adds:
