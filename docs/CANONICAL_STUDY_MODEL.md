@@ -962,7 +962,7 @@ The ledger is now **29 rows, 0000-0028, no duplicate**.
 disposable prefix `U4-P4A7K2` and synthetic fixtures only. The real workbooks
 were deliberately not supplied.
 
-**102 assertions offered: 79 executed, 79 passed, 0 failed, 70 skipped.**
+**149 assertions offered: 79 executed, 79 passed, 0 failed, 70 skipped.**
 
 All **41** protected table counts were **identical before and after**. Measured
 over the hosted transport, sizes and durations only:
