@@ -351,6 +351,29 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 - The existing ingestion and client read paths remain authoritative. Do not
   switch them to the new tables until the deterministic package importer,
   reconciliation and compatibility tests exist.
+- ⓘ **The server-side results layer EXISTS: `src/lib/results/`.** Unit 5 Phase 1
+  built the versioned, aggregate-only contract a future dashboard receives, plus
+  its in-memory adapter over the canonical projection. Its rules, its two open
+  authority conflicts and its unresolved journey relationship are documented in
+  `docs/CANONICAL_RESULTS_MODEL.md` — read it before touching that folder.
+  Nothing in it defines a formula: every number delegates to
+  `src/lib/calc/metrics.ts` / `business-metrics.ts`. `npm run test:canonical-results`
+  (in `npm test`) fails if a module there reaches a transport, or if any React
+  component or browser module imports a metric definition or re-implements one.
+  Golden parity against the approved dashboard is
+  `npm run test:canonical-results-parity <clean.xlsx> <curated.xlsx>` — read-only,
+  offline, and deliberately OUTSIDE `npm test` because its inputs are
+  machine-specific; run without workbooks it reports itself SKIPPED, never as a
+  pass. Executed 2026-09-06: 534 offered, 531 executed, 531 passed, 0 failed,
+  0 skipped, 3 unresolved. **No real workbook was imported and the canonical
+  tables are still empty.**
+- ⓘ **Two authority conflicts are open and must NOT be resolved in code.**
+  (1) The process documentation §4.1 and `docs/CALCULATION_CATALOG.md` §5 give
+  the name "TDP" to two different quantities with different denominators; both
+  are emitted under unambiguous names and the conflict is recorded, because
+  never altering an expected result to make a test pass cuts both ways.
+  (2) §5.2 forbids Esfera × CRI and the approved dashboard offers it anyway; the
+  canonical layer refuses the cross. Both need a methodological decision.
 - ⓘ **The approved future dashboard is REFERENCE ONLY, and calculations stay on
   the server.** `C:\dev\becommunity-software\becommunity-bni-cuicuilco-demo` at
   `a7248fdbccd139da80ed7c09daa70f006a62b9cf` is the approved visual and numerical

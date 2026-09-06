@@ -965,3 +965,99 @@ October 2025–June 2026, 6 retention periods all satisfying the count identity,
 18 journey stages, 10 organizational units, 20 culture dimensions, 7 curated
 performance dimensions, 50 pain points and 5 029 lineage rows citing all 16
 worksheets. Neither workbook, nor any output of that run, is in Git.
+
+### Unit 5 Phase 1 — canonical server-side results model (source only, 2026-09-06)
+
+`src/lib/results/` is the first authoritative, server-side results layer: one
+versioned, aggregate-only document (`CANONICAL_RESULTS_CONTRACT_VERSION 1.0.0`)
+that a future dashboard RECEIVES rather than computes. Its contract, authority
+rules, conflicts and open questions are documented in
+`docs/CANONICAL_RESULTS_MODEL.md`; read that before touching any of it.
+
+⚠️ **Nothing changed outside the new folder except three additions and two
+documentation corrections.** `src/lib/calc/business-metrics.ts` gained
+`processUnawarenessRatio` and the confirmed CRI vocabulary; every existing
+function, signature and behaviour is untouched. No existing read path, route,
+component or client-visible calculation was changed, and the legacy dashboard
+still computes through `src/lib/dashboard/view.ts` with its own small-sample
+suppression, exactly as before.
+
+**What it does.** Pure, deterministic, transport-free calculators reuse
+`src/lib/calc/*` — nothing here defines a formula — over a neutral record set
+(`CanonicalResultSource`) that an adapter produces. The in-memory adapter builds
+that record set from the Unit 3 commit plan; a database-backed adapter producing
+the identical shape is later work, and no calculator changes when it lands.
+
+**The adapter is the redaction boundary.** No person crosses it — the read model
+addresses a participation by an opaque id and the contract has no field for a
+name. No free text crosses it: an answer keeps its words only when its item is on
+a closed-coded allowlist. Private attributes are dropped whole. Curated findings
+travel as counts and review status, never as prose.
+
+**No suppression.** The methodology defines none and the client decision on
+record is that sample size is reported, never used to withhold. Every result
+carries its exact base plus a full accounting that keeps empty, missing,
+invalid, not-applicable, non-participation and a measured ZERO distinguishable.
+`src/lib/calc/disclosure.ts` is unchanged and still governs the legacy path.
+
+**Golden parity against the approved dashboard — EXECUTED, offline.**
+`npm run test:canonical-results-parity <clean.xlsx> <curated.xlsx>` builds the
+projection in memory from the two real workbooks and compares against
+`scripts/fixtures/cuicuilco-golden-parity.v1.json`, derived only from the
+approved dashboard at `a7248fdbccd139da80ed7c09daa70f006a62b9cf`:
+
+    ofrecidas=534  ejecutadas=531  aprobadas=531  falladas=0  omitidas=0  sin-resolver=3
+
+Plan fingerprint `sha256:a226b70c7ddc314424adadd5563a7da4a11bdc096b3bb64994dbc01df436e388`.
+It is deliberately OUTSIDE `npm test` — its inputs are machine-specific, and an
+unexecuted gate must never be counted among the offline results. Without the
+workbooks it reports itself SKIPPED, never as a pass. `npm run test:canonical-results`
+is the 210-check synthetic gate that runs everywhere and IS in `npm test`.
+
+**Both gates were proved to discriminate**, then restored byte-identically:
+changing the CSAT satisfied threshold turned parity red with 88 failures, and
+moving one expected value by 0.1 turned it red with one.
+
+**Three things are recorded as UNRESOLVED and are questions for a human:**
+
+- ⓘ **What "TDP" names.** The process documentation §4.1 gives the name to a
+  RATIO over the valid base (may exceed 100); `docs/CALCULATION_CATALOG.md` §5
+  gives it to a PROPORTION over all responses (0–100); §7.1 of the same process
+  document describes a chart that only closes under the proportion. The approved
+  dashboard implements the ratio. **Both quantities are emitted under
+  unambiguous names with their bases declared, and neither document was edited
+  to hide the disagreement.** No formula was changed to make a number match.
+- ⓘ **Esfera × CRI.** §5.2 forbids it and the catalogue repeats the exclusion;
+  the approved dashboard offers it anyway. The canonical layer REFUSES the cross
+  with `cross_not_permitted`, citing the authority.
+- ⓘ **Metric ↔ journey stage.** Re-investigated against the full methodology and
+  workbook context and still not provable: §7.2 collapses stage into touchpoint,
+  and only CSAT carries a positional qualifier. `journeyStageEvidenceLinks` stays
+  empty and the contract emits a mapping-gap report, one entry per curated stage,
+  with no candidate list. The approved dashboard's touchpoint-to-stage
+  attachment rests on a hand-written alias table in its own build script, which
+  is an implementation and not an authority.
+
+**The `Capitanes` / `ref.` exclusion, resolved.** The clean workbook — the
+canonical source — carries that touchpoint ONCE, populated, at `CSAT!AY2`, and
+it is NOT excluded. The literal string `ref.` appears in neither workbook. The
+broken duplicate is in the revised journey CSV, column `AC`, whose 19 data cells
+are all `#REF!`. The exclusion is implemented as a general rule — a touchpoint
+whose records are all `source_unavailable` is excluded and REPORTED — so a
+populated column is never removed and a blank one is reported as having no data.
+
+**Reviewed adversarially before it was committed.** Fourteen claims were
+verified against the files; three were refuted and eleven confirmed, and all
+eleven are fixed — among them a journey exclusion decided inside the filtered
+scope (so a filter could change which touchpoints existed), a refused
+Esfera × CRI cross that published five zero counts beside a real base, an
+instrument base that collapsed under a filter, and shares emitted as 0 over an
+empty base. **Not one approved number moved:** golden parity was 531/531 before
+and after. The synthetic gate grew from 174 to 210 checks and now enforces the
+base nesting rule (`valid <= responded <= eligible`), the accounting partition
+and the subset-of-answered rule on EVERY base in the document. The full table is
+in `docs/CANONICAL_RESULTS_MODEL.md` §8.
+
+**Still not done, and not to be described otherwise:** no real workbook has been
+imported, all 36 canonical tables remain empty, no hosted service was contacted
+by this unit, no read path was switched, and no dashboard UI exists.

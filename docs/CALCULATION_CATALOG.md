@@ -96,6 +96,48 @@ desconocimiento producen `3 / 10 = 30%`, no `3 / 7`.
 “No lo conozco”, “No lo he utilizado”, “No he interactuado” y “No aplica” son
 variantes configurables de la categoría Desconocimiento.
 
+### ⚠️ CONFLICTO DE AUTORIDAD ABIERTO — a qué cantidad le corresponde el nombre TDP
+
+**No resuelto. Requiere una confirmación explícita de la responsable
+metodológica, y la corrección del documento que quede equivocado.**
+
+La documentación integral del proceso enuncia el denominador al revés de esta
+sección, §4.1, textual:
+
+> «TDP = (Número de eventos reportados por desconocimiento / Número total de
+> respuestas con categoría de Satisfecho y Insatisfecho) × 100»
+
+Ese denominador **excluye** las respuestas de desconocimiento que forman el
+numerador, de modo que el resultado puede superar 100. El tablero aprobado por
+la dirección calcula exactamente esa razón. Esta sección, en cambio, define una
+**proporción** sobre todas las respuestas del punto, acotada entre 0 y 100.
+
+La propia documentación integral se contradice: §7.1 pide «barras apiladas
+mostrando el % que conoce / % que no conoce», y ese par sólo suma 100 con el
+denominador de ESTA sección.
+
+Las dos cantidades están documentadas y ambas son legítimas; lo único en disputa
+es el NOMBRE. Mientras nadie lo resuelva:
+
+- `processUnawarenessRate` implementa la **proporción** de esta sección;
+- `processUnawarenessRatio` implementa la **razón** de §4.1;
+- el modelo canónico de resultados emite **las dos**, bajo nombres inequívocos y
+  con su base declarada, y registra el conflicto como estado sin resolver.
+
+Ninguna de las dos fórmulas se cambió para que un número cuadrara. Detalle
+completo en `docs/CANONICAL_RESULTS_MODEL.md` §3.
+
+### ⚠️ Nota de reconciliación — “No aplica” como categoría y como ausencia
+
+El clasificador canónico de valores (`src/lib/ingestion/canonical-package/values.ts`)
+convierte el token “No aplica” en el estado de ausencia `not_applicable` antes de
+que cualquier columna se lea, de modo que ese texto nunca llega como respuesta.
+Para Cuicuilco eso no altera el CSAT — la única opción no numérica del bloque de
+satisfacción es “No lo conozco/No lo he utilizado/No he interactuado”, y “No
+aplica” no aparece ahí — pero sí afecta a la columna de razón de riesgo, donde
+“No aplica” es una categoría documentada. El conteo se recupera desde el estado
+de ausencia, lo cual es exacto: sólo ese token mapea a ese estado.
+
 ## 6. CRI — Índice de Riesgo de Abandono
 
 La pregunta mide qué tan probable es renovar, reinscribirse, regresar o volver a
@@ -167,6 +209,13 @@ Las dimensiones permitidas pertenecen a la configuración de la plantilla. El
 resultado siempre se recalcula dentro del segmento filtrado. La documentación
 actual excluye específicamente **Esfera × CRI**; las demás combinaciones deben
 pasar por la lista permitida de la plantilla, no construirse libremente en código.
+
+> ⚠️ **Desviación registrada.** El tablero aprobado por la dirección **sí ofrece**
+> `esfera` como dimensión de filtro del CRI. La documentación integral §5.2 dice
+> «OJO: La esfera no se debe cruzar en este KPI». El modelo canónico de
+> resultados **rechaza** ese cruce y devuelve `cross_not_permitted` citando la
+> autoridad, en lugar de calcular un número que una autoridad prohíbe. La
+> discrepancia queda para revisión humana; ver `docs/CANONICAL_RESULTS_MODEL.md` §3.
 
 ## 10. Políticas de producto
 
