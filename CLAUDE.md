@@ -120,6 +120,10 @@ npm run gates:live   # credential-bearing live chain: qualitative-live -> suite:
 npm run suite:a      # Suite A — tenant isolation, data scope, least privilege (A1-A5)
 npm run suite:b      # Suite B — behavioral server-side authorization (B1-B7)
 npm run suite:c      # Suite C — hostile input, imports, pivot boundary, injection (C1-C5)
+npm run test:migration-chain # migration numbering contract: no duplicate number, applied
+                             #   slots 0022-0025 pinned by SHA-256, canonical 0026-0028
+                             #   contiguous above them, rollbacks matched, runners omit
+                             #   nothing, no number in executable SQL, docs not lying
 npm run test:isolation    # the legacy isolation gate alone; Suite A executes it as A1.5
 npm run test:rls-coverage # live RLS coverage + 0014 privilege model (service_role / anon / authenticated)
 npm run test:pivot        # the pivot allowlist gate alone; Suite C executes it as C3.1
@@ -190,25 +194,43 @@ and hardening corrections through migration `0021`. The current bounded unit is
 an additive canonical model for the audited Cuicuilco workbook package; its
 contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 
-- ⓘ **Migrations `0022`, `0023` and `0024` CANNOT be applied under their current
-  numbers — all three collide.** `origin/main` is at 0021; above it, other
-  branches claim `0022_semantic_category_review` (9 branches),
-  `0023_experience_definition_persistence` and
-  `0024_experience_draft_conflict_code` (5 branches each) and
-  `0025_experience_publication` (1). Supabase tracks applied migrations by
-  NUMBER, so applying this branch's `0022` to a project already recording one
-  is skipped or conflicts — both quiet enough to look like success. **The
-  renumbering floor is 0026, not 0025**; any recommendation of 0025-0027 is
-  withdrawn. The full map is in `docs/CANONICAL_STUDY_MODEL.md`.
+- ⓘ **The renumbering is DONE: canonical owns `0026`, `0027` and `0028`.**
+  `0022_canonical_ingestion_foundation` → `0026`, `0023_canonical_analysis_model`
+  → `0027`, `0024_canonical_commit_and_rollback` → `0028`, with the three reverse
+  scripts renumbered identically. The three numbers were proved free by
+  enumerating every remote branch: the highest migration number anywhere is
+  0025. Supabase tracks applied migrations by NUMBER, so the old numbering would
+  have been skipped or conflicted against a project already recording a 0022 —
+  both quiet enough to look like success. `npm run test:migration-chain` now
+  fails if a duplicate number, a reoccupied applied slot, a non-contiguous
+  canonical run or a mismatched rollback ever returns.
+- ⓘ **`0022`-`0025` in this tree are IMPORTS of already-applied history, not
+  this branch's work.** `0022_semantic_category_review`,
+  `0023_experience_definition_persistence`, `0024_experience_draft_conflict_code`
+  and `0025_experience_publication`, plus their four reverse scripts, are copied
+  byte-for-byte from `origin/claude/experience-publication-versioning` (6311f0a),
+  the one branch carrying all eight. Every other branch holding any of them holds
+  the identical blob, so there was no candidate to choose between. All four are
+  ALREADY APPLIED to the hosted project and its ledger records them. Never
+  re-apply them, never edit them here, and never read `0022`-`0025` as
+  canonical-model migrations. The full map and the authoritative hashes are in
+  `docs/CANONICAL_STUDY_MODEL.md`.
 - ⓘ **The hosted project's schema is AHEAD of `main`, which is the same drift
-  `0016` was written to remove.** The `semantic_category_review` and
-  `experience_*` migrations are applied to the project and none of them is on
-  `main`. `study_experience_event` holds 86 rows written under numbers this
-  branch also uses, so the database has made that numbering a fait accompli
-  and the canonical branch is the cheap side to move.
-- Migrations `0022`, `0023` and `0024` are source changes only until staging
+  `0016` was written to remove.** The hosted ledger
+  (`supabase_migrations.schema_migrations`) records 26 versions, 0000-0025,
+  ending in `semantic_category_review`, `experience_definition_persistence`,
+  `experience_draft_conflict_code` and `experience_publication` — none of which
+  is on `main`. `study_experience_event` holds 86 rows written under numbers this
+  branch also used, so the database made that numbering a fait accompli and the
+  canonical branch was the cheap side to move. **This branch now carries those
+  four migrations too**, so the repository describes the schema the project
+  actually has; the drift is reconciled in source, not merely documented. The
+  ledger records no timestamp, so "when was 0022 applied" needs a different
+  source.
+- Migrations `0026`, `0027` and `0028` are source changes only until staging
   execution is explicitly authorized and verified. Do not describe them as
-  applied.
+  applied. (`0022`-`0025` are the opposite case: applied on the hosted project,
+  never applied by this branch.)
 - **Unit 2 (`src/lib/ingestion/canonical-package/`) parses and validates only.**
   It writes nothing: no Supabase client, no insert, no RPC, no canonical row.
   `npm run test:canonical-package` fails if one appears.
@@ -230,6 +252,11 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   real PostgREST 16.2 in front of a disposable PostgreSQL 17.11 cluster, 102
   assertions passed. It settled the supabase-js result and error shapes, the
   service-role key path, and that PostgREST accepts a 2.58 MiB RPC body.
+  ⓘ **None of the three is hosted canonical execution.** Level 3 is a LOCAL
+  PostgREST in front of a LOCAL cluster; it is not equivalent to running the
+  canonical chain on the hosted project, and it must never be reported as if it
+  were. Hosted execution of `0026`-`0028` is still pending and separately
+  authorized.
 - ⓘ **The hosted project runs a DIFFERENT PostgREST build, and the result
   shape, error shape and code round trip (T3, T4, T5) are therefore PENDING
   RE-PROOF there, not proved.** The local substitute reports `16.2` (upstream
@@ -238,12 +265,22 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   two hosted numbers disagree with each other, so neither maps onto the local
   one. Never call the hosted build "older" or "two majors behind" — only
   "different", until the numbering is established.
-- ⓘ **A hosted Supabase project has still never been contacted, and five things
-  remain unproved by anything local.** The hosted API gateway's own body limit,
-  the hosted `statement_timeout` under load, recovery from a timeout killed
-  mid-commit, building 0022's index against a populated `respondent` table, and
-  catalogue parity with Supabase's own extensions and default privileges. A
-  green local-transport run must never be reported as a hosted one.
+- ⓘ **The hosted project HAS been contacted, and exactly ONE mutation has been
+  executed against it.** In order: a read-only inventory, a read-only
+  duplicate-study diagnostic over a direct connection, a VERIFIED full data
+  backup, and one rehearsed fail-closed deletion of a duplicate legacy study.
+  The correct Cuicuilco study — 60 people, 3 282 quantitative answers and its
+  reviewed qualitative work including 23 confirmed themes — is intact and was
+  verified after the deletion. **The backup is retained and must not be
+  deleted**, and neither may any diagnostic evidence. Nothing else has been
+  written there, and NO canonical migration has been applied there.
+- ⓘ **Five things remain unproved by anything local.** The hosted API gateway's
+  own body limit, the hosted `statement_timeout` under load, recovery from a
+  timeout killed mid-commit, building `0026`'s `respondent_id_tenant_study_uidx`
+  against a populated `respondent` table, and catalogue parity with Supabase's
+  own extensions and default privileges. A green local-transport run must never
+  be reported as a hosted one, and read-only contact is not proof of a write
+  path.
 - ⓘ **The level-2 count is 135 executed + 1 skipped without the real
   workbooks, and 140 with them.** The real-package case (`X8`) needs
   `CANONICAL_COMMIT_TEST_CLEAN_XLSX` and `_PAIN_XLSX`; without them it is
@@ -271,7 +308,8 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   gate, not a surprise during a run against a live project.
 - ⓘ **The database gate must stay executable.** It creates disposable
   `becommunity_canonical_test_*` databases on a loopback host or a unix socket,
-  applies migrations 0000-0024 verbatim, and refuses to run if a remote host, a
+  applies migrations 0000-0028 verbatim — including the four imported 0022-0025
+  files — and refuses to run if a remote host, a
   password, a Supabase host or a `SUPABASE_SERVICE_ROLE_KEY` is in scope. Those
   refusals are executed by `npm test`, so weakening one is a red offline gate.
   If a check there ever becomes a source-text match again, it has stopped being
@@ -294,6 +332,16 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 - The existing ingestion and client read paths remain authoritative. Do not
   switch them to the new tables until the deterministic package importer,
   reconciliation and compatibility tests exist.
+- ⓘ **The approved future dashboard is REFERENCE ONLY, and calculations stay on
+  the server.** `C:\dev\becommunity-software\becommunity-bni-cuicuilco-demo` at
+  `a7248fdbccd139da80ed7c09daa70f006a62b9cf` is the approved visual and numerical
+  north for the future product. It is read-only: do not edit that repository, do
+  not copy its hardcoded Cuicuilco values into the product, and do not begin
+  dashboard UI work from it. When that work is authorized, its components must
+  RECEIVE authoritative calculated results from a server-side canonical read
+  model. The frontend must never become the owner of a business calculation —
+  the standing rule that composite metrics are canonical functions defined once
+  applies to the future dashboard exactly as it applies today.
 - `readXlsx()`/`parseXlsx()` are the LEGACY reader and their behaviour is
   frozen — every existing study was imported through them. The canonical
   multi-sheet reader is `readXlsxWorkbook()` in the same module; both must stay

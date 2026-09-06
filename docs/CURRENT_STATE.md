@@ -1,6 +1,6 @@
 # Current state — Be Community V2
 
-> Authoritative operational handoff. Last verified: **2026-08-28**.
+> Authoritative operational handoff. Last verified: **2026-09-05**.
 > Read this after `CLAUDE.md` at the start of every new coding session.
 > Historical files (`AUDIT_V1.md`, `docs/FASE_*.md`) explain past decisions but
 > do not override this state.
@@ -36,8 +36,9 @@ reader, or the real BNI Cuicuilco study.
   all pending.** Measured directly against the project: **23 of 31 carry a
   confirmed theme and 8 are pending.** The reset this section records did
   happen; editorial review then resumed and is partly done. That confirmed
-  work exists on ONE study only — see the duplicate below — which is what
-  makes the two copies non-interchangeable.
+  work existed on ONE study only — see the duplicate section below — which is
+  what made the two copies non-interchangeable, and why the copy was the one
+  deleted. It survives on the study that was kept.
   What still holds from the original claim: the observation text and the
   generated suggestions are preserved, no quote is approved, nothing qualitative
   is client-visible, and the study is `draft`. What no longer holds is "no theme
@@ -52,30 +53,75 @@ reader, or the real BNI Cuicuilco study.
   every key and every segment value — and remains `draft`. Re-prove it with
   `scripts/real-study-verify.mjs`.
 
-### The real study exists TWICE, in two different tenants
+### The real study existed TWICE. The duplicate has been DELETED
 
 Measured 2026-09-06, counts and digests only:
 
-| study | tenant | created | resp / quant / qual | qualitative review |
-|---|---|---|---|---|
-| `cd4d6acd` | BNI Cuicuilco | 2026-08-27 | 60 / 3282 / 31 | **23 confirmed, 8 pending** |
-| `066457f3` | BNI Cuicuilco — PRUEBA DESDE CERO | 2026-08-28 | 60 / 3282 / 31 | 0 confirmed, 31 pending |
+| study | tenant | created | resp / quant / qual | qualitative review | outcome |
+|---|---|---|---|---|---|
+| `cd4d6acd` | BNI Cuicuilco | 2026-08-27 | 60 / 3282 / 31 | **23 confirmed, 8 pending** | **KEPT — intact, verified after the delete** |
+| `066457f3` | BNI Cuicuilco — PRUEBA DESDE CERO | 2026-08-28 | 60 / 3282 / 31 | 0 confirmed, 31 pending | **DELETED 2026-09-05** |
 
 All 31 qualitative quote digests and all 56 distinct respondent segment digests
-are shared between them, so the row data is the same import. Both were built from
-the same two source files — `import_batch.source_signature` `4fea5c66cfcf` and
-`dec59dbf98a7` — and each study's counts reconcile exactly as the sum of its two
-committed batches.
+were shared between them, so the row data was the same import. Both were built
+from the same two source files — `import_batch.source_signature` `4fea5c66cfcf`
+and `dec59dbf98a7` — and each study's counts reconciled exactly as the sum of its
+two committed batches.
 
-**They are NOT interchangeable.** The human editorial work — 23 confirmed themes
-— exists only on `cd4d6acd`. Whatever is decided about the copy, that asymmetry
-is the fact that matters.
+**They were NOT interchangeable.** The human editorial work — 23 confirmed themes
+— exists only on `cd4d6acd`, and cannot be regenerated from the source workbooks.
+That asymmetry, not the row counts, is what made the copy identifiable.
 
-The second is named as a test throughout ("PRUEBA DESDE CERO", "PRUEBA FINAL
-DESDE CERO") and sits in its own tenant, so it reads as a deliberate re-import
-rather than an accidental duplicate. `/studio/estudios` applies no status filter
-(`src/app/studio/estudios/page.tsx:67`), so an internal user currently sees all
-six studies side by side with nothing distinguishing the real one.
+The copy was named as a test throughout ("PRUEBA DESDE CERO", "PRUEBA FINAL DESDE
+CERO") and sat in its own tenant, so it read as a deliberate re-import rather than
+an accidental duplicate.
+
+**How the deletion was done** (commit `c06a3bc`; this was the FIRST and so far
+ONLY write this workstream has made to the hosted project). A verified full data
+backup was taken first, and it is **retained and must not be deleted**. A
+read-only plan script predicted the blast radius from the database's own catalog
+— 18 foreign keys point at `study`, and one of them, `study_template.created_from`,
+is `SET NULL` rather than `CASCADE`, so a cascade-only mental model would have
+missed a mutation (that table was empty, so nothing was mutated). The delete then
+ran inside one transaction that fails closed four ways: the study must exist and
+must not be the study to keep; it must have exactly 0 confirmed and 31 pending
+qualitative observations; the study to keep must still carry its 23 confirmed
+themes before anything is deleted; and the per-table deltas must match the
+prediction exactly in both directions, so a table losing an unpredicted row
+aborts. The study was addressed by uuid and by nothing else.
+
+`/studio/estudios` still applies no status filter
+(`src/app/studio/estudios/page.tsx:67`), so an internal user sees every study
+side by side with nothing distinguishing the real one. That is unchanged and
+remains open.
+
+### Hosted project status — read this before inferring anything about it
+
+These eight facts are distinct, and conflating any two of them has already
+produced a wrong claim in this file. Stated precisely:
+
+1. **The hosted project HAS been inventoried and backed up.** A read-only
+   PostgREST inventory, a read-only nine-section diagnostic over a direct
+   connection, and a full data export whose row counts were verified against the
+   project's own counts per table.
+2. **One duplicate legacy study was deleted**, through the rehearsed,
+   fail-closed transaction described above. That is the only write.
+3. **The correct Cuicuilco study remains intact** — 60 people, 3 282
+   quantitative answers, 31 qualitative answers, 23 confirmed themes — and was
+   verified after the deletion.
+4. **NO canonical migration has been applied there.** `0026`, `0027` and `0028`
+   have never run against any hosted project.
+5. **No real workbook has been imported into canonical tables**, anywhere.
+6. **Hosted execution of the canonical migration chain is still PENDING** and
+   requires separate explicit authorization.
+7. **The backup is retained and must not be deleted**, and neither may any
+   diagnostic evidence.
+8. **The old application read paths remain authoritative.** Nothing reads the
+   canonical tables yet, and nothing should until the deterministic package
+   importer, reconciliation and compatibility tests exist.
+
+A ninth distinction matters as much: a green **local** PostgREST run is not
+hosted canonical execution. See level 3 below.
 
 ## Product and roadmap boundary
 
@@ -100,12 +146,26 @@ particular, retention UI and separate CEO/employee permission tiers are not the
 current task. Business content and named starter templates belong to V2.5 and
 must use documented authoritative definitions rather than invented rules.
 
+**The approved future dashboard, and where its calculations live.** The emergency
+dashboard at `C:\dev\becommunity-software\becommunity-bni-cuicuilco-demo`
+(`a7248fdbccd139da80ed7c09daa70f006a62b9cf`) is the approved visual and numerical
+north for the future product. It is **read-only reference material** and is not
+part of the current unit: do not edit it, do not copy its hardcoded Cuicuilco
+values into the product, do not begin dashboard UI work from it, and do not
+switch application read paths toward it. When that work is authorized, its
+components must RECEIVE authoritative calculated results from a **server-side
+canonical read model**. The frontend never owns a business calculation — the
+standing rule that composite metrics are canonical functions defined once
+(`src/lib/calc/metrics.ts`) governs the future dashboard exactly as it governs
+today's.
+
 ## Verified source and deployment baseline
 
-- Current `main`: `fd986940accae5a87170e3de0cb4b2f52dc9d7a9`
-  (`feat(p8): establish the Be Community product experience foundation (#37)`),
-  which also carries the merged P7 Suites B/C delivery (#38). Always verify
-  `origin/main` before beginning new work.
+- Current `main`: `c76762f428834b7401118b7d2ad7f0d40158d56a`, which carries P0-P8
+  plus the first P9 real-study ingestion and hardening units through migration
+  `0021`. (It was `fd986940accae5a87170e3de0cb4b2f52dc9d7a9` when this section
+  was first written.) `main` is unchanged by the canonical work and still tops
+  out at `0021`. Always verify `origin/main` before beginning new work.
 - **Milestone deployment baseline — P6 closure:** Worker version
   `0454021a-e307-430b-bb36-27612b5faa0c` (100% traffic at the time of the P6
   closure check). Version IDs are **not permanent identifiers**; confirm the
@@ -119,8 +179,12 @@ must use documented authoritative definitions rather than invented rules.
   value it recorded. Never open a documentation PR for that purpose.
 - Beta URL (production alias of the synthetic beta Worker
   `becommunity-v1`): `https://becommunity-v1.ollinagencyllc.workers.dev`
-- The connected Supabase project contains **synthetic test data only**. This is
-  not yet the separate real-client production environment required at go-live.
+- The connected Supabase project contains synthetic test data **and the real BNI
+  Cuicuilco study** — 60 people, 3 282 quantitative answers, 31 qualitative
+  answers and 23 human-confirmed themes. It is still not the separate
+  real-client production environment required at go-live, which makes real data
+  living there a standing risk rather than a licence to treat the project as
+  disposable.
 - **Observed behavior indicates that merges to `main` rebuild and deploy this
   synthetic beta Worker automatically** (PR #29 was documentation-only, no manual
   deployment was performed, and Cloudflare version
@@ -693,18 +757,28 @@ The Cuicuilco workbook audit established that the existing row-oriented import
 cannot preserve stable people, participation cohorts, multiple instruments,
 contextual worksheet formatting, monthly performance, multiple journeys and
 curated pain-point relationships with full provenance. A new additive schema is
-therefore staged on the development branch in migrations `0022`, `0023` and
-`0024`.
+therefore staged on the development branch in migrations `0026`, `0027` and
+`0028`.
 
 The schema and its rollback scripts are documented in
-`docs/CANONICAL_STUDY_MODEL.md`. Migration `0024` adds the transactional commit,
+`docs/CANONICAL_STUDY_MODEL.md`. Migration `0028` adds the transactional commit,
 its ownership ledger and its rollback. All 36 new tables are service-only with
 RLS and FORCE RLS. Existing application tables and read paths remain active and
 no existing data is rewritten.
 
-This entry records source state, not release state: none of `0022`, `0023` or
-`0024` has been applied to Supabase, the Cuicuilco workbooks have **not** been
-loaded into the new model, and nothing has been deployed to Cloudflare.
+⚠️ **These three were renumbered from `0022`-`0024`.** Those numbers collided
+with four migrations the hosted project had already applied, and this repository
+now carries those four as `0022`-`0025` imports. The full map, the proof that the
+rename changed no executable SQL, and the authoritative hashes are in
+`docs/CANONICAL_STUDY_MODEL.md`; `npm run test:migration-chain` enforces the
+result.
+
+This entry records source state, not release state: no canonical migration —
+`0026`, `0027` or `0028` — has been applied to any Supabase project, the
+Cuicuilco workbooks have **not** been loaded into the new model, and nothing has
+been deployed to Cloudflare. The hosted project DOES record applied migrations
+numbered 0022-0025; those are the imported `semantic_category_review` and
+`experience_*` migrations from other branches, not this branch's work.
 
 ### Unit 2 — package parser and preflight (source only, local branch)
 
@@ -748,12 +822,17 @@ The contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 
 `src/lib/ingestion/canonical-commit/` projects a validated package into
 canonical records and writes them through one transactional RPC. Migration
-`0024_canonical_commit_and_rollback.sql` and its reverse script carry the
-schema. **Nothing was applied, deployed, uploaded or mutated:** no migration ran
-anywhere, no Supabase project was contacted, no Worker was built or promoted, no
-real workbook was uploaded, and no canonical row exists in any environment. The
-deterministic gate is `npm run test:canonical-commit` (306 checks), registered in
-`npm test`.
+`0028_canonical_commit_and_rollback.sql` and its reverse script carry the
+schema. **No canonical migration has been applied and no canonical row exists in
+any environment:** none of `0026`, `0027` or `0028` has run anywhere, no Worker
+was built or promoted, and no real workbook was uploaded.
+
+⚠️ **The hosted project HAS been contacted since this entry was first written,
+and one mutation was executed there** — a read-only inventory, a read-only
+diagnostic, a verified retained backup, and the fail-closed deletion of the
+duplicate study recorded above. None of that wrote a canonical row or applied a
+canonical migration. The deterministic gate is `npm run test:canonical-commit`
+(306 checks), registered in `npm test`.
 
 The full contract is in `docs/CANONICAL_STUDY_MODEL.md`. What a reader needs
 before touching this unit:
@@ -799,13 +878,19 @@ before touching this unit:
    the database gate's own refusal rules so a weakened guard fails `npm test`.
 2. *Local PostgreSQL transaction.* `npm run test:canonical-commit-live`
    (**executed**) creates disposable databases, applies the bootstrap and
-   migrations 0000-0024 verbatim, drives `runCanonicalCommit` and
+   migrations 0000-0028 verbatim, drives `runCanonicalCommit` and
    `runCanonicalRollback` through a `psql` transport, and asserts the resulting
    database state — L1 to L16 plus the review's extra cases. It is deliberately
    OUTSIDE `npm test`. **140 assertions with the real workbooks supplied; 135
    executed and 1 skipped without them.** The skipped one is the real-package
    serialization boundary, and it is reported as skipped, never as a pass.
-3. *HTTP transport.* **Executed locally; never against a hosted project.**
+3. *HTTP transport.* **Executed against a LOCAL PostgREST only. The canonical
+   suite has never been run against a hosted project, and a local PostgREST run
+   is NOT equivalent to hosted canonical execution** — the hosted project runs a
+   different PostgREST build, and its gateway, timeouts and catalogue are its
+   own. This level is separate from the read-only inventory, diagnostics, backup
+   and single rehearsed deletion that HAVE touched the hosted project; none of
+   those executed a canonical migration or a canonical RPC.
    `npm run test:canonical-commit-local-stack` runs the same suites through
    supabase-js and a real PostgREST 16.2, in front of a disposable
    PostgreSQL 17.11 cluster: **102 assertions, 102 passed, 0 failed, 66
@@ -817,7 +902,7 @@ before touching this unit:
    (153 assertions, IN `npm test`) executes every refusal that guards it.
    **Still unproved by anything local, and not to be described otherwise:** the
    hosted API gateway's own body limit, the hosted `statement_timeout` under
-   load, recovery from a timeout killed mid-commit, building 0022's index
+   load, recovery from a timeout killed mid-commit, building 0026's index
    against a populated `respondent` table, and catalogue parity with Supabase's
    own extensions and default privileges.
 

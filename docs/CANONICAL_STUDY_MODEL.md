@@ -3,7 +3,7 @@
 ## Purpose
 
 The current ingestion model remains available for existing studies. Migrations
-`0022`, `0023` and `0024` add the normalized layer required to preserve the full
+`0026`, `0027` and `0028` add the normalized layer required to preserve the full
 meaning of multi-workbook studies without treating every worksheet row as an
 unrelated respondent or flattening source distinctions into dashboard keys, plus
 the transactional commit and rollback that writes it.
@@ -19,28 +19,39 @@ This layer is designed around four rules:
 4. Every derived metric, journey link and curated finding can be traced back to
    the source package that produced it.
 
-## BLOCKING: the migration numbers 0022, 0023 and 0024 all collide
+## RESOLVED: the migration numbering collision, and the map that fixed it
 
-**None of these three migrations may be applied to the hosted project under its
-current number.** All three numbers are already claimed by other branches, and
-two of those claims have already been APPLIED to the project.
+**The canonical migrations were renumbered. Canonical now owns `0026`, `0027`
+and `0028`.** The numbers `0022`-`0025` in this repository are IMPORTS of
+migrations the hosted project has already applied; they are not this branch's
+work and must never be re-applied or edited here.
 
-`origin/main` tops out at **0021**. Above it, every migration that exists on any
-remote branch:
+### The collision, and why the canonical branch was the side that moved
 
-| number | this branch | other branches | on the hosted project? |
+`origin/main` tops out at **0021**. Above it, every migration that existed on any
+remote branch — enumerated over all 60 fetched remote branches, the highest
+number anywhere being **0025**:
+
+| number | canonical branch claimed | other branches claimed | on the hosted project? |
 |---|---|---|---|
-| **0022** | `canonical_ingestion_foundation` | `semantic_category_review` — **9** `claude/*` branches | **the other one is applied** — `category_decision` (2 rows), `study_category_snapshot` (0) |
-| **0023** | `canonical_analysis_model` | `experience_definition_persistence` — **5** `claude/experience-*` branches | **the other one is applied** — `study_experience_draft` (2), `study_experience_event` (**86 rows**) |
-| **0024** | `canonical_commit_and_rollback` | `experience_draft_conflict_code` — the same 5 branches | **the other one is applied** — `study_experience_revision` (0) |
-| **0025** | — | `experience_publication` — `claude/experience-publication-versioning` | `study_experience_publication` (0) |
+| **0022** | `canonical_ingestion_foundation` | `semantic_category_review` — **9** `claude/*` branches | **applied** — `category_decision` (2 rows), `study_category_snapshot` (0) |
+| **0023** | `canonical_analysis_model` | `experience_definition_persistence` — **5** `claude/experience-*` branches | **applied** — `study_experience_draft` (2), `study_experience_event` (**86 rows**) |
+| **0024** | `canonical_commit_and_rollback` | `experience_draft_conflict_code` — the same 5 branches | **applied** — `study_experience_revision` (0) |
+| **0025** | — | `experience_publication` — `claude/experience-publication-versioning` | **applied** — `study_experience_publication` (0) |
 
 Supabase tracks applied migrations BY VERSION NUMBER, so applying this branch's
 `0022` to a project that already records a `0022` is either skipped as
 already-applied or conflicts — and both outcomes are quiet enough to be mistaken
 for success.
 
-### The ledger has now been read directly, and it agrees
+The canonical branch moved, and not because its numbering was worse: the database
+had already made the other numbering a fait accompli. `study_experience_event`
+holds 86 rows written under `0023`/`0024` as the experience branches define them.
+Renumbering those would mean reconciling a ledger against rows that already
+exist. This branch has written nothing to the project, so it was the cheap side
+to move.
+
+### The ledger was read directly, and it agrees
 
 `supabase_migrations.schema_migrations` was read over a direct connection on
 2026-09-06. It records **26 versions, 0000 through 0025**, ending:
@@ -51,33 +62,79 @@ for success.
     0025  experience_publication
 
 The ledger AGREES with the object-level evidence gathered over REST: every one of
-those four is recorded AND its objects exist. There is no disagreement to resolve
-— the collision is real and confirmed from both directions.
+those four is recorded AND its objects exist. The collision was confirmed from
+both directions.
 
 ⚠️ **The ledger records NO timestamp.** Its columns are `version text`,
 `statements text[]`, `name text` — nothing more. "When was 0022 applied" cannot
 be answered from it, and any plan that depends on ordering migrations by
 application time needs a different source.
 
-### The renumbering floor is 0026, not 0025
+### The migration map
 
-⚠️ **An earlier recommendation in this work to renumber to 0025-0027 is WITHDRAWN.**
-It was made when only the `0022` collision was visible, and it is wrong:
-`0025_experience_publication` already exists on
-`claude/experience-publication-versioning`. The lowest free number is **0026**,
-so the range would be **0026-0028** — and only after confirming no branch has
-claimed those in the meantime. The owner decides the target range; this document
-records the floor, not the decision.
+The earlier recommendation to renumber to 0025-0027 was withdrawn once the full
+collision was visible; the floor was recorded as 0026 and has now been re-proved
+by re-enumerating every remote branch. Nothing on any branch, in either
+`supabase/migrations/` or `supabase/rollbacks/`, uses a number above 0025.
 
-### The canonical branch is the one that renumbers
+| was | is now | rollback was | rollback is now |
+|---|---|---|---|
+| `0022_canonical_ingestion_foundation.sql` | **`0026_canonical_ingestion_foundation.sql`** | `0022_drop_canonical_ingestion_foundation.sql` | **`0026_drop_canonical_ingestion_foundation.sql`** |
+| `0023_canonical_analysis_model.sql` | **`0027_canonical_analysis_model.sql`** | `0023_drop_canonical_analysis_model.sql` | **`0027_drop_canonical_analysis_model.sql`** |
+| `0024_canonical_commit_and_rollback.sql` | **`0028_canonical_commit_and_rollback.sql`** | `0024_drop_canonical_commit_and_rollback.sql` | **`0028_drop_canonical_commit_and_rollback.sql`** |
 
-Not because its numbering is worse, but because the database has already made
-the other numbering a fait accompli: `study_experience_event` holds 86 rows
-written under `0023`/`0024` as the experience branches define them. Renumbering
-those would mean reconciling a ledger against rows that already exist. This
-branch has written nothing to the project, so it is the cheap side to move.
+**The rename changed nothing a server executes.** A migration number appears in
+these six files only inside `--` comments — never in a statement, a literal, a
+stored version marker or a column default. Stripping comments and collapsing
+whitespace gives an identical digest before and after the rename:
 
-### This is the SECOND instance of the drift 0016 was written to remove
+| file | executable-SQL SHA-256 (unchanged by the rename) | exec lines |
+|---|---|---|
+| `0026_canonical_ingestion_foundation.sql` | `0e41dcc962d218ec21e07cadafdeeb61bd68ff331bd491e44e12111c54172eb5` | 411 |
+| `0027_canonical_analysis_model.sql` | `0ce0fe035c640e973be5239e0c6a138ba50063b6015beefaefbcec1cfb3fc1cc` | 362 |
+| `0028_canonical_commit_and_rollback.sql` | `fef7ae8a0f2d97fd75f6402a1e7c68ef134f23ac2d25a898e020dbbfdd58e1fb` | 1255 |
+| `0026_drop_canonical_ingestion_foundation.sql` | `c2c35880da499a1ef20fbf33f821f1a2afdfbfd3507744df8fa7dfb1fce266c2` | 21 |
+| `0027_drop_canonical_analysis_model.sql` | `5a0d745bdb2014597a2461d6bed537aea6a353993ffbc498e59bde65b9f5afab` | 32 |
+| `0028_drop_canonical_commit_and_rollback.sql` | `7b44ff445f1282e9befab18a7a56945e25d30546dba2c6612ae4f55ec7193526` | 65 |
+
+### The imported migration artifacts, and their authoritative hashes
+
+`0022`-`0025` and their four reverse scripts were copied byte-for-byte from
+**`origin/claude/experience-publication-versioning` @ `6311f0a`** — the only
+branch carrying all eight files together. Every other branch holding any of them
+holds the IDENTICAL blob, so there was no candidate to choose between and no
+conflict to report. Each was introduced by the commit named below.
+
+| file | source commit | SHA-256 |
+|---|---|---|
+| `supabase/migrations/0022_semantic_category_review.sql` | `022513e6458993267d09a987f23233ccc7767af4` | `bde6c0a07a082c7d8247c89563007c7658f8c4d095c2facca0d9c55772dda539` |
+| `supabase/migrations/0023_experience_definition_persistence.sql` | `ab940037d77ac9c2956b199332306aab85d58911` | `8909540a728d72ffe4b99ad9f64cfb5d25be58f9a79252bea3cb04997360d84c` |
+| `supabase/migrations/0024_experience_draft_conflict_code.sql` | `8e9a4b17d508e9d5a18cb3e53f5fcf7ca6aa94e1` | `c20d821de5fd1aa598477f3e3a6afc77fbd12090e8798e47a4a49ec2084af798` |
+| `supabase/migrations/0025_experience_publication.sql` | `06f873812ce4470ab0374bad1682ce29ebb6230f` | `b7c64fad5aa216a7b851596f0028ef8f68db81d71c95c9b1aefd6dece3bee576` |
+| `supabase/rollbacks/0022_drop_semantic_category_review.sql` | `022513e6458993267d09a987f23233ccc7767af4` | `e0e71bb96143a670b5150ba650628a9d7b8032cf7cc5495a7cc8d378d76b9792` |
+| `supabase/rollbacks/0023_drop_experience_persistence.sql` | `ab940037d77ac9c2956b199332306aab85d58911` | `b7226d4798cc81166bb3715e5ae5ed619403d68aaffd8dfa070613e5df3be238` |
+| `supabase/rollbacks/0024_restore_experience_draft_conflict_code.sql` | `8e9a4b17d508e9d5a18cb3e53f5fcf7ca6aa94e1` | `b1c40e70097164d7c8047afe1906471e075f95933054c39f5508f8355e6502ab` |
+| `supabase/rollbacks/0025_drop_experience_publication.sql` | `06f873812ce4470ab0374bad1682ce29ebb6230f` | `dc1915077ddbb36268a3c14647212c9583afc41648b38dd2636dc4d6684b68f1` |
+
+All four forward migrations have an authoritative rollback, so none had to be
+invented. Only the application code of those features was left behind: the
+migration artifacts were imported without cherry-picking any UI or application
+commit.
+
+### The gate that keeps this from happening again
+
+`npm run test:migration-chain` (in `npm test`) inventories
+`supabase/migrations/` and `supabase/rollbacks/` and fails if two forward
+migrations share a number, if a canonical migration reoccupies an applied slot,
+if the canonical three stop being a contiguous ordered run, if a canonical
+rollback stops matching its forward number, if a runner's own discovery filter or
+upper bound would skip a migration, if a migration number reaches executable SQL,
+if the canonical object inventory or transaction contract is lost, or if any of
+the three governing documents claims an application that has not happened. The
+four applied slots are pinned by the SHA-256 values above, so editing an
+already-applied migration is a red gate rather than a silent divergence.
+
+### This was the SECOND instance of the drift 0016 was written to remove
 
 `0016_remove_untracked_private_policy_experiment.sql` exists because the project
 carried RLS policies and a `private` helper schema that appeared in **no tracked
@@ -85,15 +142,15 @@ migration** — schema in the database that nothing on `main` explained. Its hea
 records the cost: one policy referenced a table that did not exist, so
 `public.tenant` could not be read by any authenticated role.
 
-The same class of divergence is here again. The `semantic_category_review` and
-`experience_*` migrations are applied to the project and **none of them is on
-`main`** — `main` is at 0021. Whatever is decided about numbering, the standing
-problem is that the project's schema is ahead of the branch that is supposed to
-explain it, and 0016 is the precedent for how expensive that gets.
+The same class of divergence appeared again: the `semantic_category_review` and
+`experience_*` migrations were applied to the project and **none of them was on
+`main`**, which is at 0021. Importing those four migrations here is what closes
+it — the repository now describes the schema the project actually has, rather
+than documenting a gap. `main` itself is unchanged and still tops out at 0021.
 
-## Migration 0022: ingestion foundation
+## Migration 0026: ingestion foundation
 
-`0022_canonical_ingestion_foundation.sql` adds:
+`0026_canonical_ingestion_foundation.sql` adds:
 
 - source package identity and idempotency: `source_asset`, `import_job`,
   `import_job_asset`;
@@ -109,9 +166,9 @@ explain it, and 0016 is the precedent for how expensive that gets.
 `study_participant.legacy_respondent_id` is a compatibility bridge. Its foreign
 key includes respondent, tenant and study, so it cannot cross a data boundary.
 
-## Migration 0023: analysis model
+## Migration 0027: analysis model
 
-`0023_canonical_analysis_model.sql` adds:
+`0027_canonical_analysis_model.sql` adds:
 
 - monthly performance observations and explicit band schemes;
 - versioned metric definitions linked to their real survey or performance
@@ -129,7 +186,7 @@ confirmed ranges gray 0–29, red 30–49, yellow 50–69 and green 70–100.
 
 ## Security boundary
 
-All 36 new tables — 18 in `0022`, 16 in `0023` and 2 in `0024` — are
+All 36 new tables — 18 in `0026`, 16 in `0027` and 2 in `0028` — are
 internal-only:
 
 - RLS is enabled and forced;
@@ -150,9 +207,9 @@ implemented and verified.
 
 Rollout order:
 
-1. apply `0022_canonical_ingestion_foundation.sql` in staging;
-2. apply `0023_canonical_analysis_model.sql` in staging;
-3. apply `0024_canonical_commit_and_rollback.sql` in staging;
+1. apply `0026_canonical_ingestion_foundation.sql` in staging;
+2. apply `0027_canonical_analysis_model.sql` in staging;
+3. apply `0028_canonical_commit_and_rollback.sql` in staging;
 4. execute the focused structural gates and database/RLS smoke tests;
 5. execute `npm run test:canonical-commit-live` against a disposable database;
 6. import the two Cuicuilco workbooks into a disposable study;
@@ -161,11 +218,11 @@ Rollout order:
 
 Reverse order:
 
-1. `0024_drop_canonical_commit_and_rollback.sql`;
-2. `0023_drop_canonical_analysis_model.sql`;
-3. `0022_drop_canonical_ingestion_foundation.sql`.
+1. `0028_drop_canonical_commit_and_rollback.sql`;
+2. `0027_drop_canonical_analysis_model.sql`;
+3. `0026_drop_canonical_ingestion_foundation.sql`.
 
-`0024`'s reverse script drops the ownership ledger, so a package that is still
+`0028`'s reverse script drops the ownership ledger, so a package that is still
 committed must be reversed through `rollback_canonical_package` FIRST. Dropping
 the ledger while rows are owned would leave canonical rows nothing can identify,
 so the script REFUSES to run in that state and says which packages are holding
@@ -292,11 +349,17 @@ Confirmation is allowed if and only if there are zero blockers.
 - no client-facing calculation was changed;
 - nothing was written to any canonical table.
 
+⚠️ **Scope note.** These statements are about Units 1-3 and remain true of them.
+They are NOT a claim about the hosted project in general: Unit 4 inventoried it,
+backed it up and deleted one duplicate legacy study through a rehearsed
+fail-closed transaction. No canonical migration and no canonical row was part of
+that. See the hosted project status in `docs/CURRENT_STATE.md`.
 
-## Migration 0024: commit, ownership and rollback
 
-`0024_canonical_commit_and_rollback.sql` is additive and adds what a
-transactional commit needs and `0022`/`0023` did not have.
+## Migration 0028: commit, ownership and rollback
+
+`0028_canonical_commit_and_rollback.sql` is additive and adds what a
+transactional commit needs and `0026`/`0027` did not have.
 
 **Columns on `import_job`.** `plan_fingerprint` binds the job to one validated
 plan; `payload_digest` is the database's OWN digest of the payload it received,
@@ -325,7 +388,7 @@ a row this package created is removed, a row it merely reused is left alone.
 vocabulary, which makes "provenance survives a rollback" a structural fact
 rather than a convention a later edit could forget.
 
-**A widened `source_lineage.target_table`.** The `0023` vocabulary could not
+**A widened `source_lineage.target_table`.** The `0027` vocabulary could not
 name `attribute_definition`, `response_scale`, `retention_period` or the four
 pain-point link tables, all of which Unit 3 writes. The focused gate derives the
 set of targets the projector actually produces and fails if the migration cannot
@@ -406,7 +469,7 @@ Two kinds of refusal, and the difference matters when reading an
 
 Rollback deletes the ledger's `created` rows in reverse dependency order. The
 order is verified by the focused gate against every `ON DELETE RESTRICT` edge
-declared in `0022` and `0023`: a referencing table must appear before the table
+declared in `0026` and `0027`: a referencing table must appear before the table
 it points at.
 
 Three things deliberately survive a rollback:
@@ -581,7 +644,7 @@ Executed offline, in `npm test`:
 - colours become pending, uninterpreted evidence and the bands come from
   documented ranges;
 - lineage reaches every persisted fact, keeps the trailing space in `Equipos `
-  and a legal coordinate, and cites only targets migration 0024 can name;
+  and a legal coordinate, and cites only targets migration 0028 can name;
 - the same files in either order produce the same package key AND the same plan;
 - five projector refusals fire and produce no plan;
 - sentinel values appear in the plan and in NOTHING else — not the preflight,
@@ -589,7 +652,7 @@ Executed offline, in `npm test`:
 - count reconciliation fails on a short count, a missing family, an extra family
   and no counts at all;
 - the whole workflow runs against a fake transport;
-- migration 0024's SQL carries the grants, empty search paths, `FOR UPDATE`
+- migration 0028's SQL carries the grants, empty search paths, `FOR UPDATE`
   locks, `ROW_COUNT` measurement, ledger vocabulary and reverse counterpart it
   claims — read from the text, and now confirmed by level 2;
 - **the database gate's own refusals** run here too: a remote host, a password in
@@ -618,7 +681,7 @@ run, is committed to this repository.
 ### Level 2 — local PostgreSQL transaction (`npm run test:canonical-commit-live`)
 
 **Executed.** `scripts/canonical-commit-live-test.mjs` creates disposable
-databases, applies the bootstrap and migrations 0000-0024 verbatim, drives the
+databases, applies the bootstrap and migrations 0000-0028 verbatim, drives the
 product's own `runCanonicalCommit` / `runCanonicalRollback` through a `psql`
 transport, and asserts the resulting database state. It is deliberately outside
 `npm test`, because a database is not always available and an unexecuted
@@ -649,7 +712,7 @@ What it proved, by executing it:
 | L13 | lineage citing a role the job does not carry raises `ASSET_ROLE_UNKNOWN` |
 | L14 | `anon` and `authenticated` are refused with SQLSTATE `42501` on all four functions AND on direct reads of `import_job_record`, `retention_period`, `person_private` and `survey_response`; `service_role` may execute the three server operations |
 | L15 | all four functions are `SECURITY DEFINER` with an empty `search_path`, grant EXECUTE to `service_role` alone, and leave nothing with `PUBLIC`; both new tables carry RLS, FORCE RLS and their deny policy |
-| L16 | a normalized catalogue snapshot taken after 0023 equals the snapshot taken after applying 0024 and then its reverse — tables, columns, constraints, indexes, policies, functions, grants and default privileges |
+| L16 | a normalized catalogue snapshot taken after 0027 equals the snapshot taken after applying 0028 and then its reverse — tables, columns, constraints, indexes, policies, functions, grants and default privileges |
 
 And the cases the review added:
 
@@ -827,12 +890,12 @@ present; the protected-object census identical before and after the run.
 | **T1** | proved **at the PostgREST layer only** | a 2 708 830-byte (2.58 MiB) plan body reached the function and was parsed, answering `JOB_NOT_FOUND` in 110 ms. The largest real commit body was 2 708 898 bytes at 441 ms. |
 | **T3** | proved on the LOCAL substitute; **pending re-proof on hosted** | supabase-js returns the `jsonb` result unwrapped — a bare object, no array and no named envelope — carrying `importJobId`, `status`, `replayed`, `counts`, `commitAttempts` and `rollbackCount`. |
 | **T4** | proved on the LOCAL substitute; **pending re-proof on hosted** | `COMMITTED_PAYLOAD_DIFFERS` survives PostgREST, supabase-js and `safeErrorCode` as that code, not as `CLIENT_TRANSPORT`. |
-| **T5** | proved on the LOCAL substitute for what that run raised; **pending re-proof on hosted** | 9 of the 34 codes crossed the transport as themselves and none was flattened to `CLIENT_TRANSPORT`. The other 25 were never provoked over HTTP by this run and are recorded as SKIPPED, one per code. Most refusals travel as a **200 body** of the shape `{ status: 'failed', code }`, not as an HTTP error — migration 0024's subtransaction catches them. |
+| **T5** | proved on the LOCAL substitute for what that run raised; **pending re-proof on hosted** | 9 of the 34 codes crossed the transport as themselves and none was flattened to `CLIENT_TRANSPORT`. The other 25 were never provoked over HTTP by this run and are recorded as SKIPPED, one per code. Most refusals travel as a **200 body** of the shape `{ status: 'failed', code }`, not as an HTTP error — migration 0028's subtransaction catches them. |
 | **T8** | proved | the service-role KEY executes all four functions (SQLSTATEs `none`, `22023`, `P0002`, `P0002` — business answers, never `42501`). |
 | **T9** | proved | anon and authenticated KEYS are refused `42501` on all four functions, and on `import_job_record`, `retention_period`, `person_private` and `survey_response`. |
-| **M1** | proved | migrations 0000-0024 apply cleanly, verbatim, on PostgreSQL **17.11** — the major `supabase/config.toml` pins. |
-| **M3** | proved **against an empty table** | 0023's CHECK constraints are created and accepted on 17. Validation against *existing* `study_period_snapshot` rows needs a populated table and stays hosted-only. |
-| **M6** | proved | `X7.1`/`X7.2`/`X7.5` on 17: the 0024 reverse refuses with `CANONICAL_PACKAGES_STILL_OWNED` while a package owns rows, and succeeds once it is reversed. It needs DDL, so it is a level-2 result, not an HTTP one. |
+| **M1** | proved | migrations 0000-0028 apply cleanly, verbatim, on PostgreSQL **17.11** — the major `supabase/config.toml` pins. |
+| **M3** | proved **against an empty table** | 0027's CHECK constraints are created and accepted on 17. Validation against *existing* `study_period_snapshot` rows needs a populated table and stays hosted-only. |
+| **M6** | proved | `X7.1`/`X7.2`/`X7.5` on 17: the 0028 reverse refuses with `CANONICAL_PACKAGES_STILL_OWNED` while a package owns rows, and succeeds once it is reversed. It needs DDL, so it is a level-2 result, not an HTTP one. |
 | **L1-L16, X1-X8** | proved over HTTP except where a capability is absent | 102 executed. `L14` in full — 19 executions with real anon and authenticated JWTs. |
 
 **Skipped over HTTP, and why — 66 records.** `L4`, `L5`, `X6b`, `X6c` and `X3`
@@ -849,7 +912,7 @@ never counted as a pass.
   project are a different limit that no local stack reproduces.
 - **T6** — the hosted `statement_timeout` for `service_role` under load.
 - **T7** — recovery from a timeout killed mid-commit.
-- **M2** — building 0022's index against a populated `respondent` table.
+- **M2** — building 0026's index against a populated `respondent` table.
 - **M4** — catalogue parity where Supabase's own extensions, roles and default
   privileges differ from a bare cluster.
 
@@ -873,3 +936,9 @@ never counted as a pass.
 - no AI categorization was introduced;
 - no client-facing calculation and no legacy import behaviour was changed;
 - nothing was written to any canonical table, in any environment.
+
+⚠️ **Scope note.** These statements are about Units 1-3 and remain true of them.
+They are NOT a claim about the hosted project in general: Unit 4 inventoried it,
+backed it up and deleted one duplicate legacy study through a rehearsed
+fail-closed transaction. No canonical migration and no canonical row was part of
+that. See the hosted project status in `docs/CURRENT_STATE.md`.
