@@ -35,6 +35,47 @@
  * asks for them. And no PostgreSQL message is ever returned or logged — this
  * schema's constraint messages quote respondent data, so a transport error is
  * reduced to a code by `safeErrorCode` and the message is discarded.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY IT CANCELS, AND WHY IT IS CONCURRENT. (Unit 5 Phase 3.1.)
+ *
+ * CANCELLATION. Every request carries an optional `AbortSignal` all the way to
+ * `PostgrestTransformBuilder.abortSignal`, and the paging loop CHECKS IT BEFORE
+ * ASKING FOR THE NEXT PAGE. Both halves are needed and neither is sufficient:
+ * without the signal on the query the request in flight keeps running after its
+ * caller gave up, and without the loop check the read would obediently start
+ * page four of a set nobody is waiting for. A cancelled read throws `READ_ABORTED`, which
+ * is a code like every other refusal here — never a message.
+ *
+ * CONCURRENCY. Reading twenty-six independent families one after another cost
+ * about 4.86 seconds against the hosted project, which is most of the shadow's
+ * entire budget spent on latency rather than on data: the Cuicuilco package is
+ * 3 244 rows across 28 requests — one committed-package gate, twenty-six
+ * families, and one overflow page because `survey_response` holds 1 685 rows
+ * against a 1 000-row page — so the wall time was 28 round trips, not the
+ * volume. The families are INDEPENDENT — nothing in one read's request depends
+ * on another read's rows; only `resolveCommittedJob` must come first, because
+ * its manifest names the spec — so they are now read through a bounded pool.
+ *
+ * WHAT BOUNDED CONCURRENCY MUST NOT COST, and does not:
+ *   scope        every request still carries tenant AND study; the pool never
+ *                touches the request, it only decides when to issue it.
+ *   ceilings     each family keeps its own `maxRows` refusal threshold.
+ *   ordering     paging WITHIN a family stays strictly sequential, because the
+ *                keyset cursor is the previous page's last row; and each
+ *                family's array is placed by INDEX, so the returned row set is
+ *                byte-identical to the sequential one.
+ *   completeness one failure fails the whole load. No new task starts after the
+ *                first refusal, every started task is awaited, and the error
+ *                reported is the LOWEST-INDEXED one, so the refusal a caller
+ *                sees does not depend on which request happened to lose a race.
+ *   cancellation the pool stops issuing on abort as well as on failure.
+ *
+ * WHY THE LIMIT IS SIX. This runs inside a Cloudflare Worker, which allows a
+ * maximum of six simultaneous open outbound connections per invocation; asking
+ * for more does not fail, it queues, so a larger number would buy nothing and
+ * would misdescribe what the code is doing. Six is also gentle on PostgREST:
+ * the read is six small `select`s at a time against one study, not a fan-out.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -74,6 +115,16 @@ import type {
 /** PostgREST's own page size for this project (`supabase/config.toml`). */
 export const CANONICAL_READ_PAGE_SIZE = 1000;
 
+/**
+ * How many family reads may be in flight at once.
+ *
+ * Six, because a Cloudflare Worker allows six simultaneous open outbound
+ * connections per invocation. A seventh would queue behind the six rather than
+ * fail, so a larger number would describe an intent the platform does not
+ * honour.
+ */
+export const CANONICAL_READ_CONCURRENCY = 6;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export type CanonicalReadScope = { tenantId: string; studyId: string };
@@ -88,6 +139,12 @@ export type CanonicalReadRequest = {
   limit: number;
   /** Extra equality filters. Used only for `import_job.status`. */
   equals?: Readonly<Record<string, string>>;
+  /**
+   * Cancellation, carried all the way to the underlying `fetch`. Optional so
+   * the offline gate and the command-line operators can call the workflow
+   * without one; supplied by every caller that has a budget.
+   */
+  signal?: AbortSignal;
 };
 
 /** One page of one table. The only thing this workflow can do to the outside. */
@@ -363,12 +420,18 @@ export async function readCanonicalTable<T>(
   read: CanonicalTableRead,
   scope: CanonicalReadScope,
   equals?: Readonly<Record<string, string>>,
+  signal?: AbortSignal,
 ): Promise<T[]> {
   const rows: Record<string, unknown>[] = [];
   let cursor: Record<string, string> | null = null;
   let previous: string[] | null = null;
 
   while (rows.length < read.maxRows) {
+    // BEFORE the page, not after it. A read whose caller has given up must not
+    // open another connection, and a signal that only reached the query would
+    // still let this loop start page four of a set nobody is waiting for.
+    if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", read.table);
+
     const limit = Math.min(CANONICAL_READ_PAGE_SIZE, read.maxRows - rows.length);
     let page: { rows: Record<string, unknown>[] | null; error: unknown };
     try {
@@ -380,11 +443,19 @@ export async function readCanonicalTable<T>(
         cursor,
         limit,
         equals,
+        signal,
       });
     } catch (thrown) {
+      // An aborted request rejects, and PostgREST wraps the reason in a message
+      // this module may not repeat. The signal is the reliable witness, so it
+      // decides the code and the thrown value is discarded.
+      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", read.table);
       throw new CanonicalReadError(safeErrorCode(thrown), read.table);
     }
-    if (page.error) throw new CanonicalReadError(safeErrorCode(page.error), read.table);
+    if (page.error) {
+      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", read.table);
+      throw new CanonicalReadError(safeErrorCode(page.error), read.table);
+    }
     const batch = page.rows ?? [];
 
     for (const row of batch) {
@@ -403,6 +474,76 @@ export async function readCanonicalTable<T>(
   throw new CanonicalReadError("READ_EXCEEDS_CEILING", read.table);
 }
 
+/**
+ * Run `task` over `items` with at most `limit` in flight, and refuse as a whole.
+ *
+ * DETERMINISM IS THE POINT, so three things are fixed rather than emergent:
+ *   · results are placed BY INDEX, so the output order is the input order and
+ *     never the completion order;
+ *   · after the first failure no NEW task is started, but every task already
+ *     started is awaited, so nothing is left running behind the rejection;
+ *   · the error thrown is the LOWEST-INDEXED failure, so two families failing
+ *     in the same run report the same refusal every time.
+ *
+ * `signal` stops the pool issuing further work; an in-flight task observes the
+ * same signal through its own transport.
+ */
+export async function mapBounded<T, R>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>,
+  signal?: AbortSignal,
+): Promise<R[]> {
+  // A limit that is not a positive integer would silently produce ZERO workers
+  // and hand back an array of holes that every caller would then treat as an
+  // empty-but-complete read. Refuse it, exactly as an out-of-range ceiling is
+  // refused: a concurrency bug must not be able to look like an empty study.
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new CanonicalReadError("READ_CONCURRENCY_INVALID");
+
+  const results = new Array<R>(items.length);
+  const filled = new Array<boolean>(items.length).fill(false);
+  const failures = new Array<unknown>(items.length);
+  let failed = false;
+  let next = 0;
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      if (failed) return;
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      // Claimed, then checked: the refusal is recorded at the position that
+      // would have run, so "the lowest-indexed failure wins" holds for a
+      // cancellation exactly as it does for a transport error.
+      if (signal?.aborted) {
+        failures[index] = new CanonicalReadError("READ_ABORTED");
+        failed = true;
+        return;
+      }
+      try {
+        results[index] = await task(items[index], index);
+        filled[index] = true;
+      } catch (thrown) {
+        failures[index] = thrown ?? new CanonicalReadError("CLIENT_TRANSPORT");
+        failed = true;
+        return;
+      }
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, () => worker());
+  await Promise.all(workers);
+
+  for (let index = 0; index < items.length; index += 1) {
+    if (failures[index] !== undefined) throw failures[index];
+  }
+  // Complete or not at all. A hole here would mean a worker returned without
+  // either filling its slot or recording a refusal — impossible today, and a
+  // silently empty family is exactly the failure this module exists to refuse.
+  if (filled.some((done) => !done)) throw new CanonicalReadError("READ_INCOMPLETE");
+  return results;
+}
+
 export type LoadCanonicalRowSetOptions = {
   tenantId: string;
   studyId: string;
@@ -412,6 +553,8 @@ export type LoadCanonicalRowSetOptions = {
    * committed job and that one is read.
    */
   packageIdempotencyKey?: string;
+  /** Cancellation for every page of every family. */
+  signal?: AbortSignal;
 };
 
 /** The plan header the commit stored on `import_job.manifest`. */
@@ -435,6 +578,7 @@ async function resolveCommittedJob(
     CANONICAL_READS.importJob,
     scope,
     { status: "committed" },
+    options.signal,
   );
   const candidates = options.packageIdempotencyKey
     ? rows.filter((row) => row.idempotency_key === options.packageIdempotencyKey)
@@ -486,43 +630,95 @@ export async function loadCanonicalRowSet(
   if (!UUID.test(options.tenantId)) throw new CanonicalReadError("SCOPE_TENANT_INVALID");
   if (!UUID.test(options.studyId)) throw new CanonicalReadError("SCOPE_STUDY_INVALID");
   const scope: CanonicalReadScope = { tenantId: options.tenantId, studyId: options.studyId };
+  const signal = options.signal;
 
+  // FIRST, AND ALONE. The manifest names the spec every other read is
+  // interpreted under, and a study with anything but exactly one committed
+  // package is refused before a single family is fetched.
   const { job, specId, planFingerprint } = await resolveCommittedJob(transport, options);
-  const table = <T>(read: CanonicalTableRead) => readCanonicalTable<T>(transport, read, scope);
+
+  // The families, in a FIXED order. The order is not the fetch order — the pool
+  // decides that — it is the order results are placed in, which is what makes
+  // the concurrent read byte-identical to the sequential one it replaced.
+  const FAMILIES = [
+    "participants",
+    "attributeDefinitions",
+    "attributeValues",
+    "responseScales",
+    "responseOptions",
+    "instruments",
+    "domains",
+    "items",
+    "sessions",
+    "responses",
+    "retentionPeriods",
+    "performanceDimensions",
+    "performanceObservations",
+    "bandSchemes",
+    "bandRules",
+    "metricDefinitions",
+    "journeyModels",
+    "journeyStages",
+    "journeyStageEvidenceLinks",
+    "organizationalUnits",
+    "cultureDimensions",
+    "painPoints",
+    "painPointJourneyStages",
+    "painPointOrganizationalUnits",
+    "painPointPerformanceDimensions",
+    "painPointCultureDimensions",
+  ] as const satisfies readonly Exclude<keyof CanonicalRowSet, "importJob" | "specId" | "planFingerprint">[];
+
+  const fetched = await mapBounded(
+    FAMILIES,
+    CANONICAL_READ_CONCURRENCY,
+    (family) =>
+      readCanonicalTable<Record<string, unknown>>(
+        transport,
+        CANONICAL_READS[family] as CanonicalTableRead,
+        scope,
+        undefined,
+        signal,
+      ),
+    signal,
+  );
+
+  // One lookup, then the same per-family typed reads the sequential version
+  // performed. The cast is exactly the one `readCanonicalTable<T>` always made:
+  // the row shape is declared by `rows.ts` and enforced by the `select`, not by
+  // a runtime check that never existed.
+  const byFamily = new Map(FAMILIES.map((family, index) => [family, fetched[index]]));
+  const rows = <T>(family: (typeof FAMILIES)[number]): T[] => byFamily.get(family) as unknown as T[];
 
   return {
     importJob: job,
     specId,
     planFingerprint,
-    participants: await table<StudyParticipantRow>(CANONICAL_READS.participants),
-    attributeDefinitions: await table<AttributeDefinitionRow>(CANONICAL_READS.attributeDefinitions),
-    attributeValues: await table<ParticipantAttributeValueRow>(CANONICAL_READS.attributeValues),
-    responseScales: await table<ResponseScaleRow>(CANONICAL_READS.responseScales),
-    responseOptions: await table<ResponseOptionRow>(CANONICAL_READS.responseOptions),
-    instruments: await table<SurveyInstrumentRow>(CANONICAL_READS.instruments),
-    domains: await table<StudyDomainRow>(CANONICAL_READS.domains),
-    items: await table<SurveyItemRow>(CANONICAL_READS.items),
-    sessions: await table<SurveySessionRow>(CANONICAL_READS.sessions),
-    responses: await table<SurveyResponseRow>(CANONICAL_READS.responses),
-    retentionPeriods: await table<RetentionPeriodRow>(CANONICAL_READS.retentionPeriods),
-    performanceDimensions: await table<PerformanceDimensionRow>(CANONICAL_READS.performanceDimensions),
-    performanceObservations: await table<PerformanceObservationRow>(CANONICAL_READS.performanceObservations),
-    bandSchemes: await table<BandSchemeRow>(CANONICAL_READS.bandSchemes),
-    bandRules: await table<BandRuleRow>(CANONICAL_READS.bandRules),
-    metricDefinitions: await table<MetricDefinitionRow>(CANONICAL_READS.metricDefinitions),
-    journeyModels: await table<JourneyModelRow>(CANONICAL_READS.journeyModels),
-    journeyStages: await table<JourneyStageRow>(CANONICAL_READS.journeyStages),
-    journeyStageEvidenceLinks: await table<JourneyStageEvidenceLinkRow>(CANONICAL_READS.journeyStageEvidenceLinks),
-    organizationalUnits: await table<OrganizationalUnitRow>(CANONICAL_READS.organizationalUnits),
-    cultureDimensions: await table<CultureDimensionRow>(CANONICAL_READS.cultureDimensions),
-    painPoints: await table<PainPointRow>(CANONICAL_READS.painPoints),
-    painPointJourneyStages: await table<PainPointJourneyStageRow>(CANONICAL_READS.painPointJourneyStages),
-    painPointOrganizationalUnits: await table<PainPointOrganizationalUnitRow>(
-      CANONICAL_READS.painPointOrganizationalUnits,
-    ),
-    painPointPerformanceDimensions: await table<PainPointPerformanceDimensionRow>(
-      CANONICAL_READS.painPointPerformanceDimensions,
-    ),
-    painPointCultureDimensions: await table<PainPointCultureDimensionRow>(CANONICAL_READS.painPointCultureDimensions),
+    participants: rows<StudyParticipantRow>("participants"),
+    attributeDefinitions: rows<AttributeDefinitionRow>("attributeDefinitions"),
+    attributeValues: rows<ParticipantAttributeValueRow>("attributeValues"),
+    responseScales: rows<ResponseScaleRow>("responseScales"),
+    responseOptions: rows<ResponseOptionRow>("responseOptions"),
+    instruments: rows<SurveyInstrumentRow>("instruments"),
+    domains: rows<StudyDomainRow>("domains"),
+    items: rows<SurveyItemRow>("items"),
+    sessions: rows<SurveySessionRow>("sessions"),
+    responses: rows<SurveyResponseRow>("responses"),
+    retentionPeriods: rows<RetentionPeriodRow>("retentionPeriods"),
+    performanceDimensions: rows<PerformanceDimensionRow>("performanceDimensions"),
+    performanceObservations: rows<PerformanceObservationRow>("performanceObservations"),
+    bandSchemes: rows<BandSchemeRow>("bandSchemes"),
+    bandRules: rows<BandRuleRow>("bandRules"),
+    metricDefinitions: rows<MetricDefinitionRow>("metricDefinitions"),
+    journeyModels: rows<JourneyModelRow>("journeyModels"),
+    journeyStages: rows<JourneyStageRow>("journeyStages"),
+    journeyStageEvidenceLinks: rows<JourneyStageEvidenceLinkRow>("journeyStageEvidenceLinks"),
+    organizationalUnits: rows<OrganizationalUnitRow>("organizationalUnits"),
+    cultureDimensions: rows<CultureDimensionRow>("cultureDimensions"),
+    painPoints: rows<PainPointRow>("painPoints"),
+    painPointJourneyStages: rows<PainPointJourneyStageRow>("painPointJourneyStages"),
+    painPointOrganizationalUnits: rows<PainPointOrganizationalUnitRow>("painPointOrganizationalUnits"),
+    painPointPerformanceDimensions: rows<PainPointPerformanceDimensionRow>("painPointPerformanceDimensions"),
+    painPointCultureDimensions: rows<PainPointCultureDimensionRow>("painPointCultureDimensions"),
   };
 }

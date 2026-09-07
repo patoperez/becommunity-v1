@@ -23,9 +23,11 @@ export type { PostgrestReadClient, PostgrestScopedQuery } from "./postgrest";
 
 export {
   CANONICAL_READS,
+  CANONICAL_READ_CONCURRENCY,
   CANONICAL_READ_PAGE_SIZE,
   CanonicalReadError,
   loadCanonicalRowSet,
+  mapBounded,
   readCanonicalTable,
 } from "./read";
 export type {

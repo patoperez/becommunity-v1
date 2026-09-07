@@ -51,6 +51,12 @@ export type LoadCanonicalSourceParams = {
   packageIdempotencyKey?: string;
   /** Override the study's results specification. Defaults to the registered one. */
   spec?: StudyResultsSpec;
+  /**
+   * Cancellation, carried to every paginated query. A caller with a wall-clock
+   * budget — the shadow orchestrator is the only one today — passes its signal
+   * here so a read it has stopped waiting for is stopped, not merely ignored.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -68,6 +74,7 @@ export async function loadCanonicalResultSource(
     tenantId: params.tenantId,
     studyId: params.studyId,
     packageIdempotencyKey: params.packageIdempotencyKey,
+    signal: params.signal,
   });
   const spec = params.spec ?? CANONICAL_RESULTS_SPECS[rows.specId];
   if (!spec) throw new CanonicalReadError("SPEC_NOT_REGISTERED");

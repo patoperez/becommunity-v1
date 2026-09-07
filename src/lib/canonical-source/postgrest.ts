@@ -39,6 +39,14 @@ export type PostgrestScopedQuery = {
   or(filter: string): PostgrestScopedQuery;
   order(column: string, options: { ascending: boolean }): PostgrestScopedQuery;
   limit(count: number): PostgrestScopedQuery;
+  /**
+   * PostgREST's own cancellation, which puts the signal on the underlying
+   * `fetch`. This is the supported API — declared on
+   * `PostgrestTransformBuilder` and consumed by `PostgrestBuilder`'s `then` —
+   * and not a flag this code checks and hopes about: an aborted request is
+   * cancelled at the socket, not merely ignored when it returns.
+   */
+  abortSignal(signal: AbortSignal): PostgrestScopedQuery;
 };
 
 /** The client surface one page needs. Described, never imported. */
@@ -83,6 +91,11 @@ export function postgrestReadTransport(client: PostgrestReadClient): CanonicalRe
       if (request.cursor !== null) query = query.or(keysetFilter(request.keyColumns, request.cursor));
       for (const column of request.keyColumns) query = query.order(column, { ascending: true });
       query = query.limit(request.limit);
+
+      // LAST, so it applies to the finished query and to nothing else. An
+      // already-aborted signal is still attached: PostgREST rejects
+      // immediately, which is the answer the caller wants.
+      if (request.signal) query = query.abortSignal(request.signal);
 
       const answer = (await (query as unknown as PromiseLike<{
         data: Record<string, unknown>[] | null;
