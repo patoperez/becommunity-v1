@@ -479,15 +479,31 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `runStudyShadowComparison` under `node --conditions=react-server` and lets it
   construct its own admin client and do its own paged reads. Both are read-only.
   Never quote one as the other.
-- ⓘ **There is exactly ONE door from the application to the canonical layer, and
-  a graph walk proves it.** `src/app/insights/e/[studyId]/page.tsx` →
-  `src/lib/studies/study-dashboard.ts` (server-only) → `src/lib/shadow/server.ts`
-  (server-only) → `src/lib/canonical-source/server.ts`. The gate walks the
-  transitive import graph from every `"use client"` file and every route and
-  fails if any of them reaches the canonical layer by ANY chain; it fails if more
-  than one page does; and it fails if the chain skips the approved loader or the
-  orchestrator. It also fails if any page, component or route so much as names
-  the diagnostics. Do not add a second door.
+- ⓘ **There are exactly TWO doors from the application to the canonical layer,
+  both named in a table, and a graph walk proves it.** Unit 6B.1 added the
+  second and last; before it there was one, and the rule read "do not add a
+  second door".
+
+  1. `src/app/insights/e/[studyId]/page.tsx` → `src/lib/studies/study-dashboard.ts`
+     (server-only) → `src/lib/shadow/server.ts` (server-only) →
+     `src/lib/canonical-source/server.ts`. Unchanged, and its chain is still
+     required to pass through BOTH the approved loader and the orchestrator.
+  2. `src/app/studio/e/[studyId]/construccion/page.tsx` and its co-located
+     `actions.ts` → `src/lib/studio/presentation-workspace.ts` (server-only) →
+     the canonical read path. It is asserted NOT to travel through the shadow
+     layer: its read is a read, not a comparison.
+
+  The doors live as a TABLE in `shadow-boundary-test.mjs` §[8] rather than as a
+  count, so a third cannot be added by editing a digit: an unapproved page that
+  reaches the canonical layer fails by name. The server-action class stays
+  closed with ONE named exemption, which is additionally asserted to perform no
+  insert, update, upsert, delete, RPC or `revalidatePath`. `"use client"`
+  modules and `route.ts` handlers still reach the canonical layer by NO chain,
+  and no page, component or route may so much as name the shadow diagnostics.
+
+  **Do not add a third door.** If a surface needs canonical data, it goes
+  through one of the two loaders above or a new one is argued for in the gate
+  first, not registered afterwards.
 - ⓘ **`docs/LEGACY_CANONICAL_COMPATIBILITY.md` is the compatibility evidence.**
   Read it before proposing a read-path switch. Three totals live there and must
   never be added together or substituted for one another: **golden parity

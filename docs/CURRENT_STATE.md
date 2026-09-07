@@ -2092,3 +2092,245 @@ were executed back to back on the same machine to establish it.
 All verification ran in WSL as `patop` on Node 24.11.1 / npm 10.9.2. No hosted
 service was contacted, no credential read, no Supabase row read or written, no
 migration run, no deploy, no shadow mode, and no other worktree touched.
+
+---
+
+### Unit 6B.1 — the session-only canonical composer and the render-only library (source only, 2026-09-07)
+
+**Branch `codex/canonical-experience-integration`, on top of Unit 6A.2.** The
+first real vertical slice of the canonical dashboard composer: a pure editor
+over `PresentationDocument`, a render-only component library over
+`PresentationRenderModel`, an authenticated Studio route that composes one
+against the other, and the deliberate registration of the SECOND and last door
+from the application to the canonical layer.
+
+**Nothing is stored.** There is no draft, no revision, no publication, no
+autosave, no `revalidatePath` and no database write anywhere in the unit. The
+Cuicuilco legacy v2 draft is not read, migrated, reinterpreted or overwritten —
+no module in the unit names the table it lives in. No formula, canonical result,
+approved dashboard figure, migration, dependency or lockfile changed.
+
+#### The four pieces
+
+1. **`src/lib/composer/`** — the editor engine. Thirty-two pure operations
+   `(state, …args) => ComposerState` over a document and a catalogue: pages
+   (add, open, rename, reorder, duplicate, remove), blocks (add from the
+   catalogue, select, reorder, duplicate, hide, remove, copy, binding, variant,
+   spans, responsive behaviour, display format, sample policy, disclosure) and
+   filter panels (dimensions, explicit connections). Whole-document undo and
+   redo, sixty deep, session-only. Deterministic ids: FNV-1a at three offset
+   bases behind a two-letter kind code, no clock, no entropy, no slug, re-salted
+   against the document when taken.
+
+   It lives OUTSIDE `src/lib/presentation/` because the presentation gate proves
+   that directory contains no `Math.`, no division and no multiplication, and
+   32-bit hashing is nothing but multiplication.
+
+2. **`src/components/presentation/`** — the render-only library. Thirteen leaf
+   renderers plus the shell: `narrative`, `callout`, `kpi_value`,
+   `kpi_with_base`, `table`, `bar_vertical`, `stacked_bar`, `journey_route_map`,
+   `gauge`, `bar_horizontal`, `term_ranking`, `word_cloud`, `filter_control`. It
+   receives a render model and an audience and nothing else.
+   `RenderValue.formatted` is the only thing printed; `value`, `unit` and
+   `decimals` choose a geometry. `donut`, `pie`, `line`, `area` and
+   `touchpoint_matrix` stay semantically compatible and are not offered; nothing
+   is ever substituted for another.
+
+3. **`src/lib/studio/presentation-workspace.ts`** — the `server-only` loader.
+   Reads canonical results, builds the registry from THAT document, projects the
+   catalogue, chooses and builds a template, binds it explicitly, resolves it.
+   Blueprint selection is by `registry.source.specId` and `mappingVersion`
+   against a registered table, never by study UUID; the capability half is the
+   approved blueprint's own `requireHandle`. A study of the right family and the
+   wrong shape falls through to `buildGenericStartingBlueprint`, which builds a
+   page out of what the registry actually publishes and invents no structure. A
+   study with no usable canonical package gets a typed unavailable state and no
+   legacy fallback.
+
+4. **`/studio/e/[studyId]/construccion`**, exposed as **"Construcción"** between
+   the team's reading and the client's view. `requireInternal()` is the first
+   await, before `params`; then the UUID; then the study; then the workspace.
+
+#### What crosses to the browser
+
+`ComposerPayload` and nothing else: a bound document, the safe catalogue, a
+resolved render model, and four strings of chrome. It is built by NAMING what
+goes in rather than by removing what must not. The gate serialises a real
+payload and asserts no `CanonicalAddress`, no address map, no `RegistrySource`,
+no UUID, no plan/package/specification/mapping/calculation identity and no
+sample-policy author, rationale or threshold — then asserts the registry it was
+projected FROM does carry those, so the absence means something.
+
+The payload TYPES are declared on the client-safe side and imported by the
+server module, not the reverse; the refresh action is handed down as a prop.
+Either the other way round would put the canonical read path in a `"use client"`
+import graph.
+
+#### The preview is explicit, and stale until it is asked
+
+Structure on the canvas is always live; values are the last resolution's, marked
+**"Vista previa desactualizada"** until somebody presses **"Actualizar vista
+previa"**. That action is the only Server Action in the product that returns a
+value instead of redirecting — a redirect would remount the page and throw away
+a session-only document. It re-authorizes with `getUser()`, reads the role from
+the database, throws rather than redirects for a wrong role, validates the study
+id, reads the tenant back from the row, caps and parses the payload defensively,
+validates against the strict v4 schema, re-binds from a registry it built
+itself, and resolves on the server.
+
+#### The two doors
+
+| # | entry | loader | also through |
+|---|---|---|---|
+| 1 | `src/app/insights/e/[studyId]/page.tsx` | `src/lib/studies/study-dashboard.ts` | `src/lib/shadow/server.ts` |
+| 2 | `src/app/studio/e/[studyId]/construccion/{page.tsx,actions.ts}` | `src/lib/studio/presentation-workspace.ts` | — (asserted NOT through shadow) |
+
+They are a TABLE in `shadow-boundary-test.mjs` §[8], not a count, so a third
+cannot be added by editing a digit. The server-action class stays closed with
+one named exemption, asserted to perform no write. `"use client"` modules and
+`route.ts` handlers still reach the canonical layer by no chain.
+
+#### One existing rule was narrowed, deliberately
+
+§[30] of the presentation gate refused `src/lib/results/` **entirely** to a
+client component. A render-only library has to name a render model's type, and
+the client-safe barrel reaches `results/contract.ts` because `RenderValue.unit`
+IS a `ResultUnit`. The rule now permits **`contract.ts` and nothing else** of
+that layer, and only through `import type`, which is erased at build. Two
+assertions replace the one and are together stricter. `contract.ts` imports
+nothing and exports one version string and two empty-record factories beside 44
+type declarations; `build.ts`, `spec.ts`, `metrics.ts` and the barrel remain as
+forbidden as before.
+
+A blanket "no client reaches `src/lib/calc/`" rule was written, found to be
+violated by twelve pre-existing dashboard and upload components, and
+deliberately NOT introduced — a rule this gate has never enforced is not one
+this unit imposes on somebody else's code in passing. It is recorded in the gate.
+
+#### Gates
+
+| gate | assertions | in `npm test`? |
+|---|---:|---|
+| `npm run test:canonical-composer` | **266** (new) | yes |
+| `npm run test:canonical-presentation` | **294** (was 286) | yes |
+| `npm run test:shadow-boundary` | passes, doors as a table | yes |
+| `npm run test:studio-completion` | passes, new route registered | yes |
+| `npm run test:canonical-presentation-parity` | **51** | no — machine-specific workbooks |
+| `npm run test:canonical-results-parity` | **531/531** | no — machine-specific workbooks |
+
+**Parity, executed with the two real workbooks:**
+`ofrecidas=534 ejecutadas=531 aprobadas=531 falladas=0 omitidas=0 sin-resolver=0
+no-aplica=2 requieren-configuración=1`. The renewal index is **33** numerically
+and renders **"33.0"**; «Salida» TDP is **133.3**, unclamped; the approved
+recommendation figures are **30.8 / 46.4 / −9.1**; all **110** journey figures
+carry one decimal across 55 points and five approved routes from four source
+groups.
+
+**Discrimination: 15/15.** Four on the editor (a refusal that bumps the
+sequence; a duplicate that inherits connections; an unimplemented variant in the
+renderer table; a dropped history cap), five on the renderer (printing
+`value.value`; disabling the client branch of the absence notice; letting a
+contentless block reach a client; removing a declared variant's component;
+un-disabling the filter controls), and six on the route and doors (reading
+before authorizing; resolving before binding; importing the loader from the
+client surface; widening the payload; giving the action a write; adding a third
+unapproved page). Every one turns a gate red and exits 1; every file was
+restored byte-identically, SHA-256 compared before and after.
+
+Two of those probes are worth naming because they first proved nothing. The C11
+probe went green because every absent block in the fixture was already filtered
+out before the notice was reached — the assertions were passing structurally, so
+the notice is now driven directly in both modes for all four states. The
+ineligible-block probe went green because the assertion split the page on a
+title that appears twice and inspected the few characters between the two
+occurrences; each candidate block is now drawn alone.
+
+A third incident belongs here for the same reason. The renderer and the route
+were developed together and split into two commits afterwards by a script whose
+two edits overlapped, which deleted §[30]'s entire client/route/action/page leak
+walk from the renderer commit. The gate exited 0 and printed a clean summary,
+because a removed check does not fail — it stops asking. Lint caught it, naming
+two now-unread variables. It is restored byte-identically in its own commit, and
+the split script now asserts its own output.
+
+#### Browser QA
+
+**65/65 checks, 0 failures, 26 screenshots**, against a PRODUCTION build
+(`next build` + `next start`) driven over raw CDP. No console error, no page
+exception, no failed request. No horizontal document overflow at 1440×900,
+1280×800, 1024×768, 768×1024, 390×844, 360×800 or 320×720. Every actionable
+control reaches 44 px at every width, the seam excepted at a measured 24×44 with
+its own accessible restore button. Focus rings present, twelve of twelve tab
+stops land on a control, and under `prefers-reduced-motion` nothing animates
+above 50 ms.
+
+Exercised rather than photographed: all four left/right panel combinations;
+focus mode and its exact restoration; desktop, tablet and phone canvases; 100 /
+75 / 50 / fit zoom; add, duplicate, hide, remove; keyboard reordering with no
+pointer; undo and redo; the preview going stale and being explicitly refreshed;
+a filter panel offering a dimension and reclassifying its candidates, with six
+listed as unconnectable and why; and the filter controls drawn genuinely
+`disabled` under the sentence that says filtering arrives in Unit 6B.2.
+
+**Two limits, stated plainly.** First, the SIGNED-IN route could not be driven:
+all three synthetic actors in `.env.local` are refused by the hosted project with
+`invalid_credentials` (auth health 200, so the project is reachable), and
+rotating a credential is out of this unit's scope. What WAS proved of the route
+in a browser is that an unauthenticated visitor is redirected to `/login` before
+anything is read, and that nothing of the study leaks into that response.
+Second, the composer was therefore driven through a temporary, uncommitted
+harness that mounts the COMMITTED components with a payload built offline from
+the gate's own fixture. The screenshots show the renderers, not the approved
+dashboard's figures; those are verified by
+`test:canonical-presentation-parity` against the oracle rather than by a
+photograph.
+
+That harness produced one finding worth keeping: a statically prerendered page
+cannot carry the per-request nonce this application's CSP requires
+(`script-src 'self' 'nonce-…' 'strict-dynamic'`, where `'strict-dynamic'` makes
+`'self'` inert), so its entire client bundle is blocked — measured as 12
+scripts, 0 nonces, 12 blocked loads and no hydration, against 9 / 9 / 0 and full
+hydration on `/login` and `/`. The composer route is dynamic by construction and
+unaffected. A future statically-rendered interactive page would not be.
+
+Evidence lives outside git at `C:\dev\becommunity-qa\unit-6b1\` — `screenshots\`
+(26 PNGs) and `machine\browser-qa.json`, `machine\parity\`,
+`machine\discrimination\` and `machine\BASELINE-AUTHORITATIVE.json`.
+
+#### Known-red gates, unchanged
+
+`npm test` reports the same single failure as `b2506e9` —
+`hosted-target-guard`'s worktree-versus-main rule, a property of the verifier
+checkout. Suite D reports the same five as `b2506e9` when run in the environment
+the baseline was captured in: the browserslist advisory, three secret-class blobs
+already in reachable history, and the secret-leak gate, which needs an
+`.env.local` the verifier does not carry. Neither is called passed.
+
+With an `.env.local` present, `cf:build` embeds `SUPABASE_SERVICE_ROLE_KEY` and
+the test passwords into `.open-next/cloudflare/next-env.mjs`, and the secret-leak
+gate rightly refuses. That is pre-existing behaviour of the Cloudflare build, not
+this unit's: no file in this diff reads `process.env` at all.
+
+`tsc --noEmit` is clean; lint is at the **54-warning baseline** with zero errors
+and zero warnings from any file this unit added. `npm run build` and
+`npm run cf:build` are green.
+
+#### Deferred, and still deferred
+
+Draft storage, autosave, revision conflict handling, publication, review,
+immutable snapshots, restore, conversion of the legacy v2/v3 drafts, production
+client-route switching, public interactive filters and URL filter state,
+PDF/print export, AI or category suggestions, authentication changes,
+migrations, dependencies, deployment, shadow activation, journey route/stage
+authoring, and the emergency `/presentacion` integration.
+
+One hole is recorded rather than closed:
+`src/app/studio/e/[studyId]/interpretacion/page.tsx` is still missing from
+`studio-completion`'s `STUDIO_ROUTES`, so its authorization ORDER is checked by
+nothing. Adding it was tried and reverted — the same list drives a
+no-serialized-object rule and that page uses `JSON.stringify`, so closing the
+hole means changing a page that is not this unit's to change.
+
+All verification ran in WSL as `patop` on Node 24.11.1 / npm 10.9.2. No hosted
+service was contacted, no credential printed, no Supabase row read or written,
+no migration run, no deploy, no shadow mode, and no other worktree touched.
