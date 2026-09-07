@@ -108,3 +108,9 @@ export type {
   RenderTerm,
   RenderValue,
 } from "./render-model";
+
+export {
+  APPROVED_FIRST_GROUP_PARTITION,
+  APPROVED_ROUTE_IDS,
+  buildApprovedCuicuilcoBlueprint,
+} from "./blueprints/cuicuilco-approved";
