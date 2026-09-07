@@ -127,6 +127,13 @@ npm run test:migration-chain # migration numbering contract: no duplicate number
 npm run test:isolation    # the legacy isolation gate alone; Suite A executes it as A1.5
 npm run test:rls-coverage # live RLS coverage + 0014 privilege model (service_role / anon / authenticated)
 npm run test:pivot        # the pivot allowlist gate alone; Suite C executes it as C3.1
+npm run test:canonical-presentation # Unit 6A: opaque-handle registry, versioned presentation
+                                    #   document, pure resolver, approved blueprint. Synthetic,
+                                    #   offline, in `npm test`.
+npm run test:canonical-presentation-parity <clean.xlsx> <curated.xlsx>
+                                    # the approved blueprint against the REAL study. Outside
+                                    #   `npm test` (machine-specific inputs); reports SKIPPED
+                                    #   without the workbooks, never a pass.
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
@@ -545,6 +552,61 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   model. The frontend must never become the owner of a business calculation —
   the standing rule that composite metrics are canonical functions defined once
   applies to the future dashboard exactly as it applies today.
+- ⓘ **THE CANONICAL PRESENTATION LAYER EXISTS: `src/lib/presentation/`.** Unit 6A
+  built the bridge a future customizable dashboard binds to — a
+  server-authoritative REGISTRY of opaque handles derived from a
+  `CanonicalStudyResults`, a versioned presentation DOCUMENT, and a pure RESOLVER
+  producing a serializable render model of already-final values. Its rules are in
+  `docs/CANONICAL_PRESENTATION_MODEL.md`; read it before touching that folder.
+  **Nothing in it calculates.** It imports no module from `src/lib/calc/`, holds
+  no formula, no denominator and no threshold, and every number it emits was
+  computed, rounded once and formatted by the canonical layer.
+  `npm run test:canonical-presentation` (**124 checks**, in `npm test`) enforces
+  that, plus the boundary and the refusals.
+  ⓘ **The brief's `StudyResultsDocument` DOES NOT EXIST.** The canonical document
+  type is `CanonicalStudyResults` (`src/lib/results/contract.ts:691`). Use the
+  real name.
+- ⓘ **A HANDLE IS NOT A KEY, and it may never become one.** Handles are built
+  only from the closed vocabulary, from a label the client is already shown, or
+  from an ordinal position — never from an item, attribute, instrument, metric or
+  band-scheme key, and never from a table name. The grammar forbids the
+  underscore precisely because every canonical key is `snake_case`. The registry's
+  `addresses` map is **server-only**: `projectPresentationCatalog` drops it and no
+  render model carries it. Do not widen the catalogue to include it.
+- ⓘ **Presentation documents are `schemaVersion: 4` and carry
+  `documentKind: "canonical_presentation"`.** Versions **1-3 belong to the legacy
+  experience definition**, and **two draft rows exist on the hosted project at a
+  version nobody recorded** — the column's CHECK is only `between 1 and 1000`, so
+  the database will not say which. Unit 6A refuses 1-3 BY NAME and migrates
+  nothing in either direction. Never reinterpret a stored draft as a document of
+  the other family, and never guess its version.
+- ⓘ **The system default is `show_all`.** The canonical layer suppresses nothing;
+  this layer owns only the DISPLAY decision, and the two suppressing modes require
+  `authoredBy` and `rationale` so a hide-below rule cannot be defaulted, inherited
+  or stamped. The legacy `adaptLegacyStudy` stamped `hide_below 5` on every
+  definition it produced; that behaviour is deliberately not carried across. A
+  block-level policy is not a software rule.
+- ⓘ **A filter moves a block only when a connection names it.** Sharing a
+  dimension is never a connection — the approved dashboard's "Razones declaradas
+  de riesgo" shares every dimension with its risk panel and is deliberately not
+  moved by it. `unsupported_filter_dimension` and `forbidden_filter_cross` are
+  SEPARATE codes and must stay separate: one is a capability gap, the other is an
+  authority refusing publication.
+- ⓘ **Esfera × CRI: the approved dashboard's risk panel offers it and the
+  canonical contract forbids it.** The blueprint corrects the deviation BY
+  CONSTRUCTION — its risk panel is built from the dimensions the renewal result
+  declares it supports, a list the registry has already pruned. Do not replace
+  that derivation with a hand-written exclusion list.
+- ⓘ **Four source groups, five visible routes, and they are different layers.**
+  The workbook's four merged bands (29/6/10/10) are EVIDENCE and live in the
+  contract; the approved dashboard's split of the first category into «Operación»
+  and «Interacción» is a DECISION and lives in a presentation document. A route
+  may not claim a touchpoint the source did not place in its group, and no
+  touchpoint may be shown twice.
+- ⓘ **The curated journey pain cloud stays `configuration_required`.** The
+  approved dashboard publishes 79 curated phrases; the contract classifies them
+  as editorial review. The blueprint declares the slot and leaves it EMPTY. Never
+  copy those phrases into the product and never invent a phrase-splitting rule.
 - `readXlsx()`/`parseXlsx()` are the LEGACY reader and their behaviour is
   frozen — every existing study was imported through them. The canonical
   multi-sheet reader is `readXlsxWorkbook()` in the same module; both must stay

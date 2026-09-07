@@ -1698,3 +1698,112 @@ forbids. All four gates were extended to pin each one.
 enabled anywhere, no preview surface exists, no read path was switched, no
 dashboard UI was built, and the comparison has never run inside a request on a
 hosted deployment — only through the two internal operators.
+
+---
+
+### Unit 6A — the canonical presentation registry and the approved blueprint (source only, 2026-09-06)
+
+**Branch `codex/canonical-experience-integration`, worktree
+`C:\dev\becommunity-software\becommunity-software-canonical-experience`, branched
+from the canonical tip `ad51496`.** The canonical worktree and
+`codex/canonical-study-model` were not touched. `main` is unchanged.
+
+#### What it is
+
+The stable bridge between the canonical results engine and the future
+customizable dashboard/editor. Three pieces, all pure and offline:
+
+1. **`CanonicalPresentationRegistry`** — derived deterministically from a
+   `CanonicalStudyResults`. It publishes **246 entries** for the synthetic
+   study-shaped fixture and **279** for the real Cuicuilco document: opaque
+   handles for final values, distributions, series, population and base
+   information, filter dimensions, journey groups and touchpoints, qualitative
+   aggregates and editorial slots, each with its semantic, display formats,
+   compatible chart variants, availability, response context, provenance category
+   and the filters it supports or refuses.
+2. **A versioned presentation document** — pages, blocks, order, per-breakpoint
+   grid placement, responsive behaviour, authored copy, bindings, chart variants,
+   filter panels, explicit connections, journey routes, editorial slots, sample
+   policy, disclosure level, visibility, duplication and publication metadata.
+3. **A pure resolver** — *(document + registry + results) → render model*, which
+   reads and never computes.
+
+Full contract: **`docs/CANONICAL_PRESENTATION_MODEL.md`**. The selective manifest
+for the old experience branch: **`docs/CANONICAL_EXPERIENCE_INTEGRATION_PLAN.md`**.
+
+#### The decisions worth carrying forward
+
+- **`StudyResultsDocument` does not exist.** The brief's name has zero
+  occurrences in the repository; the canonical type is `CanonicalStudyResults`.
+- **`schemaVersion` is the integer 4**, because the database column is
+  `integer` bounded `1..1000` and the write functions require the document's own
+  field to match. **1-3 belong to the legacy experience definition**, and the two
+  hosted draft rows are at a version nobody recorded. Unit 6A refuses 1-3 by name
+  and migrates nothing.
+- **A handle carries no address.** The grammar forbids the underscore, which is
+  the shape of every canonical key. The registry's address map is server-only.
+- **`show_all` is the system default**, and the suppressing modes require a named
+  author and a stated reason.
+- **Esfera × CRI**: the approved dashboard offers the cross, the contract forbids
+  it, and the blueprint corrects the deviation by construction.
+- **Four source groups, five visible routes** — evidence and decision, in
+  different layers.
+- **The curated journey pain cloud stays `configuration_required`.** The approved
+  dashboard publishes 79 phrases; none is copied.
+
+#### The gates
+
+| gate | assertions | in `npm test`? |
+|---|---:|---|
+| `npm run test:canonical-presentation` | **124** | yes |
+| `npm run test:canonical-presentation-parity` | **43** | no — machine-specific workbooks, reports SKIPPED without them |
+
+The parity gate reproduces the approved figures through the blueprint without
+recalculating one: `Capitanes de Esfera` (position 24 of the first category) once
+and only once at **CSAT 74.1 / TDP 3.7 / n = 27**; `Salida` at **TDP 133.3**,
+over 100 and unclamped, the only such touchpoint; recommendation **30.8 / 46.4 /
+−9.1**; renewal index **33**; population **60**; 55 touchpoints repartitioned
+19 + 10 + 6 + 10 + 10 across the five approved routes with no repeat.
+
+#### Discrimination — eleven defects, proved not asserted
+
+Each invariant was broken on purpose, the gate had to fail **on its own
+assertion**, every file was restored and verified byte-identical by SHA-256, and
+the gate had to come back green. All eleven discriminated; a 13-file SHA-256
+census before and after the suite reported every file byte-identical.
+
+The eleven: TDP clamped to 100 · the registry no longer pruning a forbidden
+dimension · the resolver no longer refusing a forbidden cross · filters
+propagating implicitly · the default policy suppressing small samples · a legacy
+blob stamped with version 4 being accepted · a legacy v1-v3 document silently
+reinterpreted · a canonical table name leaking into a client-facing label · a
+route claiming a touchpoint outside its source group · the render model
+re-formatting a value instead of copying it · the catalogue carrying the
+server-only address map.
+
+Two of those found real defects in this unit's own work rather than merely
+confirming a guess. The label leak was genuine: the registry was using
+`ConfigurationRequirement.key` as a client-facing label, and
+`journey_stage_evidence` contains the canonical table name `journey_stage`. And
+the default-policy defect exposed that the gate CRASHED on a null value instead
+of reporting, so later sections never ran; the gate is now defensive throughout,
+because a section that never ran cannot catch the regression it was written for.
+
+#### What Unit 6A did NOT do
+
+No route, no React, no editor, no Studio UI. No read path switched, no shadow
+mode enabled, no migration added or edited, no dependency added, no lockfile
+change. No Supabase or hosted operation of any kind; no credential read, rotated
+or altered. The legacy dashboard is untouched and still broken in the three ways
+`docs/LEGACY_CANONICAL_COMPATIBILITY.md` §7 records. No merge or cherry-pick from
+`claude/experience-publication-versioning`.
+
+#### Unit 6B
+
+**Selective Studio composer integration against this binding layer — not a
+wholesale merge of the old branch.** The editor state machine, block catalogue,
+authoring panels, draft persistence, the immutable publication lifecycle against
+the already-applied `0023`-`0025` tables, and the client renderer that RECEIVES a
+render model. Its one blocking question: **the two hosted draft rows are at an
+unrecorded `schema_version`** and 6B must read it back and decide with the owner
+whether they are migrated, re-authored or abandoned. It must not guess.

@@ -816,3 +816,36 @@ document against the PROJECTOR-order document with every array sorted by its own
 serialisation, requiring that no value, count or base differs. The gate prints
 the paths where the two orders diverge — `results.population.instruments`, and
 nothing else.
+
+---
+
+## 13. The presentation layer that binds to this one
+
+`src/lib/presentation/` (Unit 6A) is the bridge between this contract and a
+future customizable dashboard. Its contract is
+**`docs/CANONICAL_PRESENTATION_MODEL.md`**; read that before touching the folder.
+
+Three things about it matter here, because they are promises made ABOUT this
+document:
+
+- **It reads and never computes.** Every number it emits is the one this layer
+  already produced, rounded exactly once at its declared precision and formatted
+  by `formatNumber` on the server. `src/lib/presentation/` imports no module from
+  `src/lib/calc/`, and `npm run test:canonical-presentation` fails if one appears.
+- **It names things by OPAQUE HANDLE, never by canonical key.** A handle is built
+  from the closed presentation vocabulary, from a label a client is already shown,
+  or from an ordinal position — never from an item, attribute, instrument, metric
+  or band-scheme key. The registry keeps a server-only address map that says WHERE
+  a value already sits; it is dropped before anything reaches a client, and
+  `ResultInternalProvenance` and `ResultBand.schemeKey` are dropped with it.
+  `provenance.explanation` remains the only prose a client surface may render.
+- **§5's no-suppression rule is preserved and then made explicit.** This layer
+  applies none; the presentation layer's system default is `show_all`, and its two
+  suppressing modes require a named author and a stated reason. "The software hid
+  it" and "a person decided to hide it" stay different facts.
+
+The four-versus-five journey question §9 raises is settled there too, in the only
+place it can be: the four merged bands are evidence and stay in this contract;
+the approved dashboard's five visible routes are a presentation decision and live
+in a presentation document, which may repartition a group's touchpoints but may
+never invent membership.
