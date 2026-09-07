@@ -20,7 +20,56 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import type { CanonicalPresentationRegistry, RegistryEntry } from "./registry";
+import type { ResultUnit } from "../results/contract";
+import type {
+  ChartVariant,
+  PresentationAvailability,
+  PresentationSemantic,
+  ProvenanceCategory,
+} from "./capabilities";
+import type { PresentationHandle } from "./handles";
+
+/**
+ * The base a result rests on, at the coarseness a client may be shown.
+ *
+ * The three counts and nothing else: `AnswerAccounting`'s nine fields are an
+ * auditor's tool, and publishing them per block would invite a surface to
+ * recombine them — which is arithmetic, which is forbidden here.
+ */
+export type ResponseContext = {
+  eligible: number;
+  responded: number;
+  valid: number;
+};
+
+/** One thing a presentation may name. Every field is client-safe. */
+export type RegistryEntry = {
+  handle: PresentationHandle;
+  semantic: PresentationSemantic;
+  /** Display text the client is already shown. Never a key. */
+  label: string;
+  /** The units this entry's values are already expressed in. */
+  displayFormats: readonly ResultUnit[];
+  /** The variants that may draw it. */
+  compatibleVariants: readonly ChartVariant[];
+  availability: PresentationAvailability;
+  /** Null for structural entries that rest on no single base. */
+  responseContext: ResponseContext | null;
+  provenance: ProvenanceCategory;
+  /** Filter dimensions this entry accepts, as handles. */
+  supportedFilters: readonly PresentationHandle[];
+  /** Filter dimensions an authority forbids crossing with it, as handles. */
+  forbiddenFilters: readonly PresentationHandle[];
+  /**
+   * For a journey group: the touchpoint handles the SOURCE placed in it, in the
+   * source's own order. Empty for everything else.
+   *
+   * This is the four-group evidence. The five VISIBLE routes the approved
+   * dashboard draws are presentation configuration and live in the document,
+   * never here — a route is a decision, a group is a fact.
+   */
+  members: readonly PresentationHandle[];
+};
 
 /** One catalogue row. Structurally an entry; nominally a promise about safety. */
 export type PresentationCatalogEntry = RegistryEntry;
@@ -31,18 +80,3 @@ export type PresentationCatalog = {
   contractVersion: string;
   entries: readonly PresentationCatalogEntry[];
 };
-
-/**
- * Project a registry into its client-reachable catalogue.
- *
- * The address map is dropped and nothing replaces it. `entries` is already
- * sorted by handle when the registry is built, so the catalogue is
- * deterministic without re-sorting.
- */
-export function projectPresentationCatalog(registry: CanonicalPresentationRegistry): PresentationCatalog {
-  return {
-    registryVersion: registry.registryVersion,
-    contractVersion: registry.contractVersion,
-    entries: registry.entries,
-  };
-}

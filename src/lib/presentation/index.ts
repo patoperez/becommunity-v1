@@ -1,19 +1,25 @@
 /**
- * THE CANONICAL PRESENTATION LAYER — the safe surface.
+ * THE CLIENT-SAFE PRESENTATION SURFACE - schemas, catalogue DTOs, render types.
  *
- * Everything exported here is pure, deterministic and free of any transport.
- * There is no Supabase client, no credential and no `server-only` marker in the
- * folder, for the same reason `src/lib/results/` has none: an offline gate must
- * be able to build a registry, resolve a blueprint and compare the result with
- * the approved dashboard without a database anywhere near it.
+ * WHAT THIS BARREL DELIBERATELY DOES NOT EXPORT.
  *
- * The boundary that matters is not a marker, it is a rule, and it is executed.
- * `npm run test:canonical-presentation` fails if a module here reaches a
- * database or a network, if it imports a calculator, if a canonical key reaches
- * a client-reachable structure, or if a value is computed rather than read.
+ * Unit 6A exported `buildCanonicalPresentationRegistry`, `CanonicalAddress`,
+ * `CanonicalPresentationRegistry` and `resolvePresentation` from here. Nothing
+ * imported them yet, so nothing was broken - but the machinery that binds a
+ * handle to a POSITION inside a results document was one `import` away from a
+ * `"use client"` file, and a boundary that depends on nobody noticing is not a
+ * boundary.
  *
- * A future editor imports the CATALOGUE and receives a RENDER MODEL. It never
- * imports the registry's address map, and it never imports `src/lib/calc/`.
+ * So the split is explicit. Everything reachable from here is a SHAPE: the
+ * closed vocabulary, opaque handle helpers, typed errors, the authorable
+ * document and its validator, deterministic serialization, the catalogue rows an
+ * editor may browse, and the public render-model types a renderer draws.
+ *
+ * The registry's address map, exact result binding, persistence encoding and
+ * resolution live in `./server`, behind `import "server-only"`. An offline gate
+ * may import the pure implementation modules directly - that is what gates are
+ * for - but production client code cannot reach them through this file, and an
+ * import-graph gate proves it.
  */
 
 export {
@@ -46,18 +52,16 @@ export type { PresentationFacet, PresentationHandle } from "./handles";
 export { PresentationError, compareIssues, failure, issue, success } from "./errors";
 export type { PresentationErrorCode, PresentationIssue, PresentationOutcome } from "./errors";
 
-export { buildCanonicalPresentationRegistry, registryEntry } from "./registry";
+/** Catalogue ROWS only. The registry that produces them is server-only. */
 export type {
-  CanonicalAddress,
-  CanonicalPresentationRegistry,
+  PresentationCatalog,
+  PresentationCatalogEntry,
   RegistryEntry,
   ResponseContext,
-} from "./registry";
-
-export { projectPresentationCatalog } from "./catalog";
-export type { PresentationCatalog, PresentationCatalogEntry } from "./catalog";
+} from "./catalog";
 
 export {
+  DEFAULT_DISPLAY_FORMAT,
   DEFAULT_SAMPLE_POLICY,
   GRID_COLUMNS,
   LEGACY_EXPERIENCE_SCHEMA_VERSIONS,
@@ -71,6 +75,7 @@ export type {
   AuthoredCopy,
   BlockPlacement,
   Breakpoint,
+  DisplayFormat,
   EditorialBlock,
   FilterPanelBlock,
   JourneyRoute,
@@ -78,8 +83,6 @@ export type {
   PresentationBlock,
   PresentationDocument,
   PresentationPage,
-  PresentationStoreMetadata,
-  PublicationMetadata,
   ResponsiveBehavior,
   ResultBlock,
   SampleDisplayPolicy,
@@ -87,9 +90,7 @@ export type {
 
 export { SERIALIZED_BYTE_LIMIT, serializeDeterministic, serializedBytes, withinSizeLimit } from "./serialize";
 
-export { resolvePresentation } from "./resolve";
-export type { ResolveInput } from "./resolve";
-
+/** Public render-model TYPES. The resolver that produces them is server-only. */
 export type {
   PresentationRenderModel,
   RenderAbsence,
@@ -105,13 +106,8 @@ export type {
   RenderPayload,
   RenderRoute,
   RenderRoutePoint,
+  RenderSampleDisplay,
   RenderSeriesPoint,
   RenderTerm,
   RenderValue,
 } from "./render-model";
-
-export {
-  APPROVED_FIRST_GROUP_PARTITION,
-  APPROVED_ROUTE_IDS,
-  buildApprovedCuicuilcoBlueprint,
-} from "./blueprints/cuicuilco-approved";

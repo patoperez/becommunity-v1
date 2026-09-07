@@ -36,8 +36,8 @@ import type {
   PresentationSemantic,
   ProvenanceCategory,
 } from "./capabilities";
-import type { AuthoredCopy, BlockPlacement, SampleDisplayPolicy } from "./document";
-import type { ResponseContext } from "./registry";
+import type { AuthoredCopy, BlockPlacement } from "./document";
+import type { ResponseContext } from "./catalog";
 
 /** A band, stripped of the scheme key that named it. */
 export type RenderBand = {
@@ -60,7 +60,16 @@ export type RenderAbsence =
   | { state: "unavailable"; reason: UnavailableReason; detail: string }
   | { state: "unresolved"; reason: UnresolvedReason; detail: string }
   | { state: "configuration_required"; suppliedBy: string; detail: string }
-  | { state: "withheld_by_policy"; threshold: number; authoredBy: string; rationale: string };
+  /**
+   * A person decided this is not published, and that is ALL a reader is told.
+   *
+   * Unit 6A carried the threshold, the author's name and the internal rationale
+   * here. Those are audit fields — who decided and why — and shipping them to a
+   * browser publishes the study's own deliberation beside the gap it made. If a
+   * reader should be told something, the policy carries a separately authored
+   * `publicNote` and it arrives on the block, not in here.
+   */
+  | { state: "withheld_by_policy" };
 
 /** One already-counted, already-shared category. */
 export type RenderCategory = {
@@ -175,6 +184,19 @@ export type RenderMethodology = {
   base: ResponseContext | null;
 };
 
+/**
+ * The resolved sample outcome — three states, and an approved sentence.
+ *
+ * The comparison that chose the state happened on the SERVER. What crosses the
+ * boundary is a decision already made and, where somebody authored one, the
+ * sentence they wrote for a reader. Never a threshold to compare against:
+ * comparing is calculating.
+ */
+export type RenderSampleDisplay =
+  | { state: "shown" }
+  | { state: "shown_with_note"; note: string }
+  | { state: "withheld_by_policy"; note: string | null };
+
 /** One resolved block. */
 export type RenderBlock = {
   id: string;
@@ -187,17 +209,16 @@ export type RenderBlock = {
   provenance: ProvenanceCategory | null;
   payload: RenderPayload;
   methodology: RenderMethodology;
-  /** The policy that applied to this block, after inheritance. */
-  samplePolicy: SampleDisplayPolicy;
   /**
-   * The caption an `annotate_below` policy asked for, already decided.
+   * WHAT HAPPENED TO THIS BLOCK'S SAMPLE, and nothing about who decided it.
    *
-   * Null unless a policy authored that mode AND this block's base is under its
-   * threshold. The comparison is made on the server so the browser receives a
-   * finished sentence rather than a threshold to compare against — comparing
-   * would be a calculation, and this layer does not send the browser those.
+   * Unit 6A published the whole authored `SampleDisplayPolicy` on every block —
+   * threshold, author, rationale — which is exactly the internal material a
+   * client renderer must never receive. A Studio surface may eventually be given
+   * an authoring DTO that carries it; the public model gets the OUTCOME.
    */
-  sampleNote: string | null;
+  sampleDisplay: RenderSampleDisplay;
+
   /** Panels that move this block. Empty means nothing moves it. */
   connectedFilterPanelIds: string[];
 };
