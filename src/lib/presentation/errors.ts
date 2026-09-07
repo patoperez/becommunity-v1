@@ -90,6 +90,8 @@ export type PresentationErrorCode =
   | "persistence_too_large"
   /** A stored definition does not hash to the digest recorded beside it. */
   | "persistence_hash_mismatch"
+  /** A document with no registry binding was offered for storage. */
+  | "persistence_unbound_document"
 
   /* -------- authored policy -------- */
   /** A suppressing sample policy was written without the authorship it requires. */

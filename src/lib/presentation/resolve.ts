@@ -156,10 +156,14 @@ function contextOf(base: { eligible: number; responded: number; valid: number })
 /** Split a metric into "the number" and "why there isn't one". Exactly one is non-null. */
 function readMetric(result: MetricResult): { value: RenderValue | null; absence: RenderAbsence | null } {
   if (result.status === "available") return { value: valueOf(result.value), absence: null };
+  // The CLOSED REASON crosses; the contract's `detail` does not. That prose is
+  // written for a reviewer auditing a document — it names authorities, bases and
+  // the study's own open questions — and a client surface has the block's
+  // authored copy for saying what a gap means.
   if (result.status === "unavailable") {
-    return { value: null, absence: { state: "unavailable", reason: result.reason, detail: result.detail } };
+    return { value: null, absence: { state: "unavailable", reason: result.reason } };
   }
-  return { value: null, absence: { state: "unresolved", reason: result.reason, detail: result.detail } };
+  return { value: null, absence: { state: "unresolved", reason: result.reason } };
 }
 
 /**
@@ -338,11 +342,7 @@ function payloadFor(
         const indexRead = readMetric(results.renewal.index);
         const reason: RenderAbsence =
           indexRead.absence ??
-          ({
-            state: "unavailable",
-            reason: "not_collected",
-            detail: "La distribución no se reporta para esta selección.",
-          } as RenderAbsence);
+          ({ state: "unavailable", reason: "not_collected" } as RenderAbsence);
         return { shape: "categories", categories: [], absence: reason };
       }
       if (policyWithholds(policy, contextOf(results.renewal.base))) {
@@ -431,25 +431,31 @@ function payloadFor(
         // The same three numbers a caller could bind one at a time, so the same
         // policy applies: otherwise an authored `hide_below` would depend on
         // which handle the author happened to choose.
-        const satisfaction = applySamplePolicy(
-          policy,
-          contextOf(touchpoint.satisfaction.base),
-          readMetric(touchpoint.satisfaction).value,
-          null,
-        );
-        const tdp = applySamplePolicy(policy, contextOf(touchpoint.tdp.base), readMetric(touchpoint.tdp).value, null);
-        const share = applySamplePolicy(
-          policy,
-          contextOf(touchpoint.unawareShareOfResponses.base),
-          readMetric(touchpoint.unawareShareOfResponses).value,
-          null,
-        );
+        // ALL THREE STAND OR FALL TOGETHER. They rest on DIFFERENT bases — CSAT
+        // and TDP on the valid base, the auxiliary share on every classified
+        // response — so a threshold between the two withholds the ratio and
+        // publishes the share, and the share times its own base gives back the
+        // unawareness count the withheld ratio was made of. Withholding one of a
+        // touchpoint's three numbers withholds all three.
+        const withheld =
+          policyWithholds(policy, contextOf(touchpoint.satisfaction.base)) ||
+          policyWithholds(policy, contextOf(touchpoint.tdp.base)) ||
+          policyWithholds(policy, contextOf(touchpoint.unawareShareOfResponses.base));
+        if (withheld) {
+          return {
+            shape: "touchpoint",
+            label: touchpoint.label,
+            satisfaction: null,
+            processUnawareness: null,
+            unawarenessShare: null,
+          };
+        }
         return {
           shape: "touchpoint",
           label: touchpoint.label,
-          satisfaction: spell(satisfaction.value),
-          processUnawareness: spell(tdp.value),
-          unawarenessShare: spell(share.value),
+          satisfaction: spell(readMetric(touchpoint.satisfaction).value),
+          processUnawareness: spell(readMetric(touchpoint.tdp).value),
+          unawarenessShare: spell(readMetric(touchpoint.unawareShareOfResponses).value),
         };
       }
       const metric =
@@ -517,11 +523,9 @@ function payloadFor(
       return {
         shape: "editorial",
         body: null,
-        absence: {
-          state: "configuration_required",
-          suppliedBy: requirement.suppliedBy,
-          detail: requirement.detail,
-        },
+        // Likewise: that a human supplies this is the fact a surface needs. WHO,
+        // in the contract's own paragraph-long wording, is internal.
+        absence: { state: "configuration_required" },
       };
     }
     default:
@@ -730,7 +734,7 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
         results,
         errors,
       });
-      if (rendered) renderedBlocks.push(rendered);
+      if (rendered) renderedBlocks.push(reconcileSampleDisplay(rendered, policy));
     }
 
     pages.push({ id: page.id, title: page.title, order: page.order, blocks: renderedBlocks });
@@ -799,6 +803,38 @@ function checkConnections(context: BlockContext, entry: RegistryEntry | null): v
   }
 }
 
+/** True when anything inside a finished payload was withheld by policy. */
+function payloadWithheld(payload: RenderPayload): boolean {
+  let found = false;
+  const walk = (node: unknown): void => {
+    if (found || node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if ((node as { state?: unknown }).state === "withheld_by_policy") {
+      found = true;
+      return;
+    }
+    for (const value of Object.values(node)) walk(value);
+  };
+  walk(payload);
+  return found;
+}
+
+/** Reconcile the block header with what its payload actually contains. */
+function reconcileSampleDisplay(block: RenderBlock, policy: SampleDisplayPolicy): RenderBlock {
+  if (block.sampleDisplay.state === "withheld_by_policy") return block;
+  if (!payloadWithheld(block.payload)) return block;
+  return {
+    ...block,
+    sampleDisplay: {
+      state: "withheld_by_policy",
+      note: policy.mode === "hide_below" ? policy.publicNote : null,
+    },
+  };
+}
+
 function resolveBlock(context: BlockContext): RenderBlock | null {
   const { block, path, policy, level, byHandle, registry, results, errors } = context;
 
@@ -826,6 +862,10 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
     copy: block.copy,
     placement: block.placement,
     visible: block.visible,
+    // Provisional: recomputed from the finished payload below, because a block
+    // whose base is null can still contain per-period values the policy
+    // withheld, and a header saying "shown" over a withheld figure is a lie the
+    // renderer would faithfully draw.
     sampleDisplay: sampleDisplayFor(policy, boundEntry?.responseContext ?? null),
     connectedFilterPanelIds: block.connectedFilterPanelIds.slice(),
   };

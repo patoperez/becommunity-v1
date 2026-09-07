@@ -1191,6 +1191,44 @@ if (suppressingValidated.ok) {
       terms?.payload.shape === "terms" && terms.payload.terms.length === 0,
       "y los términos curados, cuyos conteos son celdas pequeñas",
     );
+    // A TOUCHPOINT'S THREE NUMBERS STAND OR FALL TOGETHER. CSAT and TDP rest on
+    // the valid base; the auxiliary share rests on every classified response. A
+    // threshold between the two would withhold the ratio and publish the share,
+    // and the share over its own base gives back the unawareness count the
+    // ratio was made of.
+    const structuralDoc = structuredClone(suppressingValidated.value);
+    structuralDoc.pages[0].blocks.push({
+      id: "prueba-punto",
+      kind: "result",
+      binding: `journey-touchpoint:g1-t${OVER_HUNDRED_POSITION}`,
+      chartVariant: "touchpoint_matrix",
+      displayFormat: { kind: "canonical" },
+      copy: { title: null, description: null, annotation: null },
+      placement: { order: 980, span: { desktop: 6, tablet: 6, mobile: 12 }, responsive: "reflow" },
+      visible: true,
+      connectedFilterPanelIds: [],
+      samplePolicy: null,
+      methodologyDisclosure: null,
+    });
+    const structuralValidated = validatePresentationDocument(JSON.parse(JSON.stringify(structuralDoc)));
+    check(structuralValidated.ok, "un bloque enlazado al punto de contacto entero valida");
+    if (structuralValidated.ok) {
+      const structuralModel = resolvePresentation({ document: structuralValidated.value, registry, results });
+      check(structuralModel.ok, "y resuelve bajo la política de ocultamiento");
+      if (structuralModel.ok) {
+        const point = structuralModel.value.pages
+          .flatMap((page) => page.blocks)
+          .find((block) => block.id === "prueba-punto");
+        check(
+          point?.payload.shape === "touchpoint" &&
+            point.payload.satisfaction === null &&
+            point.payload.processUnawareness === null &&
+            point.payload.unawarenessShare === null,
+          "las tres cifras del punto se retienen juntas, no dos de tres",
+        );
+      }
+    }
+
     const routesUnderPolicy = byId.get("recorrido-rutas");
     const anyPublished =
       routesUnderPolicy?.payload.shape === "routes" &&
@@ -1447,8 +1485,17 @@ check(document.binding === null, "y el plano aprobado viaja SIN enlazar: es una 
 
 console.log("\n[24] La persistencia estampa el alcance, y se niega a leer el de otro");
 const SCOPE = { tenantId: IDENTITY.tenantId, studyId: IDENTITY.studyId };
-const encoded = encodePresentationForStorage(document, SCOPE, { subtitle: null });
-check(encoded.ok, "un documento válido se codifica para almacenamiento");
+refuses(
+  "guardar un documento SIN enlazar",
+  encodePresentationForStorage(document, SCOPE, { subtitle: null }),
+  "persistence_unbound_document",
+);
+// Binding is the act that turns the template into a document about this study,
+// and it is what the stale-binding refusal later tests. A row stored unbound
+// would be permanently exempt from it.
+const storable = bindPresentationDocument(document, registry);
+const encoded = encodePresentationForStorage(storable, SCOPE, { subtitle: null });
+check(encoded.ok, "un documento enlazado sí se codifica para almacenamiento");
 if (encoded.ok) {
   eq("la versión de columna es la del documento", encoded.value.schemaVersion, PRESENTATION_DOCUMENT_SCHEMA_VERSION);
   eq("el alcance estampado nombra al estudio", encoded.value.definition.metadata.studyId, SCOPE.studyId);
@@ -1467,8 +1514,8 @@ if (encoded.ok) {
       "y vuelve SIN la metadata de persistencia: se estampa al escribir y se retira al leer",
     );
     check(
-      serializeDeterministic(decoded.value) === authorableText,
-      "el viaje de ida y vuelta es byte a byte el documento original",
+      serializeDeterministic(decoded.value) === serializeDeterministic(storable),
+      "el viaje de ida y vuelta es byte a byte el documento enlazado",
     );
   }
 
@@ -1488,15 +1535,15 @@ if (encoded.ok) {
   );
   refuses(
     "un subtítulo con caracteres de control",
-    encodePresentationForStorage(document, SCOPE, { subtitle: "malo subtitulo" }),
+    encodePresentationForStorage(storable, SCOPE, { subtitle: "malo\u0000subtitulo" }),
     "persistence_scope_invalid",
   );
   refuses(
     "un subtítulo más largo que su límite",
-    encodePresentationForStorage(document, SCOPE, { subtitle: "x".repeat(201) }),
+    encodePresentationForStorage(storable, SCOPE, { subtitle: "x".repeat(201) }),
     "persistence_scope_invalid",
   );
-  const huge = structuredClone(document);
+  const huge = structuredClone(storable);
   huge.pages[0].blocks.push(
     ...Array.from({ length: 150 }, (_, index) => ({
       ...structuredClone(document.pages[0].blocks.find((block) => block.id === "cierre")),
@@ -1512,6 +1559,15 @@ if (encoded.ok) {
 
   const foreign = { tenantId: IDENTITY.tenantId, studyId: "00000000-0000-4000-8000-00000000ffff" };
   refuses("leer una fila de otro estudio", decodePresentationFromStorage(encoded.value, foreign), "persistence_scope_mismatch");
+  // The TENANT half, separately: same study id, different tenant. Testing only
+  // the study would leave the cross-tenant refusal unproven, and tenant
+  // isolation is the one boundary this project treats as sacred.
+  const foreignTenant = { tenantId: "00000000-0000-4000-8000-00000000eeee", studyId: IDENTITY.studyId };
+  refuses(
+    "leer una fila de otro inquilino",
+    decodePresentationFromStorage(encoded.value, foreignTenant),
+    "persistence_scope_mismatch",
+  );
   refuses(
     "una fila cuya columna de versión discrepa del JSON",
     decodePresentationFromStorage({ ...encoded.value, schemaVersion: 3 }, SCOPE),
@@ -1519,7 +1575,7 @@ if (encoded.ok) {
   );
   refuses(
     "un alcance que no son dos UUID",
-    encodePresentationForStorage(document, { tenantId: "no-es-uuid", studyId: SCOPE.studyId }),
+    encodePresentationForStorage(storable, { tenantId: "no-es-uuid", studyId: SCOPE.studyId }),
     "persistence_scope_invalid",
   );
 }
@@ -1596,7 +1652,16 @@ for (const forbidden of [
 ]) {
   check(!new RegExp(`\\b${forbidden}\\b`).test(stripComments(safeBarrel)), `el barril seguro no exporta ${forbidden}`);
 }
-check(!/from "\.\/(?:registry|resolve|persistence|blueprints)/.test(stripComments(safeBarrel)), "y no importa ninguno de esos módulos");
+// A NAME GREP IS NOT ENOUGH. `export * from "./resolve"` re-exports every
+// server primitive without naming one, and `from "./server"` would pull the
+// whole server barrel. Both are refused by module PATH, which no aliasing can
+// disguise, and `export *` is refused outright so the name list above can never
+// be quietly bypassed.
+check(
+  !/from "\.\/(?:registry|resolve|persistence|server|blueprints)/.test(stripComments(safeBarrel)),
+  "y no importa ni reexporta ninguno de los módulos de servidor, por ruta",
+);
+check(!/export\s*\*/.test(stripComments(safeBarrel)), "el barril seguro no usa `export *`, que reexportaría sin nombrar");
 const serverBarrel = readFileSync(join("src", "lib", "presentation", "server.ts"), "utf8");
 check(/^import "server-only";$/m.test(serverBarrel), "el barril de servidor abre con `import \"server-only\"`");
 for (const required of ["buildCanonicalPresentationRegistry", "resolvePresentation", "encodePresentationForStorage"]) {
@@ -1724,6 +1789,10 @@ eq("el plano pide un decimal fijo para el índice de renovación", criBlock.disp
 eq("exactamente uno", criBlock.displayFormat.decimals, 1);
 const criRendered = blocks.find((block) => block.id === "riesgo-indice");
 const criCanonical = results.renewal.index;
+check(
+  criCanonical.status === "available" && criRendered?.payload.shape === "value" && criRendered.payload.value !== null,
+  "el índice de renovación llega con cifra, así que lo que sigue no se salta en silencio",
+);
 if (criCanonical.status === "available" && criRendered.payload.shape === "value" && criRendered.payload.value) {
   eq("el valor numérico no cambia", criRendered.payload.value.value, criCanonical.value.value);
   check(
@@ -1760,6 +1829,10 @@ if (paddingValidated.ok) {
   const canonicalRetention = results.retention.periods[0].retention;
   const paddedModel = resolvePresentation({ document: paddingValidated.value, registry, results });
   check(paddedModel.ok, "y resuelve");
+  // ASSERTED, not assumed. Both of these guarded the three assertions below, so
+  // a fixture whose first retention period stopped being available would have
+  // skipped the padding proof in silence and the gate would still have passed.
+  check(canonicalRetention.status === "available", "el primer periodo de retención tiene una cifra que rellenar");
   if (paddedModel.ok && canonicalRetention.status === "available") {
     const padded = paddedModel.value.pages.flatMap((page) => page.blocks).find((b) => b.id === "prueba-relleno");
     check(!canonicalRetention.value.formatted.includes("."), `el contrato la escribe entera («${canonicalRetention.value.formatted}»)`);
@@ -1791,17 +1864,6 @@ refuses(
   "pedir más precisión de la que la medición declara",
   resolvePresentation({ document: overPrecise, registry, results }),
   "incompatible_display_format",
-);
-
-console.log("\n" + "=".repeat(74));
-if (failures > 0) {
-  console.error(`RESULTADO: ${failures} fallo(s). COMPUERTA BLOQUEADA.`);
-  process.exit(1);
-}
-console.log(
-  "RESULTADO: la capa de presentación enlaza por handles opacos, no calcula, no filtra sin que alguien " +
-    "lo escriba, no recorta una razón que pasa de 100, muestra las muestras pequeñas por omisión y " +
-    "rechaza en voz alta lo que no entiende. COMPUERTA APROBADA.",
 );
 
 console.log("\n[30] Ningún cliente, ruta, acción o middleware alcanza la mitad de servidor");
@@ -1922,3 +1984,15 @@ check(
   }`,
 );
 
+
+
+console.log("\n" + "=".repeat(74));
+if (failures > 0) {
+  console.error(`RESULTADO: ${failures} fallo(s). COMPUERTA BLOQUEADA.`);
+  process.exit(1);
+}
+console.log(
+  "RESULTADO: la capa de presentación enlaza por handles opacos, no calcula, no filtra sin que alguien " +
+    "lo escriba, no recorta una razón que pasa de 100, muestra las muestras pequeñas por omisión y " +
+    "rechaza en voz alta lo que no entiende. COMPUERTA APROBADA.",
+);

@@ -57,9 +57,9 @@ export type RenderValue = {
 
 /** Why there is no number, in the contract's own vocabulary. */
 export type RenderAbsence =
-  | { state: "unavailable"; reason: UnavailableReason; detail: string }
-  | { state: "unresolved"; reason: UnresolvedReason; detail: string }
-  | { state: "configuration_required"; suppliedBy: string; detail: string }
+  | { state: "unavailable"; reason: UnavailableReason }
+  | { state: "unresolved"; reason: UnresolvedReason }
+  | { state: "configuration_required" }
   /**
    * A person decided this is not published, and that is ALL a reader is told.
    *

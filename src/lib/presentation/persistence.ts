@@ -113,6 +113,21 @@ export function encodePresentationForStorage(
   const validated = validatePresentationDocument(JSON.parse(serializeDeterministic(document)));
   if (!validated.ok) return failure(validated.errors);
 
+  // A TEMPLATE may be unbound; a STORED document may not. Writing one is the act
+  // that makes it a document about a particular study, and an unbound row would
+  // switch the whole stale-binding refusal off — `document.binding !== null` is
+  // what the resolver tests, so a null here is a permanent exemption from it.
+  if (validated.value.binding === null) {
+    return failure([
+      issue(
+        "persistence_unbound_document",
+        "$.binding",
+        "un documento sin enlazar no se almacena: enlazarlo es lo que lo convierte en un documento " +
+          "de este estudio, y sin enlace la negativa por huella obsoleta quedaría desactivada para siempre.",
+      ),
+    ]);
+  }
+
   // `subtitle` is authored text and gets the boundary authored text gets. It used
   // to live in the document, where the schema bounded its length and refused
   // control characters; moving it here must not quietly drop either rule.

@@ -1926,10 +1926,10 @@ version **2**, so any conversion would need the legacy v2→v3 step first.
 
 | gate | assertions | in `npm test`? |
 |---|---:|---|
-| `npm run test:canonical-presentation` | **261** | yes |
+| `npm run test:canonical-presentation` | **269** | yes |
 | `npm run test:canonical-presentation-parity` | **51** | no — machine-specific workbooks |
 
-**Discrimination: 21/21.** Every defect caught by its own assertion, every file
+**Discrimination: 23/23.** Every defect caught by its own assertion, every file
 restored byte-identically, SHA-256 census clean before and after. The seven new
 cases: a study uuid smuggled through an authored field, persistence decoding
 accepting another study's row, the render model republishing the authored policy,
@@ -1967,3 +1967,19 @@ survived verification, and all eight were fixed:
 - the definition hash was computed on write and never verified on read;
 - `applyDisplayFormat` appended to whatever string it was given, including the
   em-dash the formatter returns for a null value.
+
+A third pass over the corrected diff confirmed ten more, of which the worst was
+structural: **section [30] — the entire module-boundary walk — ran AFTER the
+gate's own `process.exit(1)`**, so its failures printed and were never counted. A
+deliberately broken assertion in it exited 0. It now sits before the summary, and
+a broken assertion exits 1. Also fixed in that pass: a stored document could
+carry `binding: null` and switch the stale-binding refusal off permanently, so
+the store now refuses an unbound document; a touchpoint's TDP could be withheld
+while its auxiliary share — resting on a different base — was published, from
+which the withheld ratio is recoverable, so the three numbers now stand or fall
+together; the public render model carried the contract's internal `detail` and
+`suppliedBy` prose, which is written for a reviewer auditing a document, so
+absences now cross as closed codes only; a block header could say "shown" over a
+payload containing withheld figures; `[26]` could be evaded by `export *`; `[29]`
+hid its padding proof behind unasserted guards; and `[24]` never exercised a
+TENANT mismatch, only a study one.
