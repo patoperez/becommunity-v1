@@ -84,9 +84,38 @@ function clientHasContent(block: RenderBlock): boolean {
   }
 }
 
+/**
+ * Would a CLIENT see anything at all for this block?
+ *
+ * `clientHasContent` asks about the payload. This asks the whole question,
+ * including the block-level sample outcome: a block whose sample was withheld
+ * by policy carries no content AND, unless somebody authored a public note, no
+ * sentence either — so on a client surface it is a titled card over nothing,
+ * which is the exact shape C11 removes.
+ */
+function clientSeesBlock(block: RenderBlock): boolean {
+  if (!block.visible) return false;
+  if (block.sampleDisplay.state === "withheld_by_policy") {
+    return visibleNote(block.sampleDisplay) !== null;
+  }
+  return clientHasContent(block);
+}
+
+/**
+ * And would a client see anything at all for this PAGE?
+ *
+ * A page heading over nothing is a heading over nothing whether the emptiness
+ * came from one block or from all of them. Without this, a page whose every
+ * block is withheld or configuration-required still printed its title and its
+ * spacing on a client surface — an absence with a name on it.
+ */
+function clientSeesPage(page: RenderPage): boolean {
+  return page.blocks.some(clientSeesBlock);
+}
+
 function BlockCard({ block, audience }: { block: RenderBlock; audience: PresentationAudience }) {
   if (!block.visible) return null;
-  if (audience === "client" && !clientHasContent(block)) return null;
+  if (audience === "client" && !clientSeesBlock(block)) return null;
 
   const Leaf = block.chartVariant ? RENDERERS[block.chartVariant] : undefined;
   const note = visibleNote(block.sampleDisplay);
@@ -153,7 +182,7 @@ export function PresentationPageView({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-12 lg:grid-cols-12">
       {blocks.map((block) => {
         if (!block.visible) return null;
-        if (audience === "client" && !clientHasContent(block)) return null;
+        if (audience === "client" && !clientSeesBlock(block)) return null;
         const desktop = DESKTOP_SPAN[block.placement.span.desktop] ?? DESKTOP_SPAN[12];
         const tablet = TABLET_SPAN[block.placement.span.tablet] ?? TABLET_SPAN[12];
         // Mobile is always the full width the contract fixes it at, which is
@@ -180,12 +209,16 @@ export function PresentationRenderer({
   pageId?: string;
 }) {
   const pages = [...model.pages].sort(byOrderThenId);
-  const shown = pageId === undefined ? pages : pages.filter((page) => page.id === pageId);
+  const selected = pageId === undefined ? pages : pages.filter((page) => page.id === pageId);
+  // A page a client would see nothing on is not drawn at all — not its section,
+  // not its heading, not its margin. Studio still draws every page, because a
+  // reviewer's whole job is to see the ones a client will not.
+  const shown = audience === "client" ? selected.filter(clientSeesPage) : selected;
   return (
     <div className="w-full min-w-0">
       {shown.map((page) => (
         <section key={page.id} className="mb-8 last:mb-0">
-          {pageId === undefined && pages.length > 1 ? (
+          {pageId === undefined && shown.length > 1 ? (
             <h2 className="mb-3 font-display text-xl font-semibold text-strong">{page.title}</h2>
           ) : null}
           <PresentationPageView page={page} audience={audience} />

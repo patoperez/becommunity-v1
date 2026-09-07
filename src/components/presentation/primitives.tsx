@@ -95,8 +95,27 @@ export function BandChip({ value }: { value: RenderValue }) {
  * at percent precision, so printing it verbatim is the only honest option;
  * `null` means an empty base and is never drawn as a zero.
  */
-export function Count({ of, className = "" }: { of: number; className?: string }) {
+/**
+ * `of` is NULLABLE, and that is the whole point of this signature.
+ *
+ * A first version took `number` and every nullable call site wrote `count ?? 0`.
+ * That prints the digit 0 for a category with NO BASE — and a measured zero and
+ * an absent measurement are different facts the contract deliberately keeps
+ * apart (`render-model.ts`: "Null when there was no base at all. Never a
+ * filled-in zero."). A reader shown "Promotores 0" over an empty base has been
+ * told a finding the study never made.
+ *
+ * The type is the fix. `?? 0` is no longer reachable through this component,
+ * because there is nothing to default.
+ */
+export function Count({ of, className = "" }: { of: number | null; className?: string }) {
+  if (of === null) return null;
   return <span className={`tabular ${className}`}>{of}</span>;
+}
+
+/** What a reader is told where a count has no base. A caveat, not a number. */
+export function NoBase({ className = "" }: { className?: string }) {
+  return <span className={`text-muted ${className}`}>sin base</span>;
 }
 
 export function Share({ of, className = "" }: { of: number | null; className?: string }) {

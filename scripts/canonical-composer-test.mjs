@@ -978,6 +978,133 @@ for (const { absence, clientSees } of ABSENCES) {
   check(!asClient.includes("Sólo interno"), `«${absence.state}» nunca lleva lenguaje de revisor al cliente`);
 }
 
+// AN ABSENT COUNT IS NOT A ZERO, AND MUST NEVER BE DRAWN AS ONE.
+//
+// `RenderCategory.count` is `number | null` and the contract is explicit: "Null
+// when there was no base at all. Never a filled-in zero." A measured zero — a
+// rung nobody chose over a real base — and an absent measurement are different
+// facts, and the canonical layer keeps them apart precisely so a reader is never
+// told the first when the study found the second.
+//
+// The first version of `Count` took `number`, so every nullable call site wrote
+// `count ?? 0` and four of them printed the digit 0 for a category with no base.
+// A client would have read "Promotores 0" as a finding. The signature is now
+// nullable, so the default has nothing to default TO.
+const noBase = {
+  ...model,
+  pages: [
+    {
+      ...model.pages[0],
+      blocks: [
+        {
+          ...model.pages[0].blocks.find((block) => block.payload.shape === "categories"),
+          copy: { title: "Sin base alguna", description: null, annotation: null },
+          payload: {
+            shape: "categories",
+            categories: [
+              { label: "Promotores", note: null, count: null, share: null, band: null },
+              { label: "Detractores", note: null, count: null, share: null, band: null },
+            ],
+            absence: null,
+          },
+        },
+      ],
+    },
+  ],
+};
+for (const audience of ["client", "internal"]) {
+  const text = textOf(renderToStaticMarkup(createElement(PresentationRenderer, { model: noBase, audience })));
+  check(
+    !/(?<![\d.,])0(?![\d.,%])/.test(text.replace("Sin base alguna", "")),
+    `en modo ${audience}, una categoría sin base NO se dibuja como un cero`,
+  );
+  check(text.includes("sin base"), `y en su lugar dice «sin base», que es un matiz honesto y no una cifra`);
+  check(text.includes("Promotores"), "la categoría sigue nombrada: lo ausente es el número, no el hecho de haber preguntado");
+}
+
+// A HEADING OVER NOTHING IS STILL A HEADING OVER NOTHING.
+//
+// The block-level rule was in place and the PAGE-level one was not: a page whose
+// every block is withheld or configuration-required still printed its title, its
+// section and its margin on a client surface. An absence with a name on it is
+// exactly the shape C11 removes, and the size of the absence does not change
+// that. Studio still draws every page — a reviewer's job is to see the ones a
+// client will not.
+const emptyForClient = {
+  ...model,
+  pages: [
+    {
+      id: "vacia",
+      title: "Una página que el cliente no debe ver",
+      order: 0,
+      blocks: model.pages[0].blocks
+        .filter((block) => block.payload.shape === "editorial" && block.payload.body === null)
+        .map((block) => ({ ...block, sampleDisplay: { state: "withheld_by_policy", note: null } })),
+    },
+    { ...model.pages[0], order: 1 },
+  ],
+};
+check(emptyForClient.pages[0].blocks.length > 0, "hay una página cuyo contenido el cliente no puede ver");
+const emptyClientText = textOf(
+  renderToStaticMarkup(createElement(PresentationRenderer, { model: emptyForClient, audience: "client" })),
+);
+const emptyInternalText = textOf(
+  renderToStaticMarkup(createElement(PresentationRenderer, { model: emptyForClient, audience: "internal" })),
+);
+check(
+  !emptyClientText.includes("Una página que el cliente no debe ver"),
+  "su título NO aparece en el modo cliente: ni la página, ni su encabezado, ni su margen",
+);
+check(
+  emptyInternalText.includes("Una página que el cliente no debe ver"),
+  "y Studio sí la dibuja, porque revisar es ver lo que el cliente no verá",
+);
+// A block withheld by policy with NO authored note is a titled card over nothing.
+const withheldTitled = {
+  ...model,
+  pages: [
+    {
+      ...model.pages[0],
+      blocks: [
+        {
+          ...model.pages[0].blocks[0],
+          copy: { ...model.pages[0].blocks[0].copy, title: "Un bloque retenido sin nota" },
+          sampleDisplay: { state: "withheld_by_policy", note: null },
+        },
+      ],
+    },
+  ],
+};
+check(
+  !textOf(renderToStaticMarkup(createElement(PresentationRenderer, { model: withheldTitled, audience: "client" }))).includes(
+    "Un bloque retenido sin nota",
+  ),
+  "un bloque retenido sin nota redactada no deja ni su título en el cliente",
+);
+// But a withheld block WITH an authored note keeps the note: that sentence is
+// the one thing a person wrote FOR the reader, and removing it would be the
+// opposite defect.
+const withheldNoted = {
+  ...withheldTitled,
+  pages: [
+    {
+      ...withheldTitled.pages[0],
+      blocks: [
+        {
+          ...withheldTitled.pages[0].blocks[0],
+          sampleDisplay: { state: "withheld_by_policy", note: "Base demasiado pequeña para publicarse." },
+        },
+      ],
+    },
+  ],
+};
+check(
+  textOf(renderToStaticMarkup(createElement(PresentationRenderer, { model: withheldNoted, audience: "client" }))).includes(
+    "Base demasiado pequeña para publicarse.",
+  ),
+  "pero la nota que alguien redactó para el lector sí sobrevive",
+);
+
 // A filter panel is internal-only in this unit and must not reach a client page.
 check(/todavía no filtran/i.test(internalHtml), "el preview interno dice en voz alta que los filtros aún no filtran");
 check(!/todavía no filtran/i.test(clientHtml), "y el cliente no ve un control muerto");

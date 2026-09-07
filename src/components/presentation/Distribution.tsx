@@ -29,7 +29,7 @@
 
 import type { RenderBlock, RenderCategory } from "@/lib/presentation";
 import { AbsenceNotice, type PresentationAudience } from "./absence";
-import { Count, MeasureList, MeasureRow, Share } from "./primitives";
+import { Count, MeasureList, MeasureRow, NoBase, Share } from "./primitives";
 import { bandPalette, categoryMark } from "./vocabulary";
 
 type LeafProps = { block: RenderBlock; audience: PresentationAudience };
@@ -146,7 +146,11 @@ export function StackedBar({ block, audience }: LeafProps) {
               <span className="min-w-0 [overflow-wrap:anywhere]">{category.label}</span>
             </dt>
             <dd className="mt-1 flex items-baseline gap-1.5">
-              <Count of={category.count ?? 0} className="font-display text-xl font-bold text-strong" />
+              {category.count === null ? (
+                <NoBase className="text-sm" />
+              ) : (
+                <Count of={category.count} className="font-display text-xl font-bold text-strong" />
+              )}
               <Share of={category.share} className="text-xs text-muted" />
             </dd>
             {category.note ? <dd className="mt-0.5 text-xs text-muted">{category.note}</dd> : null}
@@ -174,7 +178,7 @@ export function BarHorizontal({ block, audience, offset = 0 }: LeafProps & { off
           fraction={largest === 0 || row.count === null ? 0 : row.count / largest}
           mark={row.mark}
         >
-          <Count of={row.count ?? 0} />
+          {row.count === null ? <NoBase /> : <Count of={row.count} />}
           {row.share === null ? null : (
             <>
               {" · "}
@@ -209,7 +213,7 @@ export function BarVertical({ block, audience, offset = 0 }: LeafProps & { offse
           return (
             <li key={row.label} className="flex w-24 shrink-0 flex-col items-center gap-1.5">
               <span className="text-sm text-body">
-                <Count of={row.count ?? 0} />
+                {row.count === null ? <NoBase /> : <Count of={row.count} />}
               </span>
               <span className="flex h-32 w-full items-end rounded-t-md bg-surface-sunken" aria-hidden="true">
                 <i
@@ -323,7 +327,7 @@ export function TableBlock({ block, audience }: LeafProps) {
               <th scope="row" className="py-2 pr-4 text-left font-normal text-body [overflow-wrap:anywhere]">
                 {row.note ? `${row.label} · ${row.note}` : row.label}
               </th>
-              <td className="py-2 pr-4"><Count of={row.count ?? 0} /></td>
+              <td className="py-2 pr-4">{row.count === null ? <NoBase /> : <Count of={row.count} />}</td>
               <td className="py-2"><Share of={row.share} /></td>
             </tr>
           ))}
