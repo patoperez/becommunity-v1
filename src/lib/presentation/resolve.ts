@@ -267,18 +267,18 @@ function payloadFor(
         // A refusal forbids the distribution as much as the index. Publishing
         // five zeroes beside a non-empty base would state that nobody chose
         // anything, which is false.
-        const reason =
-          results.renewal.index.status === "unavailable"
-            ? ({
-                state: "unavailable",
-                reason: results.renewal.index.reason,
-                detail: results.renewal.index.detail,
-              } as RenderAbsence)
-            : ({
-                state: "unavailable",
-                reason: "not_collected",
-                detail: "La distribución no se reporta para esta selección.",
-              } as RenderAbsence);
+        // The index's OWN state, whichever of the three it is. Reporting an
+        // unresolved indicator as `unavailable` would turn "the authorities
+        // disagree" into "there was nothing to calculate", which is a different
+        // fact and the one the contract went to some trouble to keep apart.
+        const indexRead = readMetric(results.renewal.index);
+        const reason: RenderAbsence =
+          indexRead.absence ??
+          ({
+            state: "unavailable",
+            reason: "not_collected",
+            detail: "La distribución no se reporta para esta selección.",
+          } as RenderAbsence);
         return { shape: "categories", categories: [], absence: reason };
       }
       if (policyWithholds(policy, contextOf(results.renewal.base))) {

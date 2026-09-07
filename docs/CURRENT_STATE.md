@@ -1755,7 +1755,7 @@ for the old experience branch: **`docs/CANONICAL_EXPERIENCE_INTEGRATION_PLAN.md`
 
 | gate | assertions | in `npm test`? |
 |---|---:|---|
-| `npm run test:canonical-presentation` | **153** | yes |
+| `npm run test:canonical-presentation` | **155** | yes |
 | `npm run test:canonical-presentation-parity` | **43** | no — machine-specific workbooks, reports SKIPPED without them |
 
 The parity gate reproduces the approved figures through the blueprint without

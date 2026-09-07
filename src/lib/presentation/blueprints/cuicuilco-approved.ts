@@ -17,11 +17,13 @@
  * kind a future Studio composer will produce, written by hand instead of by an
  * editor.
  *
- * IT CARRIES NO NUMBER. Not the 30.8 recommendation score, not the CRI of 33,
- * not the 74.1% retention of the latest period, not the 133.3% unawareness of
- * `Salida`. Every one of those arrives at resolution time from the canonical
+ * IT CARRIES NO NUMBER. Not the recommendation score, not the renewal index, not
+ * the latest period's retention, not the one unawareness ratio that exceeds a
+ * hundred. Every one of those arrives at resolution time from the canonical
  * results document. Search this file for a digit and you will find grid track
- * counts and ordinal positions, which is all a layout is entitled to know.
+ * counts and ordinal positions, which is all a layout is entitled to know — and
+ * the approved figures themselves are named nowhere here, not even in a comment,
+ * so that the claim above survives a reader who greps for one.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHERE IT DEPARTS FROM THE ORACLE, AND WHY.
@@ -225,6 +227,19 @@ export function buildApprovedCuicuilcoBlueprint(
       throw new PresentationError("unknown_handle", `no hay entrada para «${handle}» al construir un panel.`);
     }
     const cohort = presentationHandle("dimension", "cohorte");
+    // A deliberate omission whose target does not exist is not an omission — it
+    // is a no-op that still reads like a decision. If this blueprint says it
+    // leaves Esfera out of the journey panel, the dimension has to be there to
+    // leave out; otherwise the line is a comment pretending to be code.
+    for (const omitted of omit) {
+      if (!byHandle.has(omitted)) {
+        throw new PresentationError(
+          "unknown_handle",
+          `el plano excluye «${omitted}» de un panel y el registro no lo tiene, así que la exclusión ` +
+            "no estaría excluyendo nada. Se rechaza en lugar de silenciarse.",
+        );
+      }
+    }
     const excluded = new Set<string>([cohort, ...omit]);
     return entry.supportedFilters.filter((dimension) => !excluded.has(dimension));
   };

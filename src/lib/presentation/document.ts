@@ -152,7 +152,6 @@ type BlockCommon = {
   id: string;
   copy: AuthoredCopy;
   placement: BlockPlacement;
-  visible: boolean;
   /**
    * The filter panels that MOVE this block.
    *
@@ -163,6 +162,17 @@ type BlockCommon = {
    * dimension, and the list is deliberately NOT moved by the panel.
    */
   connectedFilterPanelIds: string[];
+  /**
+   * Whether the block is drawn.
+   *
+   * A LAYOUT AFFORDANCE, not a suppression mechanism. A hidden block still
+   * resolves and its values still reach the render model, because "do not draw
+   * this here" and "this may not be published" are different requests and only
+   * one of them is about disclosure. Withholding is the sample policy's job, and
+   * it says so in its own vocabulary. Never use `visible: false` to keep a number
+   * from somebody.
+   */
+  visible: boolean;
   /** Null means "inherit the document's policy". */
   samplePolicy: SampleDisplayPolicy | null;
   /** Null means "inherit the document's level". */
@@ -592,7 +602,13 @@ function structuralIssues(document: PresentationDocument): PresentationIssue[] {
  * connection being something somebody wrote down on purpose.
  */
 export function duplicateBlock(block: PresentationBlock, newId: string): PresentationBlock {
-  return { ...block, id: newId, connectedFilterPanelIds: [] };
+  // A spread is SHALLOW, and every interesting field here is a nested object or
+  // an array: `placement.span`, a filter panel's `dimensions`, a routes block's
+  // `routes`. Sharing them would make a copy that edits its original — the
+  // classic duplication bug, and the one an editor hits first. Deep-copied so a
+  // duplicate is genuinely a separate block.
+  const copy = structuredClone(block);
+  return { ...copy, id: newId, connectedFilterPanelIds: [] };
 }
 
 /**
@@ -613,8 +629,10 @@ export function duplicatePage(
   return {
     ...page,
     id: newPageId,
+    // Deep-copied for the same reason `duplicateBlock` is: a shallow spread
+    // would hand the copy the original's own `span`, `dimensions` and `routes`.
     blocks: page.blocks.map((block, index) => ({
-      ...block,
+      ...structuredClone(block),
       id: remap.get(block.id) ?? mintBlockId(block.id, index),
       connectedFilterPanelIds: block.connectedFilterPanelIds
         .map((panelId) => remap.get(panelId))

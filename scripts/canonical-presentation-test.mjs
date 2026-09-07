@@ -1004,6 +1004,19 @@ check(
   !riskPanel?.dimensions.includes("dimension:esfera"),
   "el panel de riesgo del plano aprobado NO ofrece Esfera, corrigiendo la desviación del tablero de referencia",
 );
+// Two different reasons, and the gate keeps them apart: the risk panel omits
+// Esfera because an AUTHORITY forbids the cross, the journey panel because the
+// approved dashboard's own journey panel omits it. One is a prohibition, the
+// other a presentation choice.
+const journeyPanel = document.pages[0].blocks.find((block) => block.id === "panel-recorrido");
+check(
+  !journeyPanel?.dimensions.includes("dimension:esfera"),
+  "y el panel del recorrido tampoco la ofrece, por elección del tablero aprobado",
+);
+check(
+  registry.entries.some((entry) => entry.handle === "dimension:esfera"),
+  "y la dimensión existe de verdad, así que ambas omisiones omiten algo",
+);
 const withForbiddenCross = structuredClone(document);
 withForbiddenCross.pages[0].blocks.find((block) => block.id === "panel-riesgo").dimensions.push("dimension:esfera");
 refuses(
