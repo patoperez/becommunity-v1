@@ -2211,7 +2211,7 @@ this unit imposes on somebody else's code in passing. It is recorded in the gate
 
 | gate | assertions | in `npm test`? |
 |---|---:|---|
-| `npm run test:canonical-composer` | **266** (new) | yes |
+| `npm run test:canonical-composer` | **321** (new) | yes |
 | `npm run test:canonical-presentation` | **294** (was 286) | yes |
 | `npm run test:shadow-boundary` | passes, doors as a table | yes |
 | `npm run test:studio-completion` | passes, new route registered | yes |
@@ -2226,26 +2226,34 @@ recommendation figures are **30.8 / 46.4 / −9.1**; all **110** journey figures
 carry one decimal across 55 points and five approved routes from four source
 groups.
 
-**Discrimination: 15/15.** Four on the editor (a refusal that bumps the
-sequence; a duplicate that inherits connections; an unimplemented variant in the
-renderer table; a dropped history cap), five on the renderer (printing
-`value.value`; disabling the client branch of the absence notice; letting a
-contentless block reach a client; removing a declared variant's component;
+**Discrimination: 29 probes, 29 discriminate.** Four on the editor (a refusal
+that bumps the sequence; a duplicate that inherits connections; an
+unimplemented variant in the renderer table; a dropped history cap), five on
+the renderer (printing `value.value`; disabling the client branch of the
+absence notice; letting a contentless block reach a client; removing a
+declared variant's component;
 un-disabling the filter controls), and six on the route and doors (reading
 before authorizing; resolving before binding; importing the loader from the
 client surface; widening the payload; giving the action a write; adding a third
-unapproved page). Every one turns a gate red and exits 1; every file was
-restored byte-identically, SHA-256 compared before and after.
+unapproved page). Fourteen more came out of the adversarial review of the final
+diff and are listed with it below. Every one turns a gate red and exits 1; every
+file was restored byte-identically, SHA-256 compared before and after.
 
-Two of those probes are worth naming because they first proved nothing. The C11
-probe went green because every absent block in the fixture was already filtered
-out before the notice was reached — the assertions were passing structurally, so
-the notice is now driven directly in both modes for all four states. The
+Four probes first proved nothing and were rewritten until they did; three are
+worth naming. The C11 probe went green because every absent block in the fixture
+was already filtered out before the notice was reached — the assertions were
+passing structurally, so the notice is now driven directly in both modes for
+all four states. The
 ineligible-block probe went green because the assertion split the page on a
 title that appears twice and inspected the few characters between the two
-occurrences; each candidate block is now drawn alone.
+occurrences; each candidate block is now drawn alone. The third removed the
+control-character half of the authored-text check and nothing went red, because
+that refusal had been added without an assertion; four now drive it — a block
+title, an editorial body, a page name and a sample-policy rationale — and the
+same sentences without the character are asserted to be accepted, so the refusal
+is about the character and not about the sentence.
 
-A third incident belongs here for the same reason. The renderer and the route
+A fourth incident belongs here for the same reason. The renderer and the route
 were developed together and split into two commits afterwards by a script whose
 two edits overlapped, which deleted §[30]'s entire client/route/action/page leak
 walk from the renderer commit. The gate exited 0 and printed a clean summary,
@@ -2255,7 +2263,7 @@ the split script now asserts its own output.
 
 #### Browser QA
 
-**65/65 checks, 0 failures, 26 screenshots**, against a PRODUCTION build
+**74/74 checks, 0 failures, 27 screenshots**, against a PRODUCTION build
 (`next build` + `next start`) driven over raw CDP. No console error, no page
 exception, no failed request. No horizontal document overflow at 1440×900,
 1280×800, 1024×768, 768×1024, 390×844, 360×800 or 320×720. Every actionable
@@ -2268,9 +2276,19 @@ Exercised rather than photographed: all four left/right panel combinations;
 focus mode and its exact restoration; desktop, tablet and phone canvases; 100 /
 75 / 50 / fit zoom; add, duplicate, hide, remove; keyboard reordering with no
 pointer; undo and redo; the preview going stale and being explicitly refreshed;
-a filter panel offering a dimension and reclassifying its candidates, with six
+a filter panel offering a dimension and reclassifying its candidates, with five
 listed as unconnectable and why; and the filter controls drawn genuinely
 `disabled` under the sentence that says filtering arrives in Unit 6B.2.
+
+The journey is exercised in the two places it means two different things. On the
+CANVAS the claim is that it is drawn and NOT operable: routes present, one detail
+area, and a focus that does not take, because the canvas wraps every drawing in
+an `inert` container so a click inside a chart selects the block. Mounted the
+way a published client view will mount it — same component, same model, no inert
+wrapper — the claim is that it works: a real pointer press moves between routes
+and only one stays chosen, an SVG point takes the focus, and the arrow keys walk
+the route with the focus following inside that block and not into the journey
+above it.
 
 **Two limits, stated plainly.** First, the SIGNED-IN route could not be driven:
 all three synthetic actors in `.env.local` are refused by the hosted project with
@@ -2278,10 +2296,13 @@ all three synthetic actors in `.env.local` are refused by the hosted project wit
 rotating a credential is out of this unit's scope. What WAS proved of the route
 in a browser is that an unauthenticated visitor is redirected to `/login` before
 anything is read, and that nothing of the study leaks into that response.
-Second, the composer was therefore driven through a temporary, uncommitted
-harness that mounts the COMMITTED components with a payload built offline from
-the gate's own fixture. The screenshots show the renderers, not the approved
-dashboard's figures; those are verified by
+Second, the composer was therefore driven through two temporary, uncommitted
+harness routes that mount the COMMITTED components with a payload built offline
+from the gate's own fixture — one for the composer and one for the renderer
+alone. The offline payload also splits each journey block's single route into
+two disjoint ones, because the generic starting layout proposes one route per
+source group and a selector with one option is not a selector. The screenshots
+show the renderers, not the approved dashboard's figures; those are verified by
 `test:canonical-presentation-parity` against the oracle rather than by a
 photograph.
 
@@ -2294,8 +2315,102 @@ hydration on `/login` and `/`. The composer route is dynamic by construction and
 unaffected. A future statically-rendered interactive page would not be.
 
 Evidence lives outside git at `C:\dev\becommunity-qa\unit-6b1\` — `screenshots\`
-(26 PNGs) and `machine\browser-qa.json`, `machine\parity\`,
-`machine\discrimination\` and `machine\BASELINE-AUTHORITATIVE.json`.
+(27 PNGs) and `machine\browser-qa.json`, `machine\parity\`,
+`machine\discrimination\` (29 probe logs beside their green baselines),
+`machine\final-chain\` and `machine\BASELINE-AUTHORITATIVE.json`.
+
+#### The adversarial review of the final diff
+
+Every finding below was verified against the code before it was accepted, and
+every correction carries a probe that turns the gate red when it is undone.
+
+**The editor engine.**
+
+1. `replaceBlock` rebuilt the document on every call, so `commit`'s
+   "nothing moved, spend no history" guard was dead for every block operation:
+   blurring a text field without typing spent an undo step, and sixty of those
+   would flush a real edit out of a sixty-deep history. It is
+   identity-preserving now, and eleven operations return the block they were
+   given when asked for what is already there.
+2. Authored text was checked for LENGTH and not for CHARACTERS, while the v4
+   schema refuses control characters — including the bidirectional overrides
+   that can make a sentence render as its own reverse. A paste carrying one
+   built a document that looked right, failed validation and could never
+   resolve or store; the author would have met it at the preview. The editor
+   refuses it now, in a sentence a person can read.
+3. `togglePanelDimension` did not re-examine the connections a panel already
+   had. Offering a dimension AFTER connecting a result could therefore create
+   the very cross an authority forbids — and the author would have learned it
+   from a resolver failure rather than from the decision they had just made.
+4. Adding a `journey_routes` block from the catalogue was judged against the
+   capability list of `journey_group`, the semantic a RESULT block bound to
+   that group resolves to. A route map cannot draw a label and a count, so the
+   only block that works was refused. Route blocks are judged against their own
+   list.
+5. The drop-line compensation lived in the drop handler and compared a
+   page-local index against a document-wide line, so dropping a block between
+   two others on any page but the first landed it one place off. It is
+   `dropIndexFor` in the engine now, computed on the page that holds the block.
+6. The renderer-capability table was keyed by VARIANT, and drawability is not a
+   property of a variant: it is a property of the PAIR (variant, payload shape).
+   A table draws a distribution and cannot draw a route. It is keyed by semantic
+   now, and §[26] renders all forty-four offered pairs and asserts each one
+   draws something.
+
+**The render-only library.**
+
+7. `Callout` reached through a touchpoint payload and printed ONE of its three
+   figures with no label. That is not a summary, it is a substitution. All three
+   are drawn, each labelled.
+8. `table` is semantically compatible with a single value, a touchpoint and a
+   journey group, and the component handled none of them — so a block the
+   client gate had already let through rendered a titled card over nothing. A
+   fallback that silently renders nothing is worse than no fallback, because the
+   card still claims there is something to read.
+9. The category table's count header said «Personas» for an instrument base,
+   whose number is a valid base — a denominator, not a headcount of people. The
+   header follows the payload shape.
+10. A period in a series with nothing a client may see kept its labelled row,
+    every cell blank: the reserved empty row C11 exists to remove. Studio still
+    shows every period, because seeing which were withheld is the point of an
+    internal preview.
+11. The opposite defect, and the more damaging one: `clientHasContent` filtered
+    any block with an empty payload, which removed the contract's own stated
+    absences along with the gaps. "Nobody responded" and "no authority states
+    this relationship" are facts about the STUDY, and C11's exception is
+    explicit that a caveat about what a reader is being shown survives. Removing
+    them made a study look complete where it had been honest.
+12. A routes payload whose every route was empty counted as content, so a client
+    was shown a titled card containing a route nobody had finished configuring.
+13. The journey's arrow keys focused `[data-journey-node="N"]` across the whole
+    document. That attribute numbers points WITHIN a route, so every journey
+    block has a node 0 — and a key pressed in the second journey moved that
+    journey's selection while sending the focus into the first. The generic
+    starting layout emits one block per source group and the approved study has
+    four, so a page with several journeys is the ordinary case.
+
+**The composer surface.**
+
+14. A ref was written during render. It is a reducer and an effect-scoped ref
+    now, which is also what makes every edit a pure function of the state.
+15. The zoom was resolved inside the canvas while the toolbar showed the stored
+    value, so «Ajustar» could be in force while the control read 100%. It is
+    resolved once, above both.
+16. The text fields are uncontrolled on purpose — a controlled one would commit
+    a history step per keystroke — and they did not reset when an edit was
+    undone, so the next blur wrote the undone text back. They carry a key
+    derived from the history depth.
+
+**And one finding about the QA run itself.** An earlier version of this run
+reported that a journey route could be selected inside the composer. The pass
+was hollow: the canvas wraps every drawn block in an `inert` container so that
+a click inside a chart selects the BLOCK rather than operating the chart, and a
+programmatic `.click()` runs listeners inside an inert subtree even though a
+person's click and keystrokes do not. The composer now asserts what is true
+there — the structure is drawn and the drawing is inert, proved by a focus that
+does not take — and the journey's real interactivity is driven against the
+renderer mounted the way a published client view will mount it, with no inert
+wrapper, using only real focus and real keystrokes.
 
 #### Known-red gates, unchanged
 
