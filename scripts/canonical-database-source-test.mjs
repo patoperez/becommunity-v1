@@ -32,11 +32,13 @@ import { join } from "node:path";
 
 import {
   CANONICAL_READS,
+  CANONICAL_READ_CONCURRENCY,
   CANONICAL_READ_PAGE_SIZE,
   CanonicalReadError,
   canonicalResultSourceFromRows,
   keysetFilter,
   loadCanonicalRowSet,
+  mapBounded,
   normalizeCanonicalResultSource,
   postgrestReadTransport,
   readCanonicalTable,
@@ -80,14 +82,42 @@ console.log("=".repeat(78));
 // ---------------------------------------------------------------------------
 // A fake transport: it serves rows from an in-memory table map and RECORDS
 // every request, so the scope, the order and the window can be asserted.
+//
+// It also records a TIMELINE of starts and ends and the peak number in flight.
+// Counting requests cannot prove the read is bounded — twenty-seven requests
+// arrive whether they were issued six at a time or all at once — and it cannot
+// prove the committed-package gate ran alone either. The timeline can.
 // ---------------------------------------------------------------------------
 function fakeTransport(tables, options = {}) {
   const requests = [];
+  const timeline = [];
+  const inFlight = { now: 0, peak: 0 };
   return {
     requests,
+    timeline,
+    inFlight,
     transport: {
       readPage: async (request) => {
         requests.push(request);
+        inFlight.now += 1;
+        inFlight.peak = Math.max(inFlight.peak, inFlight.now);
+        timeline.push(`start:${request.table}`);
+        try {
+          return await serve(request);
+        } finally {
+          inFlight.now -= 1;
+          timeline.push(`end:${request.table}`);
+        }
+      },
+    },
+  };
+
+  async function serve(request) {
+        // A real yield, so concurrent readers genuinely overlap and `peak`
+        // measures something. Without it every page would resolve before the
+        // next was issued and a serial pool would look identical to a bounded
+        // one.
+        await new Promise((resolve) => setTimeout(resolve, 2));
         if (options.failWith) return { rows: null, error: options.failWith };
         const all = (tables[request.table] ?? []).filter((row) => {
           for (const [column, value] of Object.entries(request.equals ?? {})) {
@@ -114,9 +144,7 @@ function fakeTransport(tables, options = {}) {
           return copy;
         });
         return { rows: page, error: null };
-      },
-    },
-  };
+  }
 }
 
 const scoped = (rows) => rows.map((row) => ({ ...row, __tenant: TENANT, __study: STUDY }));
@@ -307,20 +335,29 @@ check("tres columnas de clave se rechazan en vez de aproximarse", () => {
     (error) => error instanceof CanonicalReadError && error.code === "READ_KEY_ARITY_UNSUPPORTED",
   );
 });
+/**
+ * A builder that RECORDS the chain it was asked for.
+ *
+ * `abortSignal` is recorded by IDENTITY — `signal === expected` — because the
+ * only thing that matters about it is that the CALLER'S OWN signal reached the
+ * query. A recorder that merely accepted the call would pass against a
+ * transport that fabricated a signal of its own.
+ */
+const recordingClient = (calls, expectedSignal) => {
+  const query = {
+    eq: (column) => (calls.push(`eq:${column}`), query),
+    or: (filter) => (calls.push(`or:${filter.slice(0, 3)}`), query),
+    order: (column) => (calls.push(`order:${column}`), query),
+    limit: (n) => (calls.push(`limit:${n}`), query),
+    abortSignal: (signal) => (calls.push(`abortSignal:${signal === expectedSignal}`), query),
+    then: (resolve) => resolve({ data: [], error: null }),
+  };
+  return { from: (table) => (calls.push(`from:${table}`), { select: () => query }) };
+};
+
 await checkAsync("la consulta aplica el alcance ANTES de la ventana, el orden y el límite", async () => {
   const calls = [];
-  const recorder = () => {
-    const query = {
-      eq: (column) => (calls.push(`eq:${column}`), query),
-      or: (filter) => (calls.push(`or:${filter.slice(0, 3)}`), query),
-      order: (column) => (calls.push(`order:${column}`), query),
-      limit: (n) => (calls.push(`limit:${n}`), query),
-      then: (resolve) => resolve({ data: [], error: null }),
-    };
-    return query;
-  };
-  const client = { from: (table) => (calls.push(`from:${table}`), { select: () => recorder() }) };
-  await postgrestReadTransport(client).readPage({
+  await postgrestReadTransport(recordingClient(calls, null)).readPage({
     table: "survey_response",
     columns: ["id"],
     keyColumns: ["id"],
@@ -336,6 +373,46 @@ await checkAsync("la consulta aplica el alcance ANTES de la ventana, el orden y 
     "order:id",
     "limit:1000",
   ]);
+});
+await checkAsync("y la señal del que llama se pone en la consulta, la ÚLTIMA y sin sustituirla", async () => {
+  // `query.abortSignal(request.signal)` in `postgrest.ts` is the ONE line that
+  // turns a cancelled read into a cancelled socket. Every other cancellation
+  // check in this file and in `shadow-boundary-test.mjs` drives a hand-written
+  // `readPage`, so deleting that line left all of them green. This is the
+  // check that fails when it goes.
+  const signal = new AbortController().signal;
+  const calls = [];
+  await postgrestReadTransport(recordingClient(calls, signal)).readPage({
+    table: "survey_response",
+    columns: ["id"],
+    keyColumns: ["id"],
+    scope: { tenantId: TENANT, studyId: STUDY },
+    cursor: null,
+    limit: 1000,
+    signal,
+  });
+  assert.deepEqual(calls, [
+    "from:survey_response",
+    "eq:tenant_id",
+    "eq:study_id",
+    "order:id",
+    "limit:1000",
+    // LAST, so it applies to the finished query and to nothing else. And
+    // `true`, so it is the caller's signal and not one the transport invented.
+    "abortSignal:true",
+  ]);
+});
+await checkAsync("y sin señal la consulta no gana un `abortSignal` de la nada", async () => {
+  const calls = [];
+  await postgrestReadTransport(recordingClient(calls, null)).readPage({
+    table: "survey_response",
+    columns: ["id"],
+    keyColumns: ["id"],
+    scope: { tenantId: TENANT, studyId: STUDY },
+    cursor: null,
+    limit: 1000,
+  });
+  assert.ok(!calls.some((entry) => entry.startsWith("abortSignal")), calls.join(","));
 });
 
 // ===========================================================================
@@ -850,6 +927,262 @@ console.log("\n[9] El operador no borra filas a mano");
     assert.ok(!/createServer|express|new Response\(/.test(code));
   });
 }
+
+// ===========================================================================
+// Unit 5 Phase 3.1 — cancellation and bounded concurrency.
+//
+// Phase 3's budget was a `Promise.race`: it bounded the CALLER and nothing
+// else, so a read that lost the race stayed in flight — socket open, next page
+// still to be asked for — long after the request that wanted it had answered.
+// These checks are about the other half: the read must actually stop.
+// ===========================================================================
+console.log("\n[10] La cancelación llega hasta la paginación");
+
+const FULL_READ = { table: "big", columns: ["id"], keyColumns: ["id"], maxRows: 10_000 };
+const READ_SCOPE = { tenantId: TENANT, studyId: STUDY };
+/** A page that is exactly `limit` long, so the reader always asks for another. */
+const fullPage = (offset, limit) =>
+  Array.from({ length: limit }, (_, index) => ({ id: uuid(offset + index + 1) }));
+
+await checkAsync("cada página lleva la señal hasta el transporte", async () => {
+  const controller = new AbortController();
+  const seen = [];
+  const transport = {
+    readPage: async (request) => {
+      seen.push(request.signal);
+      return { rows: [{ id: uuid(1) }], error: null };
+    },
+  };
+  await readCanonicalTable(transport, FULL_READ, READ_SCOPE, undefined, controller.signal);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0], controller.signal, "the request did not carry the caller's signal");
+});
+
+await checkAsync("una lectura ya cancelada no pide ni una página", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let pages = 0;
+  const transport = {
+    readPage: async () => {
+      pages += 1;
+      return { rows: [], error: null };
+    },
+  };
+  await assert.rejects(
+    () => readCanonicalTable(transport, FULL_READ, READ_SCOPE, undefined, controller.signal),
+    (error) => error instanceof CanonicalReadError && error.code === "READ_ABORTED",
+  );
+  assert.equal(pages, 0, "a page was requested after the signal had already aborted");
+});
+
+await checkAsync("ninguna página NUEVA empieza después de la cancelación", async () => {
+  // The loop-head check. Page one completes and would normally be followed by
+  // page two; the abort lands in between, and page two must never be asked for.
+  const controller = new AbortController();
+  let pages = 0;
+  const transport = {
+    readPage: async (request) => {
+      pages += 1;
+      const rows = fullPage((pages - 1) * request.limit, request.limit);
+      controller.abort();
+      return { rows, error: null };
+    },
+  };
+  await assert.rejects(
+    () => readCanonicalTable(transport, FULL_READ, READ_SCOPE, undefined, controller.signal),
+    (error) => error.code === "READ_ABORTED",
+  );
+  assert.equal(pages, 1, `${pages} pages were read after the abort`);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(pages, 1, "a page began in the background after the read had already refused");
+});
+
+await checkAsync("una página EN VUELO cancelada se reporta como cancelación, no como transporte", async () => {
+  // An aborted `fetch` rejects with a message PostgREST wrapped, and this module
+  // may not repeat a database message. The signal is the reliable witness, so
+  // it decides the code and the thrown value is discarded.
+  const controller = new AbortController();
+  let pages = 0;
+  const transport = {
+    readPage: (request) => {
+      pages += 1;
+      if (pages === 1) return Promise.resolve({ rows: fullPage(0, request.limit), error: null });
+      controller.abort();
+      return new Promise((_resolve, reject) => {
+        const fail = () => reject(new Error('FetchError: aborted while reading "Juan Pérez"'));
+        if (request.signal.aborted) fail();
+        else request.signal.addEventListener("abort", fail);
+      });
+    },
+  };
+  await assert.rejects(
+    () => readCanonicalTable(transport, FULL_READ, READ_SCOPE, undefined, controller.signal),
+    (error) => error.code === "READ_ABORTED" && !/Juan|FetchError/.test(error.message),
+  );
+  assert.equal(pages, 2);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(pages, 2, "a third page began after the abort");
+});
+
+await checkAsync("la carga completa de un paquete se cancela entera", async () => {
+  const controller = new AbortController();
+  const { transport, requests } = fakeTransport({ import_job: [manifestJob(uuid(1), KEY_A)] });
+  controller.abort();
+  await assert.rejects(
+    () => loadCanonicalRowSet(transport, { tenantId: TENANT, studyId: STUDY, signal: controller.signal }),
+    (error) => error.code === "READ_ABORTED",
+  );
+  assert.equal(requests.length, 0, "the committed-package gate ran under an aborted signal");
+});
+
+// ===========================================================================
+console.log("\n[11] La concurrencia acotada, y lo que no le cuesta");
+
+check("el límite es el que la plataforma permite abrir a la vez", () => {
+  assert.equal(CANONICAL_READ_CONCURRENCY, 6);
+});
+
+await checkAsync("nunca hay más tareas en vuelo que el límite", async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const items = Array.from({ length: 40 }, (_, index) => index);
+  const results = await mapBounded(items, 6, async (item) => {
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    inFlight -= 1;
+    return item * 2;
+  });
+  assert.equal(peak, 6, `peak concurrency was ${peak}`);
+  assert.equal(results.length, 40);
+});
+
+await checkAsync("el ORDEN de salida es el de entrada, no el de llegada", async () => {
+  // The reads finish in reverse order on purpose. A pool that pushed results as
+  // they arrived would pass every other check in this file and silently
+  // reorder every family in the row set.
+  const items = Array.from({ length: 12 }, (_, index) => index);
+  const results = await mapBounded(items, 4, async (item) => {
+    await new Promise((resolve) => setTimeout(resolve, (12 - item) * 2));
+    return `row-${item}`;
+  });
+  assert.deepEqual(results, items.map((item) => `row-${item}`));
+});
+
+await checkAsync("un fallo detiene el trabajo nuevo y devuelve el de índice MÁS BAJO", async () => {
+  // Two failures in one run must report the same refusal every time, or a gate
+  // that asserts on the code becomes a coin toss.
+  const started = [];
+  await assert.rejects(
+    () =>
+      mapBounded(Array.from({ length: 20 }, (_, index) => index), 4, async (item) => {
+        started.push(item);
+        await new Promise((resolve) => setTimeout(resolve, item === 1 ? 6 : 1));
+        if (item === 1) throw new CanonicalReadError("READ_EXCEEDS_CEILING", "one");
+        if (item === 3) throw new CanonicalReadError("READ_NOT_ORDERED", "three");
+        return item;
+      }),
+    (error) => error.code === "READ_EXCEEDS_CEILING",
+  );
+  assert.ok(started.length < 20, `every task started despite a refusal (${started.length})`);
+});
+
+await checkAsync("un límite que no es un entero positivo es un rechazo, no cero obreros", async () => {
+  // `Math.max(1, Math.min(NaN, n))` is NaN, which produces ZERO workers and an
+  // array of holes — an empty study that looks like a complete read.
+  for (const bad of [0, -1, Number.NaN, 1.5, "6", null]) {
+    await assert.rejects(
+      () => mapBounded([1, 2, 3], bad, async (item) => item),
+      (error) => error.code === "READ_CONCURRENCY_INVALID",
+      `limit ${String(bad)} was accepted`,
+    );
+  }
+});
+
+await checkAsync("una señal ya cancelada detiene el conjunto antes de empezar", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let ran = 0;
+  await assert.rejects(
+    () =>
+      mapBounded(
+        [1, 2, 3],
+        2,
+        async (item) => {
+          ran += 1;
+          return item;
+        },
+        controller.signal,
+      ),
+    (error) => error.code === "READ_ABORTED",
+  );
+  assert.equal(ran, 0);
+});
+
+await checkAsync("la lectura concurrente produce EXACTAMENTE el mismo conjunto de filas", async () => {
+  // The families are read through a pool now. If any of the twenty-six ended up
+  // in the wrong slot, or if the arrival order leaked into an array, this is
+  // where it shows: two runs of the same package must be byte-identical, and
+  // the request count must still be one gate plus twenty-six families.
+  const tables = {
+    import_job: [manifestJob(uuid(1), KEY_A)],
+    study_participant: scoped(
+      Array.from({ length: 7 }, (_, index) => ({
+        id: uuid(100 + index),
+        cohort_key: "activos",
+        participation_status: "included",
+        survey_participation_status: "responded",
+        source_status: "present",
+      })),
+    ),
+    metric_definition: scoped(
+      Array.from({ length: 5 }, (_, index) => ({
+        id: uuid(200 + index),
+        key: `m${index}`,
+        label: `M${index}`,
+        family: "satisfaction",
+        unit: "percent",
+        precision: 1,
+        calculation_version: "catalogo-2026-08-19",
+        band_scheme_id: null,
+      })),
+    ),
+  };
+  const first = fakeTransport(tables);
+  const second = fakeTransport(tables);
+  const a = await loadCanonicalRowSet(first.transport, { tenantId: TENANT, studyId: STUDY });
+  const b = await loadCanonicalRowSet(second.transport, { tenantId: TENANT, studyId: STUDY });
+  assert.equal(JSON.stringify(a), JSON.stringify(b), "two identical reads disagreed");
+  assert.deepEqual(
+    a.participants.map((row) => row.id),
+    Array.from({ length: 7 }, (_, index) => uuid(100 + index)),
+    "the keyset order inside a family was not preserved",
+  );
+  assert.equal(a.metricDefinitions.length, 5);
+  assert.equal(first.requests.length, 27, `${first.requests.length} requests for 1 gate + 26 families`);
+  // BOUNDED, end to end, and by the MODULE'S constant rather than by a number
+  // this test chose: replacing `CANONICAL_READ_CONCURRENCY` with
+  // `FAMILIES.length` at the call site fails here.
+  assert.ok(
+    first.inFlight.peak <= CANONICAL_READ_CONCURRENCY,
+    `peak concurrency ${first.inFlight.peak} exceeded ${CANONICAL_READ_CONCURRENCY}`,
+  );
+  assert.equal(first.inFlight.peak, CANONICAL_READ_CONCURRENCY, "the families were not read concurrently at all");
+  assert.equal(first.inFlight.now, 0, "a read was still in flight when the row set was returned");
+  // And the committed-package gate ran ALONE. Its manifest names the spec every
+  // family is interpreted under, so nothing may overlap it — the first four
+  // timeline entries are its start, its end, and only then a family's start.
+  assert.deepEqual(first.timeline.slice(0, 2), ["start:import_job", "end:import_job"]);
+  // Every request still carries BOTH halves of the scope. The pool decides WHEN
+  // a request is issued and never touches WHAT it asks for.
+  for (const request of first.requests) {
+    assert.equal(request.scope.tenantId, TENANT);
+    assert.equal(request.scope.studyId, STUDY);
+  }
+  // And the committed-package gate is still first and still alone.
+  assert.equal(first.requests[0].table, "import_job");
+  assert.equal(first.requests[0].equals.status, "committed");
+});
 
 console.log("\n" + "=".repeat(78));
 console.log(`RESUMEN: ${passed + failed} comprobaciones, ${passed} aprobadas, ${failed} falladas.`);

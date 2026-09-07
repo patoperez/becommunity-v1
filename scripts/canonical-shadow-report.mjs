@@ -30,6 +30,16 @@
 // both layers already publish, counts and codes — the exact field list
 // `src/lib/shadow/contract.ts` declares, which has no place for a respondent, a
 // name, an answer or a database message.
+//
+// ⚠️ IT DOES NOT EXERCISE THE RUNTIME PATH, AND NEVER DID. This operator hands
+// `runShadowComparison` a canonical document it has ALREADY read, through the
+// pure transport, before the comparison starts — so its `elapsedMs` is the
+// comparator's time and says nothing about what a hosted request would cost.
+// The timing evidence that matters comes from
+// `npm run canonical-shadow-runtime-rehearsal`, which calls the real
+// `runStudyShadowComparison` and lets it construct its own client and do its
+// own paged reads. This script is the COMPATIBILITY report; that one is the
+// RUNTIME report. Neither replaces the other.
 // =============================================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -49,6 +59,7 @@ import {
 } from "../src/lib/canonical-source/index.ts";
 import { CUICUILCO_RESULTS_V1, buildCanonicalStudyResults } from "../src/lib/results/index.ts";
 import {
+  DEFAULT_SHADOW_BUDGET_MS,
   ENV_SHADOW_MODE,
   ENV_SHADOW_SCOPES,
   SHADOW_ENABLED_LITERAL,
@@ -177,7 +188,11 @@ const canonicalSource = canonicalResultSourceFromRows(rowSet, {
   studyId: target.studyId,
 });
 const canonical = buildCanonicalStudyResults(canonicalSource);
-say(`  contrato=${canonical.contractVersion}  (${Date.now() - readStarted} ms de lectura paginada)`);
+// The label says what was actually timed. `readStarted` is set before the
+// paged read and this line runs after the assembler and the results builder,
+// so it covers all three — calling it "read time" would repeat, one line
+// lower, the very mismeasurement this file's header warns about.
+say(`  contrato=${canonical.contractVersion}  (${Date.now() - readStarted} ms: lectura + ensamblado + construccion)`);
 say(`  huella del plan almacenada = ${canonical.study.planFingerprint}`);
 if (canonical.study.planFingerprint !== target.planFingerprint) {
   console.error(
@@ -199,13 +214,20 @@ const shadow = await runShadowComparison({
   env: {
     [ENV_SHADOW_MODE]: SHADOW_ENABLED_LITERAL,
     [ENV_SHADOW_SCOPES]: `${target.tenantId}:${target.studyId}`,
-    BECOMMUNITY_SHADOW_BUDGET_MS: "5000",
+    // The PRODUCTION default, not the ceiling. This comparison does not
+    // exercise the budget at all (the document below is already read), so
+    // printing 5000 here would advertise a number no deployment uses.
+    BECOMMUNITY_SHADOW_BUDGET_MS: String(DEFAULT_SHADOW_BUDGET_MS),
   },
   loadCanonical: async () => canonical,
 });
 
 say(`  estado=${shadow.status}  presupuesto=${shadow.budgetMs} ms  transcurrido=${shadow.elapsedMs} ms`);
-say(`  huella de filtro=${shadow.filterFingerprint}`);
+say(
+  `  alcance del filtro: filtrado=${shadow.filterScope.filtered} ` +
+    `dimensiones=${shadow.filterScope.dimensionCount} ` +
+    `claves=[${shadow.filterScope.dimensionKeys.join(", ")}]`,
+);
 say(
   `  comparadas=${shadow.counts.compared} de acuerdo=${shadow.counts.agreed} ` +
     `en desacuerdo=${shadow.counts.disagreed} clasificadas=${shadow.counts.classified}`,

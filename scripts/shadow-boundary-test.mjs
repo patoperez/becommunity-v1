@@ -29,17 +29,24 @@ import { join, dirname, resolve } from "node:path";
 
 import { buildStudyDashboard } from "../src/lib/dashboard/view.ts";
 import {
+  COMPARISON_RULES,
   COMPATIBILITY_CLASSIFICATIONS,
   MISMATCH_KINDS,
+  NOTE_CODES,
+  SHADOW_FINDING_KEYS,
+  SHADOW_SECTIONS,
   SHADOW_STATUSES,
   compareLegacyWithCanonical,
-  filterFingerprint,
+  decimalsRule,
+  describeFilterScope,
   parseLegacyBase,
   parseLegacyNumber,
   parseShadowBudget,
   parseShadowScopes,
   resolveShadowPolicy,
   runShadowComparison,
+  runtimeShadowRecord,
+  safeDimensionKeys,
   DEFAULT_SHADOW_BUDGET_MS,
   MAX_SHADOW_BUDGET_MS,
   SHADOW_ENABLED_LITERAL,
@@ -503,8 +510,24 @@ check("los espacios de claves que necesitan configuración se agrupan y se nombr
   const tdp = findings.find((entry) => entry.key === "legacy.metric_keys.tdp");
   assert.equal(csat.classification, "presentation_configuration_required");
   assert.equal(tdp.classification, "presentation_configuration_required");
-  assert.match(tdp.note, /unawareShareOfResponses/);
-  assert.match(tdp.note, /NOT touchpoints\[\]\.tdp/);
+  // The WARNING is a code now, not a sentence. `tdp_` averages to the canonical
+  // unawareness share, NOT to `touchpoints[].tdp`; the code says so and
+  // `docs/LEGACY_CANONICAL_COMPATIBILITY.md` §7 explains why in prose a person
+  // can read. A field that could hold a sentence could hold a database message.
+  assert.equal(tdp.noteCode, "canonical_counterpart_is_unaware_share_not_tdp");
+  assert.equal(csat.noteCode, "canonical_counterpart_is_top_box_share");
+  assert.equal(tdp.note, undefined, "the free-text note came back");
+});
+check("los cuatro cubos de claves se reportan SIEMPRE, incluso los vacíos", () => {
+  // A bucket that appeared only when the data contained it would make the
+  // finding SET depend on the data, and "24 findings" would stop being a
+  // property anything could check.
+  const keys = findingsOf(CANONICAL).map((entry) => entry.key);
+  for (const bucket of ["csat", "tdp", "desempeno", "other"]) {
+    assert.ok(keys.includes(`legacy.metric_keys.${bucket}`), bucket);
+  }
+  const desempeno = findingsOf(CANONICAL).find((entry) => entry.key === "legacy.metric_keys.desempeno");
+  assert.equal(desempeno.legacyValue, 0, "the fixture publishes no desempeno average");
 });
 check("la supresión heredada se reporta como reemplazo canónico", () => {
   const suppression = findingsOf(CANONICAL).find((entry) => entry.key === "disclosure.small_sample_suppression");
@@ -570,37 +593,168 @@ await checkAsync("ningún identificador, cita ni valor de segmento aparece", asy
   for (const forbidden of ["secret-person", "secret-observation", "Una cita aprobada", "Norte", "Sur", "acompanamiento"]) {
     assert.doesNotMatch(serialized, new RegExp(forbidden), forbidden);
   }
-  assert.match(shadow.filterFingerprint, /^sha256:[0-9a-f]{64}$/);
 });
-check("una selección vacía tiene una huella estable y sin valores", () => {
-  assert.equal(filterFingerprint({}), "sha256:unfiltered");
-  assert.equal(filterFingerprint({ esfera: "Norte" }), filterFingerprint({ esfera: "Norte" }));
-  assert.notEqual(filterFingerprint({ esfera: "Norte" }), filterFingerprint({ esfera: "Sur" }));
-  assert.doesNotMatch(filterFingerprint({ esfera: "Norte" }), /Norte/);
+check("el alcance del filtro describe la selección SIN describirla", () => {
+  // Phase 3 hashed the [key, value] pairs with an unsalted SHA-256 and called
+  // that a fingerprint. The values come from a catalogue the same payload
+  // publishes to the browser, so the whole space of realistic selections is a
+  // few thousand strings and a dictionary reverses the digest immediately. The
+  // old gate asserted the digest LOOKED like a hash, which is not the safety
+  // property. These assertions are the property: no value, hashed or otherwise.
+  assert.deepEqual(describeFilterScope({}), { filtered: false, dimensionKeys: [], dimensionCount: 0 });
+  assert.deepEqual(describeFilterScope({ esfera: "Norte" }), {
+    filtered: true,
+    dimensionKeys: ["esfera"],
+    dimensionCount: 1,
+  });
+  // The SAME description for two different values. That is the point: a
+  // description that could tell "Norte" from "Sur" is a description of the value.
+  assert.deepEqual(describeFilterScope({ esfera: "Norte" }), describeFilterScope({ esfera: "Sur" }));
+  const described = JSON.stringify(describeFilterScope({ esfera: "Norte", generacion: "Boomer" }));
+  assert.doesNotMatch(described, /Norte|Sur|Boomer/);
+  assert.doesNotMatch(described, /sha256|[0-9a-f]{32}/);
+  // An empty value is not a filter — `calc/filters.ts` treats it as inactive and
+  // the legacy builder therefore does not filter on it. The two definitions must
+  // not diverge, or a `?f.esfera=` link would suppress a comparison the legacy
+  // side actually performed unfiltered.
+  assert.equal(describeFilterScope({ esfera: "" }).filtered, false);
+  assert.equal(describeFilterScope({ esfera: "" }).dimensionCount, 0);
 });
+check("una clave de dimensión que no es un identificador no se publica", () => {
+  // A segment key is whatever column the workbook carried. A shape check keeps
+  // out a sentence, a name, an address and an e-mail; the COUNT stays exact so
+  // nothing is silently under-reported.
+  assert.deepEqual(safeDimensionKeys(["esfera", "Juan Pérez", "correo@ejemplo.mx", "estado_membresia"]), [
+    "esfera",
+    "estado_membresia",
+  ]);
+  assert.deepEqual(safeDimensionKeys(["A", "  ", "x".repeat(80), 7, null]), []);
+  const scope = describeFilterScope({ esfera: "Norte", "Juan Pérez": "x" });
+  assert.deepEqual(scope.dimensionKeys, ["esfera"]);
+  assert.equal(scope.dimensionCount, 2, "the count must stay exact even when a key is withheld");
+});
+// The FIELD NAMES, not the prose around them: the comments deliberately say the
+// word "message" while explaining that no field may carry one, and a scan that
+// could not tell the two apart would either fail here or be loosened until it
+// proved nothing.
+//
+// The `= {` in the start marker matters. `export type ShadowFinding` alone now
+// matches `export type ShadowFindingKey`, which is declared earlier, and the
+// scan would silently read the wrong block.
+//
+// And the identifier pattern accepts an optional `?`. Without it a field
+// declared `noteCode?:` is invisible to BOTH the list comparison and the
+// forbidden-name loop, which is a bypass for the exact edit this check exists
+// to catch.
+const PERSONAL_NAMES = ["respondent", "quote", "person", "email", "message", "segment", "text", "label"];
+const blockOf = (file, startMarker) => {
+  const source = readFileSync(file, "utf8");
+  const from = source.indexOf(startMarker);
+  assert.notEqual(from, -1, `${startMarker} not found in ${file}`);
+  const to = source.indexOf("\n};", from);
+  assert.notEqual(to, -1, `the block opened by ${startMarker} never closes in ${file}`);
+  return source.slice(from, to).replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+};
+
+/**
+ * The declared field names of one type, and ALL of them.
+ *
+ * A `^`-anchored scan had four bypasses, each of which would have hidden a new
+ * field from both the list comparison and the forbidden-name loop: a member
+ * declared `readonly`, a member whose name is quoted, a second member on the
+ * same line as the first, and an index signature — which does not name a field
+ * at all and would let anything in under any name. So: nested object types are
+ * collapsed first (their members belong to their own assertion, not this one),
+ * members are split on `;` rather than on line starts, `readonly` and quotes
+ * are stripped, and an index signature is refused outright.
+ */
+const fieldNamesOf = (file, startMarker) => {
+  const block = blockOf(file, startMarker);
+  const body = block.slice(block.indexOf("{") + 1);
+  assert.ok(!/^\s*(readonly\s+)?\[/m.test(body), `${startMarker} declares an index signature`);
+  const flat = body.replace(/\{[^{}]*\}/g, "{}");
+  return flat
+    .split(";")
+    .map((member) => member.replace(/\breadonly\s+/g, "").replace(/["']/g, "").trim())
+    .map((member) => /^([A-Za-z_][A-Za-z0-9_]*)\??\s*:/.exec(member))
+    .filter((match) => match !== null)
+    .map((match) => match[1])
+    .sort();
+};
+
+/** The members of one nested object member, e.g. `counts`. */
+const nestedFieldNamesOf = (file, startMarker, member) => {
+  const block = blockOf(file, startMarker);
+  const found = new RegExp(`\\b${member}\\s*:\\s*\\{([^{}]*)\\}`).exec(block);
+  assert.ok(found, `${startMarker} has no nested member '${member}'`);
+  return found[1]
+    .split(";")
+    .map((entry) => entry.replace(/["']/g, "").trim())
+    .map((entry) => /^([A-Za-z_][A-Za-z0-9_]*)\??\s*:/.exec(entry))
+    .filter((match) => match !== null)
+    .map((match) => match[1])
+    .sort();
+};
+const CONTRACT_FILE = join("src", "lib", "shadow", "contract.ts");
+const DIAGNOSTICS_FILE = join("src", "lib", "shadow", "diagnostics.ts");
+
 check("el contrato del hallazgo no tiene un lugar donde poner a una persona", () => {
-  // The FIELD NAMES, not the prose around them: the comments deliberately say
-  // the word "message" while explaining that no field may carry one, and a scan
-  // that could not tell the two apart would either fail here or be loosened
-  // until it proved nothing.
-  const source = readFileSync(join("src", "lib", "shadow", "contract.ts"), "utf8");
-  const block = source.slice(source.indexOf("export type ShadowFinding"), source.indexOf("/** The complete, safe result"));
-  const withoutComments = block.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
-  const fieldNames = [...withoutComments.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/gm)].map((match) => match[1]);
+  const fieldNames = fieldNamesOf(CONTRACT_FILE, "export type ShadowFinding = {");
   assert.deepEqual(
-    [...fieldNames].sort(),
+    fieldNames,
     [
       "agrees", "canonicalBase", "canonicalValue", "classification", "key",
-      "legacyBase", "legacyValue", "mismatch", "note", "rule", "section",
+      "legacyBase", "legacyValue", "mismatch", "noteCode", "rule", "section",
     ],
     "the finding's field list changed; every field must be provably non-personal",
   );
-  for (const forbidden of ["respondent", "quote", "person", "email", "message", "segment", "text", "label"]) {
+  for (const forbidden of PERSONAL_NAMES) {
     assert.ok(
       !fieldNames.some((name) => name.toLowerCase().includes(forbidden)),
       `ShadowFinding has a field named for '${forbidden}'`,
     );
   }
+  assert.ok(!fieldNames.includes("note"), "the unrestricted free-text note came back");
+});
+check("el diagnóstico completo tampoco, y no lleva huella alguna", () => {
+  const fieldNames = fieldNamesOf(CONTRACT_FILE, "export type ShadowDiagnostics = {");
+  assert.deepEqual(fieldNames, [
+    "budgetMs", "contractVersion", "counts", "elapsedMs", "filterScope", "findings",
+    "packageIdempotencyKey", "planFingerprint", "status", "studyId", "tenantId",
+  ]);
+  assert.deepEqual(nestedFieldNamesOf(CONTRACT_FILE, "export type ShadowDiagnostics = {", "counts"), [
+    "agreed", "classified", "compared", "disagreed",
+  ]);
+  for (const name of fieldNames) {
+    assert.ok(!PERSONAL_NAMES.some((forbidden) => name.toLowerCase().includes(forbidden)), name);
+  }
+  assert.ok(!fieldNames.includes("filterFingerprint"), "the reversible fingerprint came back");
+  const scopeFields = fieldNamesOf(CONTRACT_FILE, "export type ShadowFilterScope = {");
+  assert.deepEqual(scopeFields, ["dimensionCount", "dimensionKeys", "filtered"]);
+  assert.ok(!scopeFields.some((name) => /value|fingerprint|hash|digest/i.test(name)));
+});
+check("el registro de EJECUCIÓN no tiene un lugar donde poner una cifra", () => {
+  // The runtime record is what a server may hand to a sink, so it carries codes
+  // and totals and no numbers at all. Not "no small numbers" — NO numbers: a
+  // rule that needed a base to decide would need re-deciding every time a
+  // finding is added, in the one place being wrong is unrecoverable.
+  const record = fieldNamesOf(DIAGNOSTICS_FILE, "export type ShadowRuntimeRecord = {");
+  assert.deepEqual(record, [
+    "budgetMs", "contractVersion", "counts", "elapsedMs", "filterDimensionCount",
+    "filtered", "findings", "packageIdempotencyKey", "planFingerprint", "status",
+    "studyId", "tenantId",
+  ]);
+  assert.deepEqual(nestedFieldNamesOf(DIAGNOSTICS_FILE, "export type ShadowRuntimeRecord = {", "counts"), [
+    "agreed", "classified", "compared", "disagreed",
+  ]);
+  for (const name of record) {
+    assert.ok(!PERSONAL_NAMES.some((forbidden) => name.toLowerCase().includes(forbidden)), name);
+  }
+  for (const forbidden of ["legacyValue", "canonicalValue", "legacyBase", "canonicalBase", "dimensionKeys"]) {
+    assert.ok(!record.includes(forbidden), `the runtime record carries '${forbidden}'`);
+  }
+  const finding = fieldNamesOf(DIAGNOSTICS_FILE, "export type ShadowRuntimeFinding = {");
+  assert.deepEqual(finding, ["agrees", "classification", "key", "mismatch", "noteCode", "rule", "section"]);
 });
 check("cada estado posible es uno del contrato", () => {
   assert.deepEqual([...SHADOW_STATUSES].sort(), [
@@ -672,8 +826,29 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
   const appFiles = walk(join("src", "app"));
   const componentFiles = walk(join("src", "components"));
   const isCanonical = (path) => /src\/lib\/(canonical-source|ingestion\/canonical-commit|ingestion\/canonical-package)\//.test(path);
+  const isShadow = (path) => /src\/lib\/shadow\//.test(path);
   const APPROVED_LOADER = "src/lib/studies/study-dashboard.ts";
   const APPROVED_PAGE = "src/app/insights/e/[studyId]/page.tsx";
+
+  /**
+   * The entry-point classes that must NEVER reach the canonical layer.
+   *
+   * Phase 3's walk covered `"use client"` files, HTTP routes and pages. That
+   * left three whole classes of server entry point invisible: SERVER ACTIONS
+   * (eight `"use server"` modules under `src/app`), the ROOT LAYOUT and the
+   * error/loading/not-found boundaries, and `src/middleware.ts` — which is not
+   * under `src/app` at all, so no walk rooted there could ever have seen it. An
+   * action importing the canonical layer would have passed the entire gate.
+   */
+  const isDirective = (path, directive) => new RegExp(`^\\s*["']${directive}["']`, "m").test(readFileSync(path, "utf8"));
+  const serverActionFiles = [...appFiles, ...componentFiles].filter((path) => isDirective(path, "use server"));
+  const middlewareFiles = ["src/middleware.ts", "src/middleware.tsx"].filter((path) => {
+    try {
+      return statSync(path).isFile();
+    } catch {
+      return false;
+    }
+  });
 
   check("ningún COMPONENTE DE CLIENTE alcanza la capa canónica, por ningún camino", () => {
     const clientFiles = [...appFiles, ...componentFiles].filter((path) =>
@@ -712,28 +887,140 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     assert.ok(chain.includes("src/lib/shadow/server.ts"), `the chain skips the orchestrator: ${JSON.stringify(chain)}`);
   });
 
+  check("ninguna ACCIÓN DE SERVIDOR alcanza la capa canónica, por ningún camino", () => {
+    assert.ok(serverActionFiles.length >= 5, `only ${serverActionFiles.length} server actions found`);
+    for (const file of serverActionFiles) {
+      const paths = reachable(file);
+      const leak = [...paths.keys()].find(isCanonical);
+      assert.ok(!leak, `${file} reaches ${leak}\n  via ${JSON.stringify(paths.get(leak))}`);
+    }
+  });
+
+  check("el MIDDLEWARE tampoco, y existe para poder comprobarlo", () => {
+    // `src/middleware.ts` sits outside `src/app`, so the Phase 3 walk could not
+    // see it at all. Asserting it EXISTS is half the check: a walk that found
+    // nothing would pass vacuously.
+    assert.equal(middlewareFiles.length, 1, "src/middleware.ts is missing; the check would pass vacuously");
+    for (const file of middlewareFiles) {
+      const paths = reachable(file);
+      assert.ok(![...paths.keys()].find(isCanonical), `${file} reaches the canonical layer`);
+      assert.ok(![...paths.keys()].find(isShadow), `${file} reaches the shadow layer`);
+    }
+  });
+
+  check("ningún cliente, ruta o acción alcanza siquiera la CARPETA de la sombra", () => {
+    // An INDEPENDENT boundary. Until Phase 3.1 the shadow barrel was caught by
+    // the canonical walk only because `orchestrate.ts` happened to import a hash
+    // helper from `ingestion/canonical-commit/`. That import is gone, so the
+    // accidental edge is gone with it — and this check is what replaces it.
+    const clientFiles = [...appFiles, ...componentFiles].filter((path) => isDirective(path, "use client"));
+    const routes = appFiles.filter((path) => /route\.tsx?$/.test(path));
+    for (const file of [...clientFiles, ...routes, ...serverActionFiles]) {
+      const paths = reachable(file);
+      const leak = [...paths.keys()].find(isShadow);
+      assert.ok(!leak, `${file} reaches ${leak}\n  via ${JSON.stringify(paths.get(leak))}`);
+    }
+  });
+
   check("sólo el orquestador server-only nombra la lectura canónica", () => {
     const shadowFiles = readdirSync(join("src", "lib", "shadow")).map((name) => join("src", "lib", "shadow", name));
     const naming = shadowFiles.filter((path) => /canonical-source/.test(stripComments(readFileSync(path, "utf8"))));
     assert.deepEqual(naming.map((p) => p.replace(/\\/g, "/")), ["src/lib/shadow/server.ts"]);
   });
 
-  check("sólo `server.ts` de la sombra es server-only y sólo él toca el entorno", () => {
+  check("sólo `server.ts` y `sink.ts` son server-only, y sólo uno toca el entorno", () => {
     const shadowFiles = readdirSync(join("src", "lib", "shadow"));
     const serverOnly = shadowFiles.filter((name) =>
       /^\s*import\s+["']server-only["']/m.test(readFileSync(join("src", "lib", "shadow", name), "utf8")),
     );
-    assert.deepEqual(serverOnly, ["server.ts"]);
-    const pure = shadowFiles.filter((name) => name !== "server.ts");
+    // `sink.ts` is the second, and the ONLY second: it is where a run may be
+    // recorded, so it must be as unreachable from a browser as the entry point.
+    assert.deepEqual(serverOnly, ["server.ts", "sink.ts"]);
+    const pure = shadowFiles.filter((name) => !serverOnly.includes(name));
+    // `diagnostics.ts` is in this list, which is the point: the whitelist that
+    // decides what may be recorded is pure, so the gate can execute it.
+    assert.ok(pure.includes("diagnostics.ts"), "the runtime projection must stay pure");
     for (const name of pure) {
       const code = stripComments(readFileSync(join("src", "lib", "shadow", name), "utf8"));
       assert.ok(!/process\.env|@supabase|createClient\(|createAdminClient|\bfetch\(|node:/.test(code), name);
     }
+    // And the sink reads NO environment. A flag could be set on a deployment by
+    // somebody who never read the file; a function call cannot.
+    const sink = stripComments(readFileSync(join("src", "lib", "shadow", "sink.ts"), "utf8"));
+    assert.ok(!/process\.env/.test(sink), "the sink reads an environment variable");
+    assert.ok(!/@supabase|createClient\(|\bfetch\(|node:/.test(sink), "the sink has a transport");
+    assert.match(sink, /let installed: ShadowDiagnosticSink \| null = null;/, "the sink is not off by default");
   });
 
-  check("el barril seguro de la sombra no reexporta el punto de entrada", () => {
+  check("la señal del presupuesto se reenvía en CADA salto", () => {
+    // Two of these hops are single optional parameters. Deleting either
+    // compiles clean and leaves every behavioural cancellation test green,
+    // because those tests drive fakes that sit BELOW the deletion. Nothing but
+    // reading the source catches it.
+    const shadowServer = stripComments(readFileSync(join("src", "lib", "shadow", "server.ts"), "utf8"));
+    assert.match(shadowServer, /loadCanonical: async \(scope, options\) =>/, "the reader ignores its options");
+    assert.match(shadowServer, /signal: options\.signal,/, "shadow/server.ts drops the signal");
+
+    const adapter = stripComments(readFileSync(join("src", "lib", "canonical-source", "adapter.ts"), "utf8"));
+    assert.match(adapter, /signal: params\.signal,/, "canonical-source/adapter.ts drops the signal");
+
+    const read = stripComments(readFileSync(join("src", "lib", "canonical-source", "read.ts"), "utf8"));
+    assert.match(read, /signal\?\.aborted/, "the paging loop never checks the signal");
+    assert.match(read, /READ_ABORTED/, "there is no cancellation refusal code");
+
+    const transport = stripComments(readFileSync(join("src", "lib", "canonical-source", "postgrest.ts"), "utf8"));
+    assert.match(
+      transport,
+      /if \(request\.signal\) query = query\.abortSignal\(request\.signal\);/,
+      "the transport never puts the signal on the query",
+    );
+  });
+
+  check("el barril seguro de la sombra no reexporta ningún punto de entrada", () => {
     const barrel = stripComments(readFileSync(join("src", "lib", "shadow", "index.ts"), "utf8"));
     assert.ok(!/from\s+["']\.\/server["']/.test(barrel));
+    assert.ok(!/from\s+["']\.\/sink["']/.test(barrel), "the barrel re-exports the sink");
+  });
+
+  check("ninguna configuración de este repositorio enciende la sombra", () => {
+    // The one property with no automated guard until Phase 3.1: every proof that
+    // the shadow is off was a proof about the CODE's defaults. This one is about
+    // the repository's own configuration.
+    const workflows = (() => {
+      try {
+        return readdirSync(join(".github", "workflows")).map((name) => join(".github", "workflows", name));
+      } catch {
+        return [];
+      }
+    })();
+    const candidates = [
+      // `.env*` is gitignored, so this half scans the DEVELOPER'S tree: an
+      // untracked `.env.local` that turned the shadow on locally is caught here
+      // even though it could never be committed.
+      ...readdirSync(".").filter((name) => /^\.env(\..*)?$/.test(name)),
+      ".dev.vars",
+      "wrangler.toml",
+      "wrangler.json",
+      "wrangler.jsonc",
+      "next.config.ts",
+      "open-next.config.ts",
+      "package.json",
+      "Dockerfile",
+      ...workflows,
+    ];
+    for (const file of candidates) {
+      let code;
+      try {
+        code = readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      const setting = code
+        .split("\n")
+        .filter((line) => /BECOMMUNITY_SHADOW_MODE\s*[=:]/.test(line))
+        .filter((line) => !/^\s*(#|\/\/)/.test(line));
+      assert.deepEqual(setting, [], `${file} sets the shadow flag`);
+    }
   });
 
   check("ninguna página, componente o ruta nombra el diagnóstico de la sombra", () => {
@@ -758,6 +1045,17 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     const code = readFileSync(APPROVED_PAGE, "utf8");
     assert.match(code, /const \{ legacy: dashboard \} = await loadStudyDashboard\(/);
     assert.ok(!/\.shadow\b/.test(code), "the page reads the diagnostics");
+    // Bracket notation was the blind spot in BOTH diagnostics checks: the
+    // identifier scan strips string literals before testing, so `x["shadow"]`
+    // became `x[""]` and matched nothing, and `/\.shadow\b/` never saw it
+    // either. Tested here on the RAW source, before any stripping.
+    for (const file of [...appFiles, ...componentFiles]) {
+      const raw = readFileSync(file, "utf8");
+      assert.ok(
+        !/\[\s*["'`]shadow["'`]\s*\]/.test(raw),
+        `${file} reaches the diagnostics through bracket notation`,
+      );
+    }
   });
 
   check("el cargador aprobado es server-only y no muta nada", () => {
@@ -780,8 +1078,15 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     // database client at all are examined — the ones that name a Supabase
     // import, a client factory or `.from(` — and in those, the builder methods
     // used must be a subset of the read-only vocabulary.
+    //
+    // ⚠️ Phase 3 wrote this as `/^(insert|update|upsert|delete|rpc)$/.test(m) &&
+    // !READ_ONLY_BUILDER_METHODS.has(m)` over a set containing none of those
+    // five names. The second conjunct was therefore ALWAYS true — dead code
+    // dressed as an allowlist, next to a comment claiming the used methods
+    // "must be a subset of the read-only vocabulary", which nothing checked. The
+    // denylist is the real property and it is kept; the allowlist claim is moved
+    // to where it can actually be enforced, in the check below this one.
     const WRITE_PATH = /canonical-commit\/(adapter|server|flow|projector)\.ts$/;
-    const READ_ONLY_BUILDER_METHODS = new Set(["from", "select", "eq", "or", "order", "limit", "returns", "gt"]);
     const paths = reachable("src/lib/shadow/server.ts");
     const mutators = [];
     for (const file of paths.keys()) {
@@ -790,15 +1095,30 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       const holdsClient = /@supabase\/supabase-js|createAdminClient|createClient\(|\.from\(/.test(code);
       if (!holdsClient) continue;
       for (const match of code.matchAll(/\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g)) {
-        const method = match[1];
-        if (/^(insert|update|upsert|delete|rpc)$/.test(method) && !READ_ONLY_BUILDER_METHODS.has(method)) {
-          mutators.push(`${file} (.${method}())`);
-        }
+        if (/^(insert|update|upsert|delete|rpc)$/.test(match[1])) mutators.push(`${file} (.${match[1]}())`);
       }
     }
     assert.deepEqual(mutators, []);
     assert.ok(paths.size > 10, `only ${paths.size} modules reachable from the shadow entry point`);
     assert.ok([...paths.keys()].some((file) => /canonical-source\/adapter\.ts$/.test(file)), "the read adapter is unreachable");
+    assert.ok([...paths.keys()].some((file) => /shadow\/sink\.ts$/.test(file)), "the sink is not on the entry point's path");
+  });
+
+  check("la superficie del constructor que el transporte declara es sólo de LECTURA", () => {
+    // `postgrest.ts` describes the client STRUCTURALLY instead of importing it,
+    // which means this type is the complete list of methods the canonical read
+    // path is even able to call. Enforcing it here is the allowlist the check
+    // above only claimed to have. `abortSignal` is a read modifier — it puts a
+    // signal on the request's `fetch` — and is listed for that reason.
+    const source = readFileSync(join("src", "lib", "canonical-source", "postgrest.ts"), "utf8");
+    const from = source.indexOf("export type PostgrestScopedQuery = {");
+    assert.notEqual(from, -1);
+    const block = source
+      .slice(from, source.indexOf("\n};", from))
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/\/\/[^\n]*/g, " ");
+    const methods = [...block.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)].map((match) => match[1]).sort();
+    assert.deepEqual(methods, ["abortSignal", "eq", "limit", "or", "order"]);
   });
 
   check("el modelo de resultados sigue sin transporte y sin server-only", () => {
@@ -809,6 +1129,581 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     }
   });
 }
+
+// ===========================================================================
+// Unit 5 Phase 3.1 — THE FILTERED COMPARISON, adversarially.
+//
+// `shadow/server.ts` reads the canonical document by tenant and study. It does
+// not apply the request's legacy filter, and it cannot: no authority maps a
+// legacy segment key onto a canonical attribute key. Phase 3 guarded
+// `population.selected` for that reason and then compared the FILTERED legacy
+// NPS and CRI against that UNFILTERED document anyway.
+//
+// These fixtures are chosen so that both failure directions are live at once.
+// With `esfera: "Norte"` the fixture's filtered NPS is still 40 and its
+// filtered CRI is still 37.5 — identical to the canonical document — while the
+// bases fall from 20 to 10. An unguarded comparator therefore reports a FALSE
+// AGREEMENT on both values and a FALSE DISAGREEMENT on both bases, from the
+// same run. Nothing here relies on a number the comparator itself produced.
+// ===========================================================================
+console.log("\n[9] Nada que el filtro toque se compara");
+
+const NORTE = { esfera: "Norte" };
+const FILTERED_LEGACY = buildLegacy(NORTE);
+const filteredFindings = () => compareLegacyWithCanonical(FILTERED_LEGACY, CANONICAL, { filtered: true });
+const unfilteredFindings = () => compareLegacyWithCanonical(LEGACY, CANONICAL, { filtered: false });
+const findingAt = (findings, key) => {
+  const found = findings.find((entry) => entry.key === key);
+  assert.ok(found, `no finding for ${key}`);
+  return found;
+};
+
+check("la trampa existe: filtrado, el legado da el MISMO valor y OTRA base", () => {
+  // If this ever stops holding, the four checks below stop proving anything and
+  // must be re-derived rather than quietly kept.
+  const nps = FILTERED_LEGACY.view.tiles.find((tile) => tile.key === "nps");
+  assert.equal(parseLegacyNumber(nps.value), 40, "the filtered NPS is no longer the canonical value");
+  assert.equal(parseLegacyBase(nps.detail), 10, "the filtered NPS base is no longer different");
+  const cri = FILTERED_LEGACY.view.averages.find((entry) => entry.key === "average:cri");
+  assert.equal(parseLegacyNumber(cri.value), 37.5, "the filtered CRI is no longer the canonical value");
+  assert.equal(parseLegacyBase(cri.detail), 10, "the filtered CRI base is no longer different");
+  assert.equal(FILTERED_LEGACY.view.selectedUnits, 11);
+});
+
+check("el NPS filtrado no puede producir un ACUERDO falso", () => {
+  const value = findingAt(filteredFindings(), "recommendation.nps.combinado.value");
+  assert.equal(value.agrees, null, "a filtered NPS was compared");
+  assert.equal(value.classification, "presentation_configuration_required");
+  assert.equal(value.mismatch, "filter_scope");
+  assert.equal(value.noteCode, "filtered_scope_not_comparable");
+  assert.equal(value.legacyValue, null);
+  assert.equal(value.canonicalValue, null);
+  assert.equal(value.rule, "not-compared");
+});
+check("y la BASE filtrada del NPS no puede producir un DESACUERDO falso", () => {
+  const base = findingAt(filteredFindings(), "recommendation.nps.combinado.base");
+  assert.equal(base.agrees, null, "a filtered NPS base was compared");
+  assert.equal(base.mismatch, "filter_scope");
+  assert.equal(base.legacyValue, null);
+  assert.equal(base.canonicalValue, null);
+  assert.equal(base.legacyBase, null);
+  assert.equal(base.canonicalBase, null);
+});
+check("el CRI filtrado tampoco, ni su valor ni su base", () => {
+  for (const key of ["renewal.cri.value", "renewal.cri.base"]) {
+    const item = findingAt(filteredFindings(), key);
+    assert.equal(item.agrees, null, key);
+    assert.equal(item.classification, "presentation_configuration_required", key);
+    assert.equal(item.mismatch, "filter_scope", key);
+    assert.equal(item.legacyValue, null, key);
+    assert.equal(item.canonicalValue, null, key);
+  }
+});
+check("la población seleccionada tampoco", () => {
+  const selected = findingAt(filteredFindings(), "population.selected");
+  assert.equal(selected.agrees, null);
+  assert.equal(selected.classification, "presentation_configuration_required");
+  assert.equal(selected.mismatch, "filter_scope");
+  assert.equal(selected.legacyValue, null);
+});
+check("una corrida filtrada NO reporta acuerdo ni desacuerdo sobre lo que el filtro toca", () => {
+  const findings = filteredFindings();
+  const compared = findings.filter((entry) => entry.agrees !== null);
+  // Exactly ONE comparison survives a filter, and it is the one whose legacy
+  // side is provably unfiltered. Naming it here is deliberate: a future edit
+  // that added a second would have to change this line and say why.
+  assert.deepEqual(compared.map((entry) => entry.key), ["population.measured"]);
+  assert.equal(findings.filter((entry) => entry.agrees === false).length, 0, "a filtered run disagreed");
+});
+check("y ninguna cifra de una corrida filtrada viene de datos filtrados", () => {
+  // The allowlist is the proof, not the absence of a number: these three come
+  // from `rows`/`qualitative` BEFORE `filterRowsBySegments` (view.ts:182, 183,
+  // 186), so their values are the same filtered or not.
+  const UNFILTERED_SOURCES = new Set(["population.measured", "legacy.pivot.allowlist", "legacy.filterOptions"]);
+  for (const item of filteredFindings()) {
+    if (UNFILTERED_SOURCES.has(item.key)) continue;
+    assert.equal(item.legacyValue, null, `${item.key} published a filtered legacy value`);
+    assert.equal(item.legacyBase, null, `${item.key} published a filtered legacy base`);
+  }
+});
+check("las tres fuentes SIN filtrar son idénticas con y sin filtro", () => {
+  // This pins the assumption the check above rests on. The day somebody filters
+  // `sourceUnits`, this fails instead of the comment quietly becoming false.
+  assert.equal(FILTERED_LEGACY.view.sourceUnits, LEGACY.view.sourceUnits);
+  assert.deepEqual(FILTERED_LEGACY.filterOptions, LEGACY.filterOptions);
+  assert.deepEqual(FILTERED_LEGACY.pivotAllowlist, LEGACY.pivotAllowlist);
+});
+check("una selección SUPRIMIDA no se reporta como ausencia del legado", () => {
+  // Under five people the legacy builder empties `tiles` and `averages`
+  // entirely. Unguarded, the comparator read that as "legacy absent" and set
+  // `agrees: canonicalNps === null` — a DISAGREEMENT manufactured out of a
+  // disclosure rule.
+  const twoPeople = legacyRows.filter((row) => ["secret-person-1", "secret-person-3"].includes(row.respondent_id));
+  const suppressed = buildStudyDashboard(twoPeople, [], legacyStages, NORTE, {});
+  assert.equal(suppressed.view.selectionVisibility, "suppressed");
+  assert.deepEqual(suppressed.view.tiles, []);
+  assert.deepEqual(suppressed.view.averages, []);
+  const findings = compareLegacyWithCanonical(suppressed, CANONICAL, { filtered: true });
+  for (const key of ["recommendation.nps.combinado.value", "renewal.cri.value"]) {
+    const item = findingAt(findings, key);
+    assert.equal(item.agrees, null, key);
+    assert.equal(item.mismatch, "filter_scope", key);
+  }
+  assert.equal(findings.filter((entry) => entry.agrees === false).length, 0);
+  // And the suppression flag itself — which under a filter says "this segment
+  // has fewer than five people" — carries no number.
+  const disclosure = findingAt(findings, "disclosure.small_sample_suppression");
+  assert.equal(disclosure.legacyValue, null);
+  assert.equal(disclosure.noteCode, "legacy_value_withheld_under_filter");
+});
+check("VARIOS filtros se describen por su número, y refutan lo mismo", () => {
+  const multiRows = [
+    ...Array.from({ length: 12 }, (_, index) => ({
+      respondent_id: `secret-person-${index + 1}`,
+      metric_key: "nps",
+      value: index < 8 ? 10 : 3,
+      esfera: index % 2 === 0 ? "Norte" : "Sur",
+      generacion: index < 6 ? "Alfa" : "Beta",
+    })),
+    ...Array.from({ length: 12 }, (_, index) => ({
+      respondent_id: `secret-person-${index + 1}`,
+      metric_key: "cri",
+      value: 25,
+      esfera: index % 2 === 0 ? "Norte" : "Sur",
+      generacion: index < 6 ? "Alfa" : "Beta",
+    })),
+  ];
+  const filters = { esfera: "Norte", generacion: "Alfa" };
+  const legacy = buildStudyDashboard(multiRows, [], legacyStages, filters, {});
+  const scope = describeFilterScope(filters);
+  assert.deepEqual(scope, { filtered: true, dimensionKeys: ["esfera", "generacion"], dimensionCount: 2 });
+  const findings = compareLegacyWithCanonical(legacy, CANONICAL, { filtered: scope.filtered });
+  assert.deepEqual(
+    findings.filter((entry) => entry.agrees !== null).map((entry) => entry.key),
+    ["population.measured"],
+  );
+  assert.doesNotMatch(JSON.stringify(scope), /Norte|Alfa/);
+});
+check("SIN filtro, las seis comparables siguen siendo seis y siguen de acuerdo", () => {
+  // The compatibility headline. Phase 3.1 corrected the filtered path and had
+  // to leave this one untouched.
+  const findings = unfilteredFindings();
+  const compared = findings.filter((entry) => entry.agrees !== null);
+  assert.deepEqual(compared.map((entry) => entry.key).sort(), [
+    "population.measured",
+    "population.selected",
+    "recommendation.nps.combinado.base",
+    "recommendation.nps.combinado.value",
+    "renewal.cri.base",
+    "renewal.cri.value",
+  ]);
+  assert.equal(compared.filter((entry) => entry.agrees).length, 6);
+  assert.equal(compared.filter((entry) => !entry.agrees).length, 0);
+});
+check("el CONJUNTO de hallazgos no depende del filtro", () => {
+  assert.deepEqual(
+    filteredFindings().map((entry) => entry.key),
+    unfilteredFindings().map((entry) => entry.key),
+  );
+});
+check("cada clave, sección, regla y código pertenece a su lista cerrada", () => {
+  for (const findings of [filteredFindings(), unfilteredFindings()]) {
+    for (const item of findings) {
+      assert.ok(SHADOW_FINDING_KEYS.includes(item.key), `key ${item.key}`);
+      assert.ok(SHADOW_SECTIONS.includes(item.section), `section ${item.section}`);
+      assert.ok(COMPARISON_RULES.includes(item.rule), `rule ${item.rule}`);
+      if (item.noteCode !== null) assert.ok(NOTE_CODES.includes(item.noteCode), `note ${item.noteCode}`);
+    }
+  }
+});
+check("una regla de redondeo fuera del contrato es un rechazo, no una cadena nueva", () => {
+  assert.equal(decimalsRule(1), "decimals:1");
+  assert.equal(decimalsRule(2), "decimals:2");
+  for (const bad of [7, -1, 1.5, Number.NaN]) {
+    assert.throws(() => decimalsRule(bad), RangeError, `decimals ${bad} was accepted`);
+  }
+});
+
+// ===========================================================================
+console.log("\n[10] El presupuesto CANCELA, no sólo deja de esperar");
+
+await checkAsync("un lector agotado OBSERVA la cancelación", async () => {
+  // This reader rejects from INSIDE its abort listener, which fires
+  // synchronously. Phase 3.1's first draft classified on the race's winner, and
+  // that ordering made a budget expiry report `canonical_transport_error`. A
+  // real `fetch` rejects asynchronously, so the defect would have hidden until
+  // somebody needed the number.
+  let observed = null;
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+    loadCanonical: (_scope, options) =>
+      new Promise((_resolve, reject) => {
+        observed = options.signal;
+        options.signal.addEventListener("abort", () => reject(new Error("aborted by the caller")));
+      }),
+  });
+  assert.equal(shadow.status, "canonical_timeout");
+  assert.ok(observed, "the reader was never given a signal");
+  assert.equal(observed.aborted, true, "the reader was not cancelled");
+});
+
+await checkAsync("la cancelación usa el motivo de la PLATAFORMA, no uno propio", async () => {
+  // ⚠️ THE EXPENSIVE ONE. `@supabase/postgrest-js` decides whether a rejected
+  // `fetch` was cancelled by looking at the rejection's identity:
+  //   fetchError?.name === "AbortError" || fetchError?.code === "ABORT_ERR"
+  // A CUSTOM abort reason replaces the platform's `AbortError`, is not
+  // recognised, and the request is then treated as a network failure — and
+  // because a canonical read is a GET, it is RETRIED three times with backoff.
+  // The budget would issue three MORE requests after the caller gave up.
+  //
+  // This is not hypothetical: `npm run canonical-shadow-runtime-rehearsal`
+  // measured exactly three extra requests against the hosted project while the
+  // controller aborted with a custom reason. Nothing in this codebase reads
+  // `signal.reason`, so the platform default costs nothing and is the only one
+  // PostgREST honours.
+  let reason = "no abort was observed";
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+    loadCanonical: (_scope, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          reason = options.signal.reason;
+          reject(new Error("aborted"));
+        });
+      }),
+  });
+  assert.equal(shadow.status, "canonical_timeout");
+  assert.equal(reason?.name, "AbortError", `PostgREST would retry: the abort reason was ${reason?.name ?? reason}`);
+});
+
+await checkAsync("el lector recibe una señal VIVA mientras corre", async () => {
+  let duringRun = null;
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: ENABLED,
+    loadCanonical: async (_scope, options) => {
+      duringRun = options.signal.aborted;
+      return CANONICAL;
+    },
+  });
+  assert.equal(shadow.status, "compared");
+  assert.equal(duringRun, false, "the reader was handed an already-aborted signal");
+});
+
+await checkAsync("nada sigue leyendo después del vencimiento", async () => {
+  let rounds = 0;
+  let stopped = 0;
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+    loadCanonical: async (_scope, options) => {
+      // A reader that keeps paging until it is told to stop. Without a signal
+      // it would still be counting long after the page had answered.
+      for (;;) {
+        if (options.signal.aborted) {
+          stopped = rounds;
+          throw new Error("aborted");
+        }
+        rounds += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    },
+  });
+  assert.equal(shadow.status, "canonical_timeout");
+  const atReturn = rounds;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.ok(stopped > 0, "the reader never observed the abort");
+  assert.equal(rounds, atReturn, `the reader ran ${rounds - atReturn} more rounds after the budget expired`);
+});
+
+await checkAsync("un rechazo TARDÍO no queda huérfano", async () => {
+  const orphans = [];
+  const onUnhandled = (reason) => orphans.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    let failLate = null;
+    const shadow = await runShadowComparison({
+      scope: SCOPE,
+      legacy: LEGACY,
+      filters: {},
+      env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+      loadCanonical: () =>
+        new Promise((_resolve, reject) => {
+          failLate = reject;
+        }),
+    });
+    assert.equal(shadow.status, "canonical_timeout");
+    failLate(new Error('late failure quoting "Juan Pérez" and secret-person-1'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.deepEqual(orphans, [], "a late rejection escaped as an unhandled rejection");
+    assert.equal(JSON.stringify(LEGACY), LEGACY_SERIALIZED);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+await checkAsync("una resolución que llega DENTRO del aborto no se usa", async () => {
+  // THE HARD CASE, and the one a race-decided verdict fails. `abort()`
+  // dispatches its listeners synchronously, so this reader settles its promise
+  // FULFILLED before the timer's `reject` settles the timeout — and
+  // `Promise.race` hands back the document. An implementation that read the
+  // verdict off the race would report `compared`, using an answer that arrived
+  // after the budget: the worse of the two directions, because it is a wrong
+  // number rather than a wrong status.
+  //
+  // The reader returns a RAW promise on purpose. An `async` function's promise
+  // cannot settle inside the abort dispatch, so the shipped reader in
+  // `shadow/server.ts` is immune — which is exactly why this needs its own
+  // fixture rather than relying on the production shape.
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+    loadCanonical: (_scope, options) =>
+      new Promise((resolve) => {
+        options.signal.addEventListener("abort", () => resolve(CANONICAL));
+      }),
+  });
+  assert.equal(shadow.status, "canonical_timeout", "a document that arrived after the budget was used");
+  assert.deepEqual(shadow.findings, []);
+  assert.equal(shadow.counts.compared, 0);
+});
+await checkAsync("y un rechazo que llega DENTRO del aborto sigue siendo un vencimiento", async () => {
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+    loadCanonical: (_scope, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new Error("aborted, quoting secret-person-1")));
+      }),
+  });
+  assert.equal(shadow.status, "canonical_timeout", "a budget expiry was reported as a transport error");
+  assert.doesNotMatch(JSON.stringify(shadow), /secret-person/);
+});
+await checkAsync("una resolución TARDÍA se descarta, no se usa", async () => {
+  let resolveLate = null;
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+    loadCanonical: () => new Promise((resolve) => { resolveLate = resolve; }),
+  });
+  assert.equal(shadow.status, "canonical_timeout");
+  assert.deepEqual(shadow.findings, []);
+  resolveLate(CANONICAL);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(shadow.status, "canonical_timeout", "the answer arrived late and was used anyway");
+});
+
+await checkAsync("un lector que falla al ARRANCAR no deja el temporizador armado", async () => {
+  const orphans = [];
+  const onUnhandled = (reason) => orphans.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const shadow = await runShadowComparison({
+      scope: SCOPE,
+      legacy: LEGACY,
+      filters: {},
+      env: { ...ENABLED, [ENV_SHADOW_BUDGET_MS]: "40" },
+      loadCanonical: () => {
+        throw new Error("synchronous failure naming secret-person-1");
+      },
+    });
+    assert.equal(shadow.status, "canonical_transport_error");
+    assert.doesNotMatch(JSON.stringify(shadow), /secret-person|synchronous failure/);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(orphans, [], "the budget timer rejected with nobody listening");
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+await checkAsync("el orquestador deriva `filtered` de los FILTROS, no de un booleano suelto", async () => {
+  // Every other filtered check calls the comparator directly and hands it the
+  // boolean. That leaves the seam — `describeFilterScope(filters).filtered`
+  // reaching `compareLegacyWithCanonical` — unasserted, and hard-coding
+  // `{ filtered: false }` in `orchestrate.ts` would leave them all green.
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: FILTERED_LEGACY,
+    filters: NORTE,
+    env: ENABLED,
+    loadCanonical: async () => CANONICAL,
+  });
+  assert.equal(shadow.status, "compared");
+  assert.deepEqual(shadow.filterScope, { filtered: true, dimensionKeys: ["esfera"], dimensionCount: 1 });
+  assert.deepEqual(
+    shadow.findings.filter((entry) => entry.agrees !== null).map((entry) => entry.key),
+    ["population.measured"],
+    "the orchestrator compared something the filter touches",
+  );
+  assert.equal(shadow.counts.disagreed, 0);
+  assert.equal(shadow.counts.compared, 1);
+});
+await checkAsync("y sin filtros el MISMO camino sigue comparando seis", async () => {
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: {},
+    env: ENABLED,
+    loadCanonical: async () => CANONICAL,
+  });
+  assert.equal(shadow.counts.compared, 6);
+  assert.equal(shadow.counts.agreed, 6);
+  assert.equal(shadow.counts.disagreed, 0);
+  assert.deepEqual(shadow.filterScope, { filtered: false, dimensionKeys: [], dimensionCount: 0 });
+});
+await checkAsync("un valor de filtro vacío NO suprime una comparación que el legado sí hizo", async () => {
+  // `?f.esfera=` produces `{ esfera: "" }`. `calc/filters.ts` treats it as
+  // inactive, so the legacy payload is study-wide; if the shadow called it
+  // filtered it would withhold six comparisons the legacy side really did make.
+  const shadow = await runShadowComparison({
+    scope: SCOPE,
+    legacy: LEGACY,
+    filters: { esfera: "" },
+    env: ENABLED,
+    loadCanonical: async () => CANONICAL,
+  });
+  assert.equal(shadow.filterScope.filtered, false);
+  assert.equal(shadow.counts.compared, 6);
+  assert.equal(shadow.counts.agreed, 6);
+});
+
+// ===========================================================================
+console.log("\n[11] El registro de EJECUCIÓN sólo lleva códigos");
+
+const hostileDiagnostics = () => ({
+  status: "compared",
+  tenantId: TENANT,
+  studyId: STUDY,
+  filterScope: { filtered: true, dimensionKeys: ["esfera", "Juan Pérez"], dimensionCount: 2 },
+  contractVersion: "2.0.0",
+  planFingerprint: `sha256:${"a".repeat(64)}`,
+  packageIdempotencyKey: `sha256:${"b".repeat(64)}`,
+  budgetMs: 1500,
+  elapsedMs: 12,
+  counts: { compared: 6, agreed: 6, disagreed: 0, classified: 18 },
+  findings: [
+    {
+      key: "renewal.cri.value",
+      section: "renewal",
+      classification: "equivalent_after_named_transformation",
+      agrees: true,
+      mismatch: null,
+      legacyValue: 33.04,
+      canonicalValue: 33,
+      legacyBase: 3,
+      canonicalBase: 3,
+      rule: "decimals:1",
+      noteCode: "cri_precision_differs",
+    },
+  ],
+});
+
+check("una cifra no tiene por dónde entrar", () => {
+  const record = runtimeShadowRecord(hostileDiagnostics());
+  const serialized = JSON.stringify(record);
+  for (const forbidden of ["33.04", "legacyValue", "canonicalValue", "legacyBase", "canonicalBase"]) {
+    assert.ok(!serialized.includes(forbidden), `the record carried ${forbidden}`);
+  }
+  assert.equal(record.findings.length, 1);
+  assert.deepEqual(Object.keys(record.findings[0]).sort(), [
+    "agrees", "classification", "key", "mismatch", "noteCode", "rule", "section",
+  ]);
+  // A base of three people is exactly the case the disclosure rule exists for,
+  // and it is absent because NO base is ever recorded — not because three was
+  // judged too small by something that has to be right every time.
+  assert.ok(!serialized.includes('"3"') && !/[^0-9]3[^0-9]/.test(serialized.replace(/"[a-zA-Z]+":/g, "")));
+});
+
+check("ni una clave de dimensión, ni un valor de segmento", () => {
+  const record = runtimeShadowRecord(hostileDiagnostics());
+  assert.equal(record.filtered, true);
+  assert.equal(record.filterDimensionCount, 2);
+  assert.equal(record.filterDimensionKeys, undefined, "the record carries dimension keys");
+  assert.doesNotMatch(JSON.stringify(record), /esfera|Juan|Norte/);
+});
+
+check("una cadena arbitraria en un campo cerrado se DESCARTA, no se guarda", () => {
+  const hostile = hostileDiagnostics();
+  hostile.findings = [
+    { ...hostile.findings[0], noteCode: 'duplicate key value violates unique constraint "Juan Pérez"' },
+    { ...hostile.findings[0], key: "legacy.metric_keys.csat_atencion_al_socio", section: "renewal" },
+    { ...hostile.findings[0], rule: "decimals:99" },
+    { ...hostile.findings[0], classification: "totally_made_up" },
+    { ...hostile.findings[0], mismatch: "secret-person-1" },
+  ];
+  const record = runtimeShadowRecord(hostile);
+  const serialized = JSON.stringify(record);
+  assert.doesNotMatch(serialized, /Juan|unique constraint|csat_atencion|decimals:99|totally_made_up|secret-person/);
+  // A finding whose KEY, SECTION, CLASSIFICATION or RULE is not in the contract
+  // is dropped WHOLE. A key nobody proved was safe is, by definition, not safe.
+  assert.equal(record.findings.length, 2, JSON.stringify(record.findings));
+  assert.equal(record.findings[0].noteCode, null, "an arbitrary note code survived");
+  assert.equal(record.findings[1].mismatch, null, "an arbitrary mismatch survived");
+});
+
+check("un identificador que no es un uuid, ni una huella que no es un sha256, entran", () => {
+  const hostile = hostileDiagnostics();
+  hostile.tenantId = "BNI Cuicuilco";
+  hostile.studyId = "La voz de las y los Nets";
+  hostile.planFingerprint = "el plan que aprobó Juan";
+  hostile.packageIdempotencyKey = "secret-person-1";
+  hostile.contractVersion = "la versión de siempre";
+  hostile.status = "everything_is_fine";
+  const record = runtimeShadowRecord(hostile);
+  assert.doesNotMatch(JSON.stringify(record), /Cuicuilco|Juan|Nets|secret-person|everything_is_fine|la versión/);
+  assert.equal(record.tenantId, "");
+  assert.equal(record.planFingerprint, null);
+  assert.equal(record.contractVersion, null);
+  assert.ok(SHADOW_STATUSES.includes(record.status));
+});
+
+check("un total que no es un entero no negativo se vuelve cero", () => {
+  const hostile = hostileDiagnostics();
+  hostile.counts = { compared: -4, agreed: 1.5, disagreed: Number.NaN, classified: "muchos" };
+  hostile.elapsedMs = -1;
+  const record = runtimeShadowRecord(hostile);
+  assert.deepEqual(record.counts, { compared: 0, agreed: 0, disagreed: 0, classified: 0 });
+  assert.equal(record.elapsedMs, 0);
+});
+
+check("un diagnóstico REAL pasa entero y sigue sin llevar cifras", () => {
+  const findings = unfilteredFindings();
+  const record = runtimeShadowRecord({
+    status: "compared",
+    tenantId: TENANT,
+    studyId: STUDY,
+    filterScope: describeFilterScope({}),
+    contractVersion: "2.0.0",
+    planFingerprint: `sha256:${"a".repeat(64)}`,
+    packageIdempotencyKey: `sha256:${"b".repeat(64)}`,
+    budgetMs: 1500,
+    elapsedMs: 7,
+    findings,
+    counts: { compared: 6, agreed: 6, disagreed: 0, classified: findings.length - 6 },
+  });
+  assert.equal(record.findings.length, findings.length, "a real finding was dropped by the whitelist");
+  assert.equal(record.counts.agreed, 6);
+  const serialized = JSON.stringify(record);
+  for (const forbidden of ["secret-person", "Norte", "Sur", "acompanamiento", "legacyValue", "canonicalValue"]) {
+    assert.ok(!serialized.includes(forbidden), forbidden);
+  }
+});
 
 console.log("\n" + "=".repeat(78));
 console.log(`RESUMEN: ${passed + failed} comprobaciones, ${passed} aprobadas, ${failed} falladas.`);
