@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { StudioStudyWorkspace } from "@/lib/studio/study-workspace";
 import {
   studioStudy,
+  studioStudyConstruction,
   studioStudyData,
   studioStudyIndicators,
   studioStudyInterpretation,
@@ -26,6 +27,7 @@ export type StudyTabId =
   | "indicadores"
   | "cualitativo"
   | "interpretacion"
+  | "construccion"
   | "vista-cliente"
   | "publicar";
 
@@ -82,6 +84,20 @@ export function studySteps(workspace: StudioStudyWorkspace): Step[] {
       label: "Lectura del equipo",
       href: studioStudyInterpretation(study.id),
       state: "redactar y revisar",
+      tone: "quiet",
+    },
+    {
+      // Between the team's reading and the client's view, because composing the
+      // presentation is what turns one into the other.
+      //
+      // The state is a real count, never a stored progress flag: how many
+      // moments the recorrido has is what this study can currently be composed
+      // over. Unit 6B.1 saves nothing, so there is no draft to count and the
+      // step deliberately does not pretend there is.
+      id: "construccion",
+      label: "Construcción",
+      href: studioStudyConstruction(study.id),
+      state: study.stages.length === 0 ? "sin recorrido todavía" : "sesión sin guardar",
       tone: "quiet",
     },
     {

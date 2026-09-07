@@ -29,6 +29,15 @@ export const studioStudyData = (studyId: string) => `/studio/e/${studyId}/datos`
 export const studioStudyIndicators = (studyId: string) => `/studio/e/${studyId}/indicadores`;
 export const studioStudyQualitative = (studyId: string) => `/studio/e/${studyId}/cualitativo`;
 export const studioStudyInterpretation = (studyId: string) => `/studio/e/${studyId}/interpretacion`;
+/**
+ * The canonical composer (Unit 6B.1).
+ *
+ * Declared AFTER `studioStudyInterpretation` and BEFORE `studioStudyPreview`
+ * on purpose: `scripts/p8-final-acceptance-test.mjs` matches this file against
+ * an order-sensitive pattern requiring interpretation → preview → publish, and
+ * an addition between two of them keeps that order rather than breaking it.
+ */
+export const studioStudyConstruction = (studyId: string) => `/studio/e/${studyId}/construccion`;
 export const studioStudyPreview = (studyId: string) => `/studio/e/${studyId}/vista-cliente`;
 export const studioStudyPublish = (studyId: string) => `/studio/e/${studyId}/publicar`;
 

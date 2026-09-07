@@ -1948,8 +1948,38 @@ const SERVER_ONLY_MODULES = [
   "src/lib/presentation/persistence.ts",
   "src/lib/presentation/server.ts",
   "src/lib/presentation/blueprints/cuicuilco-approved.ts",
+  // Unit 6B.1's starting layout for a study no registered blueprint fits. It
+  // takes a REGISTRY, and a registry carries the address map and the database
+  // scope, so it belongs on this side of the line with the approved one.
+  "src/lib/presentation/blueprints/generic-starting.ts",
 ];
 
+/**
+ * THE ONE AUTHENTICATED STUDIO DOOR — Unit 6B.1.
+ *
+ * This walk had no allowlist at all: a client component, an HTTP route, a
+ * server action and a PAGE were all refused every module above. The composer
+ * page and its explicit preview action have to reach the resolver, because
+ * resolving needs the registry's address map and an address may not cross to a
+ * browser — so the resolution happens on the server or it happens in the wrong
+ * place.
+ *
+ * Exactly two entry points are exempted, both named, and each is required to
+ * reach the server half THROUGH its declared loader rather than by importing
+ * the resolver itself. The client and route rows below are NOT relaxed: a
+ * `"use client"` module and a `route.ts` still reach none of these modules by
+ * any path, which is what keeps an address off the browser.
+ */
+const APPROVED_PRESENTATION_DOORS = [
+  {
+    entry: "src/app/studio/e/[studyId]/construccion/page.tsx",
+    loader: "src/lib/studio/presentation-workspace.ts",
+  },
+  {
+    entry: "src/app/studio/e/[studyId]/construccion/actions.ts",
+    loader: "src/lib/studio/presentation-workspace.ts",
+  },
+];
 const appSourceFiles = [];
 const collectAppSources = (dir) => {
   let entries = [];
@@ -2026,14 +2056,19 @@ check(appSourceFiles.length > 50, `la caminata parte de ${appSourceFiles.length}
 check(clientRoots.length >= 10, `incluidos ${clientRoots.length} componentes de cliente, así que no pasa por vacío`);
 check(routeRoots.length >= 2 && pageRoots.length >= 5, `${routeRoots.length} rutas y ${pageRoots.length} páginas`);
 
-for (const [label, roots] of [
-  ["un componente de cliente", clientRoots],
-  ["una ruta HTTP", routeRoots],
-  ["una acción de servidor", actionRoots],
-  ["una página", pageRoots],
+const doorFor = (root) =>
+  APPROVED_PRESENTATION_DOORS.find((door) => door.entry === normalisePath(root)) ?? null;
+
+for (const [label, roots, exemptible] of [
+  ["un componente de cliente", clientRoots, false],
+  ["una ruta HTTP", routeRoots, false],
+  ["una acción de servidor", actionRoots, true],
+  ["una página", pageRoots, true],
 ]) {
   const leaks = [];
   for (const root of roots) {
+    const door = exemptible ? doorFor(root) : null;
+    if (door) continue;
     const reachable = reachableFrom(root);
     for (const forbidden of SERVER_ONLY_MODULES) {
       if (reachable.includes(forbidden)) leaks.push(`${normalisePath(root)} -> ${forbidden}`);
@@ -2041,10 +2076,59 @@ for (const [label, roots] of [
   }
   check(
     leaks.length === 0,
-    `ningún(a) ${label} alcanza la mitad de servidor de la presentación${leaks.length ? `: ${leaks.join(", ")}` : ""}`,
+    `ningún(a) ${label} alcanza la mitad de servidor de la presentación${
+      exemptible ? ", salvo la puerta aprobada" : ""
+    }${leaks.length ? `: ${leaks.join(", ")}` : ""}`,
   );
 }
 
+// THE EXEMPTION IS NOT A HOLE UNLESS IT IS UNCHECKED.
+//
+// Each approved door must actually exist, must actually reach the server half —
+// an exemption for something that stopped needing one is an exemption nobody
+// would notice going stale — and must arrive there through its DECLARED loader
+// rather than by importing `resolve.ts` directly. And nothing outside the table
+// may be exempt, which is asserted by the rows above rather than assumed here.
+for (const door of APPROVED_PRESENTATION_DOORS) {
+  const root = [...actionRoots, ...pageRoots].find((candidate) => normalisePath(candidate) === door.entry);
+  if (!root) {
+    bad(`la puerta aprobada ${door.entry} no existe como página ni como acción`);
+    continue;
+  }
+  const reachable = reachableFrom(root);
+  const reaches = SERVER_ONLY_MODULES.some((module) => reachable.includes(module));
+  check(reaches, `la puerta aprobada ${door.entry} sí alcanza la mitad de servidor, así que su excepción no sobra`);
+  check(
+    reachable.includes(door.loader),
+    `y lo hace a través de su cargador declarado, ${door.loader}`,
+  );
+}
+// THE CONTRACT'S VOCABULARY IS NOT THE CANONICAL RESULTS MODEL — Unit 6B.1.
+//
+// This check used to refuse `src/lib/results/` ENTIRELY to a client component,
+// and it stayed true for as long as no client component had a reason to name a
+// render model's type. Unit 6B.1 builds one: a render-only React library whose
+// whole safety argument is that it receives a `PresentationRenderModel` and
+// nothing else — and a component that receives one has to be able to say so.
+//
+// `PresentationRenderModel` is reached through the client-safe barrel, and that
+// barrel arrives at `src/lib/results/contract.ts`, because `RenderValue.unit`
+// IS a `ResultUnit` and `RenderBand.semanticColor` IS a `SemanticColor`. The
+// alternative was to re-declare those unions inside the presentation layer and
+// have a gate compare the two texts. That trades a real dependency for a
+// duplicated one plus a gate that goes red when somebody reorders a union.
+//
+// So the rule is narrowed to what it was actually protecting. `contract.ts`
+// imports NOTHING — it is a leaf — and exports one version string and two empty
+// -record factories beside 44 type declarations. There is no formula in it, no
+// metric, no spec, no transport, and nothing a browser could compute a business
+// result with. Everything that COULD — `build.ts`, `spec.ts`, `metrics.ts`, the
+// barrel, and every other module under `src/lib/results/` — stays as forbidden
+// as it was, and `src/lib/calc/` was never reachable and still is not.
+//
+// Two assertions replace the one, and together they are stricter than it was:
+// the vocabulary is the ONLY module of that layer a client may reach, and it
+// may only be reached BY TYPE, so nothing of it survives into a bundle.
 const RESULTS_VOCABULARY = "src/lib/results/contract.ts";
 const clientReachingResults = clientRoots.filter((root) =>
   reachableFrom(root).some((path) => path.startsWith("src/lib/results/") && path !== RESULTS_VOCABULARY),

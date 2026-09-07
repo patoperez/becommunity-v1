@@ -49,3 +49,14 @@ export {
   APPROVED_ROUTE_IDS,
   buildApprovedCuicuilcoBlueprint,
 } from "./blueprints/cuicuilco-approved";
+
+/**
+ * The starting layout for a study no registered blueprint fits.
+ *
+ * Behind `server-only` with the approved one, for the same reason: it takes a
+ * REGISTRY, and a registry carries the address map and the database scope. What
+ * it returns — an unbound document — is client-safe; what it reads to build one
+ * is not.
+ */
+export { buildGenericStartingBlueprint } from "./blueprints/generic-starting";
+export type { GenericBlueprintOptions } from "./blueprints/generic-starting";

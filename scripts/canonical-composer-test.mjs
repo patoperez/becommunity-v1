@@ -1054,6 +1054,139 @@ if (cloud) {
 
 /* -------------------------------------------------------------------------- */
 
+console.log("\n[21] Lo que cruza al navegador es una proyección, no un filtro");
+// The payload the screen receives, assembled exactly as the loader assembles it.
+const payload = { document: bound, catalog, model, blueprint: { id: "x", label: "y", because: "z" } };
+const payloadText = serializeDeterministic(payload);
+// An ADDRESS is an array position inside the results document. A browser
+// holding one is a browser one step from resolving it.
+check(!/"at"\s*:/.test(payloadText), "ninguna dirección canónica cruza");
+check(!/"addresses"/.test(payloadText), "ni el mapa de direcciones");
+check(!/"source"\s*:/.test(payloadText), "ni el alcance de base de datos del registro");
+const UUID_ANY = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+check(!UUID_ANY.test(payloadText), "ningún UUID — ni inquilino, ni estudio, ni persona");
+check(!/specId|planFingerprint|packageIdempotencyKey|mappingVersion|calculationVersion/.test(payloadText), "ninguna identidad de plan, paquete, especificación ni versión de cálculo");
+check(!/authoredBy|rationale|threshold/.test(payloadText), "ni el autor, la razón o el umbral de una política de muestra");
+// The registry it was projected FROM does carry those, so the absence above is
+// a property of the projection and not of the fixture.
+check(typeof registry.source.specId === "string" && registry.addresses.size > 0, "y el registro del que se proyectó sí los lleva, así que la ausencia significa algo");
+const payloadSource = stripComments(readFileSync(join("src", "lib", "composer", "payload.ts"), "utf8"));
+const declaredFields = (payloadSource.match(/export type ComposerPayload = \{([\s\S]*?)\n\};/) ?? [])[1] ?? "";
+const fieldNames = [...declaredFields.matchAll(/^\s{2}(\w+):/gm)].map((match) => match[1]).sort();
+check(
+  fieldNames.join(",") === "blueprint,catalog,document,model",
+  `el pago declara exactamente cuatro campos y son los nombrados: ${fieldNames.join(", ")}`,
+);
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[22] La ruta autoriza antes de leer, enlaza en el servidor y no escribe nada");
+const PAGE = "src/app/studio/e/[studyId]/construccion/page.tsx";
+const ACTION = "src/app/studio/e/[studyId]/construccion/actions.ts";
+const LOADER = "src/lib/studio/presentation-workspace.ts";
+const read = (path) => {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+};
+const pageSource = read(PAGE);
+const actionSource = read(ACTION);
+const loaderSource = read(LOADER);
+check(pageSource.length > 0 && actionSource.length > 0 && loaderSource.length > 0, "la página, la acción y el cargador existen");
+
+// THE ORDER IS THE ARGUMENT. Not "the gate is called somewhere in the file".
+const gateAt = pageSource.indexOf("await requireInternal()");
+check(gateAt >= 0, "la página llama a requireInternal()");
+for (const reader of ["await params", "loadStudioStudy(", "loadPresentationComposerWorkspace(", "admin."]) {
+  const at = pageSource.indexOf(reader);
+  check(at < 0 || at > gateAt, `y lo hace antes de «${reader}»`);
+}
+check(/z\.string\(\)\.uuid\(\)\.safeParse\(studyId\)/.test(pageSource), "la página valida el identificador del estudio como UUID");
+check(/notFound\(\)/.test(pageSource), "y responde 404 cuando el estudio no existe");
+
+// THE ACTION RE-DOES THE CHECK. It may not trust the page's gate.
+// Comments stripped for the NEGATIVE checks: the action's header explains that
+// it uses `getUser()` and never `getSession()`, and a scan of the raw text would
+// find the sentence and call it the defect it warns against.
+const actionCode = stripComments(actionSource);
+check(/auth\.getUser\(\)/.test(actionCode), "la acción revalida la sesión con getUser()");
+check(!/getSession\(/.test(actionCode), "y nunca con getSession()");
+check(/from\("profiles"\)/.test(actionCode) && /role/.test(actionCode), "lee el rol de la base de datos");
+check(/throw new Error\("Acceso denegado\."\)/.test(actionCode), "y un rol equivocado lanza, no redirige — un redirect desde una acción parece un éxito");
+check(/uuid\.safeParse\(studyId\)/.test(actionCode), "valida el estudio como UUID");
+check(/tenant_id/.test(actionCode), "y recupera el inquilino de la fila, nunca de la petición");
+check(/JSON\.parse\(documentJson\)/.test(actionCode) && /catch/.test(actionCode), "trata el documento como hostil: lo parsea dentro de un try/catch");
+
+// BINDING IS AN ACT, AND IT HAPPENS BEFORE RESOLUTION, ON THE SERVER.
+const loaderCode = stripComments(loaderSource);
+const bindAt = loaderCode.indexOf("bindPresentationDocument(");
+const resolveAt = loaderCode.indexOf("resolvePresentation(");
+check(bindAt >= 0 && resolveAt >= 0, "el cargador enlaza y resuelve");
+check(bindAt < resolveAt, "y enlaza ANTES de resolver, nunca al vuelo dentro de la lectura");
+check(/["']server-only["']/.test(loaderCode), "el cargador lleva la marca server-only");
+check(!/@\/lib\/dashboard|lib\/dashboard/.test(loaderCode), "y no cae al cálculo heredado cuando no hay paquete canónico");
+check(/validatePresentationDocument\(/.test(loaderCode), "valida el documento del navegador contra el esquema estricto antes de mirarlo");
+
+// NOTHING WRITES. Comments are stripped: these files DISCUSS the writes they do
+// not perform, and a scan that could not tell a promise from a call would
+// forbid the promise.
+for (const [label, source] of [["la página", pageSource], ["la acción", actionSource], ["el cargador", loaderSource]]) {
+  const code = stripComments(source);
+  const writers = [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath", "encodePresentationForStorage"].filter((writer) =>
+    code.includes(writer),
+  );
+  check(writers.length === 0, `${label} no escribe nada${writers.length ? `: ${writers.join(", ")}` : ""}`);
+}
+// And the legacy draft is never named, let alone read.
+for (const [label, source] of [["la página", pageSource], ["la acción", actionSource], ["el cargador", loaderSource]]) {
+  const code = stripComments(source);
+  check(
+    !/study_experience_draft|study_experience_revision/.test(code),
+    `${label} no nombra el borrador heredado`,
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[23] La superficie de cliente no puede alcanzar el cargador");
+const WORKSPACE_UI = "src/components/studio/composer/ComposerWorkspace.tsx";
+const uiSource = stripComments(read(WORKSPACE_UI));
+check(uiSource.length > 0, "el taller de composición existe");
+check(/^\s*["']use client["']/m.test(uiSource), "y es un componente de cliente");
+check(
+  !/from\s+["'][^"']*studio\/presentation-workspace["']/.test(uiSource),
+  "no importa el cargador server-only",
+);
+check(
+  !/from\s+["'][^"']*construccion\/actions["']/.test(uiSource),
+  "ni el módulo de la acción — la acción le llega como propiedad desde la página",
+);
+check(/refresh/.test(uiSource), "y recibe la actualización como una función que no sabe qué hay detrás");
+check(
+  !/canonical-source|lib\/results\/(?!contract)|lib\/calc/.test(uiSource),
+  "no alcanza el canónico, los resultados ni el cálculo",
+);
+// SESSION-ONLY, and the screen says so in words rather than in a tooltip.
+check(/nada[\s\S]{0,60}se guarda/i.test(uiSource), "dice que nada se guarda");
+check(/recargas|sales/i.test(uiSource), "que recargar o salir lo pierde");
+check(/cliente no ve/i.test(uiSource), "que el cliente no ve nada de esto");
+check(/no se publica/i.test(uiSource), "y que no se publica nada");
+check(
+  !/localStorage|indexedDB|navigator\.sendBeacon/.test(uiSource),
+  "y no guarda el documento en ningún almacén del navegador",
+);
+// Chrome is a preference; the document is the work. They share no storage.
+const chromeSource = stripComments(read("src/components/studio/composer/chrome.ts"));
+check(/sessionStorage/.test(chromeSource), "el cromo del taller sí recuerda una preferencia");
+check(
+  !/document|pages|blocks/.test(chromeSource.replace(/window\.document/g, "")),
+  "pero no toca el documento: recordar un panel no puede ensuciar la presentación",
+);
+
+/* -------------------------------------------------------------------------- */
+
 function buildDrawableDocument() {
   // One page carrying one of every shape the renderer has to survive, including
   // an editorial slot the contract says nobody has filled yet.

@@ -827,8 +827,64 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
   const componentFiles = walk(join("src", "components"));
   const isCanonical = (path) => /src\/lib\/(canonical-source|ingestion\/canonical-commit|ingestion\/canonical-package)\//.test(path);
   const isShadow = (path) => /src\/lib\/shadow\//.test(path);
-  const APPROVED_LOADER = "src/lib/studies/study-dashboard.ts";
-  const APPROVED_PAGE = "src/app/insights/e/[studyId]/page.tsx";
+  /**
+   * THE DOORS TO THE CANONICAL LAYER, and there are exactly two.
+   *
+   * This was one page and one loader, held in two constants, and the check
+   * below asserted the number 1. Unit 6B.1 adds the SECOND and last door: an
+   * authenticated Studio composer that reads canonical results to resolve a
+   * presentation. Rather than raise a number, the doors are now a TABLE, so
+   * every one of them is named beside the loader it is required to go through
+   * and a third cannot be added by editing a digit.
+   *
+   * `via` is an extra module the chain must also pass through. It is set only
+   * for the insights door, whose whole design is that the canonical layer is
+   * reached through the shadow orchestrator and never directly — a property
+   * that must stay attached to that door alone. The composer door has no
+   * orchestrator: it is not a comparison, it is a read.
+   */
+  const APPROVED_DOORS = [
+    {
+      page: "src/app/insights/e/[studyId]/page.tsx",
+      loader: "src/lib/studies/study-dashboard.ts",
+      via: "src/lib/shadow/server.ts",
+    },
+    {
+      page: "src/app/studio/e/[studyId]/construccion/page.tsx",
+      loader: "src/lib/studio/presentation-workspace.ts",
+      via: null,
+    },
+  ];
+  /**
+   * THE ONE SERVER ACTION THAT MAY REACH IT, and why the class stays closed.
+   *
+   * Every other `"use server"` module in the product is refused the canonical
+   * layer outright, and that rule is kept: what changes is that ONE named file
+   * is exempted, not the class.
+   *
+   * The exemption is forced by the design of the composer and not by
+   * convenience. The explicit preview refresh has to take a document the
+   * browser edited, validate it, read canonical results and resolve it — on the
+   * server, because resolving needs the registry's address map. The only two
+   * ways to be called from a browser are a Server Action and an HTTP route
+   * handler, and route handlers are refused by the check above for stronger
+   * reasons: a route is a public URL surface, an action is not.
+   *
+   * The exempted action re-authorizes with `getUser()`, reads the role from the
+   * database, validates the study id as a UUID, reads the tenant back from the
+   * row rather than taking it from the request, treats the document as hostile,
+   * and writes nothing.
+   */
+  const APPROVED_ACTION = {
+    file: "src/app/studio/e/[studyId]/construccion/actions.ts",
+    loader: "src/lib/studio/presentation-workspace.ts",
+  };
+  // The insights door by name, for the two checks further down that are about
+  // THAT door specifically — that its page binds only the legacy payload, and
+  // that its loader is server-only and mutates nothing. Derived from the table
+  // rather than written twice, so the two can never name different files.
+  const APPROVED_PAGE = APPROVED_DOORS[0].page;
+  const APPROVED_LOADER = APPROVED_DOORS[0].loader;
 
   /**
    * The entry-point classes that must NEVER reach the canonical layer.
@@ -872,7 +928,7 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     }
   });
 
-  check("exactamente UNA página alcanza la capa canónica, y por la puerta aprobada", () => {
+  check("SÓLO las páginas aprobadas alcanzan la capa canónica, y cada una por su puerta", () => {
     const pages = appFiles.filter((path) => /page\.tsx$/.test(path));
     const reaching = [];
     for (const page of pages) {
@@ -880,19 +936,70 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       const leak = [...paths.keys()].find(isCanonical);
       if (leak) reaching.push({ page: page.replace(/\\/g, "/"), path: paths.get(leak) });
     }
-    assert.equal(reaching.length, 1, `pages reaching the canonical layer: ${reaching.map((r) => r.page).join(", ")}`);
-    assert.equal(reaching[0].page, APPROVED_PAGE);
-    const chain = reaching[0].path;
-    assert.ok(chain.includes(APPROVED_LOADER), `the chain skips the approved loader: ${JSON.stringify(chain)}`);
-    assert.ok(chain.includes("src/lib/shadow/server.ts"), `the chain skips the orchestrator: ${JSON.stringify(chain)}`);
+    assert.equal(
+      reaching.length,
+      APPROVED_DOORS.length,
+      `pages reaching the canonical layer: ${reaching.map((r) => r.page).join(", ")}`,
+    );
+    for (const door of APPROVED_DOORS) {
+      const found = reaching.find((entry) => entry.page === door.page);
+      assert.ok(found, `the approved door ${door.page} no longer reaches the canonical layer`);
+      assert.ok(
+        found.path.includes(door.loader),
+        `${door.page} skips its declared loader ${door.loader}: ${JSON.stringify(found.path)}`,
+      );
+      if (door.via) {
+        assert.ok(
+          found.path.includes(door.via),
+          `${door.page} skips ${door.via}: ${JSON.stringify(found.path)}`,
+        );
+      }
+    }
+    // A door that is not in the table is a door nobody approved.
+    for (const entry of reaching) {
+      assert.ok(
+        APPROVED_DOORS.some((door) => door.page === entry.page),
+        `unapproved page reaches the canonical layer: ${entry.page}\n  via ${JSON.stringify(entry.path)}`,
+      );
+    }
+    // The composer door must NOT travel through the shadow orchestrator. Its
+    // read is a read, and borrowing the comparison path would put a diagnostic
+    // in the way of a product surface.
+    const composer = reaching.find((entry) => entry.page === APPROVED_DOORS[1].page);
+    assert.ok(
+      composer && !composer.path.some((step) => isShadow(step)),
+      `the composer door goes through the shadow layer: ${JSON.stringify(composer?.path)}`,
+    );
   });
 
-  check("ninguna ACCIÓN DE SERVIDOR alcanza la capa canónica, por ningún camino", () => {
+  check("SÓLO la acción aprobada alcanza la capa canónica; la clase sigue cerrada", () => {
     assert.ok(serverActionFiles.length >= 5, `only ${serverActionFiles.length} server actions found`);
+    const reaching = [];
     for (const file of serverActionFiles) {
       const paths = reachable(file);
       const leak = [...paths.keys()].find(isCanonical);
-      assert.ok(!leak, `${file} reaches ${leak}\n  via ${JSON.stringify(paths.get(leak))}`);
+      if (leak) reaching.push({ file: file.replace(/\\/g, "/"), path: paths.get(leak) });
+    }
+    assert.equal(
+      reaching.length,
+      1,
+      `server actions reaching the canonical layer: ${reaching.map((r) => r.file).join(", ")}`,
+    );
+    assert.equal(reaching[0].file, APPROVED_ACTION.file);
+    assert.ok(
+      reaching[0].path.includes(APPROVED_ACTION.loader),
+      `the action skips its declared loader: ${JSON.stringify(reaching[0].path)}`,
+    );
+    // And it writes nothing. An action that may read the canonical layer and
+    // could also write one is a different door from the one that was argued for.
+    //
+    // Comments are stripped first. The action's own header LISTS the writes it
+    // does not perform — that is the clearest way to say so to the next reader —
+    // and a scan that could not tell a promise from a call would forbid the
+    // promise. This gate has made that mistake before and records it here.
+    const source = stripComments(readFileSync(APPROVED_ACTION.file, "utf8"));
+    for (const writer of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath"]) {
+      assert.ok(!source.includes(writer), `the approved action performs ${writer}`);
     }
   });
 

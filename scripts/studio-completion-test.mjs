@@ -118,6 +118,17 @@ const STUDIO_ROUTES = [
   "src/app/studio/e/[studyId]/datos/page.tsx",
   "src/app/studio/e/[studyId]/indicadores/page.tsx",
   "src/app/studio/e/[studyId]/cualitativo/page.tsx",
+  // Unit 6B.1.
+  //
+  // NOTE FOR WHOEVER READS THIS NEXT. This list is hand-maintained and has
+  // already fallen behind: `src/app/studio/e/[studyId]/interpretacion/page.tsx`
+  // is missing from it, so the authorization ORDER of the route with the most
+  // authored content in Studio is checked by nothing. Adding it here was tried
+  // and reverted, because the same list drives a second rule — no route may
+  // render a serialized object — and that page uses `JSON.stringify`. Closing
+  // the hole therefore means changing that page, which is not this unit's
+  // change to make. It is recorded rather than quietly left.
+  "src/app/studio/e/[studyId]/construccion/page.tsx",
   "src/app/studio/e/[studyId]/vista-cliente/page.tsx",
   "src/app/studio/e/[studyId]/publicar/page.tsx",
 ];
@@ -127,7 +138,7 @@ for (const route of STUDIO_ROUTES) {
   assert.match(source, /await requireInternal\(\)/, `${route} must run the internal gate`);
   // Nothing may be read before the gate answers.
   const gate = source.indexOf("await requireInternal()");
-  for (const reader of ["admin.from(", "loadStudioStudy(", "loadAttentionBoard("]) {
+  for (const reader of ["admin.from(", "loadStudioStudy(", "loadAttentionBoard(", "loadPresentationComposerWorkspace("]) {
     const at = source.indexOf(reader);
     if (at >= 0) assert.ok(gate < at, `${route} must authorize before ${reader}`);
   }

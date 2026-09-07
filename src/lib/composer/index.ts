@@ -76,6 +76,16 @@ export {
 } from "./ids";
 export type { ComposerIdKind } from "./ids";
 
+export type {
+  BlueprintChoice,
+  ComposerPayload,
+  ComposerUnavailable,
+  ComposerUnavailableReason,
+  ComposerWorkspace,
+  PreviewResult,
+  RefreshPreview,
+} from "./payload";
+
 export {
   IMPLEMENTED_CHART_VARIANTS,
   chartVariantIsImplemented,
