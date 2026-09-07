@@ -405,11 +405,62 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   approved dashboard. A fresh backup was taken and restore-rehearsed first, and
   it is **retained**. Every legacy count is unchanged — Cuicuilco is still
   60 / 3 282 / 31 / 23 confirmed / 8 pending, `draft`. **The canonical tables
-  are populated and UNREAD**: nothing in `src/app` or `src/components` imports
-  either canonical path, a gate in `npm test` fails if one ever does, and the
-  application still computes through `src/lib/dashboard/view.ts`. The read-path
-  switch is separate, later, separately authorized work. Read
-  `docs/CURRENT_STATE.md` §"Unit 5 Phase 2" before describing any of it.
+  are populated and still UNREAD BY THE UI**: the application computes through
+  `src/lib/dashboard/view.ts` and the client receives only the legacy payload.
+  Since Phase 3 ONE server-only page reads them in a disabled-by-default shadow
+  comparison — see the shadow bullet below for the exact door and the gate that
+  keeps it the only one. The read-path switch is still separate, later,
+  separately authorized work. Read `docs/CURRENT_STATE.md` §"Unit 5 Phase 2"
+  and §"Unit 5 Phase 3" before describing any of it.
+- ⓘ **THE SHADOW BOUNDARY EXISTS AND IS OFF: `src/lib/shadow/`.** Unit 5 Phase 3
+  wired the canonical reader to the application's server-side loading boundary
+  in a disabled-by-default shadow mode. The legacy result is still the ONLY
+  thing the UI receives; the canonical document is read beside it, compared
+  semantically, and the comparison is returned to the server and nowhere else.
+  It needs BOTH `BECOMMUNITY_SHADOW_MODE=enabled` (that exact literal — `"true"`,
+  `"1"` and a typo all mean off) and the exact `tenantUuid:studyUuid` pair in
+  `BECOMMUNITY_SHADOW_SCOPES`; with either missing, the canonical adapter is
+  never constructed and never called. **Neither variable is set in any
+  environment, and shadow mode has never been enabled on a hosted deployment.**
+  The canonical read is raced against a wall-clock budget (1500 ms default,
+  5000 ms ceiling) and every failure — timeout, transport, malformed document, a
+  document that throws when read, a comparator that throws — becomes a safe
+  status code; none of them can change, delay past the budget or fail the legacy
+  payload. `npm run test:shadow-boundary` (54 checks, in `npm test`) executes
+  every one of those paths.
+- ⓘ **There is exactly ONE door from the application to the canonical layer, and
+  a graph walk proves it.** `src/app/insights/e/[studyId]/page.tsx` →
+  `src/lib/studies/study-dashboard.ts` (server-only) → `src/lib/shadow/server.ts`
+  (server-only) → `src/lib/canonical-source/server.ts`. The gate walks the
+  transitive import graph from every `"use client"` file and every route and
+  fails if any of them reaches the canonical layer by ANY chain; it fails if more
+  than one page does; and it fails if the chain skips the approved loader or the
+  orchestrator. It also fails if any page, component or route so much as names
+  the diagnostics. Do not add a second door.
+- ⓘ **`docs/LEGACY_CANONICAL_COMPATIBILITY.md` is the compatibility evidence.**
+  Read it before proposing a read-path switch. Three totals live there and must
+  never be added together or substituted for one another: **golden parity
+  531/531** against the approved dashboard; **6 of 6** legacy↔canonical fields
+  that both layers publish and an authority relates without an alias table; and
+  **18** findings classified as canonical-only, legacy-only, presentation- or
+  editorial-configuration-required. Never report the 531 as runtime agreement
+  with the legacy UI.
+- ⓘ **Three legacy defects were FOUND and deliberately NOT fixed** (Phase 3 may
+  not change a calculation). (1) `computeStudyMetrics` detects CSAT with
+  `startsWith("sat")`, and every Cuicuilco key is `csat_*`, so the dashboard
+  publishes **no CSAT tile at all** and shows those 55 columns as plain averages.
+  (2) `computeStageMetric` uses `csatMin = 9` — the 0–10 threshold — against 1–5
+  answers, so every `csat_*` journey stage reports "Satisfechos 0/n" to a client
+  today. (3) The legacy `tdp_` columns hold a per-person 0/100 flag whose average
+  is the canonical `unawareShareOfResponses`, **not** `tdp`; a future mapping that
+  pointed them at `tdp` would compare two different quantities. All three are
+  recorded in `docs/LEGACY_CANONICAL_COMPATIBILITY.md` §7.
+- ⓘ **The legacy dashboard cannot see six of the sixty Cuicuilco people.** It has
+  no roster: it counts whoever left a quantitative answer or a confirmed
+  qualitative observation, which is 54. The canonical contract reports `total 60`
+  beside `measured 54` for exactly that reason. `population.total` is therefore a
+  CANONICAL-ONLY capability, not a mismatch — a missing legacy field is never a
+  canonical defect.
 - ⓘ **Two fingerprints, and they are not the same number.** The plan fingerprint
   covers the whole plan and every derived record id is derived from the package
   key TOGETHER WITH the tenant and the study, so a plan for a different study is

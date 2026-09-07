@@ -119,7 +119,9 @@ produced a wrong claim in this file. Stated precisely:
    families, reconciled three ways, replayed idempotently, and read back through
    the database adapter at 531/531 golden parity. Read Unit 5 Phase 2 below
    before saying anything about what those tables hold. **They are populated
-   and UNREAD**: nothing in the application queries them.
+   and still UNREAD BY THE UI**: the client receives only the legacy payload.
+   Since Unit 5 Phase 3 one server-only page reads them in a
+   disabled-by-default shadow comparison whose result never leaves the server.
 6. **Hosted execution of the canonical migration chain is DONE, and so is the
    real import**; what remains pending is the read-path switch, which needs
    separate explicit authorization.
@@ -1299,7 +1301,140 @@ with the finish time so a replay can no longer overwrite the run it repeats.
 
 #### The application still reads the legacy path
 
-Nothing in `src/app` or `src/components` imports `canonical-source` or
+No file under `src/app` or `src/components` names `canonical-source` or
 `canonical-commit/server`, and a gate in `npm test` fails if one ever does. The
-canonical tables are populated and unread. **The read-path switch is separate,
-later, separately authorized work.**
+canonical tables were populated and completely unread at the end of Phase 2;
+Phase 3, below, opened ONE server-only door to them and proved it is the only
+one. **The client still receives only the legacy payload, and the read-path
+switch is separate, later, separately authorized work.**
+
+### Unit 5 Phase 3 — the server-side shadow boundary (source only, 2026-09-06)
+
+**The canonical reader is now wired to the application's server-side loading
+boundary, in a shadow mode that is OFF and that no environment turns on.** The
+legacy result is still the only thing the client receives; the canonical
+document is read beside it, compared semantically, and the comparison stays on
+the server. **No hosted data was mutated by this phase and no environment
+variable was set anywhere.**
+
+#### The one door, and the gate that keeps it the only one
+
+```
+app/insights/e/[studyId]/page.tsx        binds `legacy` and nothing else
+  └─ lib/studies/study-dashboard.ts      server-only. Legacy payload, then the shadow
+       └─ lib/shadow/server.ts           server-only. The ONLY module naming the canonical read
+            └─ lib/canonical-source/server.ts → adapter.ts → results/build.ts
+```
+
+`buildStudyDashboard` is called with the same five arguments the page used to
+pass it, and its result is returned by reference. The page destructures
+`{ legacy: dashboard }`; the diagnostics have no second binding.
+
+`npm run test:shadow-boundary` (**54 checks, in `npm test`**) walks the
+transitive import graph and fails if: any `"use client"` file reaches the
+canonical layer by any chain; any route does; more than one page does; the one
+page's chain skips the approved loader or the orchestrator; any page, component
+or route so much as names the diagnostics; or any module reachable from the
+shadow entry point can call a mutation.
+
+⚠️ **The existing blanket prohibition was NOT weakened.** The Phase 2 rule —
+"no file under `src/app` or `src/components` contains the string
+`canonical-source`" — is still in `npm run test:canonical-database-source` and
+still passes literally, because the approved page reaches the canonical layer
+through two server-only modules and names neither. The graph walk is an
+ADDITION that proves the stronger property the textual rule only approximates.
+
+#### Disabled by default, twice over
+
+| gate | rule |
+|---|---|
+| `BECOMMUNITY_SHADOW_MODE` | must equal the literal `enabled`. `"true"`, `"1"`, `"yes"`, `"ENABLED"`, `"enabled "` and a typo all mean OFF, and the gate executes each one. |
+| `BECOMMUNITY_SHADOW_SCOPES` | must contain the exact `tenantUuid:studyUuid` pair. A prefix is refused; a malformed entry is dropped, never repaired. |
+
+With either missing the canonical adapter is **never constructed and never
+called** — proved by counting invocations of a fake reader, not by reading the
+source. Neither variable is set in any environment, `.env`, `wrangler.toml` or
+deployment.
+
+#### Failure isolation, each path executed
+
+| path | status returned | legacy payload |
+|---|---|---|
+| flag off | `disabled_by_flag` | untouched |
+| outside the allowlist | `scope_not_allowlisted` | untouched |
+| canonical read exceeds the budget | `canonical_timeout` | untouched |
+| canonical read rejects | `canonical_transport_error` | untouched |
+| canonical document is malformed / null / missing a section | `canonical_malformed` | untouched |
+| the document THROWS when read (a hostile getter) | `canonical_malformed` | untouched |
+| the comparator throws | `comparator_error` | untouched |
+| the comparison disagrees | `compared`, with the disagreement named | untouched |
+
+The budget is a wall-clock race — 1500 ms default, 5000 ms ceiling — and a hung
+read returns in well under a second for a 60 ms budget. A PostgreSQL message
+never reaches a diagnostic: the gate feeds the transport an error containing a
+person's name and asserts the serialized diagnostic does not contain it.
+
+#### Compatibility, measured against the hosted study (read-only)
+
+`npm run canonical-shadow-report`, 2026-09-06, unfiltered, against the imported
+package `sha256:099863e8…`:
+
+**6 comparable fields, 6 agree, 0 disagree, 18 classified.**
+
+| key | legacy | canonical | rule |
+|---|---|---|---|
+| `recommendation.nps.combinado.value` | 30.8 | 30.8 | `decimals:1` |
+| `recommendation.nps.combinado.base` | 39 | 39 | exact |
+| `renewal.cri.value` | 33.04 | 33 | `decimals:1` |
+| `renewal.cri.base` | 28 | 28 | exact |
+| `population.measured` | 54 | 54 | exact |
+| `population.selected` (unfiltered) | 54 | 54 | exact |
+
+Classified and deliberately not compared: `canonical_only` 9, `legacy_only` 4,
+`presentation_configuration_required` 3, `canonical_replacement` 1,
+`editorial_configuration_required` 1. `not_comparable` 0.
+
+**Three totals, and they are never added together**: golden parity **531/531**
+against the approved dashboard; **6 of 6** legacy↔canonical comparable fields;
+**18** classified. The 531 are not runtime agreement with the legacy UI, which
+exposes a fraction of that surface.
+
+#### What the comparison found
+
+- ⚠️ **The legacy dashboard cannot see six of the sixty people.** It has no
+  roster and counts whoever answered: 60 respondent rows, 54 with a quantitative
+  answer, 23 with a confirmed qualitative observation, **6 with neither**. The
+  canonical contract reports `total 60` beside `measured 54`. `population.total`
+  is a canonical-only capability, not a mismatch.
+- ⚠️ **Three legacy defects, recorded and NOT fixed** — this phase may not change
+  a calculation. (1) `computeStudyMetrics` detects CSAT with `startsWith("sat")`,
+  so all 55 `csat_*` Cuicuilco columns are published as plain averages and the
+  dashboard shows **no CSAT tile at all**. (2) `computeStageMetric` applies
+  `csatMin = 9` — the 0–10 threshold — to 1–5 answers, so every `csat_*` journey
+  stage tells a client "Satisfechos 0/n" today. (3) The legacy `tdp_` columns
+  average to the canonical `unawareShareOfResponses`, **not** to `tdp`; a future
+  mapping that pointed them at `tdp` would compare two different quantities.
+- **The 4-source-group / 5-visible-route distinction is presentation.** The
+  workbook carries 55 touchpoints in 4 source groups and the canonical document
+  reports exactly that; the approved dashboard's five routes sit on top. The
+  comparator does not treat it as a group count mismatch.
+
+`docs/LEGACY_CANONICAL_COMPATIBILITY.md` holds the full matrix, the
+canonical-only and legacy-only capabilities, and the blockers a read-path switch
+would have to clear — chiefly a human-approved
+`legacyMetricKey ↔ canonicalItemKey` map, which would unlock 120 further
+comparisons and which this phase deliberately did not invent.
+
+#### Unchanged, and verified so
+
+Hosted golden parity re-run read-only after every change: **534 offered, 531
+executed, 531 passed, 0 failed, 0 skipped, 0 unresolved, 2 not-applicable, 1
+configuration-required** — identical to Phase 2. No migration, policy, route
+response, calculation, expected value, dashboard component, deployment,
+credential or publication state changed. The import job
+`1886a359-f2c9-483a-8b5e-979931841a71` is untouched and every backup is retained.
+
+**Still not done, and not to be described otherwise:** shadow mode has never
+been enabled anywhere, no preview surface exists, no read path was switched, no
+dashboard UI was built, and the comparison has never run inside a request on a
+hosted deployment — only through the internal operator.
