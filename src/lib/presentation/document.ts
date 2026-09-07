@@ -247,6 +247,31 @@ export type PublicationMetadata = {
   preparedNote: string | null;
 };
 
+/**
+ * The identity the STORE requires, and the client never sees.
+ *
+ * `prepare_study_experience_revision` refuses a definition whose
+ * `metadata.studyId` or `metadata.tenantId` disagrees with the study row it is
+ * being written against (`0025…sql`), so a document with no `metadata` could
+ * never be stored at all. It is carried here for that reason and no other.
+ *
+ * These ARE database identifiers, which is exactly why they stop at the
+ * document: the render model has no field for them, `projectPresentationCatalog`
+ * never sees one, and the boundary gate scans the client-reachable output for
+ * them. A stored layout may know which study it belongs to; a browser may not
+ * be told.
+ *
+ * NULL while the document is a TEMPLATE. The approved blueprint is a structure,
+ * not a study, and stamping a tenant and a study id into it would make it
+ * client-specific — the one thing the blueprint must not be. The store boundary
+ * is where a template becomes a document about a particular study.
+ */
+export type PresentationStoreMetadata = {
+  studyId: string;
+  tenantId: string;
+  subtitle: string | null;
+};
+
 /** A whole presentation. */
 export type PresentationDocument = {
   schemaVersion: number;
@@ -254,6 +279,8 @@ export type PresentationDocument = {
   id: string;
   title: string;
   locale: "es-MX";
+  /** Null for a template. Required by the write functions before storage. */
+  metadata: PresentationStoreMetadata | null;
   /** The study-wide default. Blocks may override it; nothing may default it away. */
   samplePolicy: SampleDisplayPolicy;
   methodologyDisclosure: MethodologyDisclosureLevel;
@@ -400,6 +427,13 @@ const documentSchema = z.strictObject({
   id: identifier,
   title: authoredText(160),
   locale: z.literal("es-MX"),
+  metadata: z
+    .strictObject({
+      studyId: z.string().uuid(),
+      tenantId: z.string().uuid(),
+      subtitle: authoredText(200).nullable(),
+    })
+    .nullable(),
   samplePolicy: samplePolicySchema,
   methodologyDisclosure: disclosureSchema,
   pages: z.array(pageSchema).max(64),

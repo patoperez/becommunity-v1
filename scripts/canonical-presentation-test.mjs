@@ -515,9 +515,49 @@ const CANONICAL_KEYS = [
 ];
 const CANONICAL_TABLE_NAMES = CANONICAL_FAMILY_TABLES.map((entry) => entry.table);
 
+/**
+ * TWO NEEDLE CLASSES, because they are not equally safe to search for.
+ *
+ * SNAKE_CASE is unambiguous. Every canonical item, attribute, instrument,
+ * domain, metric and band-scheme key is snake_case, and a slugified label can
+ * never be — `slugifyLabel` turns every non-alphanumeric into a hyphen. So a
+ * snake_case token appearing in client-reachable output came from a key and
+ * nowhere else. Searched as a plain substring.
+ *
+ * KEBAB-CASE is ambiguous, and an earlier version of this scan got it wrong in
+ * both directions. It first missed `journey_stage` hiding inside
+ * `editorial:journey-stage-evidence`; then, converted wholesale, it flagged
+ * `cultura-edl` and `retencion` — which are NOT leaks. «Cultura (EDL)» is the
+ * group's own label, already shown to the client, and `retencion-serie` is an
+ * authored block id in Spanish. A name that a client is already shown cannot
+ * leak by being shown again.
+ *
+ * So the kebab form is searched only for CANONICAL TABLE NAMES, which are the
+ * one class that is never display text and never a label anybody authors.
+ */
+const snakeNeedles = [...CANONICAL_KEYS, ...CANONICAL_TABLE_NAMES].filter((name) => name.includes("_"));
+const kebabTableNeedles = CANONICAL_TABLE_NAMES.filter((name) => name.includes("_")).map((name) =>
+  name.replace(/_/g, "-"),
+);
+const leaks = (haystack) => [
+  ...snakeNeedles.filter((needle) => haystack.includes(needle)),
+  ...kebabTableNeedles.filter((needle) => haystack.includes(needle)),
+];
+
 const handleText = registry.entries.map((entry) => entry.handle).join(" ");
-const leakedKeys = CANONICAL_KEYS.filter((key) => key.includes("_") && handleText.includes(key));
-check(leakedKeys.length === 0, `ningún handle contiene una clave canónica${leakedKeys.length ? `: ${leakedKeys.join(", ")}` : ""}`);
+const leakedKeys = leaks(handleText);
+check(
+  leakedKeys.length === 0,
+  `ningún handle contiene una clave canónica ni un nombre de tabla, tampoco convertido a guiones${leakedKeys.length ? `: ${[...new Set(leakedKeys)].join(", ")}` : ""}`,
+);
+// The kebab-of-a-table check is the one that matters here, and it is the reason
+// the editorial handle is built from a requirement's SECTION and KIND rather
+// than from its contract key: `journey_stage_evidence` would have carried the
+// table name `journey_stage` through slugification untouched.
+check(
+  !handleText.includes("journey-stage"),
+  "y en particular ningún handle editorial arrastra el nombre de tabla `journey_stage`",
+);
 const leakedTables = CANONICAL_TABLE_NAMES.filter((table) => handleText.includes(table));
 check(leakedTables.length === 0, `ningún handle contiene un nombre de tabla${leakedTables.length ? `: ${leakedTables.join(", ")}` : ""}`);
 check(!handleText.includes("_"), "ningún handle lleva un guion bajo, que es la forma de toda clave canónica");
@@ -537,10 +577,8 @@ const catalog = projectPresentationCatalog(registry);
 const catalogText = serializeDeterministic(catalog);
 check(!("addresses" in catalog), "el catálogo no lleva el mapa de direcciones");
 check(!catalogText.includes('"at":'), "el catálogo serializado no contiene una dirección canónica");
-const catalogLeaks = [...CANONICAL_KEYS.filter((key) => key.includes("_")), ...CANONICAL_TABLE_NAMES].filter((needle) =>
-  catalogText.includes(needle),
-);
-check(catalogLeaks.length === 0, `el catálogo no filtra claves ni tablas${catalogLeaks.length ? `: ${catalogLeaks.join(", ")}` : ""}`);
+const catalogLeaks = leaks(catalogText);
+check(catalogLeaks.length === 0, `el catálogo no filtra claves ni tablas${catalogLeaks.length ? `: ${[...new Set(catalogLeaks)].join(", ")}` : ""}`);
 check(!catalogText.includes("SENTINEL-PRIVADO"), "el catálogo no lleva un valor de atributo privado");
 
 /* -------------------------------------------------------------------------- */
@@ -652,9 +690,30 @@ check(
   overHundred?.processUnawareness?.formatted === canonicalTdp.value.formatted,
   "y su texto formateado también, sin volver a redondear",
 );
+// The check must match the claim. An upper bound of 133.3 is satisfied by a
+// value that was clamped DOWN to 100, which is the defect this line exists to
+// catch; what proves the point is that the over-hundred TDP is still over a
+// hundred, and that every route point equals its own canonical figure.
+const canonicalTdpByHandle = new Map(
+  results.journey.touchpoints.map((tp) => {
+    const group = results.journey.groups.find((g) => g.key === tp.groupKey);
+    const withinGroup = group ? group.touchpointKeys.indexOf(tp.key) + 1 : 0;
+    const groupOrdinal = results.journey.groups.findIndex((g) => g.key === tp.groupKey) + 1;
+    return [`journey-touchpoint:g${groupOrdinal}-t${withinGroup}`, tp.tdp];
+  }),
+);
+const rescaled = routePoints.filter((point) => {
+  const canonical = canonicalTdpByHandle.get(point.handle);
+  if (!canonical || canonical.status !== "available") return false;
+  return point.processUnawareness === null || point.processUnawareness.value !== canonical.value.value;
+});
 check(
-  routePoints.every((point) => point.processUnawareness === null || point.processUnawareness.value <= 133.3),
-  "ninguna TDP fue reescalada hacia abajo",
+  rescaled.length === 0,
+  `ninguna TDP fue reescalada: las ${routePoints.length} del recorrido son las del contrato${rescaled.length ? `; difieren ${rescaled.length}` : ""}`,
+);
+check(
+  routePoints.some((point) => (point.processUnawareness?.value ?? 0) > 100),
+  "y al menos una sigue por encima de 100 después de resolver",
 );
 
 /* -------------------------------------------------------------------------- */
@@ -678,10 +737,8 @@ check(
 );
 check(!modelText.includes("schemeKey"), "el modelo de render no lleva la clave del esquema de bandas");
 check(!modelText.includes('"internal"'), "el modelo de render no lleva la procedencia interna");
-const modelLeaks = [...CANONICAL_KEYS.filter((key) => key.includes("_")), ...CANONICAL_TABLE_NAMES].filter((needle) =>
-  modelText.includes(needle),
-);
-check(modelLeaks.length === 0, `el modelo de render no filtra claves ni tablas${modelLeaks.length ? `: ${modelLeaks.join(", ")}` : ""}`);
+const modelLeaks = leaks(modelText);
+check(modelLeaks.length === 0, `el modelo de render no filtra claves ni tablas${modelLeaks.length ? `: ${[...new Set(modelLeaks)].join(", ")}` : ""}`);
 check(!modelText.includes("SENTINEL-PRIVADO"), "el modelo de render no lleva un valor privado");
 check(!modelText.includes('"at":'), "el modelo de render no lleva una dirección canónica");
 for (const id of ["a1", "d1"]) {
@@ -759,6 +816,76 @@ check(
       : ""
   }`,
 );
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[9b] La prosa metodológica describe LA cifra, no la vecina");
+// A touchpoint owns three results with three explanations, and a period owns
+// two. Handing the satisfaction prose to a TDP figure, or the retention prose to
+// an attrition one, captions the wrong quantity — and TDP is the number a reader
+// is likeliest to misread, so it is the worst possible place to be approximate.
+const proseDoc = structuredClone(document);
+const proseSeeds = [
+  { id: "prueba-tdp", binding: `value:touchpoint-tdp-g1-t${OVER_HUNDRED_POSITION}` },
+  { id: "prueba-csat", binding: `value:touchpoint-satisfaction-g1-t${OVER_HUNDRED_POSITION}` },
+  { id: "prueba-desercion", binding: "value:attrition-rate-p-1" },
+  { id: "prueba-retencion", binding: "value:retention-rate-p-1" },
+];
+proseDoc.pages[0].blocks.push(
+  ...proseSeeds.map((entry, index) => ({
+    id: entry.id,
+    kind: "result",
+    binding: entry.binding,
+    chartVariant: "kpi_value",
+    copy: { title: null, description: null, annotation: null },
+    placement: { order: 900 + index, span: { desktop: 3, tablet: 6, mobile: 12 }, responsive: "reflow" },
+    visible: true,
+    connectedFilterPanelIds: [],
+    samplePolicy: null,
+    methodologyDisclosure: "plain_language",
+  })),
+);
+const proseValidated = validatePresentationDocument(JSON.parse(JSON.stringify(proseDoc)));
+check(proseValidated.ok, "un documento que enlaza TDP, CSAT, retención y deserción por separado valida");
+if (proseValidated.ok) {
+  const proseModel = resolvePresentation({ document: proseValidated.value, registry, results });
+  check(proseModel.ok, "y resuelve");
+  if (proseModel.ok) {
+    const proseById = new Map(proseModel.value.pages.flatMap((page) => page.blocks).map((b) => [b.id, b]));
+    const canonicalTouchpoint = results.journey.touchpoints.find(
+      (tp) => tp.key === itemKeyFor(0, OVER_HUNDRED_POSITION),
+    );
+    const period = results.retention.periods[0];
+    eq(
+      "la prosa de la TDP es la de la TDP",
+      proseById.get("prueba-tdp")?.methodology.explanation,
+      canonicalTouchpoint.tdp.provenance.explanation,
+    );
+    eq(
+      "la de la satisfacción es la de la satisfacción",
+      proseById.get("prueba-csat")?.methodology.explanation,
+      canonicalTouchpoint.satisfaction.provenance.explanation,
+    );
+    check(
+      canonicalTouchpoint.tdp.provenance.explanation !== canonicalTouchpoint.satisfaction.provenance.explanation,
+      "y esas dos prosas son distintas, así que lo anterior no es una tautología",
+    );
+    eq(
+      "la prosa de la deserción es la de la deserción",
+      proseById.get("prueba-desercion")?.methodology.explanation,
+      period.attrition.provenance.explanation,
+    );
+    eq(
+      "la de la retención es la de la retención",
+      proseById.get("prueba-retencion")?.methodology.explanation,
+      period.retention.provenance.explanation,
+    );
+    check(
+      period.attrition.provenance.explanation !== period.retention.provenance.explanation,
+      "y también son distintas entre sí",
+    );
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 
@@ -981,6 +1108,104 @@ if (authoredValidated.ok) {
     check(
       untouched.every((block) => block.samplePolicy.mode === "show_all"),
       "y ningún otro bloque cambia: una política de bloque no es una regla del software",
+    );
+  }
+}
+
+console.log("\n[17b] Una política de ocultamiento RETIENE de verdad, y se lleva las partes consigo");
+// The earlier case authored a threshold of 4 over a base of 6, so the
+// withholding branch never executed and nothing proved a value was ever hidden.
+// This one authors a threshold ABOVE the base, at the DOCUMENT level, so the
+// branch runs — and then checks the thing that actually matters: a withheld
+// headline whose own composition is still published is not withheld at all,
+// because a recommendation score is recoverable from its three shares.
+const suppressing = structuredClone(document);
+suppressing.samplePolicy = {
+  mode: "hide_below",
+  threshold: 10000,
+  authoredBy: "Dirección del estudio",
+  rationale: "Caso de prueba: ocultar todo lo que descanse en una base pequeña.",
+};
+const suppressingValidated = validatePresentationDocument(JSON.parse(JSON.stringify(suppressing)));
+check(suppressingValidated.ok, "una política de ocultamiento a nivel de documento valida");
+if (suppressingValidated.ok) {
+  const suppressed = resolvePresentation({ document: suppressingValidated.value, registry, results });
+  check(suppressed.ok, "y resuelve");
+  if (suppressed.ok) {
+    const byId = new Map(suppressed.value.pages.flatMap((page) => page.blocks).map((block) => [block.id, block]));
+    const score = byId.get("recomendacion-puntaje");
+    check(
+      score?.payload.shape === "value" && score.payload.value === null,
+      "el puntaje de recomendación se retiene",
+    );
+    eq("y dice por qué", score?.payload.shape === "value" ? score.payload.absence?.state : null, "withheld_by_policy");
+    const composition = byId.get("recomendacion-composicion");
+    check(
+      composition?.payload.shape === "categories" && composition.payload.categories.length === 0,
+      "su composición se retiene con él: promotores, pasivos y detractores reconstruyen el puntaje por resta",
+    );
+    const riskDistribution = byId.get("riesgo-distribucion");
+    check(
+      riskDistribution?.payload.shape === "categories" && riskDistribution.payload.categories.length === 0,
+      "la distribución de renovación también se retiene",
+    );
+    const terms = byId.get("temas-activos");
+    check(
+      terms?.payload.shape === "terms" && terms.payload.terms.length === 0,
+      "y los términos curados, cuyos conteos son celdas pequeñas",
+    );
+    const routesUnderPolicy = byId.get("recorrido-rutas");
+    const anyPublished =
+      routesUnderPolicy?.payload.shape === "routes" &&
+      routesUnderPolicy.payload.routes.flatMap((route) => route.points).some((point) => point.satisfaction !== null);
+    check(!anyPublished, "ningún punto del recorrido publica su satisfacción bajo esa política");
+  }
+}
+
+console.log("\n[17c] `annotate_below` anota en el servidor, no manda un umbral al navegador");
+const annotating = structuredClone(document);
+annotating.samplePolicy = {
+  mode: "annotate_below",
+  threshold: 10000,
+  note: "Base pequeña: lee esta cifra con cuidado.",
+  authoredBy: "Dirección del estudio",
+  rationale: "Acordado con el cliente.",
+};
+const annotatingValidated = validatePresentationDocument(JSON.parse(JSON.stringify(annotating)));
+check(annotatingValidated.ok, "una política de anotación valida");
+if (annotatingValidated.ok) {
+  const annotated = resolvePresentation({ document: annotatingValidated.value, registry, results });
+  check(annotated.ok, "y resuelve");
+  if (annotated.ok) {
+    const annotatedBlocks = annotated.value.pages.flatMap((page) => page.blocks);
+    const scoreBlock = annotatedBlocks.find((block) => block.id === "recomendacion-puntaje");
+    eq("el bloque afectado lleva la nota ya redactada", scoreBlock?.sampleNote, annotating.samplePolicy.note);
+    check(
+      scoreBlock?.payload.shape === "value" && scoreBlock.payload.value !== null,
+      "y conserva su cifra: anotar no es ocultar",
+    );
+    check(
+      annotatedBlocks.every((block) => block.sampleNote === null || typeof block.sampleNote === "string"),
+      "la nota es una frase terminada, nunca un umbral que el navegador tuviera que comparar",
+    );
+    // The authored policy DOES travel on the block, and that is deliberate: a
+    // Studio surface has to show which policy applied. What must not travel is
+    // a DECISION the browser would have to make. So the claim is not "the
+    // threshold is absent" — it is that the threshold is never load-bearing:
+    // the note is already written or already null, and the comparison that
+    // decided which has already happened on the server.
+    const underThreshold = annotatedBlocks.filter(
+      (block) => block.methodology.base !== null && block.methodology.base.valid < 10000,
+    );
+    check(
+      underThreshold.length > 0 && underThreshold.every((block) => block.sampleNote !== null),
+      `cada bloque bajo el umbral llega ya anotado (${underThreshold.length})`,
+    );
+    check(
+      annotatedBlocks
+        .filter((block) => block.payload.shape === "value")
+        .every((block) => block.payload.shape !== "value" || block.payload.value !== null),
+      "y `annotate_below` no retiene ni una sola cifra",
     );
   }
 }

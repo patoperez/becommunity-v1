@@ -78,6 +78,7 @@ export type {
   PresentationBlock,
   PresentationDocument,
   PresentationPage,
+  PresentationStoreMetadata,
   PublicationMetadata,
   ResponsiveBehavior,
   ResultBlock,

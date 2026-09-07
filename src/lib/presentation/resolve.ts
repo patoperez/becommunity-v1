@@ -59,7 +59,14 @@ import type {
   SampleDisplayPolicy,
 } from "./document";
 import { DEFAULT_SAMPLE_POLICY } from "./document";
-import { failure, issue, success, type PresentationIssue, type PresentationOutcome } from "./errors";
+import {
+  PresentationError,
+  failure,
+  issue,
+  success,
+  type PresentationIssue,
+  type PresentationOutcome,
+} from "./errors";
 import { handleFacet, type PresentationHandle } from "./handles";
 import type { CanonicalAddress, CanonicalPresentationRegistry, RegistryEntry, ResponseContext } from "./registry";
 import type {
@@ -160,24 +167,47 @@ function readMetric(result: MetricResult): { value: RenderValue | null; absence:
  * — the default — returns the value untouched, which is why the default can
  * never quietly withhold anything.
  */
+function policyWithholds(policy: SampleDisplayPolicy, base: ResponseContext | null): boolean {
+  return policy.mode === "hide_below" && base !== null && base.valid < policy.threshold;
+}
+
+function withheldAbsence(policy: SampleDisplayPolicy): RenderAbsence {
+  if (policy.mode !== "hide_below") {
+    throw new PresentationError("malformed_document", "sólo una política de ocultamiento retiene un valor.");
+  }
+  return {
+    state: "withheld_by_policy",
+    threshold: policy.threshold,
+    authoredBy: policy.authoredBy,
+    rationale: policy.rationale,
+  };
+}
+
+/**
+ * The caption an `annotate_below` policy asks for, when the base is under its
+ * threshold.
+ *
+ * `annotate_below` was authored, validated, stored and shipped, and until now
+ * the resolver ignored it — which pushed the threshold comparison into the
+ * browser, where it would have been a calculation this layer forbids. The
+ * comparison happens here, on the server, and what crosses the boundary is the
+ * finished sentence.
+ */
+function sampleNoteFor(policy: SampleDisplayPolicy, base: ResponseContext | null): string | null {
+  if (policy.mode !== "annotate_below") return null;
+  if (base === null || base.valid >= policy.threshold) return null;
+  return policy.note;
+}
+
 function applySamplePolicy(
   policy: SampleDisplayPolicy,
   base: ResponseContext | null,
   value: RenderValue | null,
   absence: RenderAbsence | null,
 ): { value: RenderValue | null; absence: RenderAbsence | null } {
-  if (policy.mode !== "hide_below") return { value, absence };
-  if (base === null || value === null) return { value, absence };
-  if (base.valid >= policy.threshold) return { value, absence };
-  return {
-    value: null,
-    absence: {
-      state: "withheld_by_policy",
-      threshold: policy.threshold,
-      authoredBy: policy.authoredBy,
-      rationale: policy.rationale,
-    },
-  };
+  if (value === null) return { value, absence };
+  if (!policyWithholds(policy, base)) return { value, absence };
+  return { value: null, absence: withheldAbsence(policy) };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -211,6 +241,12 @@ function payloadFor(
         scope.distributionShare.passives,
         scope.distributionShare.detractors,
       ];
+      // A withheld headline whose own composition is still published is not
+      // withheld: promoters, passives and detractors with their shares are the
+      // pieces the score was made of. The parts go with the whole.
+      if (policyWithholds(policy, contextOf(scope.score.base))) {
+        return { shape: "categories", categories: [], absence: withheldAbsence(policy) };
+      }
       const categories: RenderCategory[] = NPS_BAND_LABELS.map((label, index) => ({
         label,
         note: null,
@@ -244,6 +280,9 @@ function payloadFor(
                 detail: "La distribución no se reporta para esta selección.",
               } as RenderAbsence);
         return { shape: "categories", categories: [], absence: reason };
+      }
+      if (policyWithholds(policy, contextOf(results.renewal.base))) {
+        return { shape: "categories", categories: [], absence: withheldAbsence(policy) };
       }
       const categories: RenderCategory[] = distribution.map((rung) => ({
         label: rung.response,
@@ -325,9 +364,22 @@ function payloadFor(
       const touchpoint = results.journey.touchpoints[address.touchpointIndex];
       if (!touchpoint) return null;
       if (address.measure === "structure") {
-        const satisfaction = readMetric(touchpoint.satisfaction);
-        const tdp = readMetric(touchpoint.tdp);
-        const share = readMetric(touchpoint.unawareShareOfResponses);
+        // The same three numbers a caller could bind one at a time, so the same
+        // policy applies: otherwise an authored `hide_below` would depend on
+        // which handle the author happened to choose.
+        const satisfaction = applySamplePolicy(
+          policy,
+          contextOf(touchpoint.satisfaction.base),
+          readMetric(touchpoint.satisfaction).value,
+          null,
+        );
+        const tdp = applySamplePolicy(policy, contextOf(touchpoint.tdp.base), readMetric(touchpoint.tdp).value, null);
+        const share = applySamplePolicy(
+          policy,
+          contextOf(touchpoint.unawareShareOfResponses.base),
+          readMetric(touchpoint.unawareShareOfResponses).value,
+          null,
+        );
         return {
           shape: "touchpoint",
           label: touchpoint.label,
@@ -349,6 +401,9 @@ function payloadFor(
     case "qualitative.group": {
       const group = results.qualitative.groups[address.groupIndex];
       if (!group) return null;
+      if (policyWithholds(policy, contextOf(group.base))) {
+        return { shape: "terms", total: 0, terms: [], excluded: [] };
+      }
       return {
         shape: "terms",
         total: group.total,
@@ -361,11 +416,16 @@ function payloadFor(
       if (!dimension) return null;
       const points: RenderSeriesPoint[] = dimension.periods.map((period, index) => {
         const read = readMetric(period.mean);
+        const base = contextOf(period.mean.base);
+        // The structural twin of `retention.series` above, and it must obey the
+        // same policy. Having the base in hand and not consulting it is exactly
+        // how one series ends up suppressed and its neighbour does not.
+        const guarded = applySamplePolicy(policy, base, read.value, read.absence);
         return {
           label: period.label,
           order: index,
-          base: contextOf(period.mean.base),
-          measures: [{ label: dimension.label, value: read.value, absence: read.absence }],
+          base,
+          measures: [{ label: dimension.label, value: guarded.value, absence: guarded.absence }],
         };
       });
       return { shape: "series", points };
@@ -420,8 +480,16 @@ function explanationFor(address: CanonicalAddress, results: CanonicalStudyResult
     case "renewal.index":
     case "renewal.distribution":
       return results.renewal.index.provenance.explanation;
-    case "retention.period":
-      return results.retention.periods[address.periodIndex]?.retention.provenance.explanation ?? null;
+    case "retention.period": {
+      // The MEASURE decides, not the section. Retention and attrition are two
+      // results of one period with two explanations, and handing the retention
+      // prose to an attrition figure is a caption that describes the wrong
+      // number — which is worse than no caption at all.
+      const period = results.retention.periods[address.periodIndex];
+      if (!period) return null;
+      const metric = address.measure === "retention" ? period.retention : period.attrition;
+      return metric.provenance.explanation;
+    }
     case "population.total":
     case "population.measured":
     case "population.cohorts":
@@ -429,8 +497,23 @@ function explanationFor(address: CanonicalAddress, results: CanonicalStudyResult
       return results.population.provenance.explanation;
     case "journey.group":
       return results.journey.groups[address.groupIndex]?.provenance.explanation ?? null;
-    case "journey.touchpoint":
-      return results.journey.touchpoints[address.touchpointIndex]?.satisfaction.provenance.explanation ?? null;
+    case "journey.touchpoint": {
+      // Likewise here, and it matters more: a touchpoint owns THREE results with
+      // three explanations, and TDP is the one a reader is most likely to
+      // misread. Captioning a 133.3% unawareness ratio with the satisfaction
+      // prose would explain the wrong quantity beside the most surprising
+      // number on the page.
+      const touchpoint = results.journey.touchpoints[address.touchpointIndex];
+      if (!touchpoint) return null;
+      switch (address.measure) {
+        case "tdp":
+          return touchpoint.tdp.provenance.explanation;
+        case "unawareShare":
+          return touchpoint.unawareShareOfResponses.provenance.explanation;
+        default:
+          return touchpoint.satisfaction.provenance.explanation;
+      }
+    }
     case "qualitative.group":
       return results.qualitative.groups[address.groupIndex]?.provenance.explanation ?? null;
     default:
@@ -598,12 +681,16 @@ function checkConnections(context: BlockContext, entry: RegistryEntry | null): v
 function resolveBlock(context: BlockContext): RenderBlock | null {
   const { block, path, policy, level, byHandle, registry, results, errors } = context;
 
+  // The base this block rests on, known before its payload is built, so an
+  // `annotate_below` policy can be decided here once rather than per shape.
+  const boundEntry = block.kind === "result" ? (byHandle.get(block.binding) ?? null) : null;
   const shell = {
     id: block.id,
     copy: block.copy,
     placement: block.placement,
     visible: block.visible,
     samplePolicy: policy,
+    sampleNote: sampleNoteFor(policy, boundEntry?.responseContext ?? null),
     connectedFilterPanelIds: block.connectedFilterPanelIds.slice(),
   };
 

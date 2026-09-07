@@ -96,7 +96,7 @@ const H = {
   renewalDistribution: presentationHandle("distribution", "renewal", "intention"),
   qualitativeActive: presentationHandle("qualitative", "miembros-activos"),
   qualitativeDeserter: presentationHandle("qualitative", "desertores"),
-  journeyPainCloud: presentationHandle("editorial", "curated-journey-pain-cloud"),
+  journeyPainCloud: presentationHandle("editorial", "qualitative-editorial-review"),
   esferaDimension: presentationHandle("dimension", "esfera"),
 } as const;
 
@@ -638,6 +638,11 @@ export function buildApprovedCuicuilcoBlueprint(
     id: "cuicuilco-aprobado",
     title: "La voz de las y los Nets de Cuicuilco",
     locale: "es-MX",
+    // NULL, and deliberately. This blueprint is a STRUCTURE, not a document
+    // about a particular study: stamping a tenant and a study id into it would
+    // make it the client-specific artefact it must never become. The store
+    // boundary supplies the identity when a template becomes a stored draft.
+    metadata: null,
     // The approved dashboard reports every base and withholds nothing, down to a
     // single respondent. That is the system default, not a choice this blueprint
     // had to make — and it is why no threshold appears anywhere in this file.

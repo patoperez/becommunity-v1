@@ -189,6 +189,15 @@ export type RenderBlock = {
   methodology: RenderMethodology;
   /** The policy that applied to this block, after inheritance. */
   samplePolicy: SampleDisplayPolicy;
+  /**
+   * The caption an `annotate_below` policy asked for, already decided.
+   *
+   * Null unless a policy authored that mode AND this block's base is under its
+   * threshold. The comparison is made on the server so the browser receives a
+   * finished sentence rather than a threshold to compare against — comparing
+   * would be a calculation, and this layer does not send the browser those.
+   */
+  sampleNote: string | null;
   /** Panels that move this block. Empty means nothing moves it. */
   connectedFilterPanelIds: string[];
 };

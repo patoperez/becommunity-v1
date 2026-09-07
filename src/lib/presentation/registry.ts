@@ -522,8 +522,20 @@ export function buildCanonicalPresentationRegistry(
 
   const requirementUsed = new Set<string>();
   results.configurationRequired.forEach((requirement, index) => {
+    // NOT `requirement.key`. Those keys are contract vocabulary written in the
+    // same snake_case as the warehouse, and one of them —
+    // `journey_stage_evidence` — contains the canonical table name
+    // `journey_stage`. Slugifying it to `journey-stage-evidence` does not stop
+    // it being that name; it only stops a scan written in snake_case from
+    // seeing it, which is worse. The handle is built from the requirement's
+    // SECTION and KIND instead: closed vocabulary, no storage name, and stable
+    // as long as a section does not need two slots of the same kind — and if it
+    // ever does, `uniqueSegment` disambiguates with an ordinal.
     drafts.push({
-      handle: presentationHandle("editorial", uniqueSegment(requirementUsed, requirement.key, index + 1)),
+      handle: presentationHandle(
+        "editorial",
+        uniqueSegment(requirementUsed, `${requirement.section} ${requirement.kind}`, index + 1),
+      ),
       semantic: "editorial_slot",
       // NOT `requirement.key`. That key is contract vocabulary written in the
       // same snake_case as the warehouse — `journey_stage_evidence` contains the
