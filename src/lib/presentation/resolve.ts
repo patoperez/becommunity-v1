@@ -223,6 +223,13 @@ function applyDisplayFormat(
     };
   }
   const text = value.formatted;
+  // Pad a PLAIN DECIMAL NUMERAL and nothing else. `formatNumber` returns an
+  // em-dash for a null value and could in principle grow a separator or an
+  // exponent; appending zeros to any of those would produce a string that is not
+  // a number, which is a worse outcome than declining to restyle it.
+  if (!/^-?\d+(?:\.\d+)?$/.test(text)) {
+    return { error: `«${text}» no es un numeral decimal simple, así que no se rellena.` };
+  }
   const dot = text.indexOf(".");
   const present = dot < 0 ? 0 : text.length - dot - 1;
   if (present > wanted) {
