@@ -61,13 +61,16 @@
  */
 
 import {
+  DEFAULT_DISPLAY_FORMAT,
   DEFAULT_SAMPLE_POLICY,
+  type DisplayFormat,
   type PresentationBlock,
   type PresentationDocument,
   type ResponsiveBehavior,
   type SampleDisplayPolicy,
 } from "../document";
 import { PRESENTATION_DOCUMENT_KIND, PRESENTATION_DOCUMENT_SCHEMA_VERSION } from "../document";
+import { CANONICAL_PRESENTATION_REGISTRY_VERSION } from "../capabilities";
 import { PresentationError } from "../errors";
 import { presentationHandle, type PresentationHandle } from "../handles";
 import type { CanonicalPresentationRegistry } from "../registry";
@@ -173,8 +176,13 @@ function shell(seed: BlockSeed) {
   };
 }
 
-function result(seed: BlockSeed, binding: PresentationHandle, chartVariant: string): PresentationBlock {
-  return { ...shell(seed), kind: "result", binding, chartVariant };
+function result(
+  seed: BlockSeed,
+  binding: PresentationHandle,
+  chartVariant: string,
+  displayFormat: DisplayFormat = DEFAULT_DISPLAY_FORMAT,
+): PresentationBlock {
+  return { ...shell(seed), kind: "result", binding, chartVariant, displayFormat };
 }
 
 function editorial(seed: BlockSeed, body: string | null, slot: PresentationHandle | null = null): PresentationBlock {
@@ -542,6 +550,10 @@ export function buildApprovedCuicuilcoBlueprint(
       },
       H.renewalIndex,
       "gauge",
+      // «33.0», not «33». The canonical formatter renders an integer bare; the
+      // approved dashboard passes `decimals={1}` and both of its QA suites
+      // require that exact string. Padding only — the value is untouched.
+      { kind: "fixed_decimals", decimals: 1 },
     ),
     result(
       {
@@ -650,28 +662,20 @@ export function buildApprovedCuicuilcoBlueprint(
   return {
     schemaVersion: PRESENTATION_DOCUMENT_SCHEMA_VERSION,
     documentKind: PRESENTATION_DOCUMENT_KIND,
+    registryVersion: CANONICAL_PRESENTATION_REGISTRY_VERSION,
+    // UNBOUND, because this is a template. `bindPresentationDocument` is the
+    // explicit act that ties a document to one registry, and it happens at
+    // instantiation — never here.
+    binding: null,
     id: "cuicuilco-aprobado",
     title: "La voz de las y los Nets de Cuicuilco",
     locale: "es-MX",
-    // NULL, and deliberately. This blueprint is a STRUCTURE, not a document
-    // about a particular study: stamping a tenant and a study id into it would
-    // make it the client-specific artefact it must never become. The store
-    // boundary supplies the identity when a template becomes a stored draft.
-    metadata: null,
     // The approved dashboard reports every base and withholds nothing, down to a
     // single respondent. That is the system default, not a choice this blueprint
     // had to make — and it is why no threshold appears anywhere in this file.
     samplePolicy: DEFAULT_SAMPLE_POLICY,
     methodologyDisclosure: "plain_language_with_base",
     pages: [{ id: "panorama", title: "Panorama del estudio", order: 0, blocks }],
-    publication: {
-      status: "draft",
-      sourceDraftRevision: null,
-      definitionSha256: null,
-      studyFingerprint: null,
-      acknowledgedWarnings: [],
-      preparedNote: null,
-    },
   };
 }
 

@@ -36,14 +36,14 @@ import {
   buildCanonicalStudyResults,
   canonicalResultSourceFromCommitPlan,
 } from "../src/lib/results/index.ts";
+import { validatePresentationDocument } from "../src/lib/presentation/document.ts";
+import { serializeDeterministic } from "../src/lib/presentation/serialize.ts";
+import { buildCanonicalPresentationRegistry } from "../src/lib/presentation/registry.ts";
+import { resolvePresentation } from "../src/lib/presentation/resolve.ts";
 import {
   APPROVED_ROUTE_IDS,
   buildApprovedCuicuilcoBlueprint,
-  buildCanonicalPresentationRegistry,
-  resolvePresentation,
-  serializeDeterministic,
-  validatePresentationDocument,
-} from "../src/lib/presentation/index.ts";
+} from "../src/lib/presentation/blueprints/cuicuilco-approved.ts";
 import { REQUIRED_DASHBOARD_COMMIT } from "./lib/canonical-golden-parity.mjs";
 
 const cleanPath = process.argv[2] ?? process.env.CANONICAL_RESULTS_PARITY_CLEAN_XLSX;
@@ -196,15 +196,24 @@ const npsActive = blocks.find((block) => block.id === "recomendacion-comparacion
 eq("la de miembros activos", npsActive.payload.value?.formatted, "46.4");
 const npsDeserter = blocks.find((block) => block.id === "recomendacion-comparacion-desertores");
 eq("la de desertores, negativa y sin recortar", npsDeserter.payload.value?.formatted, "-9.1");
-// The approved dashboard prints «33 / 100». The APPROVED NUMBER is 33; the exact
-// string is the canonical formatter's business, so this pins the number and then
-// pins the text against the contract's own output rather than against a guess.
+// THE ORACLE, NOT THE CONTRACT. Unit 6A's first run of this gate failed because
+// it received «33» where it expected «33.0», and the fix was to compare against
+// `results.renewal.index.value.formatted` instead — which proves the layer is
+// self-consistent and proves nothing at all about parity. The approved dashboard
+// renders this figure with `decimals={1}` (`src/app/Risk.tsx`), its browser QA
+// requires text containing «33.0» and its offline QA asserts `numbers.cri ===
+// "33.0"`. So the expectation is the ORACLE's string, written here as a literal,
+// and this assertion fails if the CRI ever renders as «33» again.
 const risk = blocks.find((block) => block.id === "riesgo-indice");
-eq("el índice de renovación aprobado", risk.payload.value?.value, 33);
+eq("el valor numérico del índice de renovación", risk.payload.value?.value, 33);
+eq("y su texto, exactamente el del tablero aprobado", risk.payload.value?.formatted, "33.0");
 check(
-  results.renewal.index.status === "available" &&
-    risk.payload.value?.formatted === results.renewal.index.value.formatted,
-  `su texto es exactamente el del contrato («${risk.payload.value?.formatted}»), sin volver a formatear`,
+  results.renewal.index.status === "available" && results.renewal.index.value.value === 33,
+  "el contrato canónico sigue diciendo 33: el formato de presentación rellenó, no recalculó",
+);
+check(
+  results.renewal.index.status === "available" && results.renewal.index.value.formatted === "33",
+  "y su propio texto sigue siendo «33», así que la diferencia es de presentación y no de cifra",
 );
 const population = blocks.find((block) => block.id === "portada-poblacion");
 eq("la población del estudio", population.payload.value?.value, 60);

@@ -131,9 +131,11 @@ npm run test:canonical-presentation # Unit 6A: opaque-handle registry, versioned
                                     #   document, pure resolver, approved blueprint. Synthetic,
                                     #   offline, in `npm test`.
 npm run test:canonical-presentation-parity <clean.xlsx> <curated.xlsx>
-                                    # the approved blueprint against the REAL study. Outside
-                                    #   `npm test` (machine-specific inputs); reports SKIPPED
-                                    #   without the workbooks, never a pass.
+                                    # the approved blueprint against the REAL study, compared
+                                    #   with the APPROVED DASHBOARD as the oracle (the CRI must
+                                    #   render "33.0", not "33"). Outside `npm test`
+                                    #   (machine-specific inputs); reports SKIPPED without the
+                                    #   workbooks, never a pass.
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
@@ -561,7 +563,7 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   **Nothing in it calculates.** It imports no module from `src/lib/calc/`, holds
   no formula, no denominator and no threshold, and every number it emits was
   computed, rounded once and formatted by the canonical layer.
-  `npm run test:canonical-presentation` (**155 checks**, in `npm test`) enforces
+  `npm run test:canonical-presentation` (**255 checks**, in `npm test`) enforces
   that, plus the boundary and the refusals.
   ⓘ **The brief's `StudyResultsDocument` DOES NOT EXIST.** The canonical document
   type is `CanonicalStudyResults` (`src/lib/results/contract.ts:691`). Use the
@@ -575,11 +577,19 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   render model carries it. Do not widen the catalogue to include it.
 - ⓘ **Presentation documents are `schemaVersion: 4` and carry
   `documentKind: "canonical_presentation"`.** Versions **1-3 belong to the legacy
-  experience definition**, and **two draft rows exist on the hosted project at a
-  version nobody recorded** — the column's CHECK is only `between 1 and 1000`, so
-  the database will not say which. Unit 6A refuses 1-3 BY NAME and migrates
-  nothing in either direction. Never reinterpret a stored draft as a document of
-  the other family, and never guess its version.
+  experience definition**. Unit 6A refuses 1-3 BY NAME and migrates nothing in
+  either direction. Never reinterpret a stored draft as a document of the other
+  family.
+  ⓘ **THE TWO HOSTED DRAFTS ARE INVENTORIED, and Unit 6A was wrong to say the
+  database could not tell us.** `schema_version` is `not null` and the save RPC
+  requires it to equal `definition.schemaVersion`, so the value was always
+  readable. Measured read-only on 2026-09-06: the P6E synthetic acceptance study
+  is at **version 3, revision 14**; **«La voz de las y los Nets de Cuicuilco» is
+  at version 2, revision 72**. Column and JSON agree on both, neither carries a
+  `documentKind`, and both are therefore LEGACY-family documents. Nothing was
+  mutated. Do not migrate or re-author either: a v4 canonical presentation is
+  created from the approved blueprint, and the legacy drafts are retained as
+  evidence.
 - ⓘ **A suppressing policy takes the PARTS with the WHOLE.** An adversarial
   review found an authored `hide_below` withholding the recommendation score
   while the block beside it still published promoters/pasivos/detractores with
@@ -593,12 +603,35 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 - ⓘ **Methodology prose follows the MEASURE, not the section.** A touchpoint owns
   three explanations and a period owns two; handing the CSAT prose to a TDP
   figure captions the wrong quantity beside the most misread number on the page.
-- ⓘ **A presentation document carries `metadata` (nullable).**
-  `prepare_study_experience_revision` refuses a definition whose
-  `metadata.studyId`/`tenantId` disagree with the study row, so a document
-  without it could never be stored. It is NULL while the document is a template
-  — the approved blueprint is a structure, not a study. Those are database
-  identifiers: they stop at the document and never enter a render model.
+- ⓘ **A PRESENTATION DOCUMENT CARRIES NO DATABASE STATE AT ALL.** Unit 6A put
+  `metadata.studyId`, `metadata.tenantId` and a publication block inside it; 6A.1
+  took them out. A tenant and a study uuid are database identifiers, migration
+  0025 already owns publication, and a `definitionSha256` inside the document it
+  hashes cannot be kept true of itself. `src/lib/presentation/persistence.ts`
+  stamps the scope immediately before a write and strips it immediately after a
+  read, and refuses a row belonging to another study. A document authors only
+  configuration.
+- ⓘ **A DOCUMENT PINS THE REGISTRY IT WAS AUTHORED AGAINST.** `registryVersion`
+  plus a `binding` fingerprint — a digest over the study scope, the plan and
+  package identity, both versions and the WHOLE handle-to-address map. Because
+  every `CanonicalAddress` is an array position, a registry from study A handed
+  study B's results would resolve cleanly and answer with the wrong numbers, so
+  the resolver refuses on `registry_study_mismatch`, `registry_plan_mismatch`,
+  `registry_version_mismatch` and `binding_fingerprint_mismatch` — four separate
+  codes. Renaming a label, reordering a group or inserting a dimension or
+  touchpoint earlier all move the fingerprint, so a saved binding REFUSES rather
+  than silently retargeting. `binding: null` means "study-agnostic template".
+- ⓘ **THE BARREL IS SPLIT.** `src/lib/presentation/index.ts` is client-safe —
+  schemas, handles, errors, catalogue rows, render-model TYPES.
+  `src/lib/presentation/server.ts` carries `import "server-only"` and is the only
+  way to the registry's address map, the resolver, persistence and the blueprint.
+  Offline gates import the pure modules directly; production client code cannot.
+  Do not re-export a binding primitive from the safe barrel.
+- ⓘ **THE PUBLIC RENDER MODEL CARRIES NO AUTHORING MATERIAL.** A withheld result
+  says only that it is withheld, plus a separately authored `publicNote` if
+  somebody wrote one for a reader. The threshold, `authoredBy` and the internal
+  `rationale` stay on the server: publishing them ships the study's own
+  deliberation beside the gap it made.
 - ⓘ **The system default is `show_all`.** The canonical layer suppresses nothing;
   this layer owns only the DISPLAY decision, and the two suppressing modes require
   `authoredBy` and `rationale` so a hide-below rule cannot be defaulted, inherited

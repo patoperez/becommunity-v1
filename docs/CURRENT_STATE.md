@@ -1755,7 +1755,7 @@ for the old experience branch: **`docs/CANONICAL_EXPERIENCE_INTEGRATION_PLAN.md`
 
 | gate | assertions | in `npm test`? |
 |---|---:|---|
-| `npm run test:canonical-presentation` | **155** | yes |
+| `npm run test:canonical-presentation` | **155** (Unit 6A; **255** after 6A.1) | yes |
 | `npm run test:canonical-presentation-parity` | **43** | no — machine-specific workbooks, reports SKIPPED without them |
 
 The parity gate reproduces the approved figures through the blueprint without
@@ -1846,3 +1846,96 @@ the already-applied `0023`-`0025` tables, and the client renderer that RECEIVES 
 render model. Its one blocking question: **the two hosted draft rows are at an
 unrecorded `schema_version`** and 6B must read it back and decide with the owner
 whether they are migrated, re-authored or abandoned. It must not guess.
+
+---
+
+### Unit 6A.1 — the presentation/persistence boundary, exact binding, and the CRI oracle (source only, 2026-09-06)
+
+**Branch `codex/canonical-experience-integration`, on top of Unit 6A.** A focused
+correction. No formula, canonical value, workbook mapping or golden numerical
+expectation changed, and **golden parity is still 531/531**.
+
+#### Six corrections
+
+1. **PRESENTATION SEPARATED FROM PERSISTENCE.** `PresentationDocument` carried
+   `metadata.studyId`, `metadata.tenantId` and a publication block — status,
+   source draft revision, a SHA-256 of itself, a study fingerprint, acknowledged
+   warnings, a prepared note. A database identifier had become authorable,
+   migration 0025's lifecycle had a second writable copy, and a hash sat inside
+   the bytes it covers. All of it moved to `src/lib/presentation/persistence.ts`,
+   which stamps the scope before a write, strips it after a read, and refuses a
+   row belonging to another study. Nothing writes yet.
+2. **THE PUBLIC RENDER MODEL IS SAFE.** It published the whole authored
+   `SampleDisplayPolicy`, and a withheld result carried the threshold,
+   `authoredBy` and the internal `rationale`. A block now carries a
+   `RenderSampleDisplay` outcome — shown, shown with an approved note, or
+   withheld — plus a separately authored `publicNote` when somebody wrote one for
+   a reader. The audit fields stay on the server.
+3. **THE REGISTRY IS BOUND TO ONE RESULTS DOCUMENT.** Comparing contract
+   versions is a test two studies pass together, and every `CanonicalAddress` is
+   an array position — so a registry from study A handed study B's results
+   resolved cleanly and answered with the wrong numbers. Four new codes refuse
+   it: `registry_study_mismatch`, `registry_plan_mismatch`,
+   `registry_version_mismatch`, `binding_fingerprint_mismatch`. A document pins
+   `registryVersion` and an opaque `binding` digest over the study scope, the
+   plan and package identity, both versions and the whole handle-to-address map,
+   so renaming a label, reordering a group or inserting a dimension or touchpoint
+   earlier makes a saved binding REFUSE instead of retargeting.
+4. **THE MODULE BOUNDARY IS ENFORCED.** `index.ts` is client-safe;
+   `server.ts` carries `import "server-only"` and is the only route to the
+   address map, the resolver, persistence and the blueprint. An import-graph walk
+   from 82 application modules — 22 client components, 2 routes, 22 pages, the
+   server actions and the middleware — proves none reaches the server half or
+   `src/lib/results/`.
+5. **THE APPROVED CRI PRESENTATION IS EXACT.** The approved dashboard renders
+   `33.0` (`Risk.tsx` passes `decimals={1}`; its browser QA requires text
+   containing `33.0` and its offline QA asserts `"33.0"`). Unit 6A's parity gate
+   received `33`, and its fix compared the output with the CONTRACT's own text —
+   proving self-consistency and nothing about parity. A block may now request
+   `fixed_decimals`, honoured by PADDING ONLY: `"33"` becomes `"33.0"`, a request
+   that would shorten or that exceeds the declared precision is refused, and the
+   numeric value stays 33. The parity gate now expects the oracle's literal
+   string.
+6. **THE LINT REGRESSION IS GONE.** The one warning Unit 6A introduced — a
+   ternary used as a statement — is an `if`. Lint is back to the **54-warning
+   baseline** with zero warnings from any 6A/6A.1 file.
+
+#### The two hosted drafts, inventoried read-only
+
+Unit 6A claimed the database could not reveal their versions. **That was wrong.**
+`schema_version` is `not null` and the save RPC requires it to equal
+`definition.schemaVersion`, so the value was always readable. One narrowly scoped
+read-only `GET` (service role, no mutation, `definition` never selected whole):
+
+| study | `schema_version` | JSON `schemaVersion` | `documentKind` | revision | family |
+|---|---:|---:|---|---:|---|
+| ACEPTACIÓN P6E — DATOS SINTÉTICOS (TEST) | 3 | 3 | absent | 14 | legacy experience |
+| La voz de las y los Nets de Cuicuilco | **2** | 2 | absent | 72 | legacy experience |
+
+Column and JSON agree on both; neither is malformed; neither is a canonical
+presentation document. **Nothing was mutated** — no draft migrated, overwritten,
+deleted, published or re-authored. The owner's policy applies cleanly: retain
+both as evidence, create a new v4 presentation from the approved blueprint, and
+never automatically convert a legacy layout. The real study's draft is at
+version **2**, so any conversion would need the legacy v2→v3 step first.
+
+#### Gates
+
+| gate | assertions | in `npm test`? |
+|---|---:|---|
+| `npm run test:canonical-presentation` | **255** | yes |
+| `npm run test:canonical-presentation-parity` | **45** | no — machine-specific workbooks |
+
+**Discrimination: 21/21.** Every defect caught by its own assertion, every file
+restored byte-identically, SHA-256 census clean before and after. The seven new
+cases: a study uuid smuggled through an authored field, persistence decoding
+accepting another study's row, the render model republishing the authored policy,
+the safe barrel re-exporting the resolver, the resolver dropping the study-scope
+check, the resolver ignoring a saved binding, and the display format shortening
+instead of refusing.
+
+Two of the seven had to be sharpened before they proved anything: re-adding
+`metadata` was caught by `strictObject` rather than by the uuid scan, so the
+defect now smuggles the uuid through `title`; and disarming the shortening guard
+made `"0".repeat(negative)` throw, blocking the gate by crashing it rather than
+by asserting, so the defect now performs the truncation it is meant to model.

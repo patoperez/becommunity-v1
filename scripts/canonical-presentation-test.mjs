@@ -42,24 +42,39 @@ import { join } from "node:path";
 
 import { CANONICAL_FAMILY_TABLES } from "./lib/canonical-tables.mjs";
 import { CUICUILCO_RESULTS_V1, buildCanonicalStudyResults, emptyResultSource } from "../src/lib/results/index.ts";
+// A gate imports the PURE IMPLEMENTATION modules, never `./server`: that file
+// carries `import "server-only"`, which throws under a plain Node import by
+// design. The boundary it draws is for production code, and section [23] proves
+// the safe barrel does not leak past it.
 import {
-  APPROVED_FIRST_GROUP_PARTITION,
-  APPROVED_ROUTE_IDS,
   COMPATIBLE_CHART_VARIANTS,
+  PRESENTATION_SEMANTICS,
+  SEMANTIC_UNITS,
+} from "../src/lib/presentation/capabilities.ts";
+import {
   DEFAULT_SAMPLE_POLICY,
   LEGACY_EXPERIENCE_SCHEMA_VERSIONS,
   PRESENTATION_DOCUMENT_KIND,
   PRESENTATION_DOCUMENT_SCHEMA_VERSION,
-  PRESENTATION_SEMANTICS,
-  SEMANTIC_UNITS,
-  buildApprovedCuicuilcoBlueprint,
-  buildCanonicalPresentationRegistry,
   duplicateBlock,
-  projectPresentationCatalog,
-  resolvePresentation,
-  serializeDeterministic,
   validatePresentationDocument,
-} from "../src/lib/presentation/index.ts";
+} from "../src/lib/presentation/document.ts";
+import { serializeDeterministic } from "../src/lib/presentation/serialize.ts";
+import {
+  bindPresentationDocument,
+  buildCanonicalPresentationRegistry,
+  projectPresentationCatalog,
+} from "../src/lib/presentation/registry.ts";
+import { resolvePresentation } from "../src/lib/presentation/resolve.ts";
+import {
+  decodePresentationFromStorage,
+  encodePresentationForStorage,
+} from "../src/lib/presentation/persistence.ts";
+import {
+  APPROVED_FIRST_GROUP_PARTITION,
+  APPROVED_ROUTE_IDS,
+  buildApprovedCuicuilcoBlueprint,
+} from "../src/lib/presentation/blueprints/cuicuilco-approved.ts";
 
 let failures = 0;
 const ok = (m) => console.log("  ✓", m);
@@ -81,12 +96,18 @@ const refuses = (label, outcome, expectedCode) => {
     return;
   }
   const codes = outcome.errors.map((entry) => entry.code);
-  codes.includes(expectedCode)
-    ? ok(`${label} → ${expectedCode}`)
-    : bad(`${label}: se esperaba ${expectedCode}, se obtuvo ${codes.join(", ") || "(ninguno)"}`);
+  // An `if`, not a ternary used as a statement: the expression form is a value
+  // nobody consumes, which is exactly what `no-unused-expressions` objects to,
+  // and Unit 6A left the project's only new warning here.
+  if (codes.includes(expectedCode)) {
+    ok(`${label} → ${expectedCode}`);
+  } else {
+    bad(`${label}: se esperaba ${expectedCode}, se obtuvo ${codes.join(", ") || "(ninguno)"}`);
+  }
 };
 
 console.log("Be Community — compuerta de la capa de presentación canónica (Unidad 6A)");
+
 console.log("=".repeat(74));
 
 /* -------------------------------------------------------------------------- */
@@ -837,6 +858,7 @@ proseDoc.pages[0].blocks.push(
     kind: "result",
     binding: entry.binding,
     chartVariant: "kpi_value",
+    displayFormat: { kind: "canonical" },
     copy: { title: null, description: null, annotation: null },
     placement: { order: 900 + index, span: { desktop: 3, tablet: 6, mobile: 12 }, responsive: "reflow" },
     visible: true,
@@ -1078,8 +1100,8 @@ console.log("\n[16] La muestra pequeña se muestra: `show_all` es el sistema, no
 eq("el modo por omisión", DEFAULT_SAMPLE_POLICY.mode, "show_all");
 eq("el plano aprobado no suprime nada", document.samplePolicy.mode, "show_all");
 check(
-  blocks.every((block) => block.samplePolicy.mode === "show_all"),
-  "y ningún bloque hereda una regla de ocultamiento",
+  blocks.every((block) => block.sampleDisplay.state === "shown"),
+  "y ningún bloque llega oculto ni anotado",
 );
 const blueprintText = readFileSync(join("src", "lib", "presentation", "blueprints", "cuicuilco-approved.ts"), "utf8");
 check(
@@ -1099,6 +1121,7 @@ const authoredPolicy = {
   threshold: 4,
   authoredBy: "Dirección del estudio",
   rationale: "Acordado con el cliente para este bloque en particular.",
+  publicNote: null,
 };
 authored.pages[0].blocks.find((block) => block.id === "recomendacion-puntaje").samplePolicy = authoredPolicy;
 const authoredValidated = validatePresentationDocument(JSON.parse(JSON.stringify(authored)));
@@ -1117,9 +1140,9 @@ if (authoredValidated.ok) {
     const authoredBlocks = authoredModel.value.pages.flatMap((page) => page.blocks);
     const affected = authoredBlocks.find((block) => block.id === "recomendacion-puntaje");
     const untouched = authoredBlocks.filter((block) => block.id !== "recomendacion-puntaje");
-    eq("el bloque redactado lleva su política", affected?.samplePolicy.mode, "hide_below");
+    eq("el bloque redactado sigue mostrando su cifra", affected?.sampleDisplay.state, "shown");
     check(
-      untouched.every((block) => block.samplePolicy.mode === "show_all"),
+      untouched.every((block) => block.sampleDisplay.state === "shown"),
       "y ningún otro bloque cambia: una política de bloque no es una regla del software",
     );
   }
@@ -1138,6 +1161,7 @@ suppressing.samplePolicy = {
   threshold: 10000,
   authoredBy: "Dirección del estudio",
   rationale: "Caso de prueba: ocultar todo lo que descanse en una base pequeña.",
+  publicNote: null,
 };
 const suppressingValidated = validatePresentationDocument(JSON.parse(JSON.stringify(suppressing)));
 check(suppressingValidated.ok, "una política de ocultamiento a nivel de documento valida");
@@ -1192,13 +1216,14 @@ if (annotatingValidated.ok) {
   if (annotated.ok) {
     const annotatedBlocks = annotated.value.pages.flatMap((page) => page.blocks);
     const scoreBlock = annotatedBlocks.find((block) => block.id === "recomendacion-puntaje");
-    eq("el bloque afectado lleva la nota ya redactada", scoreBlock?.sampleNote, annotating.samplePolicy.note);
+    eq("el bloque afectado lleva la nota ya redactada", scoreBlock?.sampleDisplay.note, annotating.samplePolicy.note);
+    eq("y su estado lo dice", scoreBlock?.sampleDisplay.state, "shown_with_note");
     check(
       scoreBlock?.payload.shape === "value" && scoreBlock.payload.value !== null,
       "y conserva su cifra: anotar no es ocultar",
     );
     check(
-      annotatedBlocks.every((block) => block.sampleNote === null || typeof block.sampleNote === "string"),
+      annotatedBlocks.every((block) => block.sampleDisplay.state !== "withheld_by_policy"),
       "la nota es una frase terminada, nunca un umbral que el navegador tuviera que comparar",
     );
     // The authored policy DOES travel on the block, and that is deliberate: a
@@ -1211,7 +1236,7 @@ if (annotatingValidated.ok) {
       (block) => block.methodology.base !== null && block.methodology.base.valid < 10000,
     );
     check(
-      underThreshold.length > 0 && underThreshold.every((block) => block.sampleNote !== null),
+      underThreshold.length > 0 && underThreshold.every((block) => block.sampleDisplay.state === "shown_with_note"),
       `cada bloque bajo el umbral llega ya anotado (${underThreshold.length})`,
     );
     check(
@@ -1297,9 +1322,21 @@ walk(PRESENTATION_DIR);
 check(presentationFiles.length >= 9, `la capa tiene ${presentationFiles.length} módulos`);
 
 const transports = presentationFiles.filter(({ code }) =>
-  /@supabase|createClient\(|\.rpc\(|\bfetch\(|node:https?|node:net|XMLHttpRequest|server-only/.test(stripComments(code)),
+  /@supabase|createClient\(|\.rpc\(|\bfetch\(|node:https?|node:net|XMLHttpRequest/.test(stripComments(code)),
 );
 check(transports.length === 0, `ningún módulo alcanza un transporte${transports.length ? `: ${transports.map((f) => f.path).join(", ")}` : ""}`);
+
+// `server-only` is a BOUNDARY marker, not a transport, and exactly one module
+// may carry it: the server barrel. Anywhere else it would either be redundant —
+// the module is already unreachable through it — or a sign that a pure module a
+// gate needs to import has quietly become unimportable.
+const serverMarked = presentationFiles.filter(({ code }) => /["']server-only["']/.test(stripComments(code)));
+check(
+  serverMarked.length === 1 && serverMarked[0].path.endsWith("server.ts"),
+  `exactamente un módulo lleva la marca server-only, y es el barril de servidor${
+    serverMarked.length ? `: ${serverMarked.map((f) => f.path).join(", ")}` : " (ninguno la lleva)"
+  }`,
+);
 
 const calculators = presentationFiles.filter(({ code }) =>
   /from\s+["'][^"']*\/calc\/|from\s+["']\.\.\/calc/.test(stripComments(code)),
@@ -1389,6 +1426,335 @@ check(
 
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* UNIT 6A.1 — the boundary, the binding, and the exact oracle                 */
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[23] Un documento autorable no lleva nada que sea de la base de datos");
+const authorableText = serializeDeterministic(document);
+const UUID_ANYWHERE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+check(!UUID_ANYWHERE.test(authorableText), "no contiene un solo UUID: ni de inquilino ni de estudio");
+check(!authorableText.includes(IDENTITY.tenantId), "no nombra al inquilino");
+check(!authorableText.includes(IDENTITY.studyId), "no nombra al estudio");
+check(!authorableText.includes(IDENTITY.planFingerprint), "no lleva la huella del plan");
+check(!authorableText.includes(IDENTITY.packageIdempotencyKey), "no lleva la clave del paquete");
+for (const owned of ["publication", "definitionSha256", "studyFingerprint", "sourceDraftRevision", "acknowledgedWarnings", "preparedNote", "metadata"]) {
+  check(!Object.prototype.hasOwnProperty.call(document, owned), `no autora «${owned}»: eso lo deriva la base de datos`);
+}
+check(!/"status":\s*"(?:draft|prepared|published)"/.test(authorableText), "no autora un estado de publicación");
+check(typeof document.registryVersion === "string", "sí declara la versión de registro contra la que se redactó");
+check(document.binding === null, "y el plano aprobado viaja SIN enlazar: es una plantilla, no un documento de un estudio");
+
+console.log("\n[24] La persistencia estampa el alcance, y se niega a leer el de otro");
+const SCOPE = { tenantId: IDENTITY.tenantId, studyId: IDENTITY.studyId };
+const encoded = encodePresentationForStorage(document, SCOPE, { subtitle: null });
+check(encoded.ok, "un documento válido se codifica para almacenamiento");
+if (encoded.ok) {
+  eq("la versión de columna es la del documento", encoded.value.schemaVersion, PRESENTATION_DOCUMENT_SCHEMA_VERSION);
+  eq("el alcance estampado nombra al estudio", encoded.value.definition.metadata.studyId, SCOPE.studyId);
+  eq("y al inquilino", encoded.value.definition.metadata.tenantId, SCOPE.tenantId);
+  check(/^[0-9a-f]{64}$/.test(encoded.value.definitionSha256), "el hash se calcula FUERA de la definición que cubre");
+  check(
+    !JSON.stringify(encoded.value.definition).includes(encoded.value.definitionSha256),
+    "y por eso no aparece dentro de ella: un hash de sí mismo no puede mantenerse cierto",
+  );
+
+  const decoded = decodePresentationFromStorage(encoded.value, SCOPE);
+  check(decoded.ok, "la fila vuelve a leerse como documento autorable");
+  if (decoded.ok) {
+    check(
+      !Object.prototype.hasOwnProperty.call(decoded.value, "metadata"),
+      "y vuelve SIN la metadata de persistencia: se estampa al escribir y se retira al leer",
+    );
+    check(
+      serializeDeterministic(decoded.value) === authorableText,
+      "el viaje de ida y vuelta es byte a byte el documento original",
+    );
+  }
+
+  const foreign = { tenantId: IDENTITY.tenantId, studyId: "00000000-0000-4000-8000-00000000ffff" };
+  refuses("leer una fila de otro estudio", decodePresentationFromStorage(encoded.value, foreign), "persistence_scope_mismatch");
+  refuses(
+    "una fila cuya columna de versión discrepa del JSON",
+    decodePresentationFromStorage({ ...encoded.value, schemaVersion: 3 }, SCOPE),
+    "persistence_scope_invalid",
+  );
+  refuses(
+    "un alcance que no son dos UUID",
+    encodePresentationForStorage(document, { tenantId: "no-es-uuid", studyId: SCOPE.studyId }),
+    "persistence_scope_invalid",
+  );
+}
+
+console.log("\n[25] El modelo público de render no lleva material de autoría");
+const publicText = serializeDeterministic(model);
+for (const internal of ["authoredBy", "rationale", "Dirección del estudio"]) {
+  check(!publicText.includes(internal), `el modelo público no contiene «${internal}»`);
+}
+check(!/"samplePolicy"/.test(publicText), "ni la política de muestra completa");
+check(!UUID_ANYWHERE.test(publicText), "ni un solo UUID");
+check(!publicText.includes(IDENTITY.planFingerprint), "ni la huella del plan");
+check(!publicText.includes(registry.binding), "ni la huella de enlace del registro");
+check(
+  blocks.every((block) => block.sampleDisplay && typeof block.sampleDisplay.state === "string"),
+  "cada bloque publica su desenlace de muestra, ya decidido",
+);
+
+// The same suppressed document as section [17b], now checked for what it TELLS.
+const suppressingPublic = structuredClone(document);
+suppressingPublic.samplePolicy = {
+  mode: "hide_below",
+  threshold: 10000,
+  authoredBy: "Dirección del estudio",
+  rationale: "Motivo interno que un lector no debe leer.",
+  publicNote: "No se publica por el tamaño de la base.",
+};
+const suppressingPublicValidated = validatePresentationDocument(JSON.parse(JSON.stringify(suppressingPublic)));
+check(suppressingPublicValidated.ok, "una política con nota pública valida");
+if (suppressingPublicValidated.ok) {
+  const suppressedModel = resolvePresentation({ document: suppressingPublicValidated.value, registry, results });
+  check(suppressedModel.ok, "y resuelve");
+  if (suppressedModel.ok) {
+    const text = serializeDeterministic(suppressedModel.value);
+    check(!text.includes("Motivo interno"), "el motivo interno NO cruza al cliente");
+    check(!text.includes("Dirección del estudio"), "el nombre de quien decidió tampoco");
+    check(!text.includes("10000"), "ni el umbral");
+    check(text.includes("No se publica por el tamaño de la base."), "sí cruza la nota pública que alguien redactó para un lector");
+    const withheld = suppressedModel.value.pages
+      .flatMap((page) => page.blocks)
+      .filter((block) => block.sampleDisplay.state === "withheld_by_policy");
+    check(withheld.length > 0, `${withheld.length} bloques se retienen`);
+    // Recursively: no `withheld_by_policy` absence anywhere carries an audit field.
+    const audits = [];
+    const walk = (node) => {
+      if (node === null || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node.state === "withheld_by_policy") {
+        for (const key of Object.keys(node)) if (key !== "state" && key !== "note") audits.push(key);
+      }
+      for (const value of Object.values(node)) walk(value);
+    };
+    walk(suppressedModel.value);
+    check(audits.length === 0, `ninguna ausencia retenida lleva campos de auditoría${audits.length ? `: ${[...new Set(audits)].join(", ")}` : ""}`);
+  }
+}
+
+console.log("\n[26] El barril seguro no exporta una sola primitiva de enlace");
+const safeBarrel = readFileSync(join("src", "lib", "presentation", "index.ts"), "utf8");
+for (const forbidden of [
+  "buildCanonicalPresentationRegistry",
+  "resolvePresentation",
+  "CanonicalAddress",
+  "CanonicalPresentationRegistry",
+  "RegistrySource",
+  "encodePresentationForStorage",
+  "decodePresentationFromStorage",
+  "PresentationScope",
+  "StoredPresentation",
+  "buildApprovedCuicuilcoBlueprint",
+  "projectPresentationCatalog",
+  "bindPresentationDocument",
+  "presentationBindingFingerprint",
+]) {
+  check(!new RegExp(`\\b${forbidden}\\b`).test(stripComments(safeBarrel)), `el barril seguro no exporta ${forbidden}`);
+}
+check(!/from "\.\/(?:registry|resolve|persistence|blueprints)/.test(stripComments(safeBarrel)), "y no importa ninguno de esos módulos");
+const serverBarrel = readFileSync(join("src", "lib", "presentation", "server.ts"), "utf8");
+check(/^import "server-only";$/m.test(serverBarrel), "el barril de servidor abre con `import \"server-only\"`");
+for (const required of ["buildCanonicalPresentationRegistry", "resolvePresentation", "encodePresentationForStorage"]) {
+  check(new RegExp(`\\b${required}\\b`).test(serverBarrel), `y sí exporta ${required}`);
+}
+
+console.log("\n[27] El registro se ata a UN documento de resultados, no a una versión de contrato");
+const otherStudy = baseSource();
+otherStudy.identity = { ...IDENTITY, studyId: "00000000-0000-4000-8000-00000000dead" };
+const otherStudyResults = buildCanonicalStudyResults(otherStudy);
+eq("el otro estudio declara el mismo contrato", otherStudyResults.contractVersion, results.contractVersion);
+refuses(
+  "un registro del estudio A con los resultados del estudio B",
+  resolvePresentation({ document, registry, results: otherStudyResults }),
+  "registry_study_mismatch",
+);
+
+const otherPlan = baseSource();
+otherPlan.identity = { ...IDENTITY, planFingerprint: "sha256:otro-plan" };
+const otherPlanResults = buildCanonicalStudyResults(otherPlan);
+refuses(
+  "mismo estudio, otro plan proyectado",
+  resolvePresentation({ document, registry, results: otherPlanResults }),
+  "registry_plan_mismatch",
+);
+
+refuses(
+  "un documento redactado contra otra versión del registro",
+  resolvePresentation({ document: { ...document, registryVersion: "0.9.0" }, registry, results }),
+  "registry_version_mismatch",
+);
+
+console.log("\n[28] Un enlace guardado se niega antes que apuntar a otro resultado");
+const bound = bindPresentationDocument(document, registry);
+eq("enlazar estampa la huella del registro", bound.binding, registry.binding);
+check(/^[0-9a-f]{64}$/.test(bound.binding), "que es un digest de 64 hex y no una identidad legible");
+check(!bound.binding.includes(IDENTITY.studyId), "y no contiene el estudio del que se derivó");
+const boundOk = resolvePresentation({ document: bound, registry, results });
+check(boundOk.ok, "un documento enlazado resuelve contra su propio registro");
+
+/**
+ * The four mutations that could silently retarget a saved handle. Each rebuilds
+ * the registry from a changed study and re-resolves the SAME bound document.
+ */
+const drifts = [
+  [
+    "renombrar la etiqueta de una dimensión",
+    () => {
+      const drifted = baseSource();
+      drifted.attributeDefinitions = drifted.attributeDefinitions.map((definition) =>
+        definition.key === "perfil_cliente_h" ? { ...definition, label: "Esfera BNI" } : definition,
+      );
+      return drifted;
+    },
+  ],
+  [
+    "reordenar los grupos del recorrido",
+    () => {
+      const drifted = baseSource();
+      drifted.domains = [drifted.domains[1], drifted.domains[0], ...drifted.domains.slice(2)].map(
+        (domain, index) => ({ ...domain, displayOrder: index }),
+      );
+      return drifted;
+    },
+  ],
+  [
+    "insertar una dimensión antes",
+    () => {
+      const drifted = baseSource();
+      drifted.attributeDefinitions = [
+        { key: "perfil_cliente_b", label: "Antigüedad", dataType: "category", sensitivity: "internal", filterable: true, displayOrder: -1 },
+        ...drifted.attributeDefinitions,
+      ];
+      drifted.attributeValues = [
+        ...ACTIVE.map((id) => ({ participantId: id, attributeKey: "perfil_cliente_b", status: "answered", text: "A", numeric: null })),
+        ...drifted.attributeValues,
+      ];
+      return drifted;
+    },
+  ],
+  [
+    "insertar un punto de contacto antes",
+    () => {
+      const drifted = baseSource();
+      const inserted = {
+        key: "csat_g0p0",
+        label: "En una escala del 1 al 5, ¿un punto nuevo insertado al principio?",
+        instrumentKey: "csat",
+        domainKey: GROUPS[0].key,
+        scaleKey: "satisfaccion_csat",
+        itemOrder: -1,
+      };
+      drifted.items = [inserted, ...drifted.items];
+      drifted.answers = [
+        ...ACTIVE.map((id) => ({
+          sessionId: `s-csat-${id}`,
+          itemKey: "csat_g0p0",
+          status: "answered",
+          numeric: 5,
+          text: null,
+          optionRawValue: "5",
+          derivedLabel: "Satisfecho",
+        })),
+        ...drifted.answers,
+      ];
+      return drifted;
+    },
+  ],
+];
+
+for (const [label, mutate] of drifts) {
+  const driftedResults = buildCanonicalStudyResults(mutate());
+  const driftedRegistry = buildCanonicalPresentationRegistry(driftedResults);
+  check(driftedRegistry.binding !== registry.binding, `${label} cambia la huella de enlace`);
+  refuses(
+    `${label}: un documento enlazado se niega`,
+    resolvePresentation({ document: bound, registry: driftedRegistry, results: driftedResults }),
+    "binding_fingerprint_mismatch",
+  );
+}
+
+console.log("\n[29] El formato de presentación rellena; nunca redondea");
+const criBlock = document.pages[0].blocks.find((block) => block.id === "riesgo-indice");
+eq("el plano pide un decimal fijo para el índice de renovación", criBlock.displayFormat.kind, "fixed_decimals");
+eq("exactamente uno", criBlock.displayFormat.decimals, 1);
+const criRendered = blocks.find((block) => block.id === "riesgo-indice");
+const criCanonical = results.renewal.index;
+if (criCanonical.status === "available" && criRendered.payload.shape === "value" && criRendered.payload.value) {
+  eq("el valor numérico no cambia", criRendered.payload.value.value, criCanonical.value.value);
+  check(
+    Number(criRendered.payload.value.formatted) === criCanonical.value.value,
+    "y el texto rellenado sigue leyéndose como esa misma cifra",
+  );
+  check(
+    criRendered.payload.value.formatted.length >= criCanonical.value.formatted.length,
+    "el relleno sólo alarga: nunca acorta, que es lo que sería redondear",
+  );
+}
+// THE PADDING PATH ITSELF, proved offline. The synthetic renewal index happens
+// to carry a decimal already, so it cannot show that `\"33\"` becomes `\"33.0\"`.
+// Retention in period one is a whole 80%, whose canonical text is `\"80\"` — the
+// exact shape the approved CRI has — so binding it with one fixed decimal
+// exercises the append that the real oracle depends on.
+const paddingDoc = structuredClone(document);
+paddingDoc.pages[0].blocks.push({
+  id: "prueba-relleno",
+  kind: "result",
+  binding: "value:retention-rate-p-1",
+  chartVariant: "kpi_value",
+  displayFormat: { kind: "fixed_decimals", decimals: 1 },
+  copy: { title: null, description: null, annotation: null },
+  placement: { order: 950, span: { desktop: 3, tablet: 6, mobile: 12 }, responsive: "reflow" },
+  visible: true,
+  connectedFilterPanelIds: [],
+  samplePolicy: null,
+  methodologyDisclosure: null,
+});
+const paddingValidated = validatePresentationDocument(JSON.parse(JSON.stringify(paddingDoc)));
+check(paddingValidated.ok, "un bloque que pide un decimal fijo sobre una cifra entera valida");
+if (paddingValidated.ok) {
+  const canonicalRetention = results.retention.periods[0].retention;
+  const paddedModel = resolvePresentation({ document: paddingValidated.value, registry, results });
+  check(paddedModel.ok, "y resuelve");
+  if (paddedModel.ok && canonicalRetention.status === "available") {
+    const padded = paddedModel.value.pages.flatMap((page) => page.blocks).find((b) => b.id === "prueba-relleno");
+    check(!canonicalRetention.value.formatted.includes("."), `el contrato la escribe entera («${canonicalRetention.value.formatted}»)`);
+    eq("y la presentación la rellena", padded?.payload.value?.formatted, `${canonicalRetention.value.formatted}.0`);
+    eq("sin mover la cifra", padded?.payload.value?.value, canonicalRetention.value.value);
+  }
+}
+const others = blocks.filter((block) => block.id !== "riesgo-indice" && block.payload.shape === "value");
+check(
+  others.length > 0,
+  `y ${others.length} bloques más conservan el formato canónico: el decimal fijo es una elección de bloque, no una regla global`,
+);
+const shortening = structuredClone(document);
+shortening.pages[0].blocks.find((block) => block.id === "recomendacion-puntaje").displayFormat = {
+  kind: "fixed_decimals",
+  decimals: 0,
+};
+refuses(
+  "pedir menos decimales de los que la cifra ya escribe",
+  resolvePresentation({ document: shortening, registry, results }),
+  "incompatible_display_format",
+);
+const overPrecise = structuredClone(document);
+overPrecise.pages[0].blocks.find((block) => block.id === "riesgo-indice").displayFormat = {
+  kind: "fixed_decimals",
+  decimals: 2,
+};
+refuses(
+  "pedir más precisión de la que la medición declara",
+  resolvePresentation({ document: overPrecise, registry, results }),
+  "incompatible_display_format",
+);
+
 console.log("\n" + "=".repeat(74));
 if (failures > 0) {
   console.error(`RESULTADO: ${failures} fallo(s). COMPUERTA BLOQUEADA.`);
@@ -1399,3 +1765,118 @@ console.log(
     "lo escriba, no recorta una razón que pasa de 100, muestra las muestras pequeñas por omisión y " +
     "rechaza en voz alta lo que no entiende. COMPUERTA APROBADA.",
 );
+
+console.log("\n[30] Ningún cliente, ruta, acción o middleware alcanza la mitad de servidor");
+// A REAL WALK, not a grep. Nothing imports this layer yet, so today the answer
+// is trivially "none" — which is exactly when a boundary check is worth writing,
+// because the first import that crosses it will be written by somebody who does
+// not know the rule. The walk is rooted at every client component, HTTP route,
+// server action, page and the middleware, and follows relative and `@/` imports
+// transitively.
+const SERVER_ONLY_MODULES = [
+  "src/lib/presentation/registry.ts",
+  "src/lib/presentation/resolve.ts",
+  "src/lib/presentation/persistence.ts",
+  "src/lib/presentation/server.ts",
+  "src/lib/presentation/blueprints/cuicuilco-approved.ts",
+];
+const appSourceFiles = [];
+const collectAppSources = (dir) => {
+  let entries = [];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) collectAppSources(full);
+    else if (/\.(?:ts|tsx)$/.test(full)) appSourceFiles.push(full);
+  }
+};
+collectAppSources(join("src", "app"));
+collectAppSources(join("src", "components"));
+for (const extra of [join("src", "middleware.ts"), join("src", "middleware.tsx")]) {
+  try {
+    if (statSync(extra).isFile()) appSourceFiles.push(extra);
+  } catch {
+    /* absent */
+  }
+}
+const normalisePath = (path) => path.split("\\").join("/");
+const resolveSpecifier = (from, specifier) => {
+  const base = specifier.startsWith("@/") ? join("src", specifier.slice(2)) : join(from, "..", specifier);
+  const candidates = [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")];
+  for (const candidate of candidates) {
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      /* not this one */
+    }
+  }
+  return null;
+};
+const IMPORT_SPECIFIER = /from\s+["'](\.[^"']+|@\/[^"']+)["']/g;
+const reachableFrom = (root) => {
+  const seen = new Set();
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    let code = "";
+    try {
+      code = readFileSync(current, "utf8");
+    } catch {
+      continue;
+    }
+    for (const match of stripComments(code).matchAll(IMPORT_SPECIFIER)) {
+      const next = resolveSpecifier(current, match[1]);
+      if (next !== null) stack.push(next);
+    }
+  }
+  return [...seen].map(normalisePath);
+};
+const hasDirective = (path, directive) => {
+  try {
+    return new RegExp(`^\\s*["']${directive}["']`, "m").test(readFileSync(path, "utf8"));
+  } catch {
+    return false;
+  }
+};
+const clientRoots = appSourceFiles.filter((path) => hasDirective(path, "use client"));
+const actionRoots = appSourceFiles.filter((path) => hasDirective(path, "use server"));
+const routeRoots = appSourceFiles.filter((path) => /route\.tsx?$/.test(path));
+const pageRoots = appSourceFiles.filter((path) => /page\.tsx$/.test(path));
+check(appSourceFiles.length > 50, `la caminata parte de ${appSourceFiles.length} módulos de aplicación`);
+check(clientRoots.length >= 10, `incluidos ${clientRoots.length} componentes de cliente, así que no pasa por vacío`);
+check(routeRoots.length >= 2 && pageRoots.length >= 5, `${routeRoots.length} rutas y ${pageRoots.length} páginas`);
+
+for (const [label, roots] of [
+  ["un componente de cliente", clientRoots],
+  ["una ruta HTTP", routeRoots],
+  ["una acción de servidor", actionRoots],
+  ["una página", pageRoots],
+]) {
+  const leaks = [];
+  for (const root of roots) {
+    const reachable = reachableFrom(root);
+    for (const forbidden of SERVER_ONLY_MODULES) {
+      if (reachable.includes(forbidden)) leaks.push(`${normalisePath(root)} -> ${forbidden}`);
+    }
+  }
+  check(
+    leaks.length === 0,
+    `ningún(a) ${label} alcanza la mitad de servidor de la presentación${leaks.length ? `: ${leaks.join(", ")}` : ""}`,
+  );
+}
+const clientReachingResults = clientRoots.filter((root) =>
+  reachableFrom(root).some((path) => path.startsWith("src/lib/results/")),
+);
+check(
+  clientReachingResults.length === 0,
+  `ningún componente de cliente alcanza el modelo canónico de resultados${
+    clientReachingResults.length ? `: ${clientReachingResults.map(normalisePath).join(", ")}` : ""
+  }`,
+);
+

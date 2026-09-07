@@ -163,15 +163,27 @@ Concretely, 6B:
    owns no formula;
 5. answers the one open compatibility question below.
 
-**The open question 6B must answer before it writes to `study_experience_draft`.**
-Two draft rows exist on the hosted project, and **nothing in this repository
-records their `schema_version`.** The column's CHECK is only `between 1 and
-1000`, so the database will not say which of 1, 2 or 3 they are. Unit 6A's
-position is deliberate and safe: those rows are legacy-family documents, they are
-refused by name rather than reinterpreted, and Unit 6A neither reads nor writes
-them. 6B must read the stored version back and decide — with the owner — whether
-those two drafts are migrated forward, re-authored, or abandoned. It must not
-guess.
+**The question Unit 6A left open is now ANSWERED, by reading rather than
+guessing.** Unit 6A claimed the database could not reveal the stored versions.
+That was wrong: `schema_version` is `not null`, and the save RPC requires it to
+equal `definition.schemaVersion`, so the value was always readable. A read-only
+inventory on 2026-09-06 found:
+
+| study | `schema_version` | JSON `schemaVersion` | `documentKind` | revision | family |
+|---|---:|---:|---|---:|---|
+| ACEPTACIÓN P6E — DATOS SINTÉTICOS (TEST) | 3 | 3 | absent | 14 | legacy experience |
+| La voz de las y los Nets de Cuicuilco | **2** | 2 | absent | 72 | legacy experience |
+
+Column and JSON agree on both rows; neither is malformed; neither is a canonical
+presentation document. Nothing was mutated.
+
+So 6B does not need to decide what those rows are — it needs to honour what they
+are. The owner's stated policy applies cleanly: **retain both as evidence, create
+a new v4 canonical presentation from the approved blueprint, and never
+automatically convert a layout built on the legacy model.** The real study's
+draft is at version 2, so any future conversion would need the legacy v2→v3 step
+before v3→v4 even existed — which is precisely the automatic conversion the
+policy rules out.
 
 ---
 

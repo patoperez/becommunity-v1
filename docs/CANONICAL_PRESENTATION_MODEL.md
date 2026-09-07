@@ -128,14 +128,30 @@ publication metadata the existing draft/revision model already requires.
 Validation is Zod, `strictObject` throughout, so an unknown field is rejected
 rather than ignored.
 
-**`metadata` is nullable, and that is the template boundary.**
-`prepare_study_experience_revision` refuses a definition whose
-`metadata.studyId`/`metadata.tenantId` disagree with the study row it is written
-against, so a document without it could never be stored. It is NULL while the
-document is a template — the approved blueprint is a structure, not a study, and
-stamping a tenant into it would make it the client-specific artefact it must
-never be. Those two fields are database identifiers, so they stop at the
-document: no render model has a field for them.
+**A document carries NO database state, and the envelope is where it lives.**
+Unit 6A put `metadata.studyId`, `metadata.tenantId` and a publication block
+(status, source draft revision, a SHA-256 of itself, a study fingerprint,
+acknowledged warnings, a prepared note) inside the document, because
+`prepare_study_experience_revision` genuinely refuses a definition whose
+`metadata` disagrees with the study row. That was right about the RPC and wrong
+about the layering: a database identifier became authorable, migration 0025's
+lifecycle was duplicated in a writable second copy, and a hash sat inside the
+bytes it covers, where it cannot stay true.
+
+`src/lib/presentation/persistence.ts` owns all of it now.
+`encodePresentationForStorage` validates the document, stamps the scope in the
+shape 0025 cross-checks, and hashes the finished bytes from OUTSIDE.
+`decodePresentationFromStorage` refuses a row whose stored `schema_version`
+disagrees with the JSON, refuses a row belonging to another study, and strips the
+metadata before returning an authorable document. Nothing writes yet — the
+encoder and decoder exist for Unit 6B to wire.
+
+**A document does pin its binding.** `registryVersion` says which vocabulary it
+was authored against, and `binding` is a 64-hex digest over the study scope, the
+plan and package identity, both versions, and the entire ordered
+handle-to-address map. `null` means "study-agnostic template", which is what the
+approved blueprint is; `bindPresentationDocument` is the explicit act that ties
+one to a study.
 
 ### Versioning, and why the number is 4
 
@@ -147,9 +163,15 @@ document: no render model has a field for them.
 stored at all.
 
 Versions **1, 2 and 3 are already taken** by the legacy experience definition
-(`EXPERIENCE_SCHEMA_VERSION = 3` at `6311f0a`), and **two draft rows exist on the
-hosted project at a version nobody recorded.** Unit 6A therefore does three
-things:
+(`EXPERIENCE_SCHEMA_VERSION = 3` at `6311f0a`), and two draft rows exist on the
+hosted project. Unit 6A said the database could not reveal their versions; that
+was wrong — `schema_version` is `not null` and the save RPC requires it to equal
+`definition.schemaVersion`, so the value was always readable. A read-only
+inventory on 2026-09-06 found the P6E synthetic acceptance draft at **version 3,
+revision 14** and «La voz de las y los Nets de Cuicuilco» at **version 2,
+revision 72**; column and JSON agree on both and neither declares a
+`documentKind`, so both are LEGACY-family documents. Unit 6A therefore does
+three things:
 
 1. claims **4**, so a presentation document cannot be mistaken for a legacy one
    by version alone;
@@ -278,6 +300,62 @@ a results contract may not.
 
 ---
 
+## 9b. Two halves, and only one of them may be imported by a browser
+
+`src/lib/presentation/index.ts` is the CLIENT-SAFE barrel: the closed
+vocabulary, opaque handle helpers, typed errors, the authorable document and its
+validator, deterministic serialization, catalogue rows, and public render-model
+types. Every one of those is a shape.
+
+`src/lib/presentation/server.ts` carries `import "server-only"` and is the only
+route to the registry's address map, `RegistrySource`, the resolver, persistence
+encoding and the blueprint. Unit 6A exported all of those from the safe barrel;
+nothing imported them, so nothing broke — but a boundary that holds only because
+nobody noticed is not a boundary.
+
+Offline gates import the pure implementation modules directly, because
+`server-only` throws under a plain Node import and a gate is not a client. The
+boundary is for PRODUCTION code, and an import-graph walk rooted at every client
+component, HTTP route, server action, page and the middleware proves no path
+reaches the server half — or `src/lib/results/`.
+
+### The public render model tells a reader the outcome, not the deliberation
+
+A withheld result says `withheld_by_policy` and carries a separately authored
+`publicNote` when somebody wrote one for a reader. It does NOT carry the
+threshold, `authoredBy` or the internal `rationale`: those are audit fields, and
+shipping them publishes the study's own deliberation beside the gap it made.
+`annotate_below` likewise arrives as a finished sentence — the comparison
+happened on the server, because comparing is calculating.
+
+---
+
+## 9c. The registry is bound to ONE results document
+
+Checking that the contract VERSIONS agree is a test two different studies pass
+together. Every `CanonicalAddress` is an array position, so a registry built from
+study A and handed study B's results resolves every handle cleanly and answers
+with the wrong numbers — the worst failure this layer could have, because nothing
+looks broken.
+
+So the resolver refuses on four separate codes:
+
+| code | what moved |
+|---|---|
+| `registry_contract_mismatch` | the results contract version |
+| `registry_study_mismatch` | the tenant or the study |
+| `registry_plan_mismatch` | the projected plan, package, mapping or spec |
+| `registry_version_mismatch` | the presentation-registry version the document names |
+| `binding_fingerprint_mismatch` | the handle-to-address map itself |
+
+The last one is what makes handles safe to save. A handle is derived from a
+label or a position, so renaming a dimension, reordering a group, or inserting a
+dimension or touchpoint earlier could all silently point a saved binding at a
+different result. Each of those moves the fingerprint, so a bound document
+REFUSES instead. All four mutations are executed by the gate.
+
+---
+
 ## 10. TDP may exceed 100
 
 TDP is unawareness over the **valid** base (§4.1). It is a `ratio`, not a
@@ -334,6 +412,12 @@ npm run test:canonical-presentation          # synthetic, offline, in `npm test`
 npm run test:canonical-presentation-parity <clean.xlsx> <curated.xlsx>
 ```
 
+The parity gate compares against the APPROVED DASHBOARD, not against this
+layer's own output. Unit 6A's first run failed because it produced `"33"` where
+the oracle shows `"33.0"`, and the fix compared the value with the contract's own
+text instead — which proves self-consistency and nothing about parity. The
+expectation is now the oracle's literal string.
+
 The parity gate is deliberately **outside** `npm test`, exactly as
 `test:canonical-results-parity` is, because its inputs are machine-specific. Run
 without workbooks it reports itself SKIPPED — never as a pass.
@@ -344,7 +428,9 @@ without workbooks it reports itself SKIPPED — never as a pass.
 
 No route, no React component, no editor, no Studio UI. No read path switched. No
 shadow mode enabled. No migration added or edited. No dependency added. No
-Supabase or hosted operation of any kind. No credential read, rotated or altered.
+credential rotated or altered, and no hosted WRITE of any kind — Unit 6A.1 makes
+exactly one hosted read, the read-only draft inventory recorded in
+`docs/CURRENT_STATE.md`.
 The legacy dashboard is untouched and still broken in the three documented ways.
 `main` is unchanged.
 
