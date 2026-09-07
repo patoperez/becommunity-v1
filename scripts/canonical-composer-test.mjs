@@ -41,15 +41,22 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { composerFixtureResults } from "./lib/composer-fixture.mjs";
 // A gate imports the PURE implementation modules, never `./server`: that file
 // carries `import "server-only"`, which throws under a plain Node import by
 // design. Section [16] proves production code cannot take the shortcut.
 import {
+  bindPresentationDocument,
   buildCanonicalPresentationRegistry,
   projectPresentationCatalog,
 } from "../src/lib/presentation/registry.ts";
+import { resolvePresentation } from "../src/lib/presentation/resolve.ts";
+import { PresentationRenderer } from "../src/components/presentation/PresentationRenderer.tsx";
+import { RENDERED_VARIANTS } from "../src/components/presentation/renderers.tsx";
+import { AbsenceNotice } from "../src/components/presentation/absence.tsx";
 import { COMPATIBLE_CHART_VARIANTS } from "../src/lib/presentation/capabilities.ts";
 import {
   DEFAULT_SAMPLE_POLICY,
@@ -789,6 +796,312 @@ check(
 );
 
 /* -------------------------------------------------------------------------- */
+
+console.log("\n[17] El registro de dibujos y la tabla declarada dicen lo mismo");
+// Two artefacts, one claim. `IMPLEMENTED_CHART_VARIANTS` is what the editor
+// offers from; `RENDERERS` is what actually exists. If they drift, the editor
+// offers a variant that renders as a blank card, or hides one that works.
+const declared = [...IMPLEMENTED_CHART_VARIANTS].sort();
+const rendered = [...RENDERED_VARIANTS].sort();
+eq("la tabla declara tantas formas como componentes hay", declared.length, rendered.length);
+check(declared.join(",") === rendered.join(","), `las dos listas coinciden: ${declared.join(", ")}`);
+const REQUIRED_BY_BRIEF = [
+  "narrative", "callout", "kpi_value", "kpi_with_base", "table", "bar_vertical", "stacked_bar",
+  "journey_route_map", "gauge", "bar_horizontal", "term_ranking", "word_cloud", "filter_control",
+];
+const missingFromBrief = REQUIRED_BY_BRIEF.filter((variant) => !declared.includes(variant));
+check(missingFromBrief.length === 0, `las ${REQUIRED_BY_BRIEF.length} formas del plano aprobado están todas${missingFromBrief.length ? `; faltan ${missingFromBrief.join(", ")}` : ""}`);
+// And nothing is claimed that the authority would never allow for any semantic.
+const everyCompatible = new Set(Object.values(COMPATIBLE_CHART_VARIANTS).flat());
+const orphans = declared.filter((variant) => !everyCompatible.has(variant));
+check(orphans.length === 0, `ninguna forma implementada carece de semántica que la admita${orphans.length ? `: ${orphans.join(", ")}` : ""}`);
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[18] Un modelo resuelto se dibuja, y toda cifra visible es la ya formateada");
+const drawable = buildDrawableDocument();
+const bound = bindPresentationDocument(drawable, registry);
+const resolved = resolvePresentation({ document: bound, registry, results });
+check(resolved.ok, "el documento de prueba resuelve");
+if (!resolved.ok) {
+  console.error(JSON.stringify(resolved.errors, null, 1));
+  console.log("\n" + "=".repeat(74));
+  console.error(`RESULTADO: ${failures + 1} fallo(s). COMPUERTA BLOQUEADA.`);
+  process.exit(1);
+}
+const model = resolved.value;
+const internalHtml = renderToStaticMarkup(createElement(PresentationRenderer, { model, audience: "internal" }));
+const clientHtml = renderToStaticMarkup(createElement(PresentationRenderer, { model, audience: "client" }));
+check(internalHtml.length > 0 && clientHtml.length > 0, "la biblioteca dibuja el modelo en los dos modos");
+
+// EVERY finished figure in the model must appear in the markup exactly as the
+// canonical layer spelled it — and its bare `value` must not appear instead.
+const figures = [];
+for (const page of model.pages) {
+  for (const block of page.blocks) {
+    const payload = block.payload;
+    if (payload.shape === "value" && payload.value) figures.push(payload.value);
+    if (payload.shape === "routes") {
+      for (const route of payload.routes) {
+        for (const routePoint of route.points) {
+          if (routePoint.satisfaction) figures.push(routePoint.satisfaction);
+        }
+      }
+    }
+  }
+}
+check(figures.length > 0, `el modelo trae ${figures.length} cifra(s) terminada(s)`);
+const unprinted = figures.filter((figure) => !internalHtml.includes(figure.formatted));
+check(unprinted.length === 0, `toda cifra visible se dibuja tal cual la formateó la capa canónica${unprinted.length ? `; falta ${unprinted.map((f) => f.formatted).join(", ")}` : ""}`);
+// A padded figure is the sharpest version of the claim: the contract says "33",
+// the block asked for one decimal, and the page must read "33.0" and never "33".
+const padded = figures.filter((figure) => figure.formatted.includes("."));
+check(padded.length > 0, `hay ${padded.length} cifra(s) con decimal declarado`);
+// SCAN THE TEXT, NOT THE MARKUP. A first version of this check read the whole
+// HTML and went red on `left:50%` inside a style attribute — a marker position,
+// which is geometry, and geometry is allowed to hold a number. What the rule is
+// actually about is what a READER SEES, so the tags and their attributes come
+// off first and only the text nodes are searched.
+const textOf = (html) =>
+  html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&[a-z]+;/g, " ")
+    .replace(/\s+/g, " ");
+const internalText = textOf(internalHtml);
+const clientText = textOf(clientHtml);
+// SCOPE THE CLAIM TO THE BLOCK THAT MAKES IT. A first version searched the
+// whole page for the bare spelling and went red because a category's share
+// legitimately read "50" on the same page as an index of "50.0". Two different
+// quantities that happen to share digits are not a re-spelling of one another,
+// and an assertion that cannot tell them apart is an assertion about digits.
+//
+// So each padded figure is drawn ALONE, and the claim is made about its own
+// markup: the padded text is there and the unpadded one is not.
+const paddedBlocks = [];
+for (const page of model.pages) {
+  for (const block of page.blocks) {
+    if (block.payload.shape === "value" && block.payload.value?.formatted.includes(".")) {
+      paddedBlocks.push({ block, value: block.payload.value, page });
+    }
+  }
+}
+check(paddedBlocks.length > 0, `hay ${paddedBlocks.length} bloque(s) con una cifra rellenada a decimal fijo`);
+const misPrinted = paddedBlocks.filter(({ block, value, page }) => {
+  const alone = { ...model, pages: [{ ...page, blocks: [block] }] };
+  const text = textOf(renderToStaticMarkup(createElement(PresentationRenderer, { model: alone, audience: "internal" })));
+  const bare = value.formatted.split(".")[0];
+  const bareAlone = new RegExp(`(?<![\\d.,])${bare}(?![\\d.,])`);
+  return !text.includes(value.formatted) || bareAlone.test(text);
+});
+check(
+  misPrinted.length === 0,
+  `dibujado solo, cada bloque escribe la cifra rellenada y nunca la corta${misPrinted.length ? `: ${misPrinted.map((entry) => entry.value.formatted).join(", ")}` : ""}`,
+);
+const printedFigures = figures.filter((figure) => internalText.includes(figure.formatted));
+check(printedFigures.length === figures.length, `las ${figures.length} cifras aparecen en el TEXTO, no sólo en el marcado`);
+// The library must not be caught formatting. `formatted` is the only spelling.
+const COMPONENT_DIR = join("src", "components", "presentation");
+const componentFiles = [];
+const walkComponents = (dir) => {
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) walkComponents(path);
+    else if (path.endsWith(".ts") || path.endsWith(".tsx")) componentFiles.push({ path, code: readFileSync(path, "utf8") });
+  }
+};
+walkComponents(COMPONENT_DIR);
+check(componentFiles.length >= 8, `la biblioteca tiene ${componentFiles.length} módulos`);
+const reformatters = componentFiles.filter(({ code }) =>
+  /toFixed|toPrecision|toLocaleString|Intl\.|parseFloat|Number\.parseFloat/.test(stripComments(code)),
+);
+check(reformatters.length === 0, `ningún componente vuelve a formatear un número${reformatters.length ? `: ${reformatters.map((f) => f.path).join(", ")}` : ""}`);
+// Comments are stripped first. This library DISCUSSES `dangerouslySetInnerHTML`
+// — it is the thing it deliberately never uses — and a scan that could not tell
+// an explanation from a call would forbid the explanation. That is the same
+// mistake the presentation gate records making about the legacy adapter.
+const unsafeHtml = componentFiles.filter(({ code }) => /dangerouslySetInnerHTML/.test(stripComments(code)));
+check(unsafeHtml.length === 0, `ningún componente escribe HTML sin escapar${unsafeHtml.length ? `: ${unsafeHtml.map((f) => f.path).join(", ")}` : ""}`);
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[19] C11: el cliente no ve la ausencia que Studio sí nombra");
+check(/Sólo interno/.test(internalText), "el modo interno marca en palabras lo que es sólo para revisión");
+check(!/Sólo interno/.test(clientText), "y el modo cliente no lleva ni una de esas marcas");
+// A whole vocabulary, not one phrase: reviewer language is a family and any
+// member of it on a client page is the same defect.
+const REVIEWER_WORDS = [
+  "Sólo interno", "no lo ve el cliente", "Unidad 6B", "6B.2", "pendiente de configuración",
+  "Contenido pendiente", "Retenido por decisión", "todavía no filtran", "esta versión no dibuja",
+  "Elige otra forma", "Sin resolver", "Panel sin características",
+];
+const leaked = REVIEWER_WORDS.filter((word) => clientText.toLowerCase().includes(word.toLowerCase()));
+check(leaked.length === 0, `ninguna palabra de revisor cruza al cliente${leaked.length ? `: ${leaked.join(" | ")}` : ""}`);
+check(/pendiente/i.test(internalHtml), "Studio nombra el contenido pendiente");
+check(!/pendiente de configuración|Contenido pendiente/i.test(clientHtml), "y el cliente no ve ni el hueco ni su explicación");
+// The strongest form: a configuration-required block leaves NOTHING behind on a
+// client surface — not a card, not a heading, not a reserved row.
+const slotBlock = model.pages
+  .flatMap((page) => page.blocks)
+  .find((block) => block.availability === "configuration_required");
+check(Boolean(slotBlock), "el modelo trae un bloque que requiere configuración");
+if (slotBlock?.copy.title) {
+  check(internalHtml.includes(slotBlock.copy.title), "su título aparece en el modo interno");
+  check(!clientHtml.includes(slotBlock.copy.title), "y NO aparece en el modo cliente — ni el título queda");
+}
+// THE PREDICATE ITSELF, not only its effect on this document.
+//
+// A discrimination pass found that disabling `AbsenceNotice`'s client branch
+// changed nothing above: every absent block in the test document is already
+// filtered out by `clientHasContent` before the notice is ever reached. That is
+// defence in depth and it is worth having — but it meant the assertions were
+// passing for a structural reason and would have kept passing if the notice
+// itself started leaking. So the notice is now driven directly, in both modes,
+// for all four states.
+const ABSENCES = [
+  { absence: { state: "withheld_by_policy" }, clientSees: false },
+  { absence: { state: "configuration_required" }, clientSees: false },
+  { absence: { state: "unavailable", reason: "no_responses" }, clientSees: true },
+  { absence: { state: "unresolved", reason: "authority_conflict" }, clientSees: true },
+];
+for (const { absence, clientSees } of ABSENCES) {
+  const asClient = textOf(renderToStaticMarkup(createElement(AbsenceNotice, { absence, audience: "client" }))).trim();
+  const asInternal = textOf(renderToStaticMarkup(createElement(AbsenceNotice, { absence, audience: "internal" }))).trim();
+  if (clientSees) {
+    // A fact the CONTRACT states about a measurement is analytical honesty and
+    // must survive: C11 removes the shape of a gap, not a caveat about a
+    // result the client is being shown.
+    check(asClient.length > 0, `«${absence.state}» sí se le dice al cliente: es un hecho del contrato, no un hueco nuestro`);
+  } else {
+    check(asClient.length === 0, `«${absence.state}» no deja NADA en el cliente: ni caja, ni título, ni explicación`);
+  }
+  check(asInternal.length > 0, `y en modo interno Studio nombra «${absence.state}»`);
+  check(!asClient.includes("Sólo interno"), `«${absence.state}» nunca lleva lenguaje de revisor al cliente`);
+}
+
+// A filter panel is internal-only in this unit and must not reach a client page.
+check(/todavía no filtran/i.test(internalHtml), "el preview interno dice en voz alta que los filtros aún no filtran");
+check(!/todavía no filtran/i.test(clientHtml), "y el cliente no ve un control muerto");
+check(/disabled/.test(internalHtml), "los controles de filtro se dibujan deshabilitados de verdad");
+// AN INELIGIBLE BLOCK NEVER WEARS THE FILTER SECTION.
+//
+// The first version of this check searched the whole page for the section after
+// a block's title, and a discrimination pass showed it proved nothing: a title
+// appears twice in the markup — once in `aria-label`, once in the heading — so
+// splitting on it and reading the second piece inspected the handful of
+// characters BETWEEN the two, never the block's body. Each candidate block is
+// therefore drawn alone, which is the only way the question "does THIS block
+// carry it" has an unambiguous answer.
+const soloText = (block, page) =>
+  textOf(
+    renderToStaticMarkup(
+      createElement(PresentationRenderer, {
+        model: { ...model, pages: [{ ...page, blocks: [block] }] },
+        audience: "internal",
+      }),
+    ),
+  );
+const ineligible = [];
+const eligibleConnected = [];
+for (const page of model.pages) {
+  for (const block of page.blocks) {
+    if (block.payload.shape === "editorial" || block.payload.shape === "filter_controls" || block.payload.shape === "routes") {
+      ineligible.push({ block, page });
+    } else if (block.connectedFilterPanelIds.length > 0) {
+      eligibleConnected.push({ block, page });
+    }
+  }
+}
+check(ineligible.length > 0, `hay ${ineligible.length} bloque(s) que ningún filtro puede mover`);
+const wearing = ineligible.filter(({ block, page }) => soloText(block, page).includes("Qué filtros lo mueven"));
+check(
+  wearing.length === 0,
+  `ninguno muestra una sección genérica de «Qué filtros lo mueven»${wearing.length ? `: ${wearing.map((entry) => entry.block.id).join(", ")}` : ""}`,
+);
+// The positive control. Without it, deleting the section entirely would satisfy
+// the negative above, and a check that a missing feature is missing is not a check.
+check(eligibleConnected.length > 0, `hay ${eligibleConnected.length} bloque(s) que un panel sí mueve`);
+const notWearing = eligibleConnected.filter(({ block, page }) => !soloText(block, page).includes("Qué filtros lo mueven"));
+check(
+  notWearing.length === 0,
+  `y un bloque conectado sí la muestra${notWearing.length ? `; falta en ${notWearing.map((entry) => entry.block.id).join(", ")}` : ""}`,
+);
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[20] Ningún componente de presentación alcanza el servidor ni el cálculo");
+const componentReaching = componentFiles.filter(({ code }) =>
+  /from\s+["'][^"']*(presentation\/server|presentation\/registry|presentation\/resolve|presentation\/persistence|presentation\/blueprints|canonical-source|lib\/results\/(?!contract)|lib\/calc|lib\/shadow|lib\/supabase|studio\/)/.test(
+    stripComments(code),
+  ),
+);
+check(
+  componentReaching.length === 0,
+  `ningún componente importa servidor, registro, resolutor, persistencia, canónico, cálculo ni sombra${componentReaching.length ? `: ${componentReaching.map((f) => f.path).join(", ")}` : ""}`,
+);
+const componentTransports = componentFiles.filter(({ code }) =>
+  /@supabase|createClient\(|\.rpc\(|\bfetch\(|node:/.test(stripComments(code)),
+);
+check(componentTransports.length === 0, `ningún componente alcanza un transporte${componentTransports.length ? `: ${componentTransports.map((f) => f.path).join(", ")}` : ""}`);
+// The word cloud's geometry may read a count. It may not regroup one.
+const cloud = componentFiles.find(({ path }) => path.endsWith("Terms.tsx"));
+check(Boolean(cloud), "la biblioteca trae el dibujo de términos");
+if (cloud) {
+  const code = stripComments(cloud.code);
+  check(!/rotate\(\s*-?(?!180)\d+deg/.test(code.replace(/rotate\(180deg\)/g, "")), "la nube no inclina ningún término en diagonal");
+  check(!/<line|<path|filter:|drop-shadow|textShadow/.test(code), "no dibuja conectores, halos ni sombras entre términos");
+  check(/writing-mode|writingMode/.test(code), "y su único giro es exactamente vertical");
+}
+
+/* -------------------------------------------------------------------------- */
+
+function buildDrawableDocument() {
+  // One page carrying one of every shape the renderer has to survive, including
+  // an editorial slot the contract says nobody has filled yet.
+  const block = (id, extra, order, span = 6) => ({
+    id,
+    copy: { title: extra.title ?? null, description: null, annotation: null },
+    placement: { order, span: { desktop: span, tablet: 12, mobile: 12 }, responsive: "reflow" },
+    visible: true,
+    connectedFilterPanelIds: extra.connectedTo ?? [],
+    samplePolicy: null,
+    methodologyDisclosure: null,
+    displayFormat: extra.displayFormat ?? { kind: "canonical" },
+    ...extra.body,
+  });
+  return {
+    schemaVersion: PRESENTATION_DOCUMENT_SCHEMA_VERSION,
+    documentKind: PRESENTATION_DOCUMENT_KIND,
+    registryVersion: registry.registryVersion,
+    binding: null,
+    id: "dibujable",
+    title: "Documento dibujable",
+    locale: "es-MX",
+    samplePolicy: DEFAULT_SAMPLE_POLICY,
+    methodologyDisclosure: "plain_language_with_base",
+    pages: [
+      {
+        id: "dibujo",
+        title: "Dibujo",
+        order: 0,
+        blocks: [
+          // A padded figure: the contract spells the index one way and the block
+          // asks for a decimal, which is the exact 33 → "33.0" situation.
+          block("kpi", { title: "Índice de renovación", displayFormat: { kind: "fixed_decimals", decimals: 1 }, body: { kind: "result", binding: RENEWAL.handle, chartVariant: "gauge" } }, 0),
+          // Connected to the panel below, so the internal "what moves this"
+          // section has a positive control as well as a negative one.
+          block("nps", { title: "Recomendación", connectedTo: ["panel"], body: { kind: "result", binding: NPS.handle, chartVariant: "kpi_with_base" } }, 1),
+          block("comp", { title: "Composición", body: { kind: "result", binding: DISTRIBUTION.handle, chartVariant: "stacked_bar" } }, 2, 12),
+          block("terms", { title: "Términos", body: { kind: "result", binding: TERMS.handle, chartVariant: "word_cloud" } }, 3, 12),
+          block("ranking", { title: "Ranking", body: { kind: "result", binding: TERMS.handle, chartVariant: "term_ranking" } }, 4),
+          block("routes", { title: "Recorrido", body: { kind: "journey_routes", chartVariant: "journey_route_map", routes: [{ id: "r1", title: "Ruta uno", order: 0, sourceGroup: GROUP.handle, touchpoints: GROUP.members.slice() }] } }, 5, 12),
+          block("panel", { title: "Filtros", body: { kind: "filter_panel", dimensions: [DIM_OPEN.handle] } }, 6, 12),
+          block("slot", { title: "Texto pendiente", body: { kind: "editorial", slot: SLOT.handle, content: null } }, 7, 12),
+          block("prose", { title: "Texto redactado", body: { kind: "editorial", slot: null, content: { body: "Un párrafo escrito por una persona." } } }, 8, 12),
+        ],
+      },
+    ],
+  };
+}
 
 function countIds(document) {
   let total = 1;

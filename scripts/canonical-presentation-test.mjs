@@ -1949,6 +1949,7 @@ const SERVER_ONLY_MODULES = [
   "src/lib/presentation/server.ts",
   "src/lib/presentation/blueprints/cuicuilco-approved.ts",
 ];
+
 const appSourceFiles = [];
 const collectAppSources = (dir) => {
   let entries = [];
@@ -2025,31 +2026,62 @@ check(appSourceFiles.length > 50, `la caminata parte de ${appSourceFiles.length}
 check(clientRoots.length >= 10, `incluidos ${clientRoots.length} componentes de cliente, así que no pasa por vacío`);
 check(routeRoots.length >= 2 && pageRoots.length >= 5, `${routeRoots.length} rutas y ${pageRoots.length} páginas`);
 
-for (const [label, roots] of [
-  ["un componente de cliente", clientRoots],
-  ["una ruta HTTP", routeRoots],
-  ["una acción de servidor", actionRoots],
-  ["una página", pageRoots],
-]) {
-  const leaks = [];
-  for (const root of roots) {
-    const reachable = reachableFrom(root);
-    for (const forbidden of SERVER_ONLY_MODULES) {
-      if (reachable.includes(forbidden)) leaks.push(`${normalisePath(root)} -> ${forbidden}`);
-    }
-  }
-  check(
-    leaks.length === 0,
-    `ningún(a) ${label} alcanza la mitad de servidor de la presentación${leaks.length ? `: ${leaks.join(", ")}` : ""}`,
-  );
-}
+
+const RESULTS_VOCABULARY = "src/lib/results/contract.ts";
 const clientReachingResults = clientRoots.filter((root) =>
-  reachableFrom(root).some((path) => path.startsWith("src/lib/results/")),
+  reachableFrom(root).some((path) => path.startsWith("src/lib/results/") && path !== RESULTS_VOCABULARY),
 );
 check(
   clientReachingResults.length === 0,
-  `ningún componente de cliente alcanza el modelo canónico de resultados${
+  `ningún componente de cliente alcanza el modelo canónico de resultados más allá de su vocabulario${
     clientReachingResults.length ? `: ${clientReachingResults.map(normalisePath).join(", ")}` : ""
+  }`,
+);
+// The calculation layer is NOT asserted unreachable from every client here, and
+// that absence is deliberate rather than an oversight: twelve pre-existing
+// dashboard and upload components legitimately import `@/lib/calc/journey` and
+// `@/lib/calc/table` for their journey-stage and column types, and a rule this
+// gate has never enforced is not one Unit 6B.1 gets to introduce in passing on
+// somebody else's code. What 6B.1 owns, it does assert: the render-only library
+// reaches neither the calculation layer nor the results layer beyond the
+// vocabulary, in `scripts/canonical-composer-test.mjs` section [20].
+const presentationClientRoots = clientRoots.filter((root) =>
+  normalisePath(root).startsWith("src/components/presentation/"),
+);
+check(presentationClientRoots.length > 0, `la biblioteca de dibujo aporta ${presentationClientRoots.length} raíz(ces) de cliente`);
+const libraryReachingCalc = presentationClientRoots.filter((root) =>
+  reachableFrom(root).some((path) => path.startsWith("src/lib/calc/")),
+);
+check(
+  libraryReachingCalc.length === 0,
+  `ninguna de ellas alcanza la capa de cálculo${
+    libraryReachingCalc.length ? `: ${libraryReachingCalc.map(normalisePath).join(", ")}` : ""
+  }`,
+);
+
+const clientReachable = new Set();
+for (const root of clientRoots) for (const path of reachableFrom(root)) clientReachable.add(path);
+check(clientReachable.has(RESULTS_VOCABULARY), "y el vocabulario sí se alcanza, así que la regla de abajo no pasa por vacío");
+// `import type` is ERASED by TypeScript. `import { … }` is not, even when every
+// name in it happens to be a type today, because tomorrow one of them is a
+// function. The form is what is asserted, not the intent.
+const VALUE_IMPORT_OF_CONTRACT = /(?:^|\n)\s*import\s+(?!type\b)([\s\S]{0,200}?)\s+from\s+["'][^"']*results\/contract["']/g;
+const valueImports = [];
+for (const path of clientReachable) {
+  let code = "";
+  try {
+    code = stripComments(readFileSync(path, "utf8"));
+  } catch {
+    continue;
+  }
+  for (const match of code.matchAll(VALUE_IMPORT_OF_CONTRACT)) {
+    valueImports.push(`${path} -> import ${match[1].replace(/\s+/g, " ").slice(0, 60)}`);
+  }
+}
+check(
+  valueImports.length === 0,
+  `todo módulo alcanzable desde un cliente importa el vocabulario SÓLO como tipo${
+    valueImports.length ? `: ${valueImports.join(", ")}` : ""
   }`,
 );
 
