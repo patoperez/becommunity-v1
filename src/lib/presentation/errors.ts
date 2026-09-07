@@ -47,6 +47,25 @@ export type PresentationErrorCode =
   | "incompatible_chart_variant"
   /** The registry was built from a different results contract than the caller passed. */
   | "registry_contract_mismatch"
+  /**
+   * The registry and the results describe DIFFERENT STUDIES.
+   *
+   * Its own code, because it is the failure with no symptom: every address is an
+   * array position, so a registry from one study resolves cleanly against
+   * another and answers with the wrong numbers.
+   */
+  | "registry_study_mismatch"
+  /** Same study, different projected plan or package. The positions may have moved. */
+  | "registry_plan_mismatch"
+  /** The document was authored against a different presentation-registry version. */
+  | "registry_version_mismatch"
+  /**
+   * The document was bound to a registry whose handle-to-address map is not this
+   * one — a label was renamed, a group reordered, or an entry inserted earlier.
+   */
+  | "binding_fingerprint_mismatch"
+  /** The requested display format cannot be honoured without changing the value. */
+  | "incompatible_display_format"
 
   /* -------- filters -------- */
   /** A filter panel offers a dimension the bound result does not support. */
@@ -61,6 +80,12 @@ export type PresentationErrorCode =
   | "route_touchpoint_outside_group"
   /** Two visible routes claim the same touchpoint, or one route claims it twice. */
   | "route_touchpoint_duplicated"
+
+  /* -------- persistence (server-only) -------- */
+  /** A stored definition belongs to a different tenant/study than the caller asked for. */
+  | "persistence_scope_mismatch"
+  /** The scope is malformed, or the stored column and the JSON disagree about the version. */
+  | "persistence_scope_invalid"
 
   /* -------- authored policy -------- */
   /** A suppressing sample policy was written without the authorship it requires. */

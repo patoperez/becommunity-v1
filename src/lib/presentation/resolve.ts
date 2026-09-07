@@ -54,6 +54,7 @@ import {
   type PresentationAvailability,
 } from "./capabilities";
 import type {
+  DisplayFormat,
   PresentationBlock,
   PresentationDocument,
   SampleDisplayPolicy,
@@ -68,7 +69,8 @@ import {
   type PresentationOutcome,
 } from "./errors";
 import { handleFacet, type PresentationHandle } from "./handles";
-import type { CanonicalAddress, CanonicalPresentationRegistry, RegistryEntry, ResponseContext } from "./registry";
+import type { RegistryEntry, ResponseContext } from "./catalog";
+import type { CanonicalAddress, CanonicalPresentationRegistry } from "./registry";
 import type {
   PresentationRenderModel,
   RenderAbsence,
@@ -81,6 +83,7 @@ import type {
   RenderPayload,
   RenderRoute,
   RenderRoutePoint,
+  RenderSampleDisplay,
   RenderSeriesPoint,
   RenderValue,
 } from "./render-model";
@@ -175,12 +178,64 @@ function withheldAbsence(policy: SampleDisplayPolicy): RenderAbsence {
   if (policy.mode !== "hide_below") {
     throw new PresentationError("malformed_document", "sólo una política de ocultamiento retiene un valor.");
   }
-  return {
-    state: "withheld_by_policy",
-    threshold: policy.threshold,
-    authoredBy: policy.authoredBy,
-    rationale: policy.rationale,
-  };
+  // The threshold, the author and the rationale stay HERE. A reader is told
+  // that a person decided not to publish this, and — only if somebody wrote one
+  // for them — the sentence on the block. Nothing else.
+  return { state: "withheld_by_policy" };
+}
+
+/** The public outcome of the policy: a decision already made, plus any approved sentence. */
+function sampleDisplayFor(
+  policy: SampleDisplayPolicy,
+  base: ResponseContext | null,
+): RenderSampleDisplay {
+  if (policyWithholds(policy, base)) {
+    return {
+      state: "withheld_by_policy",
+      note: policy.mode === "hide_below" ? policy.publicNote : null,
+    };
+  }
+  const note = sampleNoteFor(policy, base);
+  return note === null ? { state: "shown" } : { state: "shown_with_note", note };
+}
+
+/**
+ * Spell a finished number the way the block asked for it — by PADDING ONLY.
+ *
+ * The canonical formatter renders an integer bare, so the renewal index is
+ * `"33"`; the approved dashboard renders `"33.0"`. Appending a zero cannot move
+ * a value, so that is the only operation allowed here: no rounding, no
+ * shortening, no arithmetic of any kind. A request that would require
+ * shortening, or that asks for more precision than the value declares, is
+ * refused rather than quietly satisfied.
+ */
+function applyDisplayFormat(
+  value: RenderValue,
+  format: DisplayFormat,
+): { value: RenderValue } | { error: string } {
+  if (format.kind === "canonical") return { value };
+  const wanted = format.decimals;
+  if (wanted > value.decimals) {
+    return {
+      error:
+        `pide ${wanted} decimales y la cifra sólo declara ${value.decimals}: rellenar más allá de la ` +
+        "precisión declarada afirmaría una exactitud que la medición no tiene.",
+    };
+  }
+  const text = value.formatted;
+  const dot = text.indexOf(".");
+  const present = dot < 0 ? 0 : text.length - dot - 1;
+  if (present > wanted) {
+    return {
+      error:
+        `la cifra ya se escribe con ${present} decimales y se piden ${wanted}: acortarla sería ` +
+        "redondear, y aquí sólo se rellena.",
+    };
+  }
+  if (present === wanted) return { value };
+  const zeros = "0".repeat(wanted - present);
+  const formatted = dot < 0 && wanted > 0 ? `${text}.${zeros}` : `${text}${zeros}`;
+  return { value: { ...value, formatted } };
 }
 
 /**
@@ -552,6 +607,14 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
   const { document, registry, results } = input;
   const errors: PresentationIssue[] = [];
 
+  // ── BINDING INTEGRITY ──────────────────────────────────────────────────────
+  //
+  // Unit 6A compared only the contract VERSIONS, which is a test two different
+  // studies pass together. Every `CanonicalAddress` is an array position, so a
+  // registry built from study A and handed study B's results resolves every
+  // handle cleanly and answers with the wrong numbers — a failure with no
+  // symptom. Each mismatch below therefore gets its own code, so a gate can
+  // prove WHICH one refused.
   if (registry.contractVersion !== results.contractVersion) {
     return failure([
       issue(
@@ -559,6 +622,55 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
         "$",
         `el registro describe el contrato ${registry.contractVersion} y los resultados declaran ` +
           `${results.contractVersion}. No se resuelve contra un contrato distinto del que lo generó.`,
+      ),
+    ]);
+  }
+  if (
+    registry.source.tenantId !== results.study.tenantId ||
+    registry.source.studyId !== results.study.studyId
+  ) {
+    return failure([
+      issue(
+        "registry_study_mismatch",
+        "$",
+        "el registro se construyó a partir de OTRO estudio. Como cada dirección canónica es una " +
+          "posición de arreglo, resolver así no fallaría: respondería con las cifras equivocadas.",
+      ),
+    ]);
+  }
+  if (
+    registry.source.planFingerprint !== results.study.planFingerprint ||
+    registry.source.packageIdempotencyKey !== results.study.packageIdempotencyKey ||
+    registry.source.mappingVersion !== results.study.mappingVersion ||
+    registry.source.specId !== results.study.specId
+  ) {
+    return failure([
+      issue(
+        "registry_plan_mismatch",
+        "$",
+        "mismo estudio, otro plan proyectado: las posiciones pueden haberse movido, así que las " +
+          "direcciones del registro ya no describen estos resultados.",
+      ),
+    ]);
+  }
+  if (document.registryVersion !== registry.registryVersion) {
+    return failure([
+      issue(
+        "registry_version_mismatch",
+        "$.registryVersion",
+        `el documento se redactó contra la versión ${document.registryVersion} del registro de ` +
+          `presentación y ésta es la ${registry.registryVersion}.`,
+      ),
+    ]);
+  }
+  if (document.binding !== null && document.binding !== registry.binding) {
+    return failure([
+      issue(
+        "binding_fingerprint_mismatch",
+        "$.binding",
+        "el documento se enlazó a un registro cuyo mapa de handles no es éste: se renombró una " +
+          "etiqueta, se reordenó un grupo o se insertó una entrada antes. Un enlace guardado se " +
+          "niega en lugar de apuntar en silencio a otro resultado.",
       ),
     ]);
   }
@@ -689,8 +801,7 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
     copy: block.copy,
     placement: block.placement,
     visible: block.visible,
-    samplePolicy: policy,
-    sampleNote: sampleNoteFor(policy, boundEntry?.responseContext ?? null),
+    sampleDisplay: sampleDisplayFor(policy, boundEntry?.responseContext ?? null),
     connectedFilterPanelIds: block.connectedFilterPanelIds.slice(),
   };
 
@@ -918,13 +1029,25 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
     return null;
   }
 
+  // Spell the number the way the block asked. Padding only — the helper refuses
+  // anything that would need rounding, and refusing is the whole point.
+  let formatted = payload;
+  if (payload.shape === "value" && payload.value !== null) {
+    const spelled = applyDisplayFormat(payload.value, block.displayFormat);
+    if ("error" in spelled) {
+      errors.push(issue("incompatible_display_format", path, spelled.error));
+      return null;
+    }
+    formatted = { ...payload, value: spelled.value };
+  }
+
   return {
     ...shell,
+    payload: formatted,
     semantic: entry.semantic,
     chartVariant: variant as ChartVariant,
     availability: entry.availability,
     provenance: entry.provenance,
-    payload,
     methodology: methodologyFor(level, address, results, entry.responseContext),
   };
 }

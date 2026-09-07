@@ -37,17 +37,17 @@ import type {
   FilterDimension,
   MetricResult,
   ResultBase,
-  ResultUnit,
 } from "../results/contract";
 import {
   CANONICAL_PRESENTATION_REGISTRY_VERSION,
   COMPATIBLE_CHART_VARIANTS,
   SEMANTIC_UNITS,
-  type ChartVariant,
   type PresentationAvailability,
   type PresentationSemantic,
   type ProvenanceCategory,
 } from "./capabilities";
+import { sha256Hex } from "../ingestion/canonical-commit/sha256";
+import type { PresentationCatalog, RegistryEntry, ResponseContext } from "./catalog";
 import {
   compareHandles,
   presentationHandle,
@@ -96,58 +96,53 @@ export type CanonicalAddress =
 /* the describable half                                                        */
 /* -------------------------------------------------------------------------- */
 
-/**
- * The base a result rests on, at the coarseness a client may be shown.
- *
- * The three counts and nothing else: `AnswerAccounting`'s nine fields are an
- * auditor's tool, and publishing them per block would invite a surface to
- * recombine them — which is arithmetic, which is forbidden here.
- */
-export type ResponseContext = {
-  eligible: number;
-  responded: number;
-  valid: number;
-};
 
-/** One thing a presentation may name. Every field is client-safe. */
-export type RegistryEntry = {
-  handle: PresentationHandle;
-  semantic: PresentationSemantic;
-  /** Display text the client is already shown. Never a key. */
-  label: string;
-  /** The units this entry's values are already expressed in. */
-  displayFormats: readonly ResultUnit[];
-  /** The variants that may draw it. */
-  compatibleVariants: readonly ChartVariant[];
-  availability: PresentationAvailability;
-  /** Null for structural entries that rest on no single base. */
-  responseContext: ResponseContext | null;
-  provenance: ProvenanceCategory;
-  /** Filter dimensions this entry accepts, as handles. */
-  supportedFilters: readonly PresentationHandle[];
-  /** Filter dimensions an authority forbids crossing with it, as handles. */
-  forbiddenFilters: readonly PresentationHandle[];
-  /**
-   * For a journey group: the touchpoint handles the SOURCE placed in it, in the
-   * source's own order. Empty for everything else.
-   *
-   * This is the four-group evidence. The five VISIBLE routes the approved
-   * dashboard draws are presentation configuration and live in the document,
-   * never here — a route is a decision, a group is a fact.
-   */
-  members: readonly PresentationHandle[];
+/**
+ * WHICH EXACT RESULTS DOCUMENT a registry was built from. SERVER ONLY.
+ *
+ * Unit 6A checked only that the contract VERSIONS agreed, which is a check two
+ * different studies pass together. Because every `CanonicalAddress` is an array
+ * POSITION, a registry from study A handed study B's results resolves every
+ * handle successfully and silently answers with the wrong numbers — the worst
+ * failure this layer could have, because nothing looks broken.
+ *
+ * None of these fields reaches a catalogue or a render model. They exist so the
+ * resolver can refuse.
+ */
+export type RegistrySource = {
+  tenantId: string;
+  studyId: string;
+  specId: string;
+  mappingVersion: number;
+  calculationVersion: string;
+  packageIdempotencyKey: string;
+  planFingerprint: string;
 };
 
 /**
  * The registry.
  *
  * `entries` is ordered by handle in codepoint order so two builds of the same
- * document enumerate identically. `addresses` is the server-only half.
+ * document enumerate identically. `addresses` and `source` are the server-only
+ * half; `binding` is the one piece a stored document may keep.
  */
 export type CanonicalPresentationRegistry = {
   registryVersion: string;
   /** The results contract this registry describes. A resolver cross-checks it. */
   contractVersion: string;
+  /** SERVER ONLY. The exact results document behind this registry. */
+  source: RegistrySource;
+  /**
+   * The BINDING FINGERPRINT — 64 hex, and safe to store in a document.
+   *
+   * A one-way digest over the study scope, the plan and package identity, both
+   * versions, and the ENTIRE ordered handle-to-address map. It exposes none of
+   * those (that is what a digest is for) and it changes whenever any of them
+   * does — which is precisely what makes a saved binding refuse instead of
+   * silently retargeting after a label is renamed, a group reordered, or a
+   * dimension or touchpoint inserted earlier.
+   */
+  binding: string;
   entries: readonly RegistryEntry[];
   /** SERVER ONLY. Dropped by `projectCatalog`; absent from every render model. */
   addresses: ReadonlyMap<PresentationHandle, CanonicalAddress>;
@@ -585,12 +580,73 @@ export function buildCanonicalPresentationRegistry(
   const addresses = new Map<PresentationHandle, CanonicalAddress>();
   for (const draft of drafts) addresses.set(draft.handle, draft.address);
 
+  const source: RegistrySource = {
+    tenantId: results.study.tenantId,
+    studyId: results.study.studyId,
+    specId: results.study.specId,
+    mappingVersion: results.study.mappingVersion,
+    calculationVersion: results.study.calculationVersion,
+    packageIdempotencyKey: results.study.packageIdempotencyKey,
+    planFingerprint: results.study.planFingerprint,
+  };
+
   return {
     registryVersion: CANONICAL_PRESENTATION_REGISTRY_VERSION,
     contractVersion: results.contractVersion,
+    source,
+    binding: presentationBindingFingerprint({
+      registryVersion: CANONICAL_PRESENTATION_REGISTRY_VERSION,
+      contractVersion: results.contractVersion,
+      source,
+      addresses,
+    }),
     entries,
     addresses,
   };
+}
+
+/**
+ * The binding fingerprint.
+ *
+ * Everything that could make a saved handle mean something different goes in:
+ * the study it belongs to, the plan and package that produced it, both
+ * versions, and every handle beside the exact address it resolves to, in a
+ * fixed order. A rename, a reorder or an insertion moves at least one handle or
+ * one address, so the digest moves with it.
+ *
+ * `sha256Hex` is the product's own synchronous SHA-256 — self-contained,
+ * allocation-light, workerd-safe, and already pinned against
+ * `crypto.subtle.digest` by the Unit 3 gate, so this cannot drift from the hash
+ * every other identity in the system uses.
+ */
+export function presentationBindingFingerprint(input: {
+  registryVersion: string;
+  contractVersion: string;
+  source: RegistrySource;
+  addresses: ReadonlyMap<PresentationHandle, CanonicalAddress>;
+}): string {
+  const map = [...input.addresses.entries()]
+    .sort((a, b) => compareHandles(a[0], b[0]))
+    .map(([handle, address]) => {
+      const fields = Object.keys(address)
+        .sort()
+        .map((key) => `${key}=${String((address as Record<string, unknown>)[key])}`)
+        .join(",");
+      return `${handle}->${fields}`;
+    })
+    .join("\n");
+  const scope = [
+    `registry=${input.registryVersion}`,
+    `contract=${input.contractVersion}`,
+    `tenant=${input.source.tenantId}`,
+    `study=${input.source.studyId}`,
+    `spec=${input.source.specId}`,
+    `mapping=${input.source.mappingVersion}`,
+    `calculation=${input.source.calculationVersion}`,
+    `package=${input.source.packageIdempotencyKey}`,
+    `plan=${input.source.planFingerprint}`,
+  ].join("\n");
+  return sha256Hex(`${scope}\n--\n${map}`);
 }
 
 /** Look one entry up by handle. */
@@ -599,4 +655,35 @@ export function registryEntry(
   handle: PresentationHandle,
 ): RegistryEntry | null {
   return registry.entries.find((entry) => entry.handle === handle) ?? null;
+}
+
+/**
+ * Bind a template to one registry — the explicit instantiation act.
+ *
+ * A study-agnostic template may travel unbound; the moment it becomes a
+ * document ABOUT a study it must say which registry produced the handles it
+ * names, so a later resolution can prove the address map has not moved
+ * underneath it. Binding is therefore something a caller does on purpose, never
+ * something resolution does silently on the caller's behalf.
+ */
+export function bindPresentationDocument<T extends { registryVersion: string; binding: string | null }>(
+  document: T,
+  registry: CanonicalPresentationRegistry,
+): T {
+  return { ...document, registryVersion: registry.registryVersion, binding: registry.binding };
+}
+
+/**
+ * Project a registry into its client-reachable catalogue.
+ *
+ * The address map is dropped and nothing replaces it. `entries` is already
+ * sorted by handle when the registry is built, so the catalogue is
+ * deterministic without re-sorting.
+ */
+export function projectPresentationCatalog(registry: CanonicalPresentationRegistry): PresentationCatalog {
+  return {
+    registryVersion: registry.registryVersion,
+    contractVersion: registry.contractVersion,
+    entries: registry.entries,
+  };
 }

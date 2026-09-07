@@ -123,10 +123,53 @@ export type SampleDisplayPolicy =
       threshold: number;
       authoredBy: string;
       rationale: string;
+      /**
+       * The ONLY sentence a reader may be shown about a withheld result.
+       *
+       * `authoredBy` and `rationale` are audit fields: who decided, and why. A
+       * client is not told either, and is not told the threshold — "we hid this
+       * because Dirección del estudio decided X below n = 5" publishes the
+       * study's internal deliberation beside the gap it made. If a reader should
+       * be told something, somebody writes it here, deliberately, for them.
+       */
+      publicNote: string | null;
     };
 
 /** The system default, and it shows everything. */
 export const DEFAULT_SAMPLE_POLICY: SampleDisplayPolicy = { mode: "show_all" };
+
+/* -------------------------------------------------------------------------- */
+/* display format                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * HOW A FINISHED NUMBER IS SPELLED — and it may only ever be spelled longer.
+ *
+ * `formatNumber` renders an integer bare: the renewal index is the value 33 at
+ * one declared decimal, and its canonical text is `"33"`. The APPROVED dashboard
+ * renders the same figure as `"33.0"` (`Risk.tsx` passes `decimals={1}`, and both
+ * of its QA suites require that string). Two spellings of one number, and the
+ * approved one is a presentation decision — which is this layer's business.
+ *
+ * So a block may ask for a fixed number of decimals, and the request is honoured
+ * by PADDING ONLY. `"33"` becomes `"33.0"`; nothing is ever shortened, rounded or
+ * re-derived, because appending a zero cannot move a value and rounding can. A
+ * request that would require shortening is REFUSED
+ * (`incompatible_display_format`) rather than quietly satisfied, and a request
+ * for more decimals than the canonical value declares is refused too — padding
+ * to a precision the measurement never had would assert an accuracy nobody has.
+ *
+ * The padding is string work, not arithmetic: the gate still proves this layer
+ * calls no `Math.`, no `toFixed` and no division.
+ */
+export type DisplayFormat =
+  /** Whatever the canonical formatter produced. The default. */
+  | { kind: "canonical" }
+  /** Pad the canonical text to exactly this many decimals. Never shortens. */
+  | { kind: "fixed_decimals"; decimals: number };
+
+/** The default: say it the way the canonical layer said it. */
+export const DEFAULT_DISPLAY_FORMAT: DisplayFormat = { kind: "canonical" };
 
 /* -------------------------------------------------------------------------- */
 /* blocks                                                                      */
@@ -184,6 +227,8 @@ export type ResultBlock = BlockCommon & {
   kind: "result";
   binding: PresentationHandle;
   chartVariant: string;
+  /** How the finished number is spelled. Padding only; never rounds. */
+  displayFormat: DisplayFormat;
 };
 
 /** One visible journey route: a presentation decision over source evidence. */
@@ -240,62 +285,54 @@ export type PresentationPage = {
 };
 
 /**
- * Publication metadata, shaped by the tables that already exist.
+ * WHAT A DOCUMENT DOES NOT CONTAIN, AND WHY IT USED TO.
  *
- * Every bound here mirrors a CHECK in migration 0025 so a document that
- * validates locally is a document the database will accept: the hash is 64
- * lower-case hex characters, the fingerprint is 1..200 characters, the note is
- * at most 200, and there are at most 64 acknowledged warning codes drawn from
- * `[a-z0-9_]`.
+ * Unit 6A put `metadata.studyId`, `metadata.tenantId` and a whole publication
+ * block inside this type, because `prepare_study_experience_revision` refuses a
+ * definition whose `metadata` disagrees with the study row. That reasoning was
+ * right about the RPC and wrong about the layering: it let a DATABASE
+ * IDENTIFIER and a LIFECYCLE STATE be authored, and migration 0025 already owns
+ * both. `definitionSha256` was worse — a hash of the document, stored inside the
+ * document it hashes, which cannot be kept true of itself.
+ *
+ * Those fields now live in `persistence.ts`, server-only, stamped immediately
+ * before a write and stripped immediately after a read. What remains here is
+ * only what a person authors.
  */
-export type PublicationMetadata = {
-  status: "draft" | "prepared" | "published";
-  sourceDraftRevision: number | null;
-  definitionSha256: string | null;
-  studyFingerprint: string | null;
-  acknowledgedWarnings: string[];
-  preparedNote: string | null;
-};
 
-/**
- * The identity the STORE requires, and the client never sees.
- *
- * `prepare_study_experience_revision` refuses a definition whose
- * `metadata.studyId` or `metadata.tenantId` disagrees with the study row it is
- * being written against (`0025…sql`), so a document with no `metadata` could
- * never be stored at all. It is carried here for that reason and no other.
- *
- * These ARE database identifiers, which is exactly why they stop at the
- * document: the render model has no field for them, `projectPresentationCatalog`
- * never sees one, and the boundary gate scans the client-reachable output for
- * them. A stored layout may know which study it belongs to; a browser may not
- * be told.
- *
- * NULL while the document is a TEMPLATE. The approved blueprint is a structure,
- * not a study, and stamping a tenant and a study id into it would make it
- * client-specific — the one thing the blueprint must not be. The store boundary
- * is where a template becomes a document about a particular study.
- */
-export type PresentationStoreMetadata = {
-  studyId: string;
-  tenantId: string;
-  subtitle: string | null;
-};
-
-/** A whole presentation. */
+/** A whole presentation — configuration, and nothing else. */
 export type PresentationDocument = {
   schemaVersion: number;
   documentKind: typeof PRESENTATION_DOCUMENT_KIND;
+  /**
+   * The presentation-registry version this document was authored against.
+   *
+   * A document outlives the code that wrote it. Without this, a layout authored
+   * against one vocabulary would be resolved by another and the mismatch would
+   * surface as a missing handle at best and a wrong number at worst.
+   */
+  registryVersion: string;
+  /**
+   * The exact registry this document was BOUND to, or null for a template.
+   *
+   * An opaque fingerprint over the registry's whole handle-to-address map,
+   * carrying no tenant, study, plan or package identity — see
+   * `registry.ts:presentationBindingFingerprint`. A bound document resolves only
+   * against the registry that produced that fingerprint, which is what stops a
+   * saved binding from silently retargeting when a label is renamed, a group is
+   * reordered, or a dimension or touchpoint is inserted earlier.
+   *
+   * NULL means "study-agnostic template". The approved blueprint is one, and
+   * binding is an explicit act performed at instantiation.
+   */
+  binding: string | null;
   id: string;
   title: string;
   locale: "es-MX";
-  /** Null for a template. Required by the write functions before storage. */
-  metadata: PresentationStoreMetadata | null;
   /** The study-wide default. Blocks may override it; nothing may default it away. */
   samplePolicy: SampleDisplayPolicy;
   methodologyDisclosure: MethodologyDisclosureLevel;
   pages: PresentationPage[];
-  publication: PublicationMetadata;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -343,7 +380,15 @@ const samplePolicySchema: z.ZodType<SampleDisplayPolicy> = z.discriminatedUnion(
     threshold: z.number().int().min(1).max(10000),
     authoredBy: authoredText(120).refine((v) => v.trim().length > 0, { message: "requiere autoría" }),
     rationale: authoredText(400).refine((v) => v.trim().length > 0, { message: "requiere una razón" }),
+    publicNote: authoredText(200).nullable(),
   }),
+]);
+
+const displayFormatSchema: z.ZodType<DisplayFormat> = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("canonical") }),
+  // Bounded by the coarsest precision the canonical policy declares, so a
+  // request can never ask for accuracy the measurement does not have.
+  z.strictObject({ kind: z.literal("fixed_decimals"), decimals: z.number().int().min(0).max(2) }),
 ]);
 
 const disclosureSchema = z.enum(
@@ -382,6 +427,7 @@ const blockSchema = z.discriminatedUnion("kind", [
     kind: z.literal("result"),
     binding: handleSchema,
     chartVariant: z.string().min(1).max(48),
+    displayFormat: displayFormatSchema,
   }),
   z.strictObject({
     ...commonFields,
@@ -419,35 +465,23 @@ const pageSchema = z.strictObject({
   blocks: z.array(blockSchema).max(256),
 });
 
-const publicationSchema = z.strictObject({
-  status: z.enum(["draft", "prepared", "published"]),
-  sourceDraftRevision: z.number().int().min(1).nullable(),
-  definitionSha256: z
-    .string()
-    .regex(/^[0-9a-f]{64}$/)
-    .nullable(),
-  studyFingerprint: z.string().min(1).max(200).nullable(),
-  acknowledgedWarnings: z.array(z.string().regex(/^[a-z0-9_]{1,64}$/)).max(64),
-  preparedNote: authoredText(200).nullable(),
-});
+
 
 const documentSchema = z.strictObject({
   schemaVersion: z.number().int(),
   documentKind: z.literal(PRESENTATION_DOCUMENT_KIND),
+  registryVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+  // 64 lower-case hex, or null for a study-agnostic template.
+  binding: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
   id: identifier,
   title: authoredText(160),
   locale: z.literal("es-MX"),
-  metadata: z
-    .strictObject({
-      studyId: z.string().uuid(),
-      tenantId: z.string().uuid(),
-      subtitle: authoredText(200).nullable(),
-    })
-    .nullable(),
   samplePolicy: samplePolicySchema,
   methodologyDisclosure: disclosureSchema,
   pages: z.array(pageSchema).max(64),
-  publication: publicationSchema,
 });
 
 /* -------------------------------------------------------------------------- */
