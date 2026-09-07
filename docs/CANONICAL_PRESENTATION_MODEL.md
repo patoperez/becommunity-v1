@@ -128,6 +128,15 @@ publication metadata the existing draft/revision model already requires.
 Validation is Zod, `strictObject` throughout, so an unknown field is rejected
 rather than ignored.
 
+**`metadata` is nullable, and that is the template boundary.**
+`prepare_study_experience_revision` refuses a definition whose
+`metadata.studyId`/`metadata.tenantId` disagree with the study row it is written
+against, so a document without it could never be stored. It is NULL while the
+document is a template — the approved blueprint is a structure, not a study, and
+stamping a tenant into it would make it the client-specific artefact it must
+never be. Those two fields are database identifiers, so they stop at the
+document: no render model has a field for them.
+
 ### Versioning, and why the number is 4
 
 `study_experience_draft.schema_version` and
@@ -205,6 +214,18 @@ makes on purpose:
 
 - **`show_all` is the system default** and the only mode needing no argument;
 - `annotate_below` and `hide_below` **require `authoredBy` and `rationale`**.
+
+**A suppressing policy takes the PARTS with the WHOLE.** Withholding a
+recommendation score while publishing promoters, pasivos and detractores with
+their shares withholds nothing: an NPS is %promoters − %detractors, so the
+number comes straight back by subtraction. Distributions, curated terms, the
+structural touchpoint payload and every series obey the policy that governs the
+scalar beside them. A new payload shape must be guarded when it is added.
+
+**`annotate_below` is resolved on the server.** The base is compared to the
+threshold here, and what crosses the boundary is a finished sentence
+(`RenderBlock.sampleNote`). Sending the browser a threshold to compare against
+would be sending it a calculation.
 
 That requirement is not ceremony. It is what makes "a person decided to hide
 this" a different fact from "the software hid it", and it is why a hide-below

@@ -561,7 +561,7 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   **Nothing in it calculates.** It imports no module from `src/lib/calc/`, holds
   no formula, no denominator and no threshold, and every number it emits was
   computed, rounded once and formatted by the canonical layer.
-  `npm run test:canonical-presentation` (**128 checks**, in `npm test`) enforces
+  `npm run test:canonical-presentation` (**153 checks**, in `npm test`) enforces
   that, plus the boundary and the refusals.
   ⓘ **The brief's `StudyResultsDocument` DOES NOT EXIST.** The canonical document
   type is `CanonicalStudyResults` (`src/lib/results/contract.ts:691`). Use the
@@ -580,6 +580,25 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   the database will not say which. Unit 6A refuses 1-3 BY NAME and migrates
   nothing in either direction. Never reinterpret a stored draft as a document of
   the other family, and never guess its version.
+- ⓘ **A suppressing policy takes the PARTS with the WHOLE.** An adversarial
+  review found an authored `hide_below` withholding the recommendation score
+  while the block beside it still published promoters/pasivos/detractores with
+  their shares — and an NPS is %promoters − %detractors, so the withheld number
+  came back by subtraction. Every composite payload now obeys the policy:
+  distributions, curated terms, the structural touchpoint payload and
+  `performance.dimension`. If you add a payload shape, guard it.
+- ⓘ **`annotate_below` is resolved on the SERVER.** It compares the base to the
+  threshold and ships a finished sentence as `RenderBlock.sampleNote`. Never move
+  that comparison to the browser — comparing is calculating.
+- ⓘ **Methodology prose follows the MEASURE, not the section.** A touchpoint owns
+  three explanations and a period owns two; handing the CSAT prose to a TDP
+  figure captions the wrong quantity beside the most misread number on the page.
+- ⓘ **A presentation document carries `metadata` (nullable).**
+  `prepare_study_experience_revision` refuses a definition whose
+  `metadata.studyId`/`tenantId` disagree with the study row, so a document
+  without it could never be stored. It is NULL while the document is a template
+  — the approved blueprint is a structure, not a study. Those are database
+  identifiers: they stop at the document and never enter a render model.
 - ⓘ **The system default is `show_all`.** The canonical layer suppresses nothing;
   this layer owns only the DISPLAY decision, and the two suppressing modes require
   `authoredBy` and `rationale` so a hide-below rule cannot be defaulted, inherited

@@ -1755,7 +1755,7 @@ for the old experience branch: **`docs/CANONICAL_EXPERIENCE_INTEGRATION_PLAN.md`
 
 | gate | assertions | in `npm test`? |
 |---|---:|---|
-| `npm run test:canonical-presentation` | **128** | yes |
+| `npm run test:canonical-presentation` | **153** | yes |
 | `npm run test:canonical-presentation-parity` | **43** | no — machine-specific workbooks, reports SKIPPED without them |
 
 The parity gate reproduces the approved figures through the blueprint without
@@ -1765,14 +1765,14 @@ over 100 and unclamped, the only such touchpoint; recommendation **30.8 / 46.4 /
 −9.1**; renewal index **33**; population **60**; 55 touchpoints repartitioned
 19 + 10 + 6 + 10 + 10 across the five approved routes with no repeat.
 
-#### Discrimination — twelve defects, proved not asserted
+#### Discrimination — fourteen defects, proved not asserted
 
 Each invariant was broken on purpose, the gate had to fail **on its own
 assertion**, every file was restored and verified byte-identical by SHA-256, and
-the gate had to come back green. All twelve discriminated; a 13-file SHA-256
+the gate had to come back green. All fourteen discriminated; a 13-file SHA-256
 census before and after the suite reported every file byte-identical.
 
-The twelve: TDP clamped to 100 · TDP clamped by a TERNARY carrying no `Math`
+The fourteen: TDP clamped to 100 · TDP clamped by a TERNARY carrying no `Math`
 call for any scan to find · the registry no longer pruning a forbidden
 dimension · the resolver no longer refusing a forbidden cross · filters
 propagating implicitly · the default policy suppressing small samples · a legacy
@@ -1780,7 +1780,45 @@ blob stamped with version 4 being accepted · a legacy v1-v3 document silently
 reinterpreted · a canonical table name leaking into a client-facing label · a
 route claiming a touchpoint outside its source group · the render model
 re-formatting a value instead of copying it · the catalogue carrying the
-server-only address map.
+server-only address map · methodology prose reverting to satisfaction for every
+touchpoint measure · a withheld headline still publishing the composition that
+reconstructs it.
+
+#### What an adversarial review found, and what it cost
+
+Six independent reviewers were pointed at this unit's own diff and asked to
+REFUTE it, each verified finding then re-checked by a separate skeptic. Thirty-
+five claims came back and sixteen were refuted on verification. Five were real,
+and they were not stylistic:
+
+1. **A suppressed value was recoverable by subtraction.** `applySamplePolicy`
+   guarded the scalar branches only, so an authored `hide_below` withheld the
+   recommendation score while the block beside it published promoters, pasivos
+   and detractores with their shares — and an NPS is %promoters − %detractors.
+   The parts now go with the whole, `performance.dimension` included; it is the
+   line-for-line twin of `retention.series` and simply lacked the call.
+2. **The same touchpoint was withheld or published depending on which handle the
+   author bound.** The structural payload bypassed the policy that the
+   per-measure payload applied.
+3. **The methodology prose described the wrong number.** Every touchpoint
+   measure received the SATISFACTION explanation — TDP included, the figure that
+   reads 133.3% — and attrition received the RETENTION one.
+4. **`annotate_below` was authored, validated, stored, shipped and ignored**,
+   which left the threshold comparison to the browser.
+5. **A canonical table name survived slugification.** The editorial handle came
+   from `ConfigurationRequirement.key`, so `journey_stage_evidence` became
+   `editorial:journey-stage-evidence` — still the table name `journey_stage`,
+   and invisible to a scan written in snake_case.
+
+A sixth was a forward-compatibility gap rather than a defect: the document had
+no `metadata`, which `prepare_study_experience_revision` requires, so no
+presentation document could ever have been stored. It is added and nullable.
+
+The gate's own leak scan was wrong in BOTH directions and is now two needle
+classes: snake_case for every canonical key — a slug can never contain an
+underscore — and the kebab form for TABLE NAMES only, the one class that is
+never display text. Converting everything to kebab had flagged `cultura-edl` and
+`retencion`, which are a group's own label and an authored block id.
 
 Three of those found real defects in this unit's own work rather than merely
 confirming a guess. The label leak was genuine: the registry was using
