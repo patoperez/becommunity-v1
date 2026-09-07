@@ -28,7 +28,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useReducer, useRef, useState, useSyncExternalStore } from "react";
 
 import {
   addBlock,
@@ -36,6 +36,7 @@ import {
   connectBlockToPanel,
   connectionCandidates,
   disconnectBlockFromPanel,
+  dropIndexFor,
   duplicateBlock,
   duplicatePage,
   findBlock,
@@ -110,8 +111,21 @@ export function ComposerWorkspace({
   const chrome = useSyncExternalStore(subscribeChrome, readChrome, serverChrome);
   const panels = visiblePanels(chrome);
 
-  const [state, setState] = useState<ComposerState>(() => openComposer(payload.document));
-  const [notice, setNotice] = useState<string | null>(null);
+  // THE OPERATION IS THE ACTION.
+  //
+  // A reducer whose action carries the operation keeps every edit pure and keeps
+  // it in ONE place. Two earlier shapes were wrong: running the operation inside
+  // a `setState` updater and calling three other setters from in there (an impure
+  // updater React may invoke twice), and mirroring the state into a ref written
+  // during render (which the React lint refuses, correctly). The consequences of
+  // an edit are drawn from the state it produced, in an effect, where a ref is
+  // legal and a stale closure is impossible.
+  const [state, dispatch] = useReducer(
+    (current: ComposerState, action: { run: (s: ComposerState) => ComposerState }) => action.run(current),
+    payload.document,
+    openComposer,
+  );
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ model: PresentationRenderModel; stale: boolean }>({
     model: payload.model,
     stale: false,
@@ -120,21 +134,29 @@ export function ComposerWorkspace({
   const [issues, setIssues] = useState<{ code: string; path: string }[] | null>(null);
   const [drawer, setDrawer] = useState<"none" | "left" | "right">("none");
 
+  /** The single choke point. Every control goes through it. */
+  const act = useCallback((run: (s: ComposerState) => ComposerState) => dispatch({ run }), []);
+
   /**
-   * The single choke point. Every control goes through it, so "an edit marks
-   * the preview stale" is one line rather than a rule everybody remembers.
+   * An edit makes the preview stale — derived from the document, not remembered
+   * at each of the thirty-odd call sites.
+   *
+   * `seenDocument` is written in an effect, which is where a ref may be written.
+   * It doubles as "the document as the screen currently knows it", which the
+   * refresh below needs after its await.
    */
-  const act = useCallback((run: (s: ComposerState) => ComposerState, done = "") => {
-    setState((current) => {
-      const next = run(current);
-      setNotice(next.refusal?.message ?? (done === "" ? null : done));
-      if (next.document !== current.document) {
-        setPreview((p) => (p.stale ? p : { ...p, stale: true }));
-        setIssues(null);
-      }
-      return next;
-    });
-  }, []);
+  const seenDocument = useRef(payload.document);
+  useEffect(() => {
+    if (state.document === seenDocument.current) return;
+    seenDocument.current = state.document;
+    setPreview((previous) => (previous.stale ? previous : { ...previous, stale: true }));
+    setIssues(null);
+    setRefreshNotice(null);
+  }, [state.document]);
+
+  // The refusal IS the notice; there is nothing to remember. A message from the
+  // refresh fills in when no refusal stands.
+  const notice = state.refusal?.message ?? refreshNotice;
 
   const document_ = state.document;
   const page = state.openPageId === null ? null : findPage(document_, state.openPageId);
@@ -174,23 +196,57 @@ export function ComposerWorkspace({
 
   const onRefresh = useCallback(async () => {
     setPending(true);
-    setNotice(null);
+    setRefreshNotice(null);
+    // WHAT WAS SENT IS WHAT MAY BE MARKED FRESH.
+    //
+    // The round trip takes as long as a canonical read, and an author can edit
+    // during it. An earlier version cleared the staleness flag on whatever came
+    // back, so a preview resolved from the OLD document was labelled up to date
+    // over a newer one — the single most misleading state this screen can be in.
+    const sent = seenDocument.current;
     try {
-      const result = await refresh(studyId, JSON.stringify(state.document));
+      const result = await refresh(studyId, JSON.stringify(sent));
       if (result.ok) {
-        setPreview({ model: result.model, stale: false });
+        const current = seenDocument.current;
+        setPreview({ model: result.model, stale: current !== sent });
         setIssues(null);
-        setNotice("Vista previa actualizada.");
+        setRefreshNotice(
+          current === sent
+            ? "Vista previa actualizada."
+            : "Vista previa actualizada, y el documento ya cambió desde entonces: sigue desactualizada.",
+        );
       } else {
         setIssues(result.unavailable.issues ?? []);
-        setNotice(result.unavailable.detail);
+        setRefreshNotice(result.unavailable.detail);
       }
     } catch {
-      setNotice("No se pudo actualizar la vista previa. La sesión sigue intacta.");
+      setRefreshNotice("No se pudo actualizar la vista previa. La sesión sigue intacta.");
     } finally {
       setPending(false);
     }
-  }, [refresh, state.document, studyId]);
+  }, [refresh, studyId]);
+
+  // THE ZOOM IS RESOLVED ONCE, WHERE BOTH THE CONTROL AND THE CANVAS CAN SEE IT.
+  //
+  // It was computed inside the canvas and the toolbar showed the stored
+  // preference, so while the automatic fit was active the control read 100% over
+  // a canvas drawn at 62%. The room a canvas has depends on which panels are
+  // open, so it is measured rather than derived from a breakpoint.
+  const canvasFrame = useRef<HTMLDivElement | null>(null);
+  const [room, setRoom] = useState(0);
+  useEffect(() => {
+    const element = canvasFrame.current;
+    if (!element) return;
+    const measure = () => setRoom(element.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const canvasWidth = CANVAS_WIDTH[chrome.mode];
+  const previewFits = room === 0 || room >= canvasWidth;
+  const zoomIsAutomatic = !chrome.zoomChosen && !previewFits;
+  const effectiveZoom: CanvasZoom = zoomIsAutomatic ? "fit" : chrome.zoom;
 
   const resolvedById = new Map<string, RenderBlock>();
   for (const renderPage of preview.model.pages) {
@@ -208,6 +264,8 @@ export function ComposerWorkspace({
         stale={preview.stale}
         canUndo={state.past.length > 0}
         canRedo={state.future.length > 0}
+        effectiveZoom={effectiveZoom}
+        zoomIsAutomatic={zoomIsAutomatic}
         onUndo={() => act(undo)}
         onRedo={() => act(redo)}
         onRefresh={onRefresh}
@@ -250,7 +308,7 @@ export function ComposerWorkspace({
         </Panel>
 
         {panels.left ? null : (
-          <RestoreTab side="left" onRestore={() => setChrome({ left: true, focus: false, right: readChrome().right })} />
+          <RestoreTab side="left" onRestore={() => setChrome({ left: true, focus: false, right: panels.right })} />
         )}
 
         {/* CENTRE — the canvas, and it is the dominant area at every width. */}
@@ -263,11 +321,15 @@ export function ComposerWorkspace({
             resolvedById={resolvedById}
             stale={preview.stale}
             model={preview.model}
+            frameRef={canvasFrame}
+            room={room}
+            effectiveZoom={effectiveZoom}
+            zoomIsAutomatic={zoomIsAutomatic}
           />
         </div>
 
         {panels.right ? null : (
-          <RestoreTab side="right" onRestore={() => setChrome({ right: true, focus: false, left: readChrome().left })} />
+          <RestoreTab side="right" onRestore={() => setChrome({ right: true, focus: false, left: panels.left })} />
         )}
 
         {/* RIGHT — the inspector for the selected block. Docks at xl (1280). */}
@@ -313,6 +375,8 @@ function Toolbar({
   stale,
   canUndo,
   canRedo,
+  effectiveZoom,
+  zoomIsAutomatic,
   onUndo,
   onRedo,
   onRefresh,
@@ -324,6 +388,8 @@ function Toolbar({
   stale: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  effectiveZoom: CanvasZoom;
+  zoomIsAutomatic: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onRefresh: () => void;
@@ -355,11 +421,17 @@ function Toolbar({
         ))}
       </fieldset>
 
+      {/*
+        A SELECT READING 100% OVER A CANVAS DRAWN AT 62% IS A CONTROL THAT LIES.
+        The value shown is the one IN EFFECT, and when the fit is automatic the
+        control says so beside itself — the earlier version showed the stored
+        preference, which is exactly the number nobody was looking at.
+      */}
       <label className="flex items-center gap-1.5 text-sm text-muted">
         <span className="sr-only sm:not-sr-only">Zoom</span>
         <select
           className="min-h-11 rounded-lg border border-line bg-surface px-2 text-sm text-body"
-          value={String(chrome.zoom)}
+          value={String(effectiveZoom)}
           onChange={(event) => {
             const raw = event.target.value;
             const zoom: CanvasZoom = raw === "fit" ? "fit" : (Number(raw) as 1 | 0.75 | 0.5);
@@ -373,15 +445,23 @@ function Toolbar({
             </option>
           ))}
         </select>
+        {zoomIsAutomatic ? <span className="text-xs text-muted">automática</span> : null}
       </label>
 
       <span className="mx-1 hidden h-6 w-px bg-line sm:block" aria-hidden="true" />
 
+      {/*
+        THE LABEL READS THE VISIBLE STATE, SO THE CLICK MUST WRITE THE VISIBLE
+        STATE. An earlier version labelled itself from `panels` (which focus mode
+        forces false) and toggled `chrome` (which focus mode leaves alone), so in
+        focus mode the button said "Mostrar páginas" and hid them: leaving focus
+        mode was correct, and it took the panel with it.
+      */}
       <button
         type="button"
         className={btn}
         aria-pressed={panels.left}
-        onClick={() => setChrome({ left: !chrome.left, focus: false })}
+        onClick={() => setChrome({ left: !panels.left, focus: false })}
       >
         {panels.left ? "Ocultar páginas" : "Mostrar páginas"}
       </button>
@@ -389,7 +469,7 @@ function Toolbar({
         type="button"
         className={btn}
         aria-pressed={panels.right}
-        onClick={() => setChrome({ right: !chrome.right, focus: false })}
+        onClick={() => setChrome({ right: !panels.right, focus: false })}
       >
         {panels.right ? "Ocultar ficha" : "Mostrar ficha"}
       </button>
@@ -537,7 +617,7 @@ function RestoreTab({ side, onRestore }: { side: "left" | "right"; onRestore: ()
         type="button"
         onClick={onRestore}
         aria-label={side === "left" ? "Mostrar páginas y catálogo" : "Mostrar la ficha del bloque"}
-        className="min-h-11 w-8 rounded-lg border border-line bg-surface text-sm text-muted hover:border-line-strong"
+        className="min-h-11 w-11 rounded-lg border border-line bg-surface text-sm text-muted hover:border-line-strong"
       >
         {side === "left" ? "›" : "‹"}
       </button>
@@ -554,7 +634,7 @@ function PagesPanel({
   payload,
 }: {
   state: ComposerState;
-  act: (run: (s: ComposerState) => ComposerState, done?: string) => void;
+  act: (run: (s: ComposerState) => ComposerState) => void;
   context: { catalog: ComposerPayload["catalog"] };
   payload: ComposerPayload;
 }) {
@@ -709,36 +789,29 @@ function Canvas({
   resolvedById,
   stale,
   model,
+  frameRef,
+  room,
+  effectiveZoom,
+  zoomIsAutomatic,
 }: {
   chrome: typeof DEFAULT_CHROME;
   page: ReturnType<typeof findPage>;
   state: ComposerState;
-  act: (run: (s: ComposerState) => ComposerState, done?: string) => void;
+  act: (run: (s: ComposerState) => ComposerState) => void;
   resolvedById: Map<string, RenderBlock>;
   stale: boolean;
   model: PresentationRenderModel;
+  frameRef: React.RefObject<HTMLDivElement | null>;
+  room: number;
+  effectiveZoom: CanvasZoom;
+  zoomIsAutomatic: boolean;
 }) {
-  const frame = useRef<HTMLDivElement | null>(null);
-  const [room, setRoom] = useState(0);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
 
-  // Measured, not declared: the room a canvas has depends on which panels are
-  // open, and a media query answers about the window.
-  useEffect(() => {
-    const element = frame.current;
-    if (!element) return;
-    const measure = () => setRoom(element.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
   const width = CANVAS_WIDTH[chrome.mode];
-  const fits = room === 0 || room >= width;
-  const automatic = !chrome.zoomChosen && !fits;
-  const effective: CanvasZoom = automatic ? "fit" : chrome.zoom;
+  const effective = effectiveZoom;
+  const automatic = zoomIsAutomatic;
   const scale =
     effective === "fit"
       ? room === 0
@@ -780,7 +853,7 @@ function Canvas({
         room for the unscaled canvas and gain a horizontal scrollbar the person
         just zoomed out to avoid.
       */}
-      <div ref={frame} className="mt-3 min-w-0 overflow-x-auto">
+      <div ref={frameRef} className="mt-3 min-w-0 overflow-x-auto">
         <div style={{ width: width * scale }}>
           <div
             style={{
@@ -856,7 +929,7 @@ function BlockShell({
   resolved: RenderBlock | null;
   stale: boolean;
   mode: CanvasMode;
-  act: (run: (s: ComposerState) => ComposerState, done?: string) => void;
+  act: (run: (s: ComposerState) => ComposerState) => void;
   dragging: string | null;
   dropIndex: number | null;
   setDragging: (id: string | null) => void;
@@ -881,12 +954,11 @@ function BlockShell({
         const moved = dragging ?? event.dataTransfer.getData("text/plain");
         const raw = dropIndex ?? index;
         if (moved) {
-          // The index is a position in the array AFTER the block has been taken
-          // out of it, so a drop below the source compensates by one.
-          act((s) => {
-            const from = s.document.pages.flatMap((p) => p.blocks).findIndex((b) => b.id === moved);
-            return moveBlockToIndex(s, moved, from >= 0 && from < raw ? raw - 1 : raw);
-          });
+          // `raw` is the DROP LINE, page-local. Turning it into the index the
+          // operation wants is `dropIndexFor`'s job, and it lives in the engine
+          // so a gate can drive it — this handler once did the arithmetic itself
+          // against an index from a flattened list of every page's blocks.
+          act((s) => moveBlockToIndex(s, moved, dropIndexFor(s.document, moved, raw)));
         }
         setDragging(null);
         setDropIndex(null);
@@ -945,7 +1017,11 @@ function BlockShell({
         </div>
 
         {menu ? (
-          <div role="menu" className="flex flex-wrap gap-1 border-x border-line bg-surface px-2 py-1.5">
+          <div
+            role="menu"
+            onClick={(event) => event.stopPropagation()}
+            className="flex flex-wrap gap-1 border-x border-line bg-surface px-2 py-1.5"
+          >
             <button type="button" role="menuitem" className={`${btn} px-2 text-xs`} onClick={() => { act((s) => moveBlock(s, block.id, -1)); setMenu(false); }}>Subir</button>
             <button type="button" role="menuitem" className={`${btn} px-2 text-xs`} onClick={() => { act((s) => moveBlock(s, block.id, 1)); setMenu(false); }}>Bajar</button>
             <button type="button" role="menuitem" className={`${btn} px-2 text-xs`} onClick={() => { act((s) => duplicateBlock(s, block.id)); setMenu(false); }}>Duplicar</button>
@@ -991,7 +1067,7 @@ function Inspector({
 }: {
   selected: ReturnType<typeof findBlock>;
   state: ComposerState;
-  act: (run: (s: ComposerState) => ComposerState, done?: string) => void;
+  act: (run: (s: ComposerState) => ComposerState) => void;
   context: { catalog: ComposerPayload["catalog"] };
   payload: ComposerPayload;
 }) {
@@ -1082,6 +1158,15 @@ function Inspector({
   const block = selected.block;
   const entry = block.kind === "result" ? payload.catalog.entries.find((e) => e.handle === block.binding) : null;
   const offered = entry ? offeredChartVariants(entry.semantic) : [];
+  // A REVISION, SO AN UNDONE EDIT DOES NOT COME BACK ON THE NEXT BLUR.
+  //
+  // These fields are uncontrolled — a controlled one would commit per keystroke
+  // and fill the sixty-step history with typing. Uncontrolled means the DOM keeps
+  // the text, so after an undo the field still held the undone words and the next
+  // blur wrote them back. Keying on the history depth remounts them whenever the
+  // document moves, which is exactly when their default is stale. Typing does not
+  // commit, so nothing remounts under the cursor.
+  const revision = `${state.past.length}-${state.future.length}`;
 
   return (
     <div className="space-y-4">
@@ -1092,7 +1177,7 @@ function Inspector({
           <input
             className={`${field} mt-1`}
             defaultValue={block.copy.title ?? ""}
-            key={`${block.id}-title`}
+            key={`${block.id}-title-${revision}`}
             onBlur={(event) => act((s) => setBlockCopy(s, block.id, "title", event.target.value || null))}
           />
         </label>
@@ -1101,7 +1186,7 @@ function Inspector({
           <textarea
             className={`${field} mt-1 min-h-[5rem]`}
             defaultValue={block.copy.description ?? ""}
-            key={`${block.id}-desc`}
+            key={`${block.id}-desc-${revision}`}
             onBlur={(event) => act((s) => setBlockCopy(s, block.id, "description", event.target.value || null))}
           />
         </label>
@@ -1111,7 +1196,7 @@ function Inspector({
             <textarea
               className={`${field} mt-1 min-h-[7rem]`}
               defaultValue={block.content?.body ?? ""}
-              key={`${block.id}-body`}
+              key={`${block.id}-body-${revision}`}
               onBlur={(event) => act((s) => setEditorialBody(s, block.id, event.target.value || null))}
             />
           </label>
@@ -1276,7 +1361,7 @@ function FilterPanelCard({
 }: {
   block: PresentationBlock & { kind: "filter_panel" };
   state: ComposerState;
-  act: (run: (s: ComposerState) => ComposerState, done?: string) => void;
+  act: (run: (s: ComposerState) => ComposerState) => void;
   context: { catalog: ComposerPayload["catalog"] };
   payload: ComposerPayload;
 }) {

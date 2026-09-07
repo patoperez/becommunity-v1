@@ -27,6 +27,7 @@ export {
   connectBlockToPanel,
   connectionCandidates,
   disconnectBlockFromPanel,
+  dropIndexFor,
   duplicateBlock,
   duplicatePage,
   findBlock,
@@ -87,6 +88,8 @@ export type {
 } from "./payload";
 
 export {
+  IMPLEMENTED_BY_SEMANTIC,
+  JOURNEY_ROUTES_VARIANTS,
   IMPLEMENTED_CHART_VARIANTS,
   chartVariantIsImplemented,
   judgeChartVariant,

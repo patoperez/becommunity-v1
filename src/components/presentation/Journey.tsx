@@ -156,8 +156,16 @@ export function JourneyRouteMap({ block, audience }: LeafProps) {
         const clamped = next < 0 ? 0 : next >= total ? total - 1 : next;
         // Focus follows selection so arrow keys walk the route rather than
         // moving a selection the keyboard has left behind.
+        //
+        // SCOPED TO THIS BLOCK'S OWN DRAWING, and that is not a precaution.
+        // `data-journey-node` numbers points WITHIN a route, so every journey
+        // block on a page has a node 0, a node 1, and so on. A document-wide
+        // lookup found the FIRST one in the document — so an arrow key pressed
+        // in the second journey of a page moved that journey's selection and
+        // sent the focus into the first one. The generic starting layout emits
+        // one block per source group, and the approved study has four.
         requestAnimationFrame(() => {
-          document.querySelector<HTMLElement>(`[data-journey-node="${clamped}"]`)?.focus();
+          holder.current?.querySelector<HTMLElement>(`[data-journey-node="${clamped}"]`)?.focus();
         });
         return clamped;
       });
@@ -172,6 +180,14 @@ export function JourneyRouteMap({ block, audience }: LeafProps) {
   if (!route) return null;
 
   const points = route.points;
+  // A ROUTE WITH NO POINTS IS A ROUTE NOBODY FINISHED CONFIGURING.
+  //
+  // An earlier version still drew the tab strip, the source-group caption and a
+  // fixed 96px placeholder box for it — a reserved space with an explanation of
+  // the drawing that was not there. Studio says so; a client sees nothing.
+  if (points.length === 0 && routes.every((candidate) => candidate.points.length === 0)) {
+    return <AbsenceNotice absence={{ state: "configuration_required" }} audience={audience} />;
+  }
   const layout = width > 0 && points.length > 0 ? (width < SERPENTINE_BREAKPOINT ? spine(points, width) : serpentine(points, width)) : null;
   const point = points[selected] ?? points[0] ?? null;
 
@@ -282,9 +298,7 @@ export function JourneyRouteMap({ block, audience }: LeafProps) {
                 );
               })}
             </svg>
-          ) : (
-            <div className="h-24" />
-          )}
+          ) : null}
         </div>
 
         {point ? (

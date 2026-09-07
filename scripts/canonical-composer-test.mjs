@@ -57,7 +57,7 @@ import { resolvePresentation } from "../src/lib/presentation/resolve.ts";
 import { PresentationRenderer } from "../src/components/presentation/PresentationRenderer.tsx";
 import { RENDERED_VARIANTS } from "../src/components/presentation/renderers.tsx";
 import { AbsenceNotice } from "../src/components/presentation/absence.tsx";
-import { COMPATIBLE_CHART_VARIANTS } from "../src/lib/presentation/capabilities.ts";
+import { COMPATIBLE_CHART_VARIANTS, PRESENTATION_SEMANTICS } from "../src/lib/presentation/capabilities.ts";
 import {
   DEFAULT_SAMPLE_POLICY,
   GRID_COLUMNS,
@@ -69,6 +69,7 @@ import { serializeDeterministic } from "../src/lib/presentation/serialize.ts";
 import {
   COMPOSER_HISTORY_DEPTH,
   COMPOSER_LIMITS,
+  IMPLEMENTED_BY_SEMANTIC,
   IMPLEMENTED_CHART_VARIANTS,
   addBlock,
   addPage,
@@ -77,6 +78,7 @@ import {
   connectBlockToPanel,
   connectionCandidates,
   disconnectBlockFromPanel,
+  dropIndexFor,
   duplicateBlock,
   duplicatePage,
   findBlock,
@@ -194,6 +196,7 @@ const RENEWAL = catalog.entries.find((entry) => entry.semantic === "renewal_inde
 const GROUP = firstOf("journey_group");
 const SLOT = firstOf("editorial_slot");
 const TERMS = firstOf("qualitative_terms");
+const SERIES = firstOf("retention_series");
 const DIM_ESFERA = catalog.entries.find(
   (entry) => entry.semantic === "filter_dimension" && RENEWAL?.forbiddenFilters.includes(entry.handle),
 );
@@ -206,7 +209,7 @@ const DIM_OPEN = catalog.entries.find(
 
 console.log("\n[1] El catálogo sintético trae una de cada cosa que un editor debe razonar");
 check(catalog.entries.length > 20, `el catálogo publica ${catalog.entries.length} entradas`);
-check(Boolean(NPS && DISTRIBUTION && RENEWAL && GROUP && SLOT && TERMS), "hay recomendación, distribución, renovación, grupo, espacio editorial y términos");
+check(Boolean(NPS && DISTRIBUTION && RENEWAL && GROUP && SLOT && TERMS && SERIES), "hay recomendación, distribución, renovación, grupo, espacio editorial y términos");
 check(Boolean(DIM_ESFERA), "una dimensión que una autoridad prohíbe cruzar con la renovación");
 check(Boolean(DIM_OPEN), "y otra que tanto la renovación como la recomendación sí admiten");
 check(
@@ -373,6 +376,57 @@ s = drive("setEditorialBody", () => setEditorialBody(s, BLOCK_EDITORIAL, "Un pá
 eq("el cuerpo editorial se escribe", findBlock(s.document, BLOCK_EDITORIAL).block.content.body, "Un párrafo escrito por una persona.");
 refuses("escribir un cuerpo editorial en un bloque que no lo es", s, setEditorialBody(s, BLOCK_NPS, "x"), "block_not_found");
 stillValid("copia", s);
+
+// EL EDITOR DEBE RECHAZAR LO MISMO QUE RECHAZA EL ESQUEMA.
+//
+// `authoredText` acota la longitud Y rechaza caracteres de control — incluidos
+// los invertidores bidireccionales, que pueden hacer que una frase se dibuje al
+// revés. Comprobar sólo la longitud deja escribir un documento que se ve bien en
+// pantalla, que `validatePresentationDocument` rechaza y que no se puede
+// resolver ni guardar: la persona se entera en la vista previa, no al escribir.
+//
+// El carácter se CONSTRUYE, nunca se teclea: uno literal en este archivo lo
+// volvería binario para grep y los rastreos que leen este mismo código dejarían
+// de encontrar nada.
+const CONTROL = String.fromCharCode(0x202e);
+refuses(
+  "un título con un carácter de control",
+  s,
+  setBlockCopy(s, BLOCK_NPS, "title", `Recomendación${CONTROL} de los miembros`),
+  "text_too_long",
+);
+refuses(
+  "un cuerpo editorial con uno",
+  s,
+  setEditorialBody(s, BLOCK_EDITORIAL, `Un párrafo${CONTROL} escrito por una persona.`),
+  "text_too_long",
+);
+refuses(
+  "el nombre de una página con uno",
+  s,
+  renamePage(s, PAGE_TWO, `Retención${CONTROL}`),
+  "text_too_long",
+);
+refuses(
+  "y la razón de una política de muestra con uno",
+  s,
+  setDocumentSamplePolicy(s, {
+    mode: "hide_below",
+    threshold: 5,
+    authoredBy: "Dirección del estudio",
+    rationale: `Una razón${CONTROL} escrita a propósito.`,
+    publicNote: null,
+  }),
+  "sample_policy_unauthored",
+);
+// Y las mismas frases sin el carácter sí se aceptan, de modo que el rechazo es
+// del carácter y no de la frase.
+check(
+  setBlockCopy(s, BLOCK_NPS, "title", "Recomendación de los miembros").refusal === null &&
+    setEditorialBody(s, BLOCK_EDITORIAL, "Un párrafo escrito por una persona.").refusal === null &&
+    renamePage(s, PAGE_TWO, "Retención").refusal === null,
+  "las mismas frases sin el carácter sí se aceptan",
+);
 
 /* -------------------------------------------------------------------------- */
 
@@ -579,6 +633,41 @@ check(
   "mientras que un resultado que sí admite ambas se conecta sin problema",
 );
 stillValid("filtros", s);
+
+/* -------------------------------------------------------------------------- */
+
+// OFFERING A DIMENSION IS ALSO A DECISION ABOUT WHAT IS ALREADY CONNECTED.
+//
+// `connectBlockToPanel` refuses a forbidden cross at the moment somebody
+// connects. Adding the dimension AFTERWARDS reached the same forbidden state
+// from the other side, and nothing looked: the document then carried a cross an
+// authority forbids, and the author met it at the preview as a resolver failure
+// rather than as the decision they had just made.
+let armed = addBlock(s, context, PAGE_TWO, { kind: "result", binding: RENEWAL.handle });
+const ARMED_BLOCK = armed.selectedBlockId;
+armed = addBlock(armed, context, PAGE_TWO, { kind: "filter_panel" });
+const ARMED_PANEL = armed.selectedBlockId;
+armed = togglePanelDimension(armed, context, ARMED_PANEL, DIM_OPEN.handle, true);
+armed = connectBlockToPanel(armed, context, ARMED_BLOCK, ARMED_PANEL);
+check(armed.refusal === null, "un panel con una característica admitida se conecta a la renovación");
+refuses(
+  "añadir DESPUÉS al panel la característica que esa medición prohíbe",
+  armed,
+  drive("togglePanelDimension/rearm", () => togglePanelDimension(armed, context, ARMED_PANEL, DIM_ESFERA.handle, true)),
+  "forbidden_filter_cross",
+);
+
+// AN EDIT THAT CHANGES NOTHING SPENDS NO UNDO STEP.
+//
+// `commit` skips the history when the document comes back reference-identical,
+// and that guard was dead for every block operation because the document was
+// rebuilt unconditionally. Blurring a text field without typing pushed a step,
+// and sixty of those would flush a real edit out of a sixty-step history.
+const settled = setBlockCopy(s, BLOCK_NPS, "title", findBlock(s.document, BLOCK_NPS).block.copy.title);
+eq("reescribir el mismo título no gasta un paso de historial", settled.past.length, s.past.length);
+check(settled.document === s.document, "y devuelve el MISMO documento, no una copia igual");
+const moved0 = moveBlockToIndex(s, BLOCK_NPS, findPage(s.document, "pagina-uno").blocks.findIndex((b) => b.id === BLOCK_NPS));
+eq("mover un bloque a donde ya está tampoco", moved0.past.length, s.past.length);
 
 /* -------------------------------------------------------------------------- */
 
@@ -1169,6 +1258,53 @@ const componentTransports = componentFiles.filter(({ code }) =>
   /@supabase|createClient\(|\.rpc\(|\bfetch\(|node:/.test(stripComments(code)),
 );
 check(componentTransports.length === 0, `ningún componente alcanza un transporte${componentTransports.length ? `: ${componentTransports.map((f) => f.path).join(", ")}` : ""}`);
+// A JOURNEY MOVES THE FOCUS INSIDE ITSELF, NEVER INSIDE THE ONE ABOVE IT.
+//
+// `data-journey-node` numbers points WITHIN a route, so every journey block on
+// a page has a node 0, a node 1, and so on. The arrow-key handler looked one up
+// with `document.querySelector`, which returns the first in the DOM — so an
+// arrow key pressed in the second journey moved that journey's selection and
+// sent the focus into the first one. The generic starting layout emits one
+// block per source group and the approved study has four, so a page with two
+// journeys is the ordinary case, not an exotic one.
+//
+// This is asserted on the source because the assertion is about FOCUS, and a
+// gate that renders to a string has no focus to observe. The browser QA run
+// drives it for real: it works in the LAST journey of the page and asserts the
+// focused node is still inside that block.
+// THE PREVIEW IS DRAWN, NOT OPERABLE, AND THAT HAS TO STAY TRUE.
+//
+// The canvas wraps every rendered block in an `inert` container so a click
+// inside a chart selects the BLOCK rather than operating the chart: a preview
+// a person can accidentally operate lies about what a client will experience.
+//
+// It is asserted here because it is easy to lose. A browser run cannot be
+// trusted to notice: a programmatic `.click()` runs listeners inside an inert
+// subtree even though a person's click and keystrokes do not, so a QA script
+// that drives the preview with `.click()` reports a capability the product
+// deliberately does not have. That happened once in this unit.
+{
+  const canvas = readFileSync(join("src", "components", "studio", "composer", "ComposerWorkspace.tsx"), "utf8");
+  const rendererUse = stripComments(canvas).indexOf("<PresentationRenderer");
+  check(rendererUse > 0, "el lienzo dibuja los bloques con la biblioteca de sólo dibujo");
+  const before = stripComments(canvas).slice(0, rendererUse);
+  const openTag = before.lastIndexOf("<div");
+  check(
+    openTag > 0 && before.slice(openTag).includes(" inert"),
+    "y el dibujo va dentro de un contenedor inerte, así que el lienzo no se opera",
+  );
+}
+const journey = componentFiles.find(({ path }) => path.endsWith("Journey.tsx"));
+check(Boolean(journey), "la biblioteca trae el dibujo del recorrido");
+if (journey) {
+  const lines = stripComments(journey.code).split(String.fromCharCode(10));
+  const lookups = lines.filter((line) => line.includes("querySelector") && line.includes("data-journey-node"));
+  check(lookups.length > 0, "el recorrido mueve el foco al punto seleccionado");
+  check(
+    lookups.length > 0 && lookups.every((line) => !line.includes("document.querySelector")),
+    "y lo busca dentro de su propio bloque, no en todo el documento",
+  );
+}
 // The word cloud's geometry may read a count. It may not regroup one.
 const cloud = componentFiles.find(({ path }) => path.endsWith("Terms.tsx"));
 check(Boolean(cloud), "la biblioteca trae el dibujo de términos");
@@ -1314,6 +1450,350 @@ check(
 
 /* -------------------------------------------------------------------------- */
 
+console.log("\n[24] Una línea de soltado cae donde promete, en la primera página y en la última");
+//
+// A DROP LINE IS PAGE-LOCAL AND SO IS THE INDEX IT BECOMES.
+//
+// The compensation lived in the drop handler and compared a page-local drop line
+// against a source index taken from a flattened list of EVERY page's blocks. On
+// the first page the two agree, which is why it read as correct; on any later
+// page the source index carried every preceding page's block count, the "did it
+// come from above the line" test was decided by the wrong number, and the block
+// landed one slot past where the line promised. Two pages are enough to see it,
+// so the gate uses two.
+let dropState = openComposer(seedValid.ok ? seedValid.value : seed);
+dropState = addPage(dropState, "Segunda");
+const SECOND = dropState.openPageId;
+// Four blocks on page one, three on page two — so a flattened index for a
+// page-two block is offset by four and cannot be mistaken for a page-local one.
+for (let i = 0; i < 4; i += 1) {
+  dropState = addBlock(dropState, context, "pagina-uno", { kind: "result", binding: NPS.handle });
+}
+const secondIds = [];
+for (let i = 0; i < 3; i += 1) {
+  dropState = addBlock(dropState, context, SECOND, { kind: "result", binding: NPS.handle });
+  secondIds.push(dropState.selectedBlockId);
+}
+const [A, B, C] = secondIds;
+eq("la página dos tiene tres bloques", findPage(dropState.document, SECOND).blocks.length, 3);
+eq("y la página uno cuatro, para que un índice aplanado no pueda pasar por local", findPage(dropState.document, "pagina-uno").blocks.length, 4);
+
+const orderOf = (state) => findPage(state.document, SECOND).blocks.map((block) => (block.id === A ? "A" : block.id === B ? "B" : "C")).join("");
+eq("el orden de partida", orderOf(dropState), "ABC");
+
+// Dropping A on the lower half of B puts the line between B and C: drop line 2.
+const movedDown = moveBlockToIndex(dropState, A, dropIndexFor(dropState.document, A, 2));
+eq("soltar A entre B y C da BAC, que es donde estaba la línea", orderOf(movedDown), "BAC");
+// Dropping C on the upper half of A puts the line before A: drop line 0.
+const movedUp = moveBlockToIndex(dropState, C, dropIndexFor(dropState.document, C, 0));
+eq("soltar C antes de A da CAB", orderOf(movedUp), "CAB");
+// The same two drops on the FIRST page, where the old arithmetic happened to work.
+const firstIds = findPage(dropState.document, "pagina-uno").blocks.map((block) => block.id);
+const firstOrder = (state) => findPage(state.document, "pagina-uno").blocks.map((block) => firstIds.indexOf(block.id)).join("");
+eq("en la primera página el orden de partida", firstOrder(dropState), "0123");
+eq(
+  "y soltar el primero entre el segundo y el tercero da 1023",
+  firstOrder(moveBlockToIndex(dropState, firstIds[0], dropIndexFor(dropState.document, firstIds[0], 2))),
+  "1023",
+);
+// A drop line at the end means last, on either page.
+eq(
+  "soltar A al final de su página lo pone último",
+  orderOf(moveBlockToIndex(dropState, A, dropIndexFor(dropState.document, A, 3))),
+  "BCA",
+);
+// And the helper never reaches past a page it does not know.
+eq("un bloque que no existe no compensa nada", dropIndexFor(dropState.document, "no-existe", 2), 2);
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[25] La ausencia que el CONTRATO afirma sí llega; la que decidimos nosotros no");
+//
+// C11 has an exception that matters more than the rule, and an adversarial pass
+// found this build enforcing the rule and losing the exception. "Nobody
+// responded" and "no authority states this relationship" are facts about the
+// STUDY: a caveat about what a reader is being shown, which must survive. What
+// C11 removes is the shape of a gap WE made — a withheld result, an unfinished
+// review — and the two had been collapsed into "the payload is empty, drop it".
+const withAbsence = (shape, absence, extra) => ({
+  ...model,
+  pages: [
+    {
+      ...model.pages[0],
+      blocks: [
+        {
+          ...model.pages[0].blocks[0],
+          semantic: null,
+          chartVariant: shape === "editorial" ? "narrative" : "kpi_value",
+          copy: { title: "Bloque con ausencia", description: null, annotation: null },
+          sampleDisplay: { state: "shown" },
+          payload: shape === "editorial" ? { shape: "editorial", body: null, absence } : { shape: "value", value: null, absence },
+          ...extra,
+        },
+      ],
+    },
+  ],
+});
+for (const [state, reason, crosses] of [
+  ["unavailable", "no_responses", true],
+  ["unresolved", "authority_conflict", true],
+  ["withheld_by_policy", null, false],
+  ["configuration_required", null, false],
+]) {
+  const absence = reason === null ? { state } : { state, reason };
+  const text = textOf(
+    renderToStaticMarkup(createElement(PresentationRenderer, { model: withAbsence("value", absence), audience: "client" })),
+  ).trim();
+  check(
+    crosses ? text.length > 0 : text.length === 0,
+    crosses
+      ? `«${state}» SÍ se le dice al cliente: es un hecho del estudio, no un hueco nuestro`
+      : `«${state}» no deja nada en el cliente`,
+  );
+  if (crosses) {
+    check(!text.includes("Sólo interno"), `y «${state}» cruza sin lenguaje de revisor`);
+  }
+}
+
+// A SERIES PERIOD WITH NOTHING VISIBLE IS A LABELLED EMPTY ROW.
+const seriesBlock = model.pages
+  .flatMap((page) => page.blocks)
+  .find((block) => block.payload.shape === "series");
+if (seriesBlock) {
+  const allWithheld = {
+    ...model,
+    pages: [
+      {
+        ...model.pages[0],
+        blocks: [
+          {
+            ...seriesBlock,
+            copy: { title: "Serie retenida", description: null, annotation: null },
+            payload: {
+              shape: "series",
+              points: seriesBlock.payload.points.map((point) => ({
+                ...point,
+                label: "Periodo retenido",
+                measures: point.measures.map((measure) => ({ ...measure, value: null, absence: { state: "withheld_by_policy" } })),
+              })),
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const asClient = textOf(
+    renderToStaticMarkup(createElement(PresentationRenderer, { model: allWithheld, audience: "client" })),
+  );
+  const asInternal = textOf(
+    renderToStaticMarkup(createElement(PresentationRenderer, { model: allWithheld, audience: "internal" })),
+  );
+  check(!asClient.includes("Periodo retenido"), "un periodo cuyo dato se retuvo no deja una fila con su nombre y nada dentro");
+  check(!asClient.includes("Serie retenida"), "y si no queda ningún periodo, tampoco queda el bloque");
+  check(asInternal.includes("Periodo retenido"), "Studio sí ve el periodo retenido, que es para lo que sirve revisar");
+
+  // AND THE MIXED CASE, WHICH IS THE ONE THE ROW FILTER ACTUALLY ANSWERS.
+  //
+  // With EVERY period withheld the block-level gate removes the card, so the
+  // per-row rule was passing for a structural reason — a discrimination probe
+  // that deleted the row filter turned nothing red. One period kept and one
+  // withheld keeps the card and puts the question where it belongs.
+  const mixed = {
+    ...model,
+    pages: [
+      {
+        ...model.pages[0],
+        blocks: [
+          {
+            ...seriesBlock,
+            copy: { title: "Serie mixta", description: null, annotation: null },
+            payload: {
+              shape: "series",
+              points: [
+                {
+                  ...seriesBlock.payload.points[0],
+                  label: "Periodo publicado",
+                  measures: seriesBlock.payload.points[0].measures.map((measure) => ({
+                    ...measure,
+                    value: { value: 1, unit: "percent", decimals: 1, formatted: "1.0", band: null },
+                    absence: null,
+                  })),
+                },
+                {
+                  ...seriesBlock.payload.points[0],
+                  label: "Periodo retenido",
+                  order: 1,
+                  measures: seriesBlock.payload.points[0].measures.map((measure) => ({
+                    ...measure,
+                    value: null,
+                    absence: { state: "withheld_by_policy" },
+                  })),
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const mixedClient = textOf(
+    renderToStaticMarkup(createElement(PresentationRenderer, { model: mixed, audience: "client" })),
+  );
+  const mixedInternal = textOf(
+    renderToStaticMarkup(createElement(PresentationRenderer, { model: mixed, audience: "internal" })),
+  );
+  check(mixedClient.includes("Periodo publicado"), "en una serie mixta el periodo publicado sí se dibuja");
+  check(!mixedClient.includes("Periodo retenido"), "y el retenido no deja su fila junto a él");
+  check(mixedInternal.includes("Periodo retenido"), "mientras Studio ve los dos");
+} else {
+  bad("el modelo de prueba no trae ninguna serie que retener");
+}
+
+// A ROUTE WITH NO POINTS IS NOT A RESERVED BOX.
+const routesBlock = model.pages.flatMap((page) => page.blocks).find((block) => block.payload.shape === "routes");
+if (routesBlock) {
+  const emptyRoutes = {
+    ...model,
+    pages: [
+      {
+        ...model.pages[0],
+        blocks: [
+          {
+            ...routesBlock,
+            copy: { title: "Recorrido sin puntos", description: null, annotation: null },
+            payload: {
+              shape: "routes",
+              routes: routesBlock.payload.routes.map((route) => ({ ...route, points: [] })),
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const asClient = textOf(
+    renderToStaticMarkup(createElement(PresentationRenderer, { model: emptyRoutes, audience: "client" })),
+  ).trim();
+  check(asClient.length === 0, "un recorrido sin puntos no deja ni caja, ni pestañas, ni la frase sobre el dibujo");
+  check(
+    textOf(renderToStaticMarkup(createElement(PresentationRenderer, { model: emptyRoutes, audience: "internal" }))).includes(
+      "pendiente",
+    ),
+    "y Studio dice que está pendiente de configuración",
+  );
+} else {
+  bad("el modelo de prueba no trae ningún recorrido que vaciar");
+}
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[26] Toda forma OFRECIDA dibuja algo de verdad para su medición");
+//
+// THE ASSERTION THE CAPABILITY TABLE ACTUALLY NEEDED.
+//
+// The first table was a flat list of thirteen variant names, and an adversarial
+// pass showed why that could not work: DRAWABILITY IS NOT A PROPERTY OF A
+// VARIANT. It is a property of the pair (variant, payload shape), and the shape
+// follows from the semantic. `bar_vertical` draws a categories payload and
+// draws nothing at all for a series one — and `retention_series` offered
+// exactly that. `table` is compatible with a touchpoint, a journey group and a
+// lone value and handled none of the three. In every case the editor offered
+// it, the resolver accepted it, the client-visibility gate saw a non-empty
+// payload and let the block through, and the reader got a titled card over
+// nothing.
+//
+// So this drives the REAL components: for every semantic the fixture publishes,
+// every variant the editor would offer is rendered alone, and must produce
+// visible text. An entry that draws nothing is a claim this build does not
+// honour, and it goes red here rather than on somebody's screen.
+const bySemantic = new Map();
+for (const entry of catalog.entries) {
+  if (!bySemantic.has(entry.semantic)) bySemantic.set(entry.semantic, entry);
+}
+check(bySemantic.size >= 12, `el fixture publica ${bySemantic.size} semánticas distintas`);
+
+const NOT_A_RESULT_BLOCK = new Set(["filter_dimension", "editorial_slot"]);
+const offeredPairs = [];
+for (const [semantic, entry] of bySemantic) {
+  if (NOT_A_RESULT_BLOCK.has(semantic)) continue;
+  for (const variant of offeredChartVariants(semantic)) offeredPairs.push({ semantic, entry, variant });
+}
+check(offeredPairs.length >= 15, `hay ${offeredPairs.length} pares (medición, forma) ofrecidos`);
+
+const blank = [];
+for (const { semantic, entry, variant } of offeredPairs) {
+  const probe = {
+    schemaVersion: PRESENTATION_DOCUMENT_SCHEMA_VERSION,
+    documentKind: PRESENTATION_DOCUMENT_KIND,
+    registryVersion: registry.registryVersion,
+    binding: null,
+    id: "sonda",
+    title: "Sonda",
+    locale: "es-MX",
+    samplePolicy: DEFAULT_SAMPLE_POLICY,
+    methodologyDisclosure: "plain_language_with_base",
+    pages: [
+      {
+        id: "sonda",
+        title: "Sonda",
+        order: 0,
+        blocks: [
+          {
+            kind: "result",
+            id: "sonda-bloque",
+            binding: entry.handle,
+            chartVariant: variant,
+            copy: { title: null, description: null, annotation: null },
+            placement: { order: 0, span: { desktop: 12, tablet: 12, mobile: 12 }, responsive: "reflow" },
+            visible: true,
+            connectedFilterPanelIds: [],
+            samplePolicy: null,
+            methodologyDisclosure: null,
+            displayFormat: { kind: "canonical" },
+          },
+        ],
+      },
+    ],
+  };
+  const outcome = resolvePresentation({
+    document: bindPresentationDocument(probe, registry),
+    registry,
+    results,
+  });
+  if (!outcome.ok) {
+    blank.push(`${semantic}/${variant} no resuelve: ${outcome.errors.map((e) => e.code).join(",")}`);
+    continue;
+  }
+  const drawn = textOf(
+    renderToStaticMarkup(createElement(PresentationRenderer, { model: outcome.value, audience: "internal" })),
+  ).trim();
+  // An unavailable measurement legitimately draws a sentence rather than a
+  // figure, so the bar is "something visible", not "a number".
+  if (drawn.length === 0) blank.push(`${semantic}/${variant} dibuja el vacío`);
+}
+check(
+  blank.length === 0,
+  `las ${offeredPairs.length} combinaciones ofrecidas dibujan algo${blank.length ? `; en blanco: ${blank.slice(0, 6).join(" | ")}` : ""}`,
+);
+
+// AND THE TABLE MAY NARROW THE AUTHORITY, NEVER WIDEN IT.
+const widened = [];
+for (const [semantic, drawnVariants] of Object.entries(IMPLEMENTED_BY_SEMANTIC)) {
+  const compatible = COMPATIBLE_CHART_VARIANTS[semantic] ?? [];
+  for (const variant of drawnVariants) {
+    if (!compatible.includes(variant)) widened.push(`${semantic}/${variant}`);
+  }
+}
+check(widened.length === 0, `ninguna entrada de la tabla amplía lo que la autoridad admite${widened.length ? `: ${widened.join(", ")}` : ""}`);
+// Every semantic the vocabulary declares has an entry, so a new one cannot be
+// forgotten into silently offering everything or nothing.
+const missingSemantics = PRESENTATION_SEMANTICS.filter((semantic) => IMPLEMENTED_BY_SEMANTIC[semantic] === undefined);
+check(missingSemantics.length === 0, `la tabla nombra las ${PRESENTATION_SEMANTICS.length} semánticas${missingSemantics.length ? `; faltan ${missingSemantics.join(", ")}` : ""}`);
+// A semantic this build cannot draw is DECLARED empty rather than left out, and
+// the editor then refuses to add such a block instead of adding a blank one.
+eq("una medición que esta versión no dibuja se declara vacía", offeredChartVariants("journey_group").length, 0);
+
+/* -------------------------------------------------------------------------- */
+
 function buildDrawableDocument() {
   // One page carrying one of every shape the renderer has to survive, including
   // an editorial slot the contract says nobody has filled yet.
@@ -1353,6 +1833,7 @@ function buildDrawableDocument() {
           block("comp", { title: "Composición", body: { kind: "result", binding: DISTRIBUTION.handle, chartVariant: "stacked_bar" } }, 2, 12),
           block("terms", { title: "Términos", body: { kind: "result", binding: TERMS.handle, chartVariant: "word_cloud" } }, 3, 12),
           block("ranking", { title: "Ranking", body: { kind: "result", binding: TERMS.handle, chartVariant: "term_ranking" } }, 4),
+          block("serie", { title: "Serie", body: { kind: "result", binding: SERIES.handle, chartVariant: "table" } }, 5, 12),
           block("routes", { title: "Recorrido", body: { kind: "journey_routes", chartVariant: "journey_route_map", routes: [{ id: "r1", title: "Ruta uno", order: 0, sourceGroup: GROUP.handle, touchpoints: GROUP.members.slice() }] } }, 5, 12),
           block("panel", { title: "Filtros", body: { kind: "filter_panel", dimensions: [DIM_OPEN.handle] } }, 6, 12),
           block("slot", { title: "Texto pendiente", body: { kind: "editorial", slot: SLOT.handle, content: null } }, 7, 12),

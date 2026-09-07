@@ -27,9 +27,9 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import type { RenderBlock, RenderCategory } from "@/lib/presentation";
+import type { RenderBlock, RenderCategory, RenderValue } from "@/lib/presentation";
 import { AbsenceNotice, type PresentationAudience } from "./absence";
-import { Count, MeasureList, MeasureRow, NoBase, Share } from "./primitives";
+import { Count, Figure, MeasureList, MeasureRow, NoBase, Share } from "./primitives";
 import { bandPalette, categoryMark } from "./vocabulary";
 
 type LeafProps = { block: RenderBlock; audience: PresentationAudience };
@@ -241,13 +241,31 @@ export function TableBlock({ block, audience }: LeafProps) {
   const payload = block.payload;
 
   if (payload.shape === "series") {
+    // A PERIOD WITH NOTHING A CLIENT MAY SEE IS A LABELLED EMPTY ROW.
+    //
+    // That is the reserved row C11 removes: the period name stays, every cell is
+    // blank, and the reader is told a measurement happened and shown nothing.
+    // Studio keeps every period, because seeing which ones were withheld is the
+    // point of an internal preview.
+    const visible =
+      audience === "client"
+        ? payload.points.filter((point) =>
+            point.measures.some(
+              (measure) =>
+                measure.value !== null ||
+                measure.absence?.state === "unavailable" ||
+                measure.absence?.state === "unresolved",
+            ),
+          )
+        : payload.points;
+    if (visible.length === 0) return null;
     return (
       <div className="overflow-x-auto">
         <table className="min-w-max border-collapse text-sm">
           <thead>
             <tr className="border-b border-line text-left">
               <th scope="col" className="py-2 pr-4 font-semibold text-strong">Periodo</th>
-              {(payload.points[0]?.measures ?? []).map((measure) => (
+              {(visible[0]?.measures ?? []).map((measure) => (
                 <th key={measure.label} scope="col" className="py-2 pr-4 font-semibold text-strong">
                   {measure.label}
                 </th>
@@ -255,7 +273,7 @@ export function TableBlock({ block, audience }: LeafProps) {
             </tr>
           </thead>
           <tbody>
-            {payload.points.map((point) => (
+            {visible.map((point) => (
               <tr key={`${point.order}-${point.label}`} className="border-b border-line last:border-0">
                 <th scope="row" className="py-2 pr-4 text-left font-normal text-body">{point.label}</th>
                 {point.measures.map((measure) => (
@@ -306,6 +324,50 @@ export function TableBlock({ block, audience }: LeafProps) {
     );
   }
 
+  // THE TABLE IS THE UNIVERSAL FALLBACK, so it has to cover every shape.
+  //
+  // An adversarial pass found the opposite: `table` is semantically compatible
+  // with a touchpoint, a journey group and a single value, and this component
+  // handled none of the three — so a block the client-gate had already let
+  // through rendered a titled card over nothing. A fallback that silently
+  // renders nothing is worse than no fallback, because the card still claims
+  // there is something to read.
+  if (payload.shape === "value" || payload.shape === "touchpoint" || payload.shape === "journey_group") {
+    const lines: { label: string; value: RenderValue | null; count: number | null }[] =
+      payload.shape === "value"
+        ? [{ label: block.copy.title ?? "Resultado", value: payload.value, count: null }]
+        : payload.shape === "touchpoint"
+          ? [
+              { label: "Satisfacción", value: payload.satisfaction, count: null },
+              { label: "Desconocimiento del proceso", value: payload.processUnawareness, count: null },
+              { label: "Proporción que no lo conocía", value: payload.unawarenessShare, count: null },
+            ]
+          : [{ label: payload.label, value: null, count: payload.touchpointCount }];
+    const drawn = lines.filter((line) => line.value !== null || line.count !== null);
+    if (drawn.length === 0) {
+      const absence = absenceOf(block);
+      return absence ? <AbsenceNotice absence={absence} audience={audience} /> : null;
+    }
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-max border-collapse text-sm">
+          <tbody>
+            {drawn.map((line) => (
+              <tr key={line.label} className="border-b border-line last:border-0">
+                <th scope="row" className="py-2 pr-4 text-left font-normal text-body [overflow-wrap:anywhere]">
+                  {line.label}
+                </th>
+                <td className="py-2 tabular">
+                  {line.value ? <Figure value={line.value} /> : <Count of={line.count} />}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   const rows = rowsOf(block);
   if (rows.length === 0) {
     const absence = absenceOf(block);
@@ -317,7 +379,15 @@ export function TableBlock({ block, audience }: LeafProps) {
         <thead>
           <tr className="border-b border-line text-left">
             <th scope="col" className="py-2 pr-4 font-semibold text-strong">Categoría</th>
-            <th scope="col" className="py-2 pr-4 font-semibold text-strong">Personas</th>
+            {/*
+              «Personas» is right for a category count and for a cohort, and it
+              is WRONG for an instrument base, whose number is the valid base —
+              a denominator, not a headcount of people. The header follows the
+              shape rather than assuming one.
+            */}
+            <th scope="col" className="py-2 pr-4 font-semibold text-strong">
+              {payload.shape === "instrument_bases" ? "Base utilizable" : payload.shape === "terms" ? "Menciones" : "Personas"}
+            </th>
             <th scope="col" className="py-2 font-semibold text-strong">Proporción</th>
           </tr>
         </thead>

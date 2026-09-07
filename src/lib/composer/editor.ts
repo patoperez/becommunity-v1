@@ -54,6 +54,7 @@ import {
   duplicatePage as clonePresentationPage,
   isPresentationHandle,
   type Breakpoint,
+  type ChartVariant,
   type DisplayFormat,
   type MethodologyDisclosureLevel,
   type PresentationBlock,
@@ -67,7 +68,7 @@ import {
   type SampleDisplayPolicy,
 } from "../presentation";
 import { mintFreeComposerId, takenComposerIds } from "./ids";
-import { judgeChartVariant, offeredChartVariants } from "./renderer-capabilities";
+import { JOURNEY_ROUTES_VARIANTS, judgeChartVariant, offeredChartVariants } from "./renderer-capabilities";
 
 /* -------------------------------------------------------------------------- */
 /* state                                                                       */
@@ -75,6 +76,7 @@ import { judgeChartVariant, offeredChartVariants } from "./renderer-capabilities
 
 /** How deep undo goes. Sixty edits is more than a sitting; more is a museum. */
 export const COMPOSER_HISTORY_DEPTH = 60;
+
 
 /**
  * Why an operation refused, as a closed code and a sentence for a person.
@@ -240,19 +242,54 @@ export function catalogEntry(
 }
 
 /** Replace one block in place, renumbering nothing — the position has not moved. */
+/**
+ * Replace one block in place, and return the SAME document when nothing moved.
+ *
+ * `commit` skips the history step when the document comes back
+ * reference-identical, which is how an operation that legitimately decided
+ * there was nothing to do avoids spending an undo. An earlier version rebuilt
+ * the document unconditionally, so that guard was dead for every block
+ * operation: blurring a text field without typing pushed an undo step, and
+ * sixty of those would have flushed a real edit out of the history.
+ *
+ * The update function decides. Every caller that can no-op returns the block it
+ * was given, and identity does the rest.
+ */
 function replaceBlock(
   document: PresentationDocument,
   blockId: string,
   update: (block: PresentationBlock) => PresentationBlock,
 ): PresentationDocument {
-  return {
-    ...document,
-    pages: document.pages.map((page) =>
-      page.blocks.some((block) => block.id === blockId)
-        ? { ...page, blocks: page.blocks.map((block) => (block.id === blockId ? update(block) : block)) }
-        : page,
-    ),
-  };
+  let changed = false;
+  const pages = document.pages.map((page) => {
+    if (!page.blocks.some((block) => block.id === blockId)) return page;
+    let pageChanged = false;
+    const blocks = page.blocks.map((block) => {
+      if (block.id !== blockId) return block;
+      const next = update(block);
+      if (next !== block) pageChanged = true;
+      return next;
+    });
+    if (!pageChanged) return page;
+    changed = true;
+    return { ...page, blocks };
+  });
+  return changed ? { ...document, pages } : document;
+}
+
+/**
+ * The characters `document.ts` refuses in authored text, repeated here.
+ *
+ * The schema rejects them and the editor did not, so a paste carrying a
+ * bidirectional override or a stray control byte produced a document that
+ * looked fine on screen and could never be resolved or stored. The editor is
+ * the surface where a person can be told; refusing there is the point.
+ */
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200e\u200f\u202a-\u202e]/;
+
+/** Authored text the strict v4 schema will accept: bounded AND clean. */
+function authoredTextIsValid(value: string, max: number): boolean {
+  return value.length <= max && !CONTROL_CHARACTERS.test(value);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -338,8 +375,12 @@ export function redo(state: ComposerState): ComposerState {
 export function addPage(state: ComposerState, title: string): ComposerState {
   const trimmed = title.trim();
   if (trimmed.length === 0) return refuse(state, "page_title_empty", "Una página necesita un nombre.");
-  if (trimmed.length > COMPOSER_LIMITS.title) {
-    return refuse(state, "text_too_long", `Un nombre de página admite ${COMPOSER_LIMITS.title} caracteres.`);
+  if (!authoredTextIsValid(trimmed, COMPOSER_LIMITS.title)) {
+    return refuse(
+      state,
+      "text_too_long",
+      `Un nombre de página admite ${COMPOSER_LIMITS.title} caracteres y ningún carácter de control.`,
+    );
   }
   if (state.document.pages.length >= COMPOSER_LIMITS.pages) {
     return refuse(state, "page_limit_reached", `Una presentación admite ${COMPOSER_LIMITS.pages} páginas.`);
@@ -362,9 +403,14 @@ export function renamePage(state: ComposerState, pageId: string, title: string):
   }
   const trimmed = title.trim();
   if (trimmed.length === 0) return refuse(state, "page_title_empty", "Una página necesita un nombre.");
-  if (trimmed.length > COMPOSER_LIMITS.title) {
-    return refuse(state, "text_too_long", `Un nombre de página admite ${COMPOSER_LIMITS.title} caracteres.`);
+  if (!authoredTextIsValid(trimmed, COMPOSER_LIMITS.title)) {
+    return refuse(
+      state,
+      "text_too_long",
+      `Un nombre de página admite ${COMPOSER_LIMITS.title} caracteres y ningún carácter de control.`,
+    );
   }
+  if (findPage(state.document, pageId)?.title === trimmed) return { ...state, refusal: null };
   return commit(state, {
     ...state.document,
     pages: state.document.pages.map((page) => (page.id === pageId ? { ...page, title: trimmed } : page)),
@@ -539,7 +585,14 @@ export function addBlock(
     if (!entry) {
       return refuse(state, "unknown_handle", "Ese resultado no está en el catálogo de este estudio.");
     }
-    const offered = offeredChartVariants(entry.semantic);
+    // A JOURNEY_ROUTES BLOCK IS NOT A RESULT BLOCK BOUND TO A GROUP.
+    //
+    // Its payload is `routes` — the touchpoints a person decided each route
+    // draws — and the route map draws exactly that. A RESULT block bound to the
+    // same group resolves to `journey_group`, a label and a count, which the
+    // route map cannot draw at all. Judging the first against the second's
+    // capability list refuses the only block that works.
+    const offered = request.kind === "journey_routes" ? JOURNEY_ROUTES_VARIANTS : offeredChartVariants(entry.semantic);
     const variant = request.chartVariant ?? offered[0];
     if (variant === undefined) {
       return refuse(
@@ -548,7 +601,12 @@ export function addBlock(
         `«${entry.label}» todavía no tiene ninguna forma de dibujarse en esta versión.`,
       );
     }
-    const verdict = judgeChartVariant(entry.semantic, variant);
+    const verdict =
+      request.kind === "journey_routes"
+        ? JOURNEY_ROUTES_VARIANTS.includes(variant as ChartVariant)
+          ? null
+          : ({ reason: "not_implemented" } as const)
+        : judgeChartVariant(entry.semantic, variant);
     if (verdict) return refuseVariant(state, entry.label, variant, verdict.reason);
 
     block =
@@ -657,6 +715,32 @@ export function moveBlock(state: ComposerState, blockId: string, direction: -1 |
   if (to < 0) return refuse(state, "already_first", "Ya es el primer bloque de la página.");
   if (to >= found.page.blocks.length) return refuse(state, "already_last", "Ya es el último bloque de la página.");
   return commit(state, reorderWithin(state.document, found.page.id, from, to));
+}
+
+/**
+ * Turn a DROP LINE into the index `moveBlockToIndex` expects.
+ *
+ * A drop line sits BETWEEN two blocks, so it is a position in the array as the
+ * author currently sees it. `moveBlockToIndex` wants a position in the array
+ * AFTER the block has been taken out, which differs by one whenever the block
+ * came from above the line. Both indices are PAGE-LOCAL.
+ *
+ * The compensation used to live in the drop handler and compared a page-local
+ * drop line against a source index found in a flattened list of every page's
+ * blocks. On the first page the two agree, which is why it looked right; on any
+ * later page the source index was offset by every preceding page's block count,
+ * the comparison went the wrong way, and the block landed one slot past where
+ * the line promised. It is a function now so a gate can drive it.
+ */
+export function dropIndexFor(
+  document: PresentationDocument,
+  blockId: string,
+  dropLine: number,
+): number {
+  const found = findBlock(document, blockId);
+  if (!found) return dropLine;
+  const from = found.page.blocks.findIndex((block) => block.id === blockId);
+  return from >= 0 && from < dropLine ? dropLine - 1 : dropLine;
 }
 
 /**
@@ -777,12 +861,18 @@ export function setBlockCopy(
   if (!findBlock(state.document, blockId)) {
     return refuse(state, "block_not_found", "Ese bloque ya no está en la presentación.");
   }
-  if (value !== null && value.length > COPY_LIMIT[field]) {
-    return refuse(state, "text_too_long", `Ese texto admite ${COPY_LIMIT[field]} caracteres.`);
+  if (value !== null && !authoredTextIsValid(value, COPY_LIMIT[field])) {
+    return refuse(
+      state,
+      "text_too_long",
+      `Ese texto admite ${COPY_LIMIT[field]} caracteres y ningún carácter de control.`,
+    );
   }
   return commit(
     state,
-    replaceBlock(state.document, blockId, (block) => ({ ...block, copy: { ...block.copy, [field]: value } })),
+    replaceBlock(state.document, blockId, (block) =>
+      block.copy[field] === value ? block : { ...block, copy: { ...block.copy, [field]: value } },
+    ),
   );
 }
 
@@ -792,14 +882,20 @@ export function setEditorialBody(state: ComposerState, blockId: string, body: st
   if (found.block.kind !== "editorial") {
     return refuse(state, "block_not_found", "Ese bloque no es un texto editorial.");
   }
-  if (body !== null && body.length > COMPOSER_LIMITS.editorialBody) {
-    return refuse(state, "text_too_long", `Un texto editorial admite ${COMPOSER_LIMITS.editorialBody} caracteres.`);
+  if (body !== null && !authoredTextIsValid(body, COMPOSER_LIMITS.editorialBody)) {
+    return refuse(
+      state,
+      "text_too_long",
+      `Un texto editorial admite ${COMPOSER_LIMITS.editorialBody} caracteres y ningún carácter de control.`,
+    );
   }
   return commit(
     state,
-    replaceBlock(state.document, blockId, (block) =>
-      block.kind === "editorial" ? { ...block, content: body === null ? null : { body } } : block,
-    ),
+    replaceBlock(state.document, blockId, (block) => {
+      if (block.kind !== "editorial") return block;
+      if ((block.content?.body ?? null) === body) return block;
+      return { ...block, content: body === null ? null : { body } };
+    }),
   );
 }
 
@@ -841,7 +937,9 @@ export function setBlockBinding(
   return commit(
     state,
     replaceBlock(state.document, blockId, (block) =>
-      block.kind === "result" ? { ...block, binding: entry.handle, chartVariant: variant } : block,
+      block.kind === "result" && (block.binding !== entry.handle || block.chartVariant !== variant)
+        ? { ...block, binding: entry.handle, chartVariant: variant }
+        : block,
     ),
   );
 }
@@ -857,18 +955,29 @@ export function setChartVariant(
   if (found.block.kind !== "result" && found.block.kind !== "journey_routes") {
     return refuse(state, "incompatible_chart_variant", "Ese bloque no se dibuja como una gráfica.");
   }
-  const handle = found.block.kind === "result" ? found.block.binding : null;
-  const entry = handle === null ? null : catalogEntry(context.catalog, handle);
-  if (found.block.kind === "result" && !entry) {
+  if (found.block.kind === "journey_routes") {
+    if (!JOURNEY_ROUTES_VARIANTS.includes(variant as ChartVariant)) {
+      return refuseVariant(state, "el recorrido", variant, "not_implemented");
+    }
+    return commit(
+      state,
+      replaceBlock(state.document, blockId, (block) =>
+        block.kind === "journey_routes" && block.chartVariant !== variant ? { ...block, chartVariant: variant } : block,
+      ),
+    );
+  }
+  const entry = catalogEntry(context.catalog, found.block.binding);
+  if (!entry) {
     return refuse(state, "unknown_handle", "Ese resultado no está en el catálogo de este estudio.");
   }
-  const semantic = entry?.semantic ?? "journey_group";
-  const verdict = judgeChartVariant(semantic, variant);
-  if (verdict) return refuseVariant(state, entry?.label ?? "el recorrido", variant, verdict.reason);
+  const verdict = judgeChartVariant(entry.semantic, variant);
+  if (verdict) return refuseVariant(state, entry.label, variant, verdict.reason);
   return commit(
     state,
     replaceBlock(state.document, blockId, (block) =>
-      block.kind === "result" || block.kind === "journey_routes" ? { ...block, chartVariant: variant } : block,
+      (block.kind === "result" || block.kind === "journey_routes") && block.chartVariant !== variant
+        ? { ...block, chartVariant: variant }
+        : block,
     ),
   );
 }
@@ -901,10 +1010,11 @@ export function setBlockSpan(
   }
   return commit(
     state,
-    replaceBlock(state.document, blockId, (block) => ({
-      ...block,
-      placement: { ...block.placement, span: { ...block.placement.span, [breakpoint]: span } },
-    })),
+    replaceBlock(state.document, blockId, (block) =>
+      block.placement.span[breakpoint] === span
+        ? block
+        : { ...block, placement: { ...block.placement, span: { ...block.placement.span, [breakpoint]: span } } },
+    ),
   );
 }
 
@@ -918,10 +1028,11 @@ export function setBlockResponsive(
   }
   return commit(
     state,
-    replaceBlock(state.document, blockId, (block) => ({
-      ...block,
-      placement: { ...block.placement, responsive },
-    })),
+    replaceBlock(state.document, blockId, (block) =>
+      block.placement.responsive === responsive
+        ? block
+        : { ...block, placement: { ...block.placement, responsive } },
+    ),
   );
 }
 
@@ -938,7 +1049,16 @@ export function setBlockDisplayFormat(
       return refuse(state, "invalid_display_format", "Un formato fijo admite entre 0 y 2 decimales.");
     }
   }
-  return commit(state, replaceBlock(state.document, blockId, (block) => ({ ...block, displayFormat: format })));
+  return commit(
+    state,
+    replaceBlock(state.document, blockId, (block) => {
+      const current = block.displayFormat;
+      if (current.kind === format.kind && (current.kind !== "fixed_decimals" || current.decimals === (format as { decimals: number }).decimals)) {
+        return block;
+      }
+      return { ...block, displayFormat: format };
+    }),
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -957,7 +1077,17 @@ export function setBlockDisplayFormat(
  */
 function policyIsAuthored(policy: SampleDisplayPolicy): boolean {
   if (policy.mode === "show_all") return true;
-  return policy.authoredBy.trim().length > 0 && policy.rationale.trim().length > 0;
+  if (policy.authoredBy.trim().length === 0 || policy.rationale.trim().length === 0) return false;
+  // The schema bounds these strings and refuses control characters in them just
+  // as it does for any authored text. Accepting one here would build a document
+  // that can never be resolved, and the author would find out at the preview.
+  if (!authoredTextIsValid(policy.authoredBy, 120)) return false;
+  if (!authoredTextIsValid(policy.rationale, 400)) return false;
+  if (policy.mode === "annotate_below" && !authoredTextIsValid(policy.note, 200)) return false;
+  if (policy.mode === "hide_below" && policy.publicNote !== null && !authoredTextIsValid(policy.publicNote, 200)) {
+    return false;
+  }
+  return Number.isInteger(policy.threshold) && policy.threshold >= 0;
 }
 
 export function setDocumentSamplePolicy(state: ComposerState, policy: SampleDisplayPolicy): ComposerState {
@@ -986,13 +1116,19 @@ export function setBlockSamplePolicy(
       "Ocultar o anotar por base pequeña necesita quién lo decide y por qué.",
     );
   }
-  return commit(state, replaceBlock(state.document, blockId, (block) => ({ ...block, samplePolicy: policy })));
+  return commit(
+    state,
+    replaceBlock(state.document, blockId, (block) =>
+      block.samplePolicy === null && policy === null ? block : { ...block, samplePolicy: policy },
+    ),
+  );
 }
 
 export function setDocumentDisclosure(
   state: ComposerState,
   level: MethodologyDisclosureLevel,
 ): ComposerState {
+  if (state.document.methodologyDisclosure === level) return { ...state, refusal: null };
   return commit(state, { ...state.document, methodologyDisclosure: level });
 }
 
@@ -1006,7 +1142,9 @@ export function setBlockDisclosure(
   }
   return commit(
     state,
-    replaceBlock(state.document, blockId, (block) => ({ ...block, methodologyDisclosure: level })),
+    replaceBlock(state.document, blockId, (block) =>
+      block.methodologyDisclosure === level ? block : { ...block, methodologyDisclosure: level },
+    ),
   );
 }
 
@@ -1052,6 +1190,38 @@ export function togglePanelDimension(
       "dimension_limit_reached",
       `Un panel admite ${COMPOSER_LIMITS.dimensionsPerPanel} características.`,
     );
+  }
+  // OFFERING A DIMENSION IS ALSO A DECISION ABOUT EVERY BLOCK ALREADY CONNECTED.
+  //
+  // `connectBlockToPanel` refuses a forbidden cross and an unsupported
+  // dimension at the moment somebody connects. Adding a dimension AFTERWARDS
+  // reached the same forbidden state from the other direction and nothing
+  // looked: the document then carried a cross an authority forbids, and the
+  // author found out at the preview, phrased as a resolver failure rather than
+  // as the decision they had just made.
+  if (offered) {
+    for (const page of state.document.pages) {
+      for (const candidate of page.blocks) {
+        if (!candidate.connectedFilterPanelIds.includes(panelId)) continue;
+        if (!blockIsFilterable(candidate)) continue;
+        const bound = catalogEntry(context.catalog, candidate.binding);
+        if (!bound) continue;
+        if (bound.forbiddenFilters.includes(entry.handle)) {
+          return refuse(
+            state,
+            "forbidden_filter_cross",
+            `Este panel ya mueve «${bound.label}», y una autoridad del estudio prohíbe cruzar esa medición con «${entry.label}».`,
+          );
+        }
+        if (!bound.supportedFilters.includes(entry.handle)) {
+          return refuse(
+            state,
+            "unsupported_filter_dimension",
+            `Este panel ya mueve «${bound.label}», que no se puede desglosar por «${entry.label}».`,
+          );
+        }
+      }
+    }
   }
   const dimensions = offered
     ? [...current, entry.handle]

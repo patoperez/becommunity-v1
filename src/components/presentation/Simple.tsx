@@ -104,8 +104,42 @@ export function Gauge({ block, audience }: LeafProps) {
   );
 }
 
-/** A short aside on a tinted plate. Carries a figure only if the block has one. */
+/**
+ * A short aside on a tinted plate. Carries a figure only if the block has one.
+ *
+ * A TOUCHPOINT CARRIES THREE FIGURES, AND PRINTING ONE OF THEM UNLABELLED IS
+ * NOT A SUMMARY, IT IS A SUBSTITUTION. An earlier version reached through
+ * `soleValue`, drew the satisfaction alone with no label, and dropped the
+ * process-unawareness silently — so a reader saw one number where the study
+ * measured three and could not tell which one they were looking at.
+ */
 export function Callout({ block, audience }: LeafProps) {
+  if (block.payload.shape === "touchpoint") {
+    const { label, satisfaction, processUnawareness, unawarenessShare } = block.payload;
+    const lines = [
+      { caption: "Satisfacción", value: satisfaction },
+      { caption: "Desconocimiento del proceso", value: processUnawareness },
+      { caption: "Proporción que no lo conocía", value: unawarenessShare },
+    ].filter((line) => line.value !== null);
+    if (lines.length === 0) return null;
+    return (
+      <div className="rounded-xl border border-evidence-line bg-evidence-surface p-4">
+        <p className="text-sm font-semibold text-strong [overflow-wrap:anywhere]">{label}</p>
+        <dl className="mt-2 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr))]">
+          {lines.map((line) => (
+            <div key={line.caption}>
+              <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-muted">{line.caption}</dt>
+              <dd className="mt-0.5 font-display text-xl font-bold text-strong">
+                <Figure value={line.value as RenderValue} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {block.methodology.base ? <BaseLine base={block.methodology.base} className="mt-2" /> : null}
+      </div>
+    );
+  }
+
   const { value } = soleValue(block);
   const body = block.payload.shape === "editorial" ? block.payload.body : null;
   if (block.payload.shape === "editorial" && body === null) {

@@ -55,13 +55,33 @@ function byOrderThenId<T extends { order: number; id: string }>(a: T, b: T): num
  */
 function clientHasContent(block: RenderBlock): boolean {
   const payload = block.payload;
+  // AN ABSENCE THE CONTRACT STATES IS NOT A GAP WE MADE.
+  //
+  // "Nobody responded" and "no authority states this relationship" are facts
+  // about the STUDY, and C11's exception is explicit that a caveat about what a
+  // reader is being shown survives. An earlier version filtered any block with
+  // an empty payload, so those two sentences were removed along with the gaps —
+  // the opposite defect, and the more damaging one, because it makes a study
+  // look complete where it was honest.
+  const stated =
+    "absence" in payload &&
+    payload.absence !== null &&
+    (payload.absence.state === "unavailable" || payload.absence.state === "unresolved");
+  if (stated) return true;
   switch (payload.shape) {
     case "value":
-      return payload.value !== null || payload.absence?.state === "unavailable" || payload.absence?.state === "unresolved";
+      return payload.value !== null;
     case "categories":
       return payload.categories.length > 0;
     case "series":
-      return payload.points.length > 0;
+      return payload.points.some((point) =>
+        point.measures.some(
+          (measure) =>
+            measure.value !== null ||
+            measure.absence?.state === "unavailable" ||
+            measure.absence?.state === "unresolved",
+        ),
+      );
     case "terms":
       return payload.terms.length > 0;
     case "cohorts":
@@ -72,8 +92,10 @@ function clientHasContent(block: RenderBlock): boolean {
       return payload.satisfaction !== null || payload.processUnawareness !== null || payload.unawarenessShare !== null;
     case "journey_group":
       return payload.touchpointCount > 0;
+    // A route with no points is a route nobody finished configuring: the
+    // block exists, and there is nothing in it for a reader.
     case "routes":
-      return payload.routes.length > 0;
+      return payload.routes.some((route) => route.points.length > 0);
     case "editorial":
       return payload.body !== null;
     // A filter panel has no viewer behaviour in this unit, so it is internal-only.
