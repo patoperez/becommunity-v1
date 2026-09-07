@@ -203,3 +203,17 @@ and says so loudly; it is **not** the gate. `npm run suite:d` on Linux CI is.
 - [ ] Worker env vars set (service_role as an encrypted secret).
 - [ ] Uptime Robot configured against `/api/health` — see [OPERATIONS.md](OPERATIONS.md).
 - [ ] Supabase upgraded to **Pro** once a real client has the link (§9.2).
+
+---
+
+## Worker limits this codebase depends on
+
+- ⚠️ **Six simultaneous open outbound connections per invocation.** A Worker may
+  hold six at once; a seventh is queued rather than refused, so exceeding the
+  limit costs latency silently instead of failing loudly. This number is
+  load-bearing in source: `CANONICAL_READ_CONCURRENCY` in
+  `src/lib/canonical-source/read.ts` is six for exactly this reason, and
+  `npm run test:canonical-database-source` asserts it. Raising it would not make
+  the canonical read faster — it would only misdescribe what the code is doing.
+  Recorded here because a constant that encodes a platform limit needs somewhere
+  a human can find the limit.

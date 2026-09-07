@@ -1438,3 +1438,263 @@ credential or publication state changed. The import job
 been enabled anywhere, no preview surface exists, no read path was switched, no
 dashboard UI was built, and the comparison has never run inside a request on a
 hosted deployment — only through the internal operator.
+
+
+---
+
+### Unit 5 Phase 3.1 — the post-completion corrections (source only, 2026-09-06)
+
+**Phase 3 was committed and then audited, and the audit found four defects. All
+four are corrected. Shadow preview is still NOT authorized and shadow mode is
+still off everywhere; nothing was deployed, no hosted row was written, no
+environment variable was set, and neither the legacy response nor any dashboard
+surface changed.**
+
+#### A. Filtered comparisons were invalid, and now refuse
+
+`shadow/server.ts` reads the canonical document by tenant and study and does not
+apply the request's legacy filter — it cannot, because no authority maps a
+legacy segment key onto a canonical attribute key. Phase 3 guarded
+`population.selected` for exactly that reason and then compared the FILTERED
+legacy NPS and CRI against that UNFILTERED document anyway.
+
+That produced errors in both directions, and the new offline fixture produces
+both from one run: filtering it leaves the NPS at 40 and the CRI at 37.5 — a
+false AGREEMENT with the canonical values — while dropping both bases from 20 to
+10, a false DISAGREEMENT. Under an active filter, every quantity the filter
+touches is now `presentation_configuration_required`, mismatch `filter_scope`,
+`agrees` null, and carries **no numbers**.
+
+**One comparison survives a filter and only because it is provably unfiltered.**
+`population.measured` reads `view.sourceUnits`, which `dashboard/view.ts:186`
+computes from `rows` and `qualitative` rather than their filtered forms.
+`legacy.pivot.allowlist` and `legacy.filterOptions` keep their counts for the
+same reason (`view.ts:182-183`). All three are pinned by a gate that asserts
+they are identical between a filtered and an unfiltered build.
+
+Hosted, one dimension applied: **1 comparable, 1 agree, 0 disagree, 23
+classified, 12 refused by scope.** Unfiltered is unchanged at **6 comparable, 6
+agree, 0 disagree, 18 classified.**
+
+#### B. The runtime path had never been executed, and now has been
+
+The Phase 3 evidence came from `canonical-shadow-report`, which preloads the
+canonical document and hands the orchestrator `loadCanonical: async () =>
+canonical`. That measured the comparator. It never exercised the policy, the
+admin client, the server-only adapter, the paged reads or the results builder —
+that is, not one step of what a request does inside its budget.
+
+`npm run canonical-shadow-runtime-rehearsal` calls `runStudyShadowComparison`,
+the same function `studies/study-dashboard.ts` calls, and lets it do all of it.
+It runs under `node --conditions=react-server`, which resolves the `server-only`
+marker to its own empty module — the same condition the RSC runtime supplies —
+so the real modules run without the marker being patched, stubbed or copied.
+
+Three runs of twenty samples each, hosted, read-only, **nothing preloaded**,
+after the abort-reason fix. Three, not one, because the tail moves:
+
+| | run A | run B | run C |
+|---|---|---|---|
+| cold (first) | 1 233 | 1 452 | 1 902 |
+| minimum | 976 | 1 058 | 1 021 |
+| median | **1 047** | **1 105** | **1 093** |
+| p95 (rank 19 of 20) | 1 129 | 1 177 | 1 288 |
+| maximum | 1 233 | 1 452 | **1 902** |
+
+Every sample returned `compared` with 6/6/0/18 and the legacy payload was
+asserted byte-identical after each one. ⚠️ **Run C's maximum of 1 902 ms is past
+the 1 500 ms default budget**: that cold request would have returned
+`canonical_timeout` instead of a comparison.
+
+The rehearsal also COUNTS this process's outbound requests across the
+budget-expiry probe: 1 at return, **1 after two further seconds**, 0 orphaned
+rejections. That count is what caught defect 8 above.
+
+⚠️ **These are workstation-to-Supabase times, not Worker-to-Supabase times**, and
+must never be quoted as if they were.
+
+#### C. The timeout did not cancel, and now does
+
+`Promise.race` bounded the caller and nothing else: the losing Supabase read
+stayed in flight — socket open, next page still to be asked for — after the
+request had answered. The budget now owns an `AbortController` whose signal is
+threaded through the reader contract, `shadow/server.ts`,
+`canonical-source/adapter.ts`, `loadCanonicalRowSet`, `readCanonicalTable`, the
+transport and every paginated query's `PostgrestTransformBuilder.abortSignal`
+— the
+supported PostgREST cancellation API, which puts the signal on the underlying
+`fetch`. The paging loop also checks the signal BEFORE asking for the next page:
+the query-level signal stops the request in flight, the loop-level check stops
+the next one from starting, and neither alone is enough.
+
+⚠️ **The verdict is decided by the clock, not by the race.** `abort()` dispatches
+its listeners synchronously, so a reader that rejects from inside its own abort
+listener settles the work promise first and `Promise.race` would hand back its
+rejection — turning a budget expiry into `canonical_transport_error`. The timer
+sets `expired` before it aborts and rejects, and the classification reads that
+flag. A real `fetch` rejects asynchronously, which is exactly why this would
+have hidden until somebody needed the number. The offline gate carries a reader
+that rejects synchronously from its abort listener.
+
+Proved offline: the reader observes the abort; no page begins after it; an
+in-flight page's abort is reported as `READ_ABORTED` and never as a database
+message; a late rejection does not escape as an unhandled rejection; a late
+resolution is discarded; and a reader that throws while STARTING does not leave
+the timer armed. Proved on the hosted path: a 1 ms budget returns
+`canonical_timeout` in 10 ms and two seconds of waiting afterwards produces no
+late resolution and no further read.
+
+#### D. Runtime evidence was unsafe or unavailable, and is now inert by default
+
+`src/lib/shadow/sink.ts` is server-only and records nothing unless code running
+in the same process installs a sink. **There is no environment variable**, so no
+deployment can turn it on; the only caller is the rehearsal operator. It returns
+`void` and swallows its own failures, so it cannot alter, delay or fail a
+response, and it adds no route — the way in is a function call and an internal
+bounded ring buffer.
+
+`src/lib/shadow/diagnostics.ts` is the pure whitelist that turns local operator
+evidence into a record. It reads each field by name, checks it against the
+closed list it must belong to, and drops what is not there — a finding whose
+key, section, classification or rule is unknown is dropped WHOLE. It carries
+**no numbers at all**: `legacyValue`, `canonicalValue`, `legacyBase` and
+`canonicalBase` have no field to arrive in, filtered or not. Every string that
+survives is a member of a closed list, a uuid, a `sha256:` digest or a dotted
+version.
+
+#### The diagnostic contract was hardened
+
+- ⚠️ **The filter fingerprint is GONE, not improved.** It was an unsalted
+  SHA-256 of the applied `[key, value]` pairs. The values come from a catalogue
+  the same legacy payload publishes to the browser — thirteen dimensions with
+  single-digit-to-low-tens value spaces — so the whole space of realistic
+  selections is a few thousand strings and a dictionary reverses the digest in
+  milliseconds. `ShadowFilterScope` records `filtered`, a dimension COUNT and
+  those dimension KEYS whose shape is conservative enough to publish; the
+  runtime record drops the keys and keeps the count. **No new operational secret
+  was introduced, and no keyed HMAC was added**: the brief permits one only if a
+  suitable existing server-only secret with clear rotation behaviour already
+  exists, and the only such secret is `SUPABASE_SERVICE_ROLE_KEY`, whose
+  rotation runbook exists precisely so it can be replaced without warning.
+- `note: string | null` became `noteCode: NoteCode | null` over a closed union;
+  `rule` became a closed union; and a finding's `key` and `section` are members
+  of closed lists, so a study's own metric key cannot become a finding key. The
+  prose those notes carried is in `docs/LEGACY_CANONICAL_COMPATIBILITY.md`.
+
+#### The canonical read is concurrent, and nothing was traded for it
+
+`loadCanonicalRowSet` read twenty-six independent families one after another.
+The Cuicuilco package is 3 244 rows in 28 round trips, so the 4 858 ms on record
+was LATENCY, not volume. The families now go through a bounded pool.
+
+Measured in one session, same transport, same machine, four runs each:
+sequential **min 4 177 / median 4 774 / max 5 128 ms**; bounded concurrency 6
+**min 1 181 / median 1 263 / max 1 384 ms** — **3.78× on the median**, and the
+4 774 ms reproduces the 4 858 ms on record.
+
+**Six, because Cloudflare Workers allow six simultaneous open outbound
+connections per invocation.** A seventh queues rather than fails.
+
+Preserved and proved: tenant AND study on every request; every family's own
+ceiling; strictly sequential paging *within* a family, because the keyset cursor
+is the previous page's last row; results placed by index, so the row set is
+identical to the sequential one; complete-or-refuse, with no new work after the
+first failure and the LOWEST-INDEXED refusal reported so it does not depend on
+who lost a race; cancellation; and a refusal — `READ_CONCURRENCY_INVALID` —
+rather than zero workers and an array of holes if the limit is ever not a
+positive integer.
+
+**Single-flight de-duplication was considered and NOT implemented.** It is
+optional in the brief, and a module-level cache keyed by tenant and study on a
+service-role read path is a tenant-isolation hazard for a saving the pool
+already delivers.
+
+#### The gates
+
+| gate | before | after |
+|---|---|---|
+| `npm run test:shadow-boundary` | 54 | **96** |
+| `npm run test:canonical-database-source` | 60 | **74** |
+| `npm run test:shadow-sink` | — | **17** (new, in `npm test`) |
+
+The boundary gate also closed four holes the audit found in itself: it now walks
+SERVER ACTIONS and `src/middleware.ts` — which is outside `src/app` and no walk
+rooted there could ever have seen; it checks bracket notation
+(`payload["shadow"]`), which both diagnostics checks used to miss; it asserts no
+client, route or action reaches `src/lib/shadow/` at all, replacing an edge that
+was accidental; it asserts no `.env*`, `wrangler.toml`, `next.config.ts`,
+`open-next.config.ts` or `package.json` in this repository sets
+`BECOMMUNITY_SHADOW_MODE`; and it removed a dead allowlist conjunct in the
+mutation scan, replacing the claim with an enforceable one over the structural
+builder type in `canonical-source/postgrest.ts`.
+
+**Discrimination was proved, not assumed.** EIGHT defects were reintroduced one
+at a time and each gate caught its own — the three the brief named, plus the
+five an adversarial review of this diff found:
+
+| # | defect reintroduced | gate | checks failed |
+|---|---|---|---|
+| 1 | the filtered NPS comparison | shadow-boundary | 7 |
+| 2 | a non-cancelling timeout (Phase 3's race, nothing aborts) | shadow-boundary | 3 |
+| 3 | an unrestricted note string | shadow-sink | 2 |
+| 4 | the verdict read off the race instead of the clock | shadow-boundary | 1 |
+| 5 | the signal never reaching `abortSignal` on the query | canonical-database-source | 1 |
+| 6 | an `async` sink's rejection escaping | shadow-sink | 1 |
+| 7 | the operator buffer sharing its `counts` object | shadow-sink | 1 |
+| 8 | a CUSTOM abort reason (PostgREST retries the cancelled GET) | shadow-boundary | 1 |
+
+Every file was restored byte-identically, verified by SHA-256 before and after.
+
+#### What the review and the new assertions found, and what it cost
+
+The audit's own corrections were themselves audited, and five defects in them
+were caught before anything was committed. Two are worth stating in full.
+
+⚠️ **THE VERDICT WAS READ OFF THE RACE ON THE SUCCESS PATH.** `expired` was
+consulted only in the `catch`. `abort()` dispatches its listeners synchronously,
+so a reader that RESOLVES from inside its own abort listener settles the work
+promise before the timer's `reject` settles the timeout — and `Promise.race`
+hands back a canonical document that arrived after the budget, which is then
+compared as though it had arrived in time. A wrong number, not a wrong status.
+Production was immune only because `shadow/server.ts` supplies an `async`
+arrow whose promise cannot settle inside the abort dispatch, which is luck
+rather than a guarantee. `expired` is now checked on both paths.
+
+⚠️ **AND `controller.abort()` MUST TAKE NO ARGUMENT.** This one was found by the
+hosted rehearsal, and only because the rehearsal stopped printing prose and
+started counting. `@supabase/postgrest-js` decides whether a rejected `fetch`
+was cancelled by reading the rejection's identity — `name === "AbortError"` or
+`code === "ABORT_ERR"`. Passing `abort(new TimeoutSignal(...))` replaces the
+platform's own `AbortError` with a reason PostgREST does not recognise, so the
+aborted GET was classified as a network failure and **retried three times with
+backoff**. Measured against the hosted project: **three further requests after
+the budget expired**. Cancellation was producing MORE load than the race it
+replaced. Nothing in this codebase reads `signal.reason`, so every `abort()`
+call is now argument-free and the boundary gate asserts
+`signal.reason.name === "AbortError"`.
+
+The other three: an `async` sink's rejection escaped `recordShadowRun`'s
+`try/catch` (TypeScript's void-return assignability lets one be installed); the
+operator buffer's `records()` shallow-copied and handed out its own `counts`
+object; and three top-level reads in the rehearsal were unguarded, so a
+PostgREST error would have printed a database message the file's own header
+forbids. All four gates were extended to pin each one.
+
+#### Golden parity, unchanged
+
+`npm run canonical-database-parity`, read-only against the hosted import:
+**534 offered, 531 executed, 531 passed, 0 failed, 0 skipped, 0 unresolved,
+2 not-applicable, 1 configuration-required.**
+
+#### Preview activation: STILL BLOCKED
+
+| reason | detail |
+|---|---|
+| The default budget does not fit — it is SMALLER than the observed maximum | 1 500 ms against an observed maximum of 1 902 ms is a margin of 0.79×, i.e. none. Only the 5 000 ms ceiling has room, at 2.63×, and only from this vantage point. |
+| No Worker measurement exists | every number above was taken from the development workstation. The margin that decides this is the Worker's, and nothing has measured it. |
+| §9's blockers are untouched | chiefly the human-approved `legacyMetricKey ↔ canonicalItemKey` map and the filter-dimension map. Phase 3.1 corrected how the shadow behaves without one; it did not supply one. |
+
+**Still not done, and not to be described otherwise:** shadow mode has never been
+enabled anywhere, no preview surface exists, no read path was switched, no
+dashboard UI was built, and the comparison has never run inside a request on a
+hosted deployment — only through the two internal operators.

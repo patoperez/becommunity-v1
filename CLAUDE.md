@@ -381,7 +381,7 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   than its declared ceiling THROWS instead of being truncated — PostgREST's
   silent 1000-row cap has been paid for here once already. §12 of
   `docs/CANONICAL_RESULTS_MODEL.md` is the contract; read it before touching the
-  folder. `npm run test:canonical-database-source` (60 checks, in `npm test`)
+  folder. `npm run test:canonical-database-source` (**74 checks**, in `npm test`)
   enforces it.
 - ⓘ **`scripts/canonical-import-operator.mjs` is the ONLY way a real package is
   written, and it defaults to refusing.** It does not reimplement the commit:
@@ -426,8 +426,50 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   5000 ms ceiling) and every failure — timeout, transport, malformed document, a
   document that throws when read, a comparator that throws — becomes a safe
   status code; none of them can change, delay past the budget or fail the legacy
-  payload. `npm run test:shadow-boundary` (54 checks, in `npm test`) executes
+  payload. `npm run test:shadow-boundary` (**96 checks**, in `npm test`) executes
   every one of those paths.
+- ⓘ **Unit 5 Phase 3.1 corrected four defects a post-completion audit found.**
+  Read `docs/CURRENT_STATE.md` §"Unit 5 Phase 3.1" before touching
+  `src/lib/shadow/` or `src/lib/canonical-source/read.ts`. In short: (A) NOTHING
+  THE FILTER TOUCHES IS COMPARED — the canonical document is read by tenant and
+  study only, so under an active filter every quantity the legacy filter touches
+  is `presentation_configuration_required` / `filter_scope` with no verdict and
+  no numbers; `population.measured` survives only because `view.sourceUnits` is
+  provably unfiltered. (B) THE BUDGET CANCELS — it owns an `AbortController`
+  whose signal reaches every paginated query's `PostgrestBuilder.abortSignal`,
+  and the paging loop checks it before asking for the next page; the verdict is
+  decided by an `expired` flag set before the abort, NOT by who won
+  `Promise.race`. (C) EVERY TEXT FIELD IS A CLOSED SET — `noteCode` replaced
+  `note: string`, `rule`, `key` and `section` are unions, and the reversible
+  unsalted filter fingerprint was DELETED rather than improved. (D) THE RUNTIME
+  SINK IS INERT — `src/lib/shadow/sink.ts` is server-only, reads no environment
+  variable, records only codes and totals and no numbers at all, and adds no
+  route. `npm run test:shadow-sink` (17 checks, in `npm test`) proves it.
+- ⓘ **`controller.abort()` TAKES NO ARGUMENT, and that is load-bearing.**
+  `@supabase/postgrest-js` decides whether a rejected `fetch` was cancelled by
+  reading the rejection's identity — `name === "AbortError"` or
+  `code === "ABORT_ERR"`. A CUSTOM abort reason replaces the platform's own
+  `AbortError`, is not recognised, and the request is then treated as a network
+  failure — and because a canonical read is a GET, it is RETRIED three times
+  with backoff. The hosted rehearsal measured exactly three extra requests
+  after a 1 ms budget expired. Never pass a reason to `abort()` on this path;
+  the budget's verdict comes from its own `expired` flag, not from the reason.
+- ⓘ **The canonical read is bounded-concurrent at SIX, and six is not arbitrary.**
+  A Cloudflare Worker allows six simultaneous open outbound connections per
+  invocation. `loadCanonicalRowSet` reads its twenty-six independent families
+  through a pool: 4 774 ms median sequential became 1 263 ms, measured against
+  the hosted package. Paging WITHIN a family stays strictly sequential — the
+  keyset cursor is the previous page's last row — results are placed by index so
+  the row set is identical to the sequential one, and one failure fails the whole
+  load reporting the LOWEST-INDEXED refusal. Never raise the concurrency to buy
+  speed and never drop a ceiling or a scope check for it.
+- ⓘ **The two shadow operators measure different things.**
+  `npm run canonical-shadow-report` is the COMPATIBILITY report and preloads the
+  canonical document, so its elapsed time is the comparator's.
+  `npm run canonical-shadow-runtime-rehearsal` is the RUNTIME report: it calls
+  `runStudyShadowComparison` under `node --conditions=react-server` and lets it
+  construct its own admin client and do its own paged reads. Both are read-only.
+  Never quote one as the other.
 - ⓘ **There is exactly ONE door from the application to the canonical layer, and
   a graph walk proves it.** `src/app/insights/e/[studyId]/page.tsx` →
   `src/lib/studies/study-dashboard.ts` (server-only) → `src/lib/shadow/server.ts`
@@ -444,7 +486,16 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   that both layers publish and an authority relates without an alias table; and
   **18** findings classified as canonical-only, legacy-only, presentation- or
   editorial-configuration-required. Never report the 531 as runtime agreement
-  with the legacy UI.
+  with the legacy UI. A FOURTH total joined them in Phase 3.1 and is also not
+  interchangeable: under an active filter the comparison is **1 comparable, 1
+  agree, 0 disagree, 23 classified**, of which 12 are refused by scope.
+  ⓘ **Preview activation is BLOCKED.** Across three hosted runs of twenty
+  samples the median held at ~1.05-1.11 s but the maximum reached **1 902 ms** —
+  PAST the 1500 ms default budget, so that request would have timed out rather
+  than compared. Only the 5000 ms ceiling has room (2.63x), and every
+  measurement was taken from this workstation rather than from the Worker, which
+  is the margin that actually decides it. Do not enable shadow mode in any
+  environment.
 - ⓘ **Three legacy defects were FOUND and deliberately NOT fixed** (Phase 3 may
   not change a calculation). (1) `computeStudyMetrics` detects CSAT with
   `startsWith("sat")`, and every Cuicuilco key is `csat_*`, so the dashboard
