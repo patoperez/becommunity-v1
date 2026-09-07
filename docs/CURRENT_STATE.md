@@ -1738,8 +1738,10 @@ for the old experience branch: **`docs/CANONICAL_EXPERIENCE_INTEGRATION_PLAN.md`
 - **`schemaVersion` is the integer 4**, because the database column is
   `integer` bounded `1..1000` and the write functions require the document's own
   field to match. **1-3 belong to the legacy experience definition**, and the two
-  hosted draft rows are at a version nobody recorded. Unit 6A refuses 1-3 by name
-  and migrates nothing.
+  hosted draft rows are legacy-family documents. Unit 6A refuses 1-3 by name and
+  migrates nothing. **Unit 6A also claimed the database could not reveal those
+  rows' versions; that was wrong, and Unit 6A.1 read them — v3 and v2. See the
+  6A.1 section below.**
 - **A handle carries no address.** The grammar forbids the underscore, which is
   the shape of every canonical key. The registry's address map is server-only.
 - **`show_all` is the system default**, and the suppressing modes require a named
@@ -1762,7 +1764,8 @@ The parity gate reproduces the approved figures through the blueprint without
 recalculating one: `Capitanes de Esfera` (position 24 of the first category) once
 and only once at **CSAT 74.1 / TDP 3.7 / n = 27**; `Salida` at **TDP 133.3**,
 over 100 and unclamped, the only such touchpoint; recommendation **30.8 / 46.4 /
-−9.1**; renewal index **33**; population **60**; 55 touchpoints repartitioned
+−9.1**; renewal index **33** (Unit 6A rendered it `"33"`; the approved oracle
+shows `"33.0"`, corrected in 6A.1); population **60**; 55 touchpoints repartitioned
 19 + 10 + 6 + 10 + 10 across the five approved routes with no repeat.
 
 #### Discrimination — fourteen defects, proved not asserted
