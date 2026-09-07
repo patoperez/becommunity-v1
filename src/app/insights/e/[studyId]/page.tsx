@@ -7,15 +7,14 @@ import NarrativeHome from "@/app/dashboard/NarrativeHome";
 import StudyCard from "@/app/dashboard/StudyCard";
 import { StateBlock } from "@/components/States";
 import { InsightsShell } from "@/components/shell/InsightsShell";
-import { parseJourneyDefinition } from "@/lib/calc/journey";
 import { buildSegmentFilterOptions, validateSegmentFilters } from "@/lib/calc/filters";
 import { buildLongitudinalView } from "@/lib/dashboard/longitudinal";
 import { buildNarrativeHome } from "@/lib/dashboard/narrative";
 import { parseDashboardConfig } from "@/lib/dashboard/config";
-import { buildStudyDashboard } from "@/lib/dashboard/view";
 import { logoPublicUrl } from "@/lib/branding/config";
 import { parseInsightsFilters, type InsightsSearchParams } from "@/lib/insights/filters";
 import { loadAuthorizedStudyData, type AuthorizedStudy } from "@/lib/studies/authorized";
+import { loadStudyDashboard } from "@/lib/studies/study-dashboard";
 import { createClient } from "@/lib/supabase/server";
 import { PeriodSeries } from "@/components/studio/PeriodSeries";
 
@@ -56,13 +55,17 @@ export default async function InsightsStudyPage({
       ? "Ese enlace contiene una selección que este estudio no permite."
       : null;
 
-  const dashboard = buildStudyDashboard(
+  // The SAME legacy payload as before, built by the same function from the same
+  // five arguments. `loadStudyDashboard` additionally runs the server-only
+  // canonical shadow comparison, which is disabled by default and whose
+  // diagnostics this page deliberately does not read — only `legacy` is bound,
+  // so nothing else can reach a prop, the serialized payload or the browser.
+  const { legacy: dashboard } = await loadStudyDashboard({
+    study,
     rows,
     qualitative,
-    parseJourneyDefinition(study.journey_definition),
     filters,
-    study.dashboard_config,
-  );
+  });
 
   const { data: candidates } = await supabase.from("study")
     .select("id, tenant_id, name, period, status, dashboard_config, journey_definition, created_at")
