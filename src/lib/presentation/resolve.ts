@@ -1,0 +1,843 @@
+/**
+ * THE PURE RESOLVER — definition + registry + results → render model.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT READS. IT NEVER COMPUTES.
+ *
+ * Every number this file puts into a render model was already computed,
+ * rounded exactly once and formatted by the canonical layer. Search this file
+ * for an arithmetic operator applied to a study quantity and you will not find
+ * one: the only arithmetic present is over ARRAY POSITIONS and ORDERING, which
+ * decide where a block goes, never what it says.
+ *
+ * That is not a stylistic preference. `docs/CANONICAL_RESULTS_MODEL.md` §6
+ * requires every value to be rounded exactly once, at the precision its unit
+ * declares. A second rounding — even at the same precision, even "harmless" —
+ * is a value that can move, and a value that moves is a wrong number in front
+ * of a client.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * FOUR REFUSALS THAT ARE THE POINT OF THE LAYER.
+ *
+ *   1. A handle the registry does not know is `unknown_handle`. Never a blank
+ *      card, never a silently dropped block.
+ *   2. A chart variant the semantic does not support is
+ *      `incompatible_chart_variant` — a ratio that may exceed 100 must not be
+ *      accepted onto a 0..100 gauge.
+ *   3. A filter connection to a dimension the result does not support is
+ *      `unsupported_filter_dimension`; one an authority forbids is
+ *      `forbidden_filter_cross`. Esfera × CRI is the standing example, and the
+ *      approved dashboard's own risk panel offers it — a reference-dashboard
+ *      deviation the canonical contract refuses.
+ *   4. A route claiming a touchpoint its source group does not contain is
+ *      `route_touchpoint_outside_group`. Five visible routes may repartition
+ *      four source groups; they may not invent membership.
+ *
+ * AND ONE NON-REFUSAL. A missing value is not an error. `unavailable`,
+ * `unresolved` and `configuration_required` are STATES the contract publishes,
+ * and they arrive in the render model intact so a surface can say which one it
+ * is. Turning a settled "a human supplies this" into a failure would report a
+ * working design as a permanent defect.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+import type {
+  CanonicalStudyResults,
+  MetricResult,
+  ResultBand,
+  ResultValue,
+} from "../results/contract";
+import {
+  chartVariantIsCompatible,
+  type ChartVariant,
+  type MethodologyDisclosureLevel,
+  type PresentationAvailability,
+} from "./capabilities";
+import type {
+  PresentationBlock,
+  PresentationDocument,
+  SampleDisplayPolicy,
+} from "./document";
+import { DEFAULT_SAMPLE_POLICY } from "./document";
+import { failure, issue, success, type PresentationIssue, type PresentationOutcome } from "./errors";
+import { handleFacet, type PresentationHandle } from "./handles";
+import type { CanonicalAddress, CanonicalPresentationRegistry, RegistryEntry, ResponseContext } from "./registry";
+import type {
+  PresentationRenderModel,
+  RenderAbsence,
+  RenderBand,
+  RenderBlock,
+  RenderCategory,
+  RenderMeasure,
+  RenderMethodology,
+  RenderPage,
+  RenderPayload,
+  RenderRoute,
+  RenderRoutePoint,
+  RenderSeriesPoint,
+  RenderValue,
+} from "./render-model";
+
+/**
+ * Display names for the three recommendation bands.
+ *
+ * PRESENTATION VOCABULARY, not data. The canonical `NpsDistribution` carries
+ * three counts under three field names and no labels, because naming them is a
+ * display decision. They are declared here, once, rather than authored per
+ * document — an author who could rename "Detractores" could rename it to
+ * something the number does not mean.
+ */
+const NPS_BAND_LABELS = ["Promotores", "Pasivos", "Detractores"] as const;
+
+/** Every valid chart variant, so an authored string can be checked before use. */
+const CHART_VARIANTS: readonly string[] = [
+  "kpi_value",
+  "kpi_with_base",
+  "gauge",
+  "donut",
+  "pie",
+  "stacked_bar",
+  "bar_vertical",
+  "bar_horizontal",
+  "line",
+  "area",
+  "table",
+  "word_cloud",
+  "term_ranking",
+  "callout",
+  "narrative",
+  "journey_route_map",
+  "touchpoint_matrix",
+  "filter_control",
+];
+
+export type ResolveInput = {
+  document: PresentationDocument;
+  registry: CanonicalPresentationRegistry;
+  results: CanonicalStudyResults;
+};
+
+/* -------------------------------------------------------------------------- */
+/* reading, never computing                                                    */
+/* -------------------------------------------------------------------------- */
+
+function bandOf(band: ResultBand | null): RenderBand | null {
+  // `schemeKey` is deliberately dropped: it names the study's band-scheme
+  // configuration and is not client copy.
+  return band === null ? null : { semanticColor: band.semanticColor, label: band.label };
+}
+
+function valueOf(value: ResultValue): RenderValue {
+  // Every field is copied verbatim. `formatted` in particular is the canonical
+  // formatter's own output; reformatting it here would be a second rounding.
+  return {
+    value: value.value,
+    unit: value.unit,
+    decimals: value.decimals,
+    formatted: value.formatted,
+    band: bandOf(value.band),
+  };
+}
+
+function contextOf(base: { eligible: number; responded: number; valid: number }): ResponseContext {
+  return { eligible: base.eligible, responded: base.responded, valid: base.valid };
+}
+
+/** Split a metric into "the number" and "why there isn't one". Exactly one is non-null. */
+function readMetric(result: MetricResult): { value: RenderValue | null; absence: RenderAbsence | null } {
+  if (result.status === "available") return { value: valueOf(result.value), absence: null };
+  if (result.status === "unavailable") {
+    return { value: null, absence: { state: "unavailable", reason: result.reason, detail: result.detail } };
+  }
+  return { value: null, absence: { state: "unresolved", reason: result.reason, detail: result.detail } };
+}
+
+/**
+ * Apply the block's sample-display policy.
+ *
+ * The canonical layer suppresses NOTHING; this is the layer that owns the
+ * display decision, and it acts only when a person authored one. `show_all`
+ * — the default — returns the value untouched, which is why the default can
+ * never quietly withhold anything.
+ */
+function applySamplePolicy(
+  policy: SampleDisplayPolicy,
+  base: ResponseContext | null,
+  value: RenderValue | null,
+  absence: RenderAbsence | null,
+): { value: RenderValue | null; absence: RenderAbsence | null } {
+  if (policy.mode !== "hide_below") return { value, absence };
+  if (base === null || value === null) return { value, absence };
+  if (base.valid >= policy.threshold) return { value, absence };
+  return {
+    value: null,
+    absence: {
+      state: "withheld_by_policy",
+      threshold: policy.threshold,
+      authoredBy: policy.authoredBy,
+      rationale: policy.rationale,
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* payloads                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function payloadFor(
+  address: CanonicalAddress,
+  results: CanonicalStudyResults,
+  entry: RegistryEntry,
+  policy: SampleDisplayPolicy,
+): RenderPayload | null {
+  switch (address.at) {
+    case "recommendation.score": {
+      const scope = results.recommendation.scopes[address.scopeIndex];
+      if (!scope) return null;
+      const read = readMetric(scope.score);
+      const guarded = applySamplePolicy(policy, contextOf(scope.score.base), read.value, read.absence);
+      return { shape: "value", value: guarded.value, absence: guarded.absence };
+    }
+    case "recommendation.distribution": {
+      const scope = results.recommendation.scopes[address.scopeIndex];
+      if (!scope) return null;
+      const counts = [
+        scope.distribution.promoters,
+        scope.distribution.passives,
+        scope.distribution.detractors,
+      ];
+      const shares = [
+        scope.distributionShare.promoters,
+        scope.distributionShare.passives,
+        scope.distributionShare.detractors,
+      ];
+      const categories: RenderCategory[] = NPS_BAND_LABELS.map((label, index) => ({
+        label,
+        note: null,
+        count: counts[index],
+        share: shares[index],
+        band: null,
+      }));
+      return { shape: "categories", categories, absence: null };
+    }
+    case "renewal.index": {
+      const read = readMetric(results.renewal.index);
+      const guarded = applySamplePolicy(policy, contextOf(results.renewal.base), read.value, read.absence);
+      return { shape: "value", value: guarded.value, absence: guarded.absence };
+    }
+    case "renewal.distribution": {
+      const distribution = results.renewal.distribution;
+      if (distribution === null) {
+        // A refusal forbids the distribution as much as the index. Publishing
+        // five zeroes beside a non-empty base would state that nobody chose
+        // anything, which is false.
+        const reason =
+          results.renewal.index.status === "unavailable"
+            ? ({
+                state: "unavailable",
+                reason: results.renewal.index.reason,
+                detail: results.renewal.index.detail,
+              } as RenderAbsence)
+            : ({
+                state: "unavailable",
+                reason: "not_collected",
+                detail: "La distribución no se reporta para esta selección.",
+              } as RenderAbsence);
+        return { shape: "categories", categories: [], absence: reason };
+      }
+      const categories: RenderCategory[] = distribution.map((rung) => ({
+        label: rung.response,
+        note: rung.level,
+        count: rung.count,
+        share: rung.share,
+        band: null,
+      }));
+      return { shape: "categories", categories, absence: null };
+    }
+    case "retention.series": {
+      const points: RenderSeriesPoint[] = results.retention.periods.map((period) => {
+        const retention = readMetric(period.retention);
+        const attrition = readMetric(period.attrition);
+        const base = contextOf(period.retention.base);
+        const guardedRetention = applySamplePolicy(policy, base, retention.value, retention.absence);
+        const guardedAttrition = applySamplePolicy(
+          policy,
+          contextOf(period.attrition.base),
+          attrition.value,
+          attrition.absence,
+        );
+        const measures: RenderMeasure[] = [
+          { label: "Retención", value: guardedRetention.value, absence: guardedRetention.absence },
+          { label: "Deserción", value: guardedAttrition.value, absence: guardedAttrition.absence },
+        ];
+        return { label: period.label, order: period.order, base, measures };
+      });
+      return { shape: "series", points };
+    }
+    case "retention.period": {
+      const period = results.retention.periods[address.periodIndex];
+      if (!period) return null;
+      const metric = address.measure === "retention" ? period.retention : period.attrition;
+      const read = readMetric(metric);
+      const guarded = applySamplePolicy(policy, contextOf(metric.base), read.value, read.absence);
+      return { shape: "value", value: guarded.value, absence: guarded.absence };
+    }
+    case "population.total":
+    case "population.measured": {
+      // A population count is a count the source stated. It carries no
+      // `ResultValue`, so the contract's own `count` unit applies and the
+      // number is rendered as the integer it already is.
+      const count = address.at === "population.total" ? results.population.total : results.population.measured;
+      return {
+        shape: "value",
+        value: { value: count, unit: "count", decimals: 0, formatted: String(count), band: null },
+        absence: null,
+      };
+    }
+    case "population.cohorts": {
+      return {
+        shape: "cohorts",
+        cohorts: results.population.cohorts.map((cohort) => ({
+          label: cohort.label,
+          total: cohort.total,
+          measured: cohort.measured,
+          responded: cohort.responded,
+          notParticipated: cohort.notParticipated,
+          participationUnknown: cohort.participationUnknown,
+        })),
+      };
+    }
+    case "population.instruments": {
+      return {
+        shape: "instrument_bases",
+        instruments: results.population.instruments.map((instrument) => ({
+          label: instrument.label,
+          base: contextOf(instrument.base),
+        })),
+      };
+    }
+    case "journey.group": {
+      const group = results.journey.groups[address.groupIndex];
+      if (!group) return null;
+      return { shape: "journey_group", label: group.label, touchpointCount: group.touchpointKeys.length };
+    }
+    case "journey.touchpoint": {
+      const touchpoint = results.journey.touchpoints[address.touchpointIndex];
+      if (!touchpoint) return null;
+      if (address.measure === "structure") {
+        const satisfaction = readMetric(touchpoint.satisfaction);
+        const tdp = readMetric(touchpoint.tdp);
+        const share = readMetric(touchpoint.unawareShareOfResponses);
+        return {
+          shape: "touchpoint",
+          label: touchpoint.label,
+          satisfaction: satisfaction.value,
+          processUnawareness: tdp.value,
+          unawarenessShare: share.value,
+        };
+      }
+      const metric =
+        address.measure === "satisfaction"
+          ? touchpoint.satisfaction
+          : address.measure === "tdp"
+            ? touchpoint.tdp
+            : touchpoint.unawareShareOfResponses;
+      const read = readMetric(metric);
+      const guarded = applySamplePolicy(policy, contextOf(metric.base), read.value, read.absence);
+      return { shape: "value", value: guarded.value, absence: guarded.absence };
+    }
+    case "qualitative.group": {
+      const group = results.qualitative.groups[address.groupIndex];
+      if (!group) return null;
+      return {
+        shape: "terms",
+        total: group.total,
+        terms: group.terms.map((term) => ({ label: term.label, count: term.count, share: term.share })),
+        excluded: group.excluded.map((entry) => ({ label: entry.label, count: entry.count })),
+      };
+    }
+    case "performance.dimension": {
+      const dimension = results.performance.dimensions[address.dimensionIndex];
+      if (!dimension) return null;
+      const points: RenderSeriesPoint[] = dimension.periods.map((period, index) => {
+        const read = readMetric(period.mean);
+        return {
+          label: period.label,
+          order: index,
+          base: contextOf(period.mean.base),
+          measures: [{ label: dimension.label, value: read.value, absence: read.absence }],
+        };
+      });
+      return { shape: "series", points };
+    }
+    case "filter.dimension": {
+      const dimension = results.filters.dimensions[address.dimensionIndex];
+      if (!dimension) return null;
+      return {
+        shape: "filter_controls",
+        dimensions: [
+          {
+            handle: entry.handle,
+            label: dimension.label,
+            options: dimension.values.map((value) => ({
+              value: value.value,
+              participants: value.participants,
+            })),
+          },
+        ],
+      };
+    }
+    case "configuration.requirement": {
+      const requirement = results.configurationRequired[address.requirementIndex];
+      if (!requirement) return null;
+      return {
+        shape: "editorial",
+        body: null,
+        absence: {
+          state: "configuration_required",
+          suppliedBy: requirement.suppliedBy,
+          detail: requirement.detail,
+        },
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* methodology                                                                 */
+/* -------------------------------------------------------------------------- */
+
+function explanationFor(address: CanonicalAddress, results: CanonicalStudyResults): string | null {
+  // ONLY `provenance.explanation` — the contract's client-safe prose. The
+  // internal provenance beside it (metric key, source families, authority
+  // statements) is never reachable from here.
+  switch (address.at) {
+    case "recommendation.score":
+    case "recommendation.distribution":
+      return results.recommendation.scopes[address.scopeIndex]?.score.provenance.explanation ?? null;
+    case "renewal.index":
+    case "renewal.distribution":
+      return results.renewal.index.provenance.explanation;
+    case "retention.period":
+      return results.retention.periods[address.periodIndex]?.retention.provenance.explanation ?? null;
+    case "population.total":
+    case "population.measured":
+    case "population.cohorts":
+    case "population.instruments":
+      return results.population.provenance.explanation;
+    case "journey.group":
+      return results.journey.groups[address.groupIndex]?.provenance.explanation ?? null;
+    case "journey.touchpoint":
+      return results.journey.touchpoints[address.touchpointIndex]?.satisfaction.provenance.explanation ?? null;
+    case "qualitative.group":
+      return results.qualitative.groups[address.groupIndex]?.provenance.explanation ?? null;
+    default:
+      return null;
+  }
+}
+
+function methodologyFor(
+  level: MethodologyDisclosureLevel,
+  address: CanonicalAddress | null,
+  results: CanonicalStudyResults,
+  base: ResponseContext | null,
+): RenderMethodology {
+  const wantsProse = level === "plain_language" || level === "plain_language_with_base";
+  const wantsBase = level === "base_only" || level === "plain_language_with_base";
+  return {
+    level,
+    explanation: wantsProse && address ? explanationFor(address, results) : null,
+    base: wantsBase ? base : null,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* the resolver                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Resolve a whole presentation.
+ *
+ * Pure: same three inputs produce a byte-identical model. No clock, no
+ * randomness, no environment, no transport. Ordering is total — pages and
+ * blocks are sorted by their authored order and ties broken by id — so two runs
+ * cannot disagree about sequence.
+ */
+export function resolvePresentation(input: ResolveInput): PresentationOutcome<PresentationRenderModel> {
+  const { document, registry, results } = input;
+  const errors: PresentationIssue[] = [];
+
+  if (registry.contractVersion !== results.contractVersion) {
+    return failure([
+      issue(
+        "registry_contract_mismatch",
+        "$",
+        `el registro describe el contrato ${registry.contractVersion} y los resultados declaran ` +
+          `${results.contractVersion}. No se resuelve contra un contrato distinto del que lo generó.`,
+      ),
+    ]);
+  }
+
+  const byHandle = new Map<PresentationHandle, RegistryEntry>();
+  for (const entry of registry.entries) byHandle.set(entry.handle, entry);
+
+  /** Every filter panel in the document, by id, with the dimensions it offers. */
+  const panels = new Map<string, PresentationHandle[]>();
+  for (const page of document.pages) {
+    for (const block of page.blocks) {
+      if (block.kind === "filter_panel") panels.set(block.id, block.dimensions);
+    }
+  }
+
+  const pages: RenderPage[] = [];
+
+  const orderedPages = document.pages
+    .slice()
+    .sort((a, b) => (a.order !== b.order ? a.order - b.order : a.id < b.id ? -1 : 1));
+
+  for (const [pageIndex, page] of orderedPages.entries()) {
+    const orderedBlocks = page.blocks
+      .slice()
+      .sort((a, b) =>
+        a.placement.order !== b.placement.order
+          ? a.placement.order - b.placement.order
+          : a.id < b.id
+            ? -1
+            : 1,
+      );
+
+    const renderedBlocks: RenderBlock[] = [];
+
+    for (const [blockIndex, block] of orderedBlocks.entries()) {
+      const path = `$.pages[${pageIndex}].blocks[${blockIndex}]`;
+      const policy = block.samplePolicy ?? document.samplePolicy ?? DEFAULT_SAMPLE_POLICY;
+      const level = block.methodologyDisclosure ?? document.methodologyDisclosure;
+
+      const rendered = resolveBlock({
+        block,
+        path,
+        policy,
+        level,
+        byHandle,
+        panels,
+        registry,
+        results,
+        errors,
+      });
+      if (rendered) renderedBlocks.push(rendered);
+    }
+
+    pages.push({ id: page.id, title: page.title, order: page.order, blocks: renderedBlocks });
+  }
+
+  if (errors.length > 0) return failure(errors);
+
+  return success({
+    schemaVersion: document.schemaVersion,
+    contractVersion: results.contractVersion,
+    registryVersion: registry.registryVersion,
+    title: document.title,
+    locale: document.locale,
+    pages,
+  });
+}
+
+type BlockContext = {
+  block: PresentationBlock;
+  path: string;
+  policy: SampleDisplayPolicy;
+  level: MethodologyDisclosureLevel;
+  byHandle: Map<PresentationHandle, RegistryEntry>;
+  panels: Map<string, PresentationHandle[]>;
+  registry: CanonicalPresentationRegistry;
+  results: CanonicalStudyResults;
+  errors: PresentationIssue[];
+};
+
+/**
+ * Check every filter panel connected to this block against the bound entry.
+ *
+ * A connection is honoured only when the RESULT supports the dimension. An
+ * authority-forbidden cross is refused by its own code, separately from a
+ * merely unsupported one, so a gate can prove that Esfera × CRI fails as a
+ * forbidden cross and not as a typo.
+ */
+function checkConnections(context: BlockContext, entry: RegistryEntry | null): void {
+  const { block, path, panels, errors } = context;
+  if (entry === null) return;
+  for (const panelId of block.connectedFilterPanelIds) {
+    const dimensions = panels.get(panelId);
+    if (!dimensions) continue; // structural validation already reported it
+    for (const dimension of dimensions) {
+      if (entry.forbiddenFilters.includes(dimension)) {
+        errors.push(
+          issue(
+            "forbidden_filter_cross",
+            path,
+            `una autoridad prohíbe cruzar «${dimension}» con este resultado; la conexión con el panel ` +
+              `«${panelId}» se rechaza en lugar de descartarse en silencio.`,
+          ),
+        );
+        continue;
+      }
+      if (!entry.supportedFilters.includes(dimension)) {
+        errors.push(
+          issue(
+            "unsupported_filter_dimension",
+            path,
+            `este resultado no declara soporte para «${dimension}», ofrecido por el panel «${panelId}».`,
+          ),
+        );
+      }
+    }
+  }
+}
+
+function resolveBlock(context: BlockContext): RenderBlock | null {
+  const { block, path, policy, level, byHandle, registry, results, errors } = context;
+
+  const shell = {
+    id: block.id,
+    copy: block.copy,
+    placement: block.placement,
+    visible: block.visible,
+    samplePolicy: policy,
+    connectedFilterPanelIds: block.connectedFilterPanelIds.slice(),
+  };
+
+  if (block.kind === "filter_panel") {
+    const dimensions = [];
+    for (const handle of block.dimensions) {
+      const entry = byHandle.get(handle);
+      if (!entry) {
+        errors.push(issue("unknown_handle", path, `el panel ofrece «${handle}», que el registro no conoce.`));
+        continue;
+      }
+      if (handleFacet(handle) !== "dimension") {
+        errors.push(
+          issue("handle_facet_mismatch", path, `«${handle}» no es una dimensión de filtro.`),
+        );
+        continue;
+      }
+      const address = registry.addresses.get(handle);
+      if (!address) continue;
+      const payload = payloadFor(address, results, entry, policy);
+      if (payload && payload.shape === "filter_controls") dimensions.push(...payload.dimensions);
+    }
+    return {
+      ...shell,
+      semantic: "filter_dimension",
+      chartVariant: "filter_control",
+      availability: "available",
+      provenance: "source_reported",
+      payload: { shape: "filter_controls", dimensions },
+      methodology: methodologyFor(level, null, results, null),
+    };
+  }
+
+  if (block.kind === "editorial") {
+    let availability: PresentationAvailability = "available";
+    let payload: RenderPayload = { shape: "editorial", body: block.content?.body ?? null, absence: null };
+    if (block.slot !== null) {
+      const entry = byHandle.get(block.slot);
+      if (!entry) {
+        errors.push(issue("unknown_handle", path, `la ranura editorial «${block.slot}» no existe en el registro.`));
+        return null;
+      }
+      if (handleFacet(block.slot) !== "editorial") {
+        errors.push(issue("handle_facet_mismatch", path, `«${block.slot}» no es una ranura editorial.`));
+        return null;
+      }
+      if (block.content === null) {
+        // The contract says a human supplies this and nobody has yet. That is a
+        // STATE, reported honestly — never invented, never quietly dropped.
+        const address = registry.addresses.get(block.slot);
+        const resolved = address ? payloadFor(address, results, entry, policy) : null;
+        payload = resolved ?? { shape: "editorial", body: null, absence: null };
+        availability = "configuration_required";
+      }
+    }
+    return {
+      ...shell,
+      semantic: "editorial_slot",
+      chartVariant: block.kind === "editorial" ? "narrative" : null,
+      availability,
+      provenance: "editorial",
+      payload,
+      methodology: methodologyFor(level, null, results, null),
+    };
+  }
+
+  if (block.kind === "journey_routes") {
+    const routes: RenderRoute[] = [];
+    const claimed = new Map<string, string>();
+
+    const orderedRoutes = block.routes
+      .slice()
+      .sort((a, b) => (a.order !== b.order ? a.order - b.order : a.id < b.id ? -1 : 1));
+
+    for (const route of orderedRoutes) {
+      const groupEntry = byHandle.get(route.sourceGroup);
+      if (!groupEntry) {
+        errors.push(
+          issue("unknown_handle", path, `la ruta «${route.id}» nombra el grupo «${route.sourceGroup}», desconocido.`),
+        );
+        continue;
+      }
+      if (handleFacet(route.sourceGroup) !== "journey-group") {
+        errors.push(
+          issue("handle_facet_mismatch", path, `«${route.sourceGroup}» no es un grupo de recorrido.`),
+        );
+        continue;
+      }
+      checkConnections(context, groupEntry);
+
+      const points: RenderRoutePoint[] = [];
+      route.touchpoints.forEach((handle, index) => {
+        const entry = byHandle.get(handle);
+        if (!entry) {
+          errors.push(issue("unknown_handle", path, `la ruta «${route.id}» nombra «${handle}», desconocido.`));
+          return;
+        }
+        if (handleFacet(handle) !== "journey-touchpoint") {
+          errors.push(issue("handle_facet_mismatch", path, `«${handle}» no es un punto de contacto.`));
+          return;
+        }
+        if (!groupEntry.members.includes(handle)) {
+          errors.push(
+            issue(
+              "route_touchpoint_outside_group",
+              path,
+              `la ruta «${route.id}» reclama «${handle}», que la fuente no colocó en «${groupEntry.label}». ` +
+                "Cinco rutas visibles pueden repartir cuatro grupos; no pueden inventar pertenencia.",
+            ),
+          );
+          return;
+        }
+        const previous = claimed.get(handle);
+        if (previous !== undefined) {
+          errors.push(
+            issue(
+              "route_touchpoint_duplicated",
+              path,
+              `«${handle}» ya lo reclama la ruta «${previous}»; un punto de contacto se muestra una sola vez.`,
+            ),
+          );
+          return;
+        }
+        claimed.set(handle, route.id);
+
+        const address = registry.addresses.get(handle);
+        const touchpoint =
+          address && address.at === "journey.touchpoint"
+            ? results.journey.touchpoints[address.touchpointIndex]
+            : undefined;
+        if (!touchpoint) return;
+        const satisfaction = readMetric(touchpoint.satisfaction);
+        const tdp = readMetric(touchpoint.tdp);
+        const base = contextOf(touchpoint.satisfaction.base);
+        const guarded = applySamplePolicy(policy, base, satisfaction.value, satisfaction.absence);
+        const guardedTdp = applySamplePolicy(policy, contextOf(touchpoint.tdp.base), tdp.value, tdp.absence);
+        points.push({
+          handle,
+          label: touchpoint.label,
+          order: index,
+          satisfaction: guarded.value,
+          // TDP arrives exactly as the canonical layer produced it. It is a
+          // ratio over the valid base, it may exceed 100, and nothing here
+          // clamps, caps or rescales it.
+          processUnawareness: guardedTdp.value,
+          base,
+          absence: guarded.absence,
+        });
+      });
+
+      routes.push({
+        id: route.id,
+        title: route.title,
+        order: route.order,
+        sourceGroupLabel: groupEntry.label,
+        points,
+      });
+    }
+
+    const variant = block.chartVariant;
+    if (!CHART_VARIANTS.includes(variant)) {
+      errors.push(issue("incompatible_chart_variant", path, `«${variant}» no es una variante conocida.`));
+    } else if (!chartVariantIsCompatible("journey_group", variant as ChartVariant)) {
+      errors.push(
+        issue("incompatible_chart_variant", path, `«${variant}» no puede dibujar un recorrido por grupos.`),
+      );
+    }
+
+    return {
+      ...shell,
+      semantic: "journey_group",
+      chartVariant: CHART_VARIANTS.includes(variant) ? (variant as ChartVariant) : null,
+      availability: "available",
+      provenance: "measured_aggregate",
+      payload: { shape: "routes", routes },
+      methodology: methodologyFor(level, null, results, null),
+    };
+  }
+
+  /* ---- a plain result block ---- */
+
+  const entry = byHandle.get(block.binding);
+  if (!entry) {
+    errors.push(
+      issue("unknown_handle", path, `el bloque enlaza «${block.binding}», que el registro no conoce.`),
+    );
+    return null;
+  }
+  if (handleFacet(block.binding) === "dimension") {
+    errors.push(
+      issue("handle_facet_mismatch", path, "una dimensión de filtro no se dibuja como un resultado."),
+    );
+    return null;
+  }
+
+  const variant = block.chartVariant;
+  if (!CHART_VARIANTS.includes(variant)) {
+    errors.push(issue("incompatible_chart_variant", path, `«${variant}» no es una variante conocida.`));
+    return null;
+  }
+  if (!chartVariantIsCompatible(entry.semantic, variant as ChartVariant)) {
+    errors.push(
+      issue(
+        "incompatible_chart_variant",
+        path,
+        `«${variant}» no puede dibujar «${entry.semantic}»; las variantes compatibles son ` +
+          `${entry.compatibleVariants.join(", ")}.`,
+      ),
+    );
+    return null;
+  }
+
+  checkConnections(context, entry);
+
+  const address = registry.addresses.get(block.binding);
+  if (!address) {
+    errors.push(issue("unknown_handle", path, `«${block.binding}» no tiene enlace canónico.`));
+    return null;
+  }
+  const payload = payloadFor(address, results, entry, policy);
+  if (payload === null) {
+    errors.push(
+      issue("unknown_handle", path, `«${block.binding}» ya no resuelve contra este documento de resultados.`),
+    );
+    return null;
+  }
+
+  return {
+    ...shell,
+    semantic: entry.semantic,
+    chartVariant: variant as ChartVariant,
+    availability: entry.availability,
+    provenance: entry.provenance,
+    payload,
+    methodology: methodologyFor(level, address, results, entry.responseContext),
+  };
+}
