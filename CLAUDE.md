@@ -561,7 +561,7 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   **Nothing in it calculates.** It imports no module from `src/lib/calc/`, holds
   no formula, no denominator and no threshold, and every number it emits was
   computed, rounded once and formatted by the canonical layer.
-  `npm run test:canonical-presentation` (**124 checks**, in `npm test`) enforces
+  `npm run test:canonical-presentation` (**128 checks**, in `npm test`) enforces
   that, plus the boundary and the refusals.
   ⓘ **The brief's `StudyResultsDocument` DOES NOT EXIST.** The canonical document
   type is `CanonicalStudyResults` (`src/lib/results/contract.ts:691`). Use the

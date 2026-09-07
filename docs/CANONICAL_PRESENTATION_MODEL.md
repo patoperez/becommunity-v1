@@ -264,8 +264,11 @@ TDP is unawareness over the **valid** base (§4.1). It is a `ratio`, not a
 declares `ratio`, and `COMPATIBLE_CHART_VARIANTS` refuses to let a ratio be drawn
 on a `gauge`. In the approved study one touchpoint — «Salida» — reports
 **133.3%** (16 unaware over a valid base of 12). Nothing in this layer clamps,
-caps or rescales it, and a gate reintroduces a `Math.min(100, …)` to prove the
-gate notices.
+caps or rescales it. Two discrimination cases prove the gate notices: a
+`Math.min(100, …)`, and a TERNARY clamp carrying no `Math` call at all — the
+second is invisible to every static scan and is caught instead by the assertion
+that every finished number in a render model traces back to the canonical
+document.
 
 ---
 

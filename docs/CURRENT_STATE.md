@@ -1755,7 +1755,7 @@ for the old experience branch: **`docs/CANONICAL_EXPERIENCE_INTEGRATION_PLAN.md`
 
 | gate | assertions | in `npm test`? |
 |---|---:|---|
-| `npm run test:canonical-presentation` | **124** | yes |
+| `npm run test:canonical-presentation` | **128** | yes |
 | `npm run test:canonical-presentation-parity` | **43** | no — machine-specific workbooks, reports SKIPPED without them |
 
 The parity gate reproduces the approved figures through the blueprint without
@@ -1765,14 +1765,15 @@ over 100 and unclamped, the only such touchpoint; recommendation **30.8 / 46.4 /
 −9.1**; renewal index **33**; population **60**; 55 touchpoints repartitioned
 19 + 10 + 6 + 10 + 10 across the five approved routes with no repeat.
 
-#### Discrimination — eleven defects, proved not asserted
+#### Discrimination — twelve defects, proved not asserted
 
 Each invariant was broken on purpose, the gate had to fail **on its own
 assertion**, every file was restored and verified byte-identical by SHA-256, and
-the gate had to come back green. All eleven discriminated; a 13-file SHA-256
+the gate had to come back green. All twelve discriminated; a 13-file SHA-256
 census before and after the suite reported every file byte-identical.
 
-The eleven: TDP clamped to 100 · the registry no longer pruning a forbidden
+The twelve: TDP clamped to 100 · TDP clamped by a TERNARY carrying no `Math`
+call for any scan to find · the registry no longer pruning a forbidden
 dimension · the resolver no longer refusing a forbidden cross · filters
 propagating implicitly · the default policy suppressing small samples · a legacy
 blob stamped with version 4 being accepted · a legacy v1-v3 document silently
@@ -1781,7 +1782,7 @@ route claiming a touchpoint outside its source group · the render model
 re-formatting a value instead of copying it · the catalogue carrying the
 server-only address map.
 
-Two of those found real defects in this unit's own work rather than merely
+Three of those found real defects in this unit's own work rather than merely
 confirming a guess. The label leak was genuine: the registry was using
 `ConfigurationRequirement.key` as a client-facing label, and
 `journey_stage_evidence` contains the canonical table name `journey_stage`. And
