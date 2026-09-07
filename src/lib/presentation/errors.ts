@@ -86,6 +86,10 @@ export type PresentationErrorCode =
   | "persistence_scope_mismatch"
   /** The scope is malformed, or the stored column and the JSON disagree about the version. */
   | "persistence_scope_invalid"
+  /** The stored definition exceeds the byte ceiling the column enforces. */
+  | "persistence_too_large"
+  /** A stored definition does not hash to the digest recorded beside it. */
+  | "persistence_hash_mismatch"
 
   /* -------- authored policy -------- */
   /** A suppressing sample policy was written without the authorship it requires. */

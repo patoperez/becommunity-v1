@@ -145,6 +145,7 @@ type Span = { desktop: number; tablet: number; mobile: number };
 
 type BlockSeed = {
   id: string;
+  displayFormat?: DisplayFormat;
   order: number;
   span: Span;
   responsive?: ResponsiveBehavior;
@@ -173,6 +174,7 @@ function shell(seed: BlockSeed) {
     connectedFilterPanelIds: seed.connect ?? [],
     samplePolicy: seed.policy ?? null,
     methodologyDisclosure: seed.disclosure ?? null,
+    displayFormat: seed.displayFormat ?? DEFAULT_DISPLAY_FORMAT,
   };
 }
 
@@ -182,7 +184,7 @@ function result(
   chartVariant: string,
   displayFormat: DisplayFormat = DEFAULT_DISPLAY_FORMAT,
 ): PresentationBlock {
-  return { ...shell(seed), kind: "result", binding, chartVariant, displayFormat };
+  return { ...shell({ ...seed, displayFormat }), kind: "result", binding, chartVariant };
 }
 
 function editorial(seed: BlockSeed, body: string | null, slot: PresentationHandle | null = null): PresentationBlock {
@@ -472,6 +474,10 @@ export function buildApprovedCuicuilcoBlueprint(
         connect: [journeyPanelId],
         disclosure: "plain_language_with_base",
         responsive: "scroll_x",
+        // The approved dashboard prints every touchpoint figure with one
+        // decimal — «85.7%», and «0.0%» where nobody was unaware. Padding here
+        // is what makes those match; the value never moves.
+        displayFormat: { kind: "fixed_decimals", decimals: 1 },
       }),
       kind: "journey_routes",
       chartVariant: "journey_route_map",

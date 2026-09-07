@@ -144,7 +144,21 @@ console.log("\n[3] Cuatro categorías del origen, cinco recorridos aprobados, 55
 const routesBlock = blocks.find((block) => block.payload.shape === "routes");
 const routes = routesBlock.payload.routes;
 eq("recorridos visibles", routes.length, 5);
-check(routes.map((route) => route.id).join(",") === APPROVED_ROUTE_IDS.join(","), "en el orden aprobado");
+// THE ORACLE'S OWN FIVE, written out. Importing `APPROVED_ROUTE_IDS` from the
+// blueprint and comparing it with what the blueprint produced compares the
+// implementation with itself, which is the same mistake the CRI assertion made.
+const ORACLE_ROUTE_IDS = [
+  "operacion",
+  "interaccion",
+  "rendicion-de-cuentas",
+  "cultura-equipo-de-liderazgo",
+  "cultura-miembros",
+];
+check(routes.map((route) => route.id).join(",") === ORACLE_ROUTE_IDS.join(","), "en el orden aprobado");
+check(
+  APPROVED_ROUTE_IDS.join(",") === ORACLE_ROUTE_IDS.join(","),
+  "y el plano declara exactamente esos cinco, sin que una lista se justifique con la otra",
+);
 const points = routes.flatMap((route) => route.points);
 eq("puntos repartidos", points.length, 55);
 eq("puntos distintos", new Set(points.map((point) => point.handle)).size, 55);
@@ -188,6 +202,28 @@ eq(
   "exactamente una TDP supera el 100 en todo el recorrido",
   points.filter((point) => (point.processUnawareness?.value ?? 0) > 100).length,
   1,
+);
+
+// THE ZERO THAT PROVES THE PADDING GENERALISES. The approved dashboard prints
+// «Bienvenida al capítulo 85.7% / 0.0%» — a TDP of zero, padded. The canonical
+// formatter renders an integer bare, so without a display format this figure
+// arrives as «0», and dozens of touchpoints share that shape. Unit 6A.1's first
+// fix reached only the CRI; this is the assertion that would have caught that.
+const welcome = points.find((point) => point.handle === "journey-touchpoint:g1-t3");
+check(welcome !== undefined, "el punto 3 de la primera categoría está en una ruta");
+eq("su satisfacción aprobada", welcome?.satisfaction?.formatted, "85.7");
+eq("y su TDP aprobada, rellenada a un decimal", welcome?.processUnawareness?.formatted, "0.0");
+eq("con el valor intacto", welcome?.processUnawareness?.value, 0);
+const bareIntegers = points.filter(
+  (point) =>
+    (point.satisfaction !== null && !point.satisfaction.formatted.includes(".")) ||
+    (point.processUnawareness !== null && !point.processUnawareness.formatted.includes(".")),
+);
+check(
+  bareIntegers.length === 0,
+  `ninguna de las ${points.length * 2} cifras del recorrido se escribe sin decimal${
+    bareIntegers.length ? `: ${bareIntegers.length} lo hacen` : ""
+  }`,
 );
 
 const npsBlock = blocks.find((block) => block.id === "recomendacion-puntaje");

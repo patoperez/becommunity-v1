@@ -416,7 +416,19 @@ The parity gate compares against the APPROVED DASHBOARD, not against this
 layer's own output. Unit 6A's first run failed because it produced `"33"` where
 the oracle shows `"33.0"`, and the fix compared the value with the contract's own
 text instead — which proves self-consistency and nothing about parity. The
-expectation is now the oracle's literal string.
+expectation is now the oracle's literal string, and the same de-circularisation
+was applied to the five route ids, which were being checked against the
+blueprint's own constant.
+
+**The display format is on the BLOCK, not on one payload shape.** A first cut put
+it on the result block only, which fixed the CRI and left the same discrepancy
+everywhere else: the approved dashboard pads a touchpoint's TDP of zero to
+`"0.0"`, and dozens of touchpoints have one. A block's numbers are not all in one
+shape — a journey route carries a satisfaction and a TDP per point, a series two
+measures per period, a touchpoint three — so the format lives on every block and
+one speller applies it wherever that block produces a finished number. The parity
+gate now asserts that none of the 110 journey figures is written without a
+decimal.
 
 The parity gate is deliberately **outside** `npm test`, exactly as
 `test:canonical-results-parity` is, because its inputs are machine-specific. Run

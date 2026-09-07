@@ -281,6 +281,8 @@ function payloadFor(
   results: CanonicalStudyResults,
   entry: RegistryEntry,
   policy: SampleDisplayPolicy,
+  format: DisplayFormat,
+  spell: (value: RenderValue | null) => RenderValue | null,
 ): RenderPayload | null {
   switch (address.at) {
     case "recommendation.score": {
@@ -288,7 +290,7 @@ function payloadFor(
       if (!scope) return null;
       const read = readMetric(scope.score);
       const guarded = applySamplePolicy(policy, contextOf(scope.score.base), read.value, read.absence);
-      return { shape: "value", value: guarded.value, absence: guarded.absence };
+      return { shape: "value", value: spell(guarded.value), absence: guarded.absence };
     }
     case "recommendation.distribution": {
       const scope = results.recommendation.scopes[address.scopeIndex];
@@ -321,7 +323,7 @@ function payloadFor(
     case "renewal.index": {
       const read = readMetric(results.renewal.index);
       const guarded = applySamplePolicy(policy, contextOf(results.renewal.base), read.value, read.absence);
-      return { shape: "value", value: guarded.value, absence: guarded.absence };
+      return { shape: "value", value: spell(guarded.value), absence: guarded.absence };
     }
     case "renewal.distribution": {
       const distribution = results.renewal.distribution;
@@ -368,8 +370,8 @@ function payloadFor(
           attrition.absence,
         );
         const measures: RenderMeasure[] = [
-          { label: "Retención", value: guardedRetention.value, absence: guardedRetention.absence },
-          { label: "Deserción", value: guardedAttrition.value, absence: guardedAttrition.absence },
+          { label: "Retención", value: spell(guardedRetention.value), absence: guardedRetention.absence },
+          { label: "Deserción", value: spell(guardedAttrition.value), absence: guardedAttrition.absence },
         ];
         return { label: period.label, order: period.order, base, measures };
       });
@@ -381,7 +383,7 @@ function payloadFor(
       const metric = address.measure === "retention" ? period.retention : period.attrition;
       const read = readMetric(metric);
       const guarded = applySamplePolicy(policy, contextOf(metric.base), read.value, read.absence);
-      return { shape: "value", value: guarded.value, absence: guarded.absence };
+      return { shape: "value", value: spell(guarded.value), absence: guarded.absence };
     }
     case "population.total":
     case "population.measured": {
@@ -391,7 +393,7 @@ function payloadFor(
       const count = address.at === "population.total" ? results.population.total : results.population.measured;
       return {
         shape: "value",
-        value: { value: count, unit: "count", decimals: 0, formatted: String(count), band: null },
+        value: spell({ value: count, unit: "count", decimals: 0, formatted: String(count), band: null }),
         absence: null,
       };
     }
@@ -445,9 +447,9 @@ function payloadFor(
         return {
           shape: "touchpoint",
           label: touchpoint.label,
-          satisfaction: satisfaction.value,
-          processUnawareness: tdp.value,
-          unawarenessShare: share.value,
+          satisfaction: spell(satisfaction.value),
+          processUnawareness: spell(tdp.value),
+          unawarenessShare: spell(share.value),
         };
       }
       const metric =
@@ -458,7 +460,7 @@ function payloadFor(
             : touchpoint.unawareShareOfResponses;
       const read = readMetric(metric);
       const guarded = applySamplePolicy(policy, contextOf(metric.base), read.value, read.absence);
-      return { shape: "value", value: guarded.value, absence: guarded.absence };
+      return { shape: "value", value: spell(guarded.value), absence: guarded.absence };
     }
     case "qualitative.group": {
       const group = results.qualitative.groups[address.groupIndex];
@@ -487,7 +489,7 @@ function payloadFor(
           label: period.label,
           order: index,
           base,
-          measures: [{ label: dimension.label, value: guarded.value, absence: guarded.absence }],
+          measures: [{ label: dimension.label, value: spell(guarded.value), absence: guarded.absence }],
         };
       });
       return { shape: "series", points };
@@ -803,6 +805,22 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
   // The base this block rests on, known before its payload is built, so an
   // `annotate_below` policy can be decided here once rather than per shape.
   const boundEntry = block.kind === "result" ? (byHandle.get(block.binding) ?? null) : null;
+  // ONE speller per block, used everywhere this block produces a finished
+  // number. It records its own refusals rather than throwing, so a format a
+  // value cannot honour becomes a typed issue on the block that asked for it.
+  const spell = (value: RenderValue | null): RenderValue | null => {
+    if (value === null) return null;
+    const spelled = applyDisplayFormat(value, block.displayFormat);
+    if ("error" in spelled) {
+      // Recorded against the block that asked for the format, which makes the
+      // whole resolution fail. Returning the unpadded value keeps the model
+      // well-formed for anything else that inspects it; the refusal is what
+      // decides the outcome.
+      errors.push(issue("incompatible_display_format", path, spelled.error));
+      return value;
+    }
+    return spelled.value;
+  };
   const shell = {
     id: block.id,
     copy: block.copy,
@@ -828,7 +846,7 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
       }
       const address = registry.addresses.get(handle);
       if (!address) continue;
-      const payload = payloadFor(address, results, entry, policy);
+      const payload = payloadFor(address, results, entry, policy, block.displayFormat, spell);
       if (payload && payload.shape === "filter_controls") dimensions.push(...payload.dimensions);
     }
     return {
@@ -859,7 +877,7 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
         // The contract says a human supplies this and nobody has yet. That is a
         // STATE, reported honestly — never invented, never quietly dropped.
         const address = registry.addresses.get(block.slot);
-        const resolved = address ? payloadFor(address, results, entry, policy) : null;
+        const resolved = address ? payloadFor(address, results, entry, policy, block.displayFormat, spell) : null;
         payload = resolved ?? { shape: "editorial", body: null, absence: null };
         availability = "configuration_required";
       }
@@ -949,11 +967,11 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
           handle,
           label: touchpoint.label,
           order: index,
-          satisfaction: guarded.value,
+          satisfaction: spell(guarded.value),
           // TDP arrives exactly as the canonical layer produced it. It is a
           // ratio over the valid base, it may exceed 100, and nothing here
           // clamps, caps or rescales it.
-          processUnawareness: guardedTdp.value,
+          processUnawareness: spell(guardedTdp.value),
           base,
           absence: guarded.absence,
         });
@@ -1028,7 +1046,7 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
     errors.push(issue("unknown_handle", path, `«${block.binding}» no tiene enlace canónico.`));
     return null;
   }
-  const payload = payloadFor(address, results, entry, policy);
+  const payload = payloadFor(address, results, entry, policy, block.displayFormat, spell);
   if (payload === null) {
     errors.push(
       issue("unknown_handle", path, `«${block.binding}» ya no resuelve contra este documento de resultados.`),
@@ -1036,21 +1054,9 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
     return null;
   }
 
-  // Spell the number the way the block asked. Padding only — the helper refuses
-  // anything that would need rounding, and refusing is the whole point.
-  let formatted = payload;
-  if (payload.shape === "value" && payload.value !== null) {
-    const spelled = applyDisplayFormat(payload.value, block.displayFormat);
-    if ("error" in spelled) {
-      errors.push(issue("incompatible_display_format", path, spelled.error));
-      return null;
-    }
-    formatted = { ...payload, value: spelled.value };
-  }
-
   return {
     ...shell,
-    payload: formatted,
+    payload,
     semantic: entry.semantic,
     chartVariant: variant as ChartVariant,
     availability: entry.availability,

@@ -1926,8 +1926,8 @@ version **2**, so any conversion would need the legacy v2→v3 step first.
 
 | gate | assertions | in `npm test`? |
 |---|---:|---|
-| `npm run test:canonical-presentation` | **255** | yes |
-| `npm run test:canonical-presentation-parity` | **45** | no — machine-specific workbooks |
+| `npm run test:canonical-presentation` | **261** | yes |
+| `npm run test:canonical-presentation-parity` | **51** | no — machine-specific workbooks |
 
 **Discrimination: 21/21.** Every defect caught by its own assertion, every file
 restored byte-identically, SHA-256 census clean before and after. The seven new
@@ -1942,3 +1942,28 @@ Two of the seven had to be sharpened before they proved anything: re-adding
 defect now smuggles the uuid through `title`; and disarming the shortening guard
 made `"0".repeat(negative)` throw, blocking the gate by crashing it rather than
 by asserting, so the defect now performs the truncation it is meant to model.
+
+#### What a second adversarial review found
+
+Five reviewers were pointed at the 6A.1 diff and asked to refute it. Eight claims
+survived verification, and all eight were fixed:
+
+- **the display format reached one payload shape out of eleven**, so the CRI was
+  fixed and the same discrepancy left everywhere else — the approved dashboard
+  pads a touchpoint TDP of zero to `"0.0"` and dozens of touchpoints have one.
+  The format moved to the block, one speller applies it wherever that block
+  produces a number, and the parity gate now asserts that none of the 110 journey
+  figures is written without a decimal;
+- **the parity gate still compared the five route ids against the blueprint's own
+  constant** — the same circularity the CRI assertion had;
+- `subtitle` had regressed from validated authored text to an unchecked string
+  written straight into the stored definition;
+- `decodePresentationFromStorage` never validated the scope the CALLER asserts,
+  so `undefined !== undefined` would have waved a cross-study read through;
+- the import-graph walk was blind to dynamic `import()` and bare side-effect
+  imports — the two edges somebody would actually use to reach server code;
+- `encodePresentationForStorage` never checked the 512 KiB ceiling the layer
+  itself declares and `withinSizeLimit` was dead code;
+- the definition hash was computed on write and never verified on read;
+- `applyDisplayFormat` appended to whatever string it was given, including the
+  em-dash the formatter returns for a null value.

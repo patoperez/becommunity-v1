@@ -1472,6 +1472,44 @@ if (encoded.ok) {
     );
   }
 
+  refuses(
+    "un alcance solicitado que no son dos UUID",
+    decodePresentationFromStorage(encoded.value, { tenantId: undefined, studyId: undefined }),
+    "persistence_scope_invalid",
+  );
+  refuses(
+    "una fila cuyo digest no corresponde a sus bytes",
+    decodePresentationFromStorage({ ...encoded.value, definitionSha256: "0".repeat(64) }, SCOPE),
+    "persistence_hash_mismatch",
+  );
+  check(
+    decodePresentationFromStorage(encoded.value, SCOPE).ok,
+    "y el digest correcto se verifica sin quejarse",
+  );
+  refuses(
+    "un subtítulo con caracteres de control",
+    encodePresentationForStorage(document, SCOPE, { subtitle: "malo subtitulo" }),
+    "persistence_scope_invalid",
+  );
+  refuses(
+    "un subtítulo más largo que su límite",
+    encodePresentationForStorage(document, SCOPE, { subtitle: "x".repeat(201) }),
+    "persistence_scope_invalid",
+  );
+  const huge = structuredClone(document);
+  huge.pages[0].blocks.push(
+    ...Array.from({ length: 150 }, (_, index) => ({
+      ...structuredClone(document.pages[0].blocks.find((block) => block.id === "cierre")),
+      id: `relleno-${index}`,
+      content: { body: "x".repeat(3999) },
+    })),
+  );
+  refuses(
+    "una definición que rebasa el techo de bytes de la columna",
+    encodePresentationForStorage(huge, SCOPE),
+    "persistence_too_large",
+  );
+
   const foreign = { tenantId: IDENTITY.tenantId, studyId: "00000000-0000-4000-8000-00000000ffff" };
   refuses("leer una fila de otro estudio", decodePresentationFromStorage(encoded.value, foreign), "persistence_scope_mismatch");
   refuses(
@@ -1816,7 +1854,11 @@ const resolveSpecifier = (from, specifier) => {
   }
   return null;
 };
-const IMPORT_SPECIFIER = /from\s+["'](\.[^"']+|@\/[^"']+)["']/g;
+// `from "…"` alone misses two real edges: a DYNAMIC `import("…")`, which is
+// exactly how somebody would reach server code from a client component without
+// a static import to notice, and a bare side-effect `import "…"`. Both are
+// matched now.
+const IMPORT_SPECIFIER = /(?:from\s+|import\s*\(\s*|import\s+)["'](\.[^"']+|@\/[^"']+)["']/g;
 const reachableFrom = (root) => {
   const seen = new Set();
   const stack = [root];

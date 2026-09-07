@@ -44,7 +44,7 @@ import {
   type PresentationDocument,
 } from "./document";
 import { failure, issue, success, type PresentationOutcome } from "./errors";
-import { serializeDeterministic } from "./serialize";
+import { SERIALIZED_BYTE_LIMIT, serializeDeterministic, serializedBytes } from "./serialize";
 import { sha256Hex } from "../ingestion/canonical-commit/sha256";
 
 /**
@@ -89,6 +89,8 @@ export type StoredPresentation = {
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Same class the document schema refuses in authored text. */
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200e\u200f\u202a-\u202e]/;
 
 /**
  * Stamp the scope and produce the row.
@@ -111,14 +113,36 @@ export function encodePresentationForStorage(
   const validated = validatePresentationDocument(JSON.parse(serializeDeterministic(document)));
   if (!validated.ok) return failure(validated.errors);
 
+  // `subtitle` is authored text and gets the boundary authored text gets. It used
+  // to live in the document, where the schema bounded its length and refused
+  // control characters; moving it here must not quietly drop either rule.
+  const subtitle = options.subtitle ?? null;
+  if (subtitle !== null && (subtitle.length > 200 || CONTROL_CHARACTERS.test(subtitle))) {
+    return failure([
+      issue("persistence_scope_invalid", "$.metadata.subtitle", "el subtítulo excede su límite o lleva caracteres de control."),
+    ]);
+  }
+
   const definition: Record<string, unknown> = {
     ...(JSON.parse(serializeDeterministic(validated.value)) as Record<string, unknown>),
-    metadata: {
-      studyId: scope.studyId,
-      tenantId: scope.tenantId,
-      subtitle: options.subtitle ?? null,
-    },
+    metadata: { studyId: scope.studyId, tenantId: scope.tenantId, subtitle },
   };
+
+  // The ceiling the COLUMN enforces (`0023…sql`, 512 KiB). `withinSizeLimit`
+  // existed and nothing called it; this is the one function whose entire output
+  // is the value that column holds, so it is the place to check.
+  const bytes = serializedBytes(definition);
+  if (bytes > SERIALIZED_BYTE_LIMIT) {
+    return failure([
+      issue(
+        "persistence_too_large",
+        "$",
+        `la definición ocupa ${bytes} bytes y la columna admite ${SERIALIZED_BYTE_LIMIT}: se rechaza aquí ` +
+          "en lugar de dejar que la base la rechace a mitad de una escritura.",
+      ),
+    ]);
+  }
+
   return success({
     scope,
     schemaVersion: PRESENTATION_DOCUMENT_SCHEMA_VERSION,
@@ -139,9 +163,18 @@ export function encodePresentationForStorage(
  * including the legacy-family refusal, so nothing is ever reinterpreted.
  */
 export function decodePresentationFromStorage(
-  stored: { schemaVersion: number; definition: unknown },
+  stored: { schemaVersion: number; definition: unknown; definitionSha256?: string },
   expectedScope: PresentationScope,
 ): PresentationOutcome<PresentationDocument> {
+  // The scope the CALLER asserts is checked before it is trusted. Without this,
+  // a caller passing `{ studyId: undefined }` against a row carrying no metadata
+  // compares `undefined !== undefined`, which is false — and the refusal that
+  // exists to stop cross-study reads would wave it through.
+  if (!UUID.test(expectedScope.tenantId ?? "") || !UUID.test(expectedScope.studyId ?? "")) {
+    return failure([
+      issue("persistence_scope_invalid", "$", "el alcance solicitado no es un par de UUID válidos."),
+    ]);
+  }
   const definition = stored.definition;
   if (typeof definition !== "object" || definition === null || Array.isArray(definition)) {
     return failure([issue("malformed_document", "$", "la definición almacenada no es un objeto.")]);
@@ -175,6 +208,22 @@ export function decodePresentationFromStorage(
           "documento de otro estudio resolvería sin fallar y respondería con las cifras equivocadas.",
       ),
     ]);
+  }
+
+  // When the row carries the digest that was written beside it, CHECK it. The
+  // hash exists so two readers can prove they are looking at the same bytes, and
+  // a hash nobody verifies proves nothing at all.
+  if (stored.definitionSha256 !== undefined) {
+    const actual = sha256Hex(serializeDeterministic(record));
+    if (actual !== stored.definitionSha256) {
+      return failure([
+        issue(
+          "persistence_hash_mismatch",
+          "$",
+          "la definición almacenada no corresponde al digest guardado junto a ella.",
+        ),
+      ]);
+    }
   }
 
   // Strip the persistence metadata; what comes back is authorable and nothing else.

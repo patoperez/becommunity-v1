@@ -220,6 +220,17 @@ type BlockCommon = {
   samplePolicy: SampleDisplayPolicy | null;
   /** Null means "inherit the document's level". */
   methodologyDisclosure: MethodologyDisclosureLevel | null;
+  /**
+   * How every finished number in this block is spelled. Padding only.
+   *
+   * On the COMMON block rather than on the result block, because a block's
+   * numbers are not all in one payload shape: a journey route carries a
+   * satisfaction and a TDP per point, a series carries two measures per period,
+   * a touchpoint carries three. Putting the format on one shape would have made
+   * the CRI fix a special case — the approved dashboard pads a TDP of zero to
+   * `"0.0"` too, and there are dozens of those.
+   */
+  displayFormat: DisplayFormat;
 };
 
 /** One canonical result, drawn one way. */
@@ -227,8 +238,6 @@ export type ResultBlock = BlockCommon & {
   kind: "result";
   binding: PresentationHandle;
   chartVariant: string;
-  /** How the finished number is spelled. Padding only; never rounds. */
-  displayFormat: DisplayFormat;
 };
 
 /** One visible journey route: a presentation decision over source evidence. */
@@ -419,6 +428,7 @@ const commonFields = {
   connectedFilterPanelIds: z.array(identifier).max(16),
   samplePolicy: samplePolicySchema.nullable(),
   methodologyDisclosure: disclosureSchema.nullable(),
+  displayFormat: displayFormatSchema,
 };
 
 const blockSchema = z.discriminatedUnion("kind", [
@@ -427,7 +437,6 @@ const blockSchema = z.discriminatedUnion("kind", [
     kind: z.literal("result"),
     binding: handleSchema,
     chartVariant: z.string().min(1).max(48),
-    displayFormat: displayFormatSchema,
   }),
   z.strictObject({
     ...commonFields,
