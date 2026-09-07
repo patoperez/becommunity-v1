@@ -64,6 +64,17 @@ export type PresentationErrorCode =
    * one — a label was renamed, a group reordered, or an entry inserted earlier.
    */
   | "binding_fingerprint_mismatch"
+  /**
+   * The document carries NO binding at all, and was offered for resolution.
+   *
+   * Its own code because it is the OTHER half of the refusal above, and the half
+   * Unit 6A left open: `binding_fingerprint_mismatch` only fires on a binding
+   * that disagrees, so `binding: null` walked straight past it and every stale-
+   * binding guarantee with it. An unbound document is a TEMPLATE — a layout
+   * nobody has yet attached to a study — and a template resolved against real
+   * results answers with numbers no one bound it to.
+   */
+  | "unbound_presentation_document"
   /** The requested display format cannot be honoured without changing the value. */
   | "incompatible_display_format"
 

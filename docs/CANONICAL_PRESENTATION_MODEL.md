@@ -122,8 +122,13 @@ eventually print the wrong caption over an empty card.
 Pages, block instances, order, per-breakpoint grid placement, responsive
 behaviour, authored copy, bindings by handle, chart variants, filter panels,
 explicit filter connections, journey routes, editorial slots, a sample-display
-policy, a methodology-disclosure level, visibility, duplication, and the
-publication metadata the existing draft/revision model already requires.
+policy, a methodology-disclosure level, visibility and duplication.
+
+**Layout and authoring concerns only.** Database scope, hashes, and the revision
+and publication lifecycle live in the server-only persistence envelope, never
+here. This paragraph used to end "and the publication metadata the existing
+draft/revision model already requires" — true of Unit 6A's shape, false the
+moment 6A.1 moved those fields out, and corrected here.
 
 Validation is Zod, `strictObject` throughout, so an unknown field is rejected
 rather than ignored.
@@ -151,7 +156,11 @@ was authored against, and `binding` is a 64-hex digest over the study scope, the
 plan and package identity, both versions, and the entire ordered
 handle-to-address map. `null` means "study-agnostic template", which is what the
 approved blueprint is; `bindPresentationDocument` is the explicit act that ties
-one to a study.
+one to a study. A template is not a presentation: `resolvePresentation` refuses
+`binding: null` as `unbound_presentation_document`, and
+`encodePresentationForStorage` refuses to store one as
+`persistence_unbound_document`, so the only way an unbound layout becomes an
+answer is for somebody to bind it on purpose (§9c).
 
 ### Versioning, and why the number is 4
 
@@ -338,21 +347,41 @@ study A and handed study B's results resolves every handle cleanly and answers
 with the wrong numbers — the worst failure this layer could have, because nothing
 looks broken.
 
-So the resolver refuses on four separate codes:
+So the resolver refuses on six separate codes. (This sentence said "four" while
+the table listed five, and the table itself was one short — the count is now the
+count.)
 
 | code | what moved |
 |---|---|
 | `registry_contract_mismatch` | the results contract version |
 | `registry_study_mismatch` | the tenant or the study |
-| `registry_plan_mismatch` | the projected plan, package, mapping or spec |
+| `registry_plan_mismatch` | the projected plan, package, mapping, spec, or CALCULATION VERSION |
 | `registry_version_mismatch` | the presentation-registry version the document names |
+| `unbound_presentation_document` | nothing moved: the document was never bound at all |
 | `binding_fingerprint_mismatch` | the handle-to-address map itself |
 
-The last one is what makes handles safe to save. A handle is derived from a
-label or a position, so renaming a dimension, reordering a group, or inserting a
-dimension or touchpoint earlier could all silently point a saved binding at a
-different result. Each of those moves the fingerprint, so a bound document
-REFUSES instead. All four mutations are executed by the gate.
+`calculationVersion` is on that third row as of Unit 6A.2. It was recorded on
+`RegistrySource` and folded into the binding fingerprint from the start, and then
+never compared — so results computed under one calculation version resolved
+cleanly against a registry built under another, and answered with the other
+version's numbers. Same study, same plan, different projection: the same class of
+silent wrong answer the rest of that row exists to stop.
+
+The last two are what make handles safe to save, and they are two halves of one
+guarantee. A handle is derived from a label or a position, so renaming a
+dimension, reordering a group, or inserting a dimension or touchpoint earlier
+could all silently point a saved binding at a different result. Each of those
+moves the fingerprint, so a bound document REFUSES instead. All four mutations
+are executed by the gate.
+
+The other half is the document that carries NO binding. `buildApprovedCuicuilcoBlueprint`
+emits `binding: null` — a blueprint is a LAYOUT, and which registry it answers
+for is decided by whoever publishes it — and Unit 6A guarded the fingerprint
+comparison with `binding !== null`, which made an unbound document permanently
+EXEMPT from it rather than merely unchecked. The resolver now refuses it as
+`unbound_presentation_document` at `$.binding`. It does not bind it on the way
+past: `bindPresentationDocument` is a deliberate act, and a binding made on the
+read path would agree by construction and prove nothing.
 
 ---
 

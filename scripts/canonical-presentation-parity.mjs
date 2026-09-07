@@ -38,7 +38,10 @@ import {
 } from "../src/lib/results/index.ts";
 import { validatePresentationDocument } from "../src/lib/presentation/document.ts";
 import { serializeDeterministic } from "../src/lib/presentation/serialize.ts";
-import { buildCanonicalPresentationRegistry } from "../src/lib/presentation/registry.ts";
+import {
+  bindPresentationDocument,
+  buildCanonicalPresentationRegistry,
+} from "../src/lib/presentation/registry.ts";
 import { resolvePresentation } from "../src/lib/presentation/resolve.ts";
 import {
   APPROVED_ROUTE_IDS,
@@ -129,7 +132,10 @@ if (!validated.ok) {
   console.error(JSON.stringify(validated.errors, null, 1));
   process.exit(1);
 }
-const resolved = resolvePresentation({ document: validated.value, registry, results });
+// The blueprint is emitted unbound; binding it is the publisher's act, and the
+// resolver refuses an unbound document. Bind once, here, and use that below.
+const document = bindPresentationDocument(validated.value, registry);
+const resolved = resolvePresentation({ document, registry, results });
 check(resolved.ok, "el plano aprobado resuelve contra el documento canónico real");
 if (!resolved.ok) {
   console.error(JSON.stringify(resolved.errors, null, 1));
@@ -292,7 +298,7 @@ check(leaked.length === 0, `ningún nombre de persona aparece en el modelo (${pr
 /* -------------------------------------------------------------------------- */
 
 console.log("\n[7] La resolución es determinista sobre el estudio real");
-const second = resolvePresentation({ document: validated.value, registry, results });
+const second = resolvePresentation({ document, registry, results });
 check(second.ok && serializeDeterministic(second.value) === modelText, "dos resoluciones producen los mismos bytes");
 
 console.log("\n" + "=".repeat(74));

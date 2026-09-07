@@ -655,14 +655,22 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
     registry.source.planFingerprint !== results.study.planFingerprint ||
     registry.source.packageIdempotencyKey !== results.study.packageIdempotencyKey ||
     registry.source.mappingVersion !== results.study.mappingVersion ||
-    registry.source.specId !== results.study.specId
+    registry.source.specId !== results.study.specId ||
+    // `calculationVersion` was recorded on `RegistrySource` and folded into the
+    // binding fingerprint, and then never compared here — so a registry built
+    // under one calculation version resolved against results computed under
+    // another, and every address dereferenced cleanly. The numbers would be the
+    // OTHER version's, which is the same class of silent wrong answer the study
+    // and plan checks exist to prevent: same study, different projection.
+    registry.source.calculationVersion !== results.study.calculationVersion
   ) {
     return failure([
       issue(
         "registry_plan_mismatch",
         "$",
-        "mismo estudio, otro plan proyectado: las posiciones pueden haberse movido, así que las " +
-          "direcciones del registro ya no describen estos resultados.",
+        "mismo estudio, otro plan proyectado — otra huella de plan, otro paquete, otra versión de " +
+          "mapeo, otra especificación o OTRA VERSIÓN DE CÁLCULO: las posiciones pueden haberse " +
+          "movido, así que las direcciones del registro ya no describen estos resultados.",
       ),
     ]);
   }
@@ -676,7 +684,30 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
       ),
     ]);
   }
-  if (document.binding !== null && document.binding !== registry.binding) {
+  // AN UNBOUND DOCUMENT IS A TEMPLATE, AND A TEMPLATE IS NOT AN ANSWER.
+  //
+  // `binding_fingerprint_mismatch` below compares a binding that EXISTS. Unit 6A
+  // guarded it with `document.binding !== null`, which meant a document carrying
+  // no binding was not merely unchecked — it was PERMANENTLY EXEMPT from the
+  // stale-binding refusal, and the exemption was invisible: it resolved, every
+  // address dereferenced, and the render model looked exactly like a bound one.
+  //
+  // Binding is not repaired here. `bindPresentationDocument` is a deliberate act
+  // by a caller who has decided this layout describes this registry; doing it
+  // silently on the read path would make the fingerprint agree by construction
+  // and turn the whole check into a tautology.
+  if (document.binding === null) {
+    return failure([
+      issue(
+        "unbound_presentation_document",
+        "$.binding",
+        "este documento no está enlazado a ningún registro: es una plantilla, no una presentación de " +
+          "este estudio. Enlazarlo es una decisión de quien lo publica, así que aquí se rechaza en " +
+          "lugar de enlazarlo solo — un enlace hecho al vuelo coincidiría siempre y no probaría nada.",
+      ),
+    ]);
+  }
+  if (document.binding !== registry.binding) {
     return failure([
       issue(
         "binding_fingerprint_mismatch",

@@ -7,8 +7,14 @@
  * Pages, blocks, order, grid placement per breakpoint, authored copy, opaque
  * bindings, chart variants, filter panels, EXPLICIT filter connections, journey
  * routes, editorial slots, a sample-display policy, a methodology-disclosure
- * level, visibility, and the publication metadata the existing draft/revision
- * model already requires.
+ * level, and visibility.
+ *
+ * LAYOUT AND AUTHORING ONLY. Database scope, hashes, and the revision and
+ * publication lifecycle belong to the SERVER-ONLY PERSISTENCE ENVELOPE in
+ * `persistence.ts`, not here — Unit 6A put them in this type and Unit 6A.1 took
+ * them out. This sentence used to end "and the publication metadata the existing
+ * draft/revision model already requires", which stopped being true the moment
+ * that move happened.
  *
  * WHAT IT MAY NOT CONTAIN, and cannot: a number drawn from a study, a formula,
  * a threshold that changes a value, a canonical key of any kind. A binding is a
@@ -31,9 +37,22 @@
  *
  * Versions 1, 2 and 3 ARE ALREADY TAKEN by the legacy experience definition
  * (`EXPERIENCE_SCHEMA_VERSION = 3` on `claude/experience-publication-versioning`
- * at 6311f0a), and TWO DRAFTS EXIST on the hosted project at a version nobody
- * recorded — it may be 1, 2 or 3, and the database's `between 1 and 1000` check
- * will not say which. Unit 6A therefore does three things and not one:
+ * at 6311f0a), and two drafts exist on the hosted project.
+ *
+ * Unit 6A said the database could not reveal their versions. It could:
+ * `schema_version` is `not null` and the save RPC requires it to equal the
+ * document's own `schemaVersion`, so the value was always readable. A read-only
+ * inventory during Unit 6A.1 OBSERVED the synthetic P6E draft at column version
+ * 3 / JSON version 3, and the Cuicuilco draft at column version 2 / JSON version
+ * 2. Both are legacy experience documents; neither declares a `documentKind`, so
+ * neither is a canonical presentation document.
+ *
+ * That was an OBSERVATION at a moment in time, not a promise about what those
+ * rows will always hold. Nothing here depends on it: whatever a stored document
+ * turns out to be, it is refused by name rather than reinterpreted, and no
+ * migration is ever performed automatically.
+ *
+ * Unit 6A therefore does three things and not one:
  *
  *   1. it claims 4, so a presentation document can never be mistaken for a
  *      legacy one by version alone;

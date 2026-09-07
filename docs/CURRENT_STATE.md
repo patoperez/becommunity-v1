@@ -1983,3 +1983,92 @@ absences now cross as closed codes only; a block header could say "shown" over a
 payload containing withheld figures; `[26]` could be evaded by `export *`; `[29]`
 hid its padding proof behind unasserted guards; and `[24]` never exercised a
 TENANT mismatch, only a study one.
+
+---
+
+### Unit 6A.2 — three residual gaps closed (source only, 2026-09-07)
+
+**Branch `codex/canonical-experience-integration`, on top of Unit 6A.1.** No
+formula, canonical result, approved dashboard number, blueprint content, visual
+design, route, component, migration, dependency or lockfile changed. **Golden
+parity is still 531/531** (534 offered, 2 not applicable, 1 editorial), and the
+approved CRI still reads `33` in the contract and `33.0` on the page.
+
+#### A. The documentation was describing a layer that no longer existed
+
+Three passages survived the 6A.1 move and had stopped being true:
+
+- `document.ts` said a presentation document carries "the publication metadata
+  the existing draft/revision model already requires". 6A.1 had moved every one
+  of those fields into `persistence.ts`. The header now says where they live and
+  says outright that the old sentence stopped being true the moment they moved.
+- The same header's versioning note still framed the two hosted drafts as
+  unknowable. They were inventoried read-only on 2026-09-06; the note now records
+  what was found — P6E at column 3 / JSON 3, Cuicuilco at column 2 / JSON 2, both
+  legacy — and labels it an OBSERVATION at a moment in time, not a promise.
+- `docs/CANONICAL_PRESENTATION_MODEL.md` §5 opened by describing the document as
+  carrying database scope and lifecycle. It opens with "Layout and authoring
+  concerns only."
+
+§9c also said the resolver "refuses on four separate codes" above a table of
+five. It is now six, and the count matches the table.
+
+#### B. `calculationVersion` was recorded, hashed, and never compared
+
+`RegistrySource` carried it and the binding fingerprint covered it — and no
+comparison read it. So a registry built under one calculation version resolved
+against results computed under another, every address dereferenced cleanly, and
+the answer was the OTHER version's numbers. Same study, same plan, different
+projection: the exact class of silent wrong answer the study and plan checks
+exist to prevent.
+
+It joins the existing `registry_plan_mismatch` condition, because it is the same
+failure — the same study projected under a different plan — and the refusal text
+now names calculation-version drift instead of listing four causes for a fifth.
+
+The adversarial fixture holds contract, tenant, study, spec, mapping version,
+package key and plan fingerprint identical and changes only the calculation
+version; the gate asserts each of those seven is unchanged before asserting the
+typed code, so the test cannot pass by accident.
+
+#### C. An unbound document was EXEMPT from the stale-binding refusal, not merely unchecked
+
+`binding_fingerprint_mismatch` compares a binding that exists, and Unit 6A
+guarded it with `document.binding !== null`. A document carrying no binding
+therefore walked past it permanently, and invisibly: it resolved, every address
+dereferenced, and the render model looked exactly like a bound one. 6A.1 had
+closed the write side (`persistence_unbound_document`) and left the read side
+open.
+
+`resolvePresentation` now refuses `binding: null` as
+**`unbound_presentation_document`** at `$.binding`. It does not bind it on the
+way past — `bindPresentationDocument` is a deliberate act by a caller who has
+decided this layout describes this registry, and a binding made on the read path
+would agree by construction and prove nothing. The blueprint is still emitted
+unbound, because a blueprint is a LAYOUT and which registry it answers for is the
+publisher's decision; both gates now bind it explicitly, which is what a real
+caller does.
+
+#### Gates
+
+| gate | assertions | in `npm test`? |
+|---|---:|---|
+| `npm run test:canonical-presentation` | **286** (was 269) | yes |
+| `npm run test:canonical-presentation-parity` | **51** | no — machine-specific workbooks |
+| `npm run test:canonical-results-parity` | **531/531** | no — machine-specific workbooks |
+
+**Discrimination: 2/2 new.** Removing only the `calculationVersion` comparison
+turns 2 assertions red and the gate exits 1; restoring Unit 6A's null-tolerant
+`binding` guard turns 3 red and the gate exits 1. `resolve.ts` was restored
+byte-identically both times, verified by SHA-256 before and after, and the gate
+returns to exit 0.
+
+`tsc --noEmit` is clean and lint is at the **54-warning baseline** with zero
+warnings from any presentation file. `npm test` reports the same single failure
+at this commit and at its base — `hosted-target-guard`'s worktree-versus-main
+rule, which is about the checkout's shape and not about this change; the two runs
+were executed back to back on the same machine to establish it.
+
+All verification ran in WSL as `patop` on Node 24.11.1 / npm 10.9.2. No hosted
+service was contacted, no credential read, no Supabase row read or written, no
+migration run, no deploy, no shadow mode, and no other worktree touched.

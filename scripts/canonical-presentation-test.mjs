@@ -614,7 +614,14 @@ if (!validated.ok) {
   console.error(`RESULTADO: ${failures + 1} fallo(s). COMPUERTA BLOQUEADA.`);
   process.exit(1);
 }
-const document = validated.value;
+// THE BLUEPRINT IS A TEMPLATE, AND BINDING IT IS THE CALLER'S ACT.
+// `buildApprovedCuicuilcoBlueprint` leaves `binding: null` on purpose: it
+// describes a LAYOUT, and which registry that layout answers for is decided by
+// whoever publishes it. The resolver refuses an unbound document outright
+// (section [28]), so every test below works with the BOUND form — the same form
+// a real caller would hold.
+const template = validated.value;
+const document = bindPresentationDocument(template, registry);
 const resolved = resolvePresentation({ document, registry, results });
 check(resolved.ok, "el plano aprobado resuelve sin un solo enlace colgante");
 if (!resolved.ok) {
@@ -1481,13 +1488,14 @@ for (const owned of ["publication", "definitionSha256", "studyFingerprint", "sou
 }
 check(!/"status":\s*"(?:draft|prepared|published)"/.test(authorableText), "no autora un estado de publicación");
 check(typeof document.registryVersion === "string", "sí declara la versión de registro contra la que se redactó");
-check(document.binding === null, "y el plano aprobado viaja SIN enlazar: es una plantilla, no un documento de un estudio");
+check(template.binding === null, "y el plano aprobado se EMITE sin enlazar: es una plantilla, no un documento de un estudio");
+check(typeof document.binding === "string", "y enlazarlo es un acto aparte de quien lo publica, no algo que el plano traiga hecho");
 
 console.log("\n[24] La persistencia estampa el alcance, y se niega a leer el de otro");
 const SCOPE = { tenantId: IDENTITY.tenantId, studyId: IDENTITY.studyId };
 refuses(
   "guardar un documento SIN enlazar",
-  encodePresentationForStorage(document, SCOPE, { subtitle: null }),
+  encodePresentationForStorage(template, SCOPE, { subtitle: null }),
   "persistence_unbound_document",
 );
 // Binding is the act that turns the template into a document about this study,
@@ -1688,6 +1696,37 @@ refuses(
   "registry_plan_mismatch",
 );
 
+// THE COMPARISON UNIT 6A NEVER MADE. `calculationVersion` sat on `RegistrySource`
+// and inside the binding fingerprint, and nothing checked it — so results computed
+// under a DIFFERENT calculation version resolved cleanly against a registry built
+// under this one, and every address dereferenced. The numbers would be the other
+// version's. This fixture changes that field and NOTHING else: same contract, same
+// tenant, same study, same spec, same mapping version, same package key, same plan
+// fingerprint. If the resolver still accepts it, the check is not there.
+const otherCalculationResults = buildCanonicalStudyResults(baseSource(), {
+  spec: { ...SPEC, calculationVersion: "catalogo-2099-01-01" },
+});
+eq("el otro cálculo declara el mismo contrato", otherCalculationResults.contractVersion, results.contractVersion);
+eq("el mismo inquilino", otherCalculationResults.study.tenantId, results.study.tenantId);
+eq("el mismo estudio", otherCalculationResults.study.studyId, results.study.studyId);
+eq("la misma especificación", otherCalculationResults.study.specId, results.study.specId);
+eq("la misma versión de mapeo", otherCalculationResults.study.mappingVersion, results.study.mappingVersion);
+eq("el mismo paquete", otherCalculationResults.study.packageIdempotencyKey, results.study.packageIdempotencyKey);
+eq("la misma huella de plan", otherCalculationResults.study.planFingerprint, results.study.planFingerprint);
+check(
+  otherCalculationResults.study.calculationVersion !== results.study.calculationVersion,
+  `y SÓLO cambia la versión de cálculo (${results.study.calculationVersion} → ${otherCalculationResults.study.calculationVersion})`,
+);
+const calculationRefusal = resolvePresentation({ document, registry, results: otherCalculationResults });
+refuses("mismo estudio y mismo plan, otra versión de cálculo", calculationRefusal, "registry_plan_mismatch");
+// And the refusal must SAY so. A message that lists four causes for a fifth one
+// sends a reader looking at the wrong fields.
+check(
+  !calculationRefusal.ok &&
+    calculationRefusal.errors.some((entry) => /versi[oó]n de c[aá]lculo/i.test(entry.detail)),
+  "y la explicación nombra la versión de cálculo, no sólo el plan",
+);
+
 refuses(
   "un documento redactado contra otra versión del registro",
   resolvePresentation({ document: { ...document, registryVersion: "0.9.0" }, registry, results }),
@@ -1695,6 +1734,32 @@ refuses(
 );
 
 console.log("\n[28] Un enlace guardado se niega antes que apuntar a otro resultado");
+// FIRST, THE HALF UNIT 6A LEFT OPEN. The fingerprint refusal below only compares
+// a binding that EXISTS, so an unbound document was not merely unchecked — it
+// was exempt, and exempt in a way nothing showed: it resolved, every address
+// dereferenced, and the render model looked like any other. The blueprint is
+// emitted unbound, so this is not a contrived fixture; it is what
+// `buildApprovedCuicuilcoBlueprint` actually returns.
+eq("el plano se emite SIN enlace", template.binding, null);
+const unboundOutcome = resolvePresentation({ document: template, registry, results });
+refuses("una plantilla sin enlazar no resuelve", unboundOutcome, "unbound_presentation_document");
+check(
+  !unboundOutcome.ok &&
+    unboundOutcome.errors.length === 1 &&
+    unboundOutcome.errors[0].path === "$.binding",
+  "y la negativa es UNA, y señala $.binding, para que un editor sepa qué le falta al documento",
+);
+// NO AUTO-BINDING, AND NO FALLBACK. A refusal that quietly ends in a resolution
+// would make the fingerprint agree by construction and prove nothing at all.
+check(!unboundOutcome.ok && !("value" in unboundOutcome), "la negativa no trae un modelo de repuesto");
+check(template.binding === null, "y la plantilla sigue sin enlazar: el resolutor no la modificó");
+// The positive half: the SAME template, bound, resolves.
+const boundTemplate = bindPresentationDocument(template, registry);
+check(
+  resolvePresentation({ document: boundTemplate, registry, results }).ok,
+  "la misma plantilla, enlazada, sí resuelve",
+);
+
 const bound = bindPresentationDocument(document, registry);
 eq("enlazar estampa la huella del registro", bound.binding, registry.binding);
 check(/^[0-9a-f]{64}$/.test(bound.binding), "que es un digest de 64 hex y no una identidad legible");
