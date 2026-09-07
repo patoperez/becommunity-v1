@@ -1725,6 +1725,12 @@ customizable dashboard/editor. Three pieces, all pure and offline:
    grid placement, responsive behaviour, authored copy, bindings, chart variants,
    filter panels, explicit connections, journey routes, editorial slots, sample
    policy, disclosure level, visibility, duplication and publication metadata.
+   **That last item is SUPERSEDED and is left standing because Unit 6A really
+   did ship it.** Unit 6A.1 moved every publication and lifecycle field out of
+   the authorable document and into the server-only persistence envelope
+   (`src/lib/presentation/persistence.ts`); a presentation document has carried
+   no publication metadata since. Read the inventory above as what Unit 6A
+   built, not as what the layer holds today.
 3. **A pure resolver** — *(document + registry + results) → render model*, which
    reads and never computes.
 
@@ -1849,6 +1855,20 @@ the already-applied `0023`-`0025` tables, and the client renderer that RECEIVES 
 render model. Its one blocking question: **the two hosted draft rows are at an
 unrecorded `schema_version`** and 6B must read it back and decide with the owner
 whether they are migrated, re-authored or abandoned. It must not guess.
+
+**SUPERSEDED — the blocking question is answered, and it was never blocking.**
+The paragraph above was written believing those versions could not be read. They
+could: `schema_version` is `not null` on both tables and the save RPCs require it
+to equal the document's own field, so the value was always legible. A read-only
+inventory during **Unit 6A.1 OBSERVED them** — the synthetic P6E draft at column
+version 3 / JSON version 3, and the Cuicuilco draft at column version 2 / JSON
+version 2. Both are legacy experience documents; neither declares a
+`documentKind`, so neither is a canonical presentation document. Nothing was
+migrated then and nothing is migrated now: 1-3 are refused by name. **Unit 6B.1
+does not read, migrate, reinterpret or overwrite either row** — it composes a
+fresh v4 document in session memory only. Whether those two rows are re-authored
+or abandoned is still the owner's decision, and it is a decision for a later unit
+that touches storage, not a precondition for composing.
 
 ---
 

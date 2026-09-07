@@ -114,16 +114,26 @@ export function encodePresentationForStorage(
   if (!validated.ok) return failure(validated.errors);
 
   // A TEMPLATE may be unbound; a STORED document may not. Writing one is the act
-  // that makes it a document about a particular study, and an unbound row would
-  // switch the whole stale-binding refusal off — `document.binding !== null` is
-  // what the resolver tests, so a null here is a permanent exemption from it.
+  // that makes it a document about a particular study, and a row filed under a
+  // study it never claimed to describe is a layout in the wrong drawer.
+  //
+  // SUPERSEDED. This comment used to continue: "and an unbound row would switch
+  // the whole stale-binding refusal off — `document.binding !== null` is what the
+  // resolver tests, so a null here is a permanent exemption from it." That was
+  // true of Unit 6A's resolver and stopped being true in 6A.2, which made
+  // `resolvePresentation` refuse `binding: null` outright as the closed code
+  // `unbound_presentation_document` (`resolve.ts`, the check above
+  // `binding_fingerprint_mismatch`). An unbound row is exempt from nothing now —
+  // it simply never resolves. The refusal below is therefore no longer the last
+  // line of defence it was written to be, and is kept for its own reason:
+  // refusing at the write is better than storing a row that can only ever fail.
   if (validated.value.binding === null) {
     return failure([
       issue(
         "persistence_unbound_document",
         "$.binding",
         "un documento sin enlazar no se almacena: enlazarlo es lo que lo convierte en un documento " +
-          "de este estudio, y sin enlace la negativa por huella obsoleta quedaría desactivada para siempre.",
+          "de este estudio, y sin enlace no podría resolverse nunca.",
       ),
     ]);
   }

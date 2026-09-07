@@ -1498,9 +1498,13 @@ refuses(
   encodePresentationForStorage(template, SCOPE, { subtitle: null }),
   "persistence_unbound_document",
 );
-// Binding is the act that turns the template into a document about this study,
-// and it is what the stale-binding refusal later tests. A row stored unbound
-// would be permanently exempt from it.
+// Binding is the act that turns the template into a document about this study.
+//
+// SUPERSEDED. These lines used to continue: "and it is what the stale-binding
+// refusal later tests. A row stored unbound would be permanently exempt from
+// it." Unit 6A.2 made the resolver refuse `binding: null` outright as
+// `unbound_presentation_document`, so an unbound row is exempt from nothing —
+// it never resolves at all. Section [28] above is the assertion that proves it.
 const storable = bindPresentationDocument(document, registry);
 const encoded = encodePresentationForStorage(storable, SCOPE, { subtitle: null });
 check(encoded.ok, "un documento enlazado sí se codifica para almacenamiento");
