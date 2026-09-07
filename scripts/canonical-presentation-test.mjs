@@ -2026,6 +2026,24 @@ check(appSourceFiles.length > 50, `la caminata parte de ${appSourceFiles.length}
 check(clientRoots.length >= 10, `incluidos ${clientRoots.length} componentes de cliente, así que no pasa por vacío`);
 check(routeRoots.length >= 2 && pageRoots.length >= 5, `${routeRoots.length} rutas y ${pageRoots.length} páginas`);
 
+for (const [label, roots] of [
+  ["un componente de cliente", clientRoots],
+  ["una ruta HTTP", routeRoots],
+  ["una acción de servidor", actionRoots],
+  ["una página", pageRoots],
+]) {
+  const leaks = [];
+  for (const root of roots) {
+    const reachable = reachableFrom(root);
+    for (const forbidden of SERVER_ONLY_MODULES) {
+      if (reachable.includes(forbidden)) leaks.push(`${normalisePath(root)} -> ${forbidden}`);
+    }
+  }
+  check(
+    leaks.length === 0,
+    `ningún(a) ${label} alcanza la mitad de servidor de la presentación${leaks.length ? `: ${leaks.join(", ")}` : ""}`,
+  );
+}
 
 const RESULTS_VOCABULARY = "src/lib/results/contract.ts";
 const clientReachingResults = clientRoots.filter((root) =>
