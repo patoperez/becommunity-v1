@@ -688,6 +688,78 @@ for (const id of ["a1", "d1"]) {
   check(!new RegExp(`"${id}"`).test(modelText), `el modelo de render no nombra a la participación ${id}`);
 }
 
+// EVERY value, not a hand-picked few. A source scan can only say the layer looks
+// like it does not compute; this says that it did not. Each finished number in
+// the render model must be a number the canonical document already carried —
+// same value, same unit, same declared precision, same formatted text — or a
+// plain count the contract states. A clamp, a re-round, a rescale or a derived
+// percentage all move a value out of that set, whatever shape the code took.
+const canonicalValues = new Set();
+const canonicalCounts = new Set();
+const collectCanonical = (node) => {
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    node.forEach(collectCanonical);
+    return;
+  }
+  const candidate = node;
+  if (
+    typeof candidate.value === "number" &&
+    typeof candidate.unit === "string" &&
+    typeof candidate.decimals === "number" &&
+    typeof candidate.formatted === "string"
+  ) {
+    canonicalValues.add(`${candidate.value}|${candidate.unit}|${candidate.decimals}|${candidate.formatted}`);
+  }
+  for (const entry of Object.values(candidate)) collectCanonical(entry);
+};
+collectCanonical(results);
+canonicalCounts.add(results.population.total);
+canonicalCounts.add(results.population.measured);
+
+const renderedValues = [];
+const collectRendered = (node) => {
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    node.forEach(collectRendered);
+    return;
+  }
+  if (
+    typeof node.value === "number" &&
+    typeof node.unit === "string" &&
+    typeof node.decimals === "number" &&
+    typeof node.formatted === "string"
+  ) {
+    renderedValues.push(node);
+  }
+  for (const entry of Object.values(node)) collectRendered(entry);
+};
+collectRendered(model);
+
+const untraceable = renderedValues.filter((rendered) => {
+  const key = `${rendered.value}|${rendered.unit}|${rendered.decimals}|${rendered.formatted}`;
+  if (canonicalValues.has(key)) return false;
+  // A population headline is a count the source stated. It carries no
+  // `ResultValue`, so it is admitted only as the exact integer the contract
+  // reports, printed as itself and nothing else.
+  const isStatedCount =
+    rendered.unit === "count" &&
+    rendered.decimals === 0 &&
+    Number.isInteger(rendered.value) &&
+    canonicalCounts.has(rendered.value) &&
+    rendered.formatted === String(rendered.value);
+  return !isStatedCount;
+});
+check(renderedValues.length > 40, `el modelo de render publica ${renderedValues.length} cifras finales`);
+check(
+  untraceable.length === 0,
+  `cada cifra del modelo procede del documento canónico${
+    untraceable.length
+      ? `: ${untraceable.length} sin origen, p. ej. ${untraceable[0].value} ${untraceable[0].unit} «${untraceable[0].formatted}»`
+      : ""
+  }`,
+);
+
 /* -------------------------------------------------------------------------- */
 
 console.log("\n[10] Versionado: lo desconocido se rechaza en voz alta, nunca se reinterpreta");
@@ -1011,22 +1083,51 @@ check(
   `ningún módulo importa el adaptador de resultados heredado${legacyAdapters.length ? `: ${legacyAdapters.map((f) => f.path).join(", ")}` : ""}`,
 );
 
-// The arithmetic scan looks for an operator applied to something that is not an
-// index. It is deliberately narrow — `+ 1` on an ordinal is how a position is
-// computed and is not a business calculation — and it is why the value-copy
-// assertions in section [9] exist beside it rather than instead of it.
-const businessArithmetic = presentationFiles.filter(({ path, code }) => {
-  if (path.endsWith("capabilities.ts")) return false;
-  const stripped = stripComments(code);
-  return /\bvalue\s*[*/]|\/\s*(?:base|total|valid|responded|eligible)\b|\bMath\.(?:round|min|max)\s*\([^)]*value/.test(stripped);
-});
-check(
-  businessArithmetic.length === 0,
-  `ningún módulo divide, multiplica ni recorta un valor${businessArithmetic.length ? `: ${businessArithmetic.map((f) => f.path).join(", ")}` : ""}`,
-);
+// THE ARITHMETIC SCAN IS A PROPERTY OF THE LAYER, NOT A LIST OF KNOWN DEFECTS.
+//
+// An earlier version looked for particular shapes — `Math.min(100, x)`,
+// `value / base` — and an adversarial review showed how little that proved:
+// `Math.min(x, 100)`, `x > 100 ? 100 : x`, `sum / count` and
+// `(promoters - detractors) / respondents * 100` all walked straight past it. A
+// scan that enumerates the defects it knows about passes for every defect it
+// does not.
+//
+// The rule is therefore structural, and it is one this layer genuinely has: it
+// performs no arithmetic on a study quantity because it performs almost none at
+// all. String literals and regular expressions are removed along with comments,
+// so an import path or a sentence cannot be mistaken for code.
+const stripStrings = (code) =>
+  code
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/\/(?:[^/\\\n[]|\\.|\[[^\]]*\])+\/[gimsuy]*/g, "RE");
+const executable = presentationFiles.map(({ path, code }) => ({ path, code: stripStrings(stripComments(code)) }));
 
-const clamps = presentationFiles.filter(({ code }) => /Math\.min\(\s*100|clamp/i.test(stripComments(code)));
-check(clamps.length === 0, "ningún módulo recorta un valor a 100");
+const withMath = executable.filter(({ code }) => /\bMath\./.test(code));
+check(
+  withMath.length === 0,
+  `ningún módulo llama a Math en absoluto${withMath.length ? `: ${withMath.map((f) => f.path).join(", ")}` : ""}`,
+);
+const withRounding = executable.filter(({ code }) => /toFixed|toPrecision|parseFloat/.test(code));
+check(
+  withRounding.length === 0,
+  `ningún módulo vuelve a redondear ni a re-formatear${withRounding.length ? `: ${withRounding.map((f) => f.path).join(", ")}` : ""}`,
+);
+const withDivision = executable.filter(({ code }) => /[^*/\n]\/[^*/=\n]/.test(code));
+check(
+  withDivision.length === 0,
+  `ningún módulo divide${withDivision.length ? `: ${withDivision.map((f) => f.path).join(", ")}` : ""}`,
+);
+// Exactly one multiplication is allowed, and it is named: the 512 KiB byte
+// ceiling migration 0023 declares. Anything else is a finding.
+const multiplyingFiles = executable.filter(({ code }) => /[^*/\n]\*[^*/=\n]/.test(code));
+check(
+  multiplyingFiles.every(({ path }) => path.endsWith("serialize.ts")) && multiplyingFiles.length <= 1,
+  `la única multiplicación de la capa es el techo de bytes${
+    multiplyingFiles.length ? `; presente en ${multiplyingFiles.map((f) => f.path).join(", ")}` : ""
+  }`,
+);
 
 /* -------------------------------------------------------------------------- */
 
@@ -1038,7 +1139,10 @@ check(
   oracleReferences.length === 0,
   `ningún módulo alcanza el repositorio del tablero${oracleReferences.length ? `: ${oracleReferences.map((f) => f.path).join(", ")}` : ""}`,
 );
-const hardcodedFigures = /\b(?:30\.8|46\.4|-9\.1|133\.3|74\.1|57\.9|63\.6)\b/;
+// The leading `\b` an earlier version used does not match before a minus sign,
+// so a hardcoded −9.1 — the approved deserter score, and the one figure most
+// likely to be pasted in as a "sanity default" — walked straight past it.
+const hardcodedFigures = /(?<![\w.])-?(?:30\.8|46\.4|9\.1|133\.3|74\.1|57\.9|63\.6)(?![\w.])/;
 const withFigures = presentationFiles.filter(({ code }) => hardcodedFigures.test(stripComments(code)));
 check(
   withFigures.length === 0,
