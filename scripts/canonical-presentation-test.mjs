@@ -1979,6 +1979,27 @@ const APPROVED_PRESENTATION_DOORS = [
     entry: "src/app/studio/e/[studyId]/construccion/actions.ts",
     loader: "src/lib/studio/presentation-workspace.ts",
   },
+  // UNIT 6B.4A — the publication review, and its two actions.
+  //
+  // It reaches the presentation's server half for one reason nothing else
+  // supplies: a publication has to be checked against the study's results AS
+  // THEY ARE NOW, and the client-visible preview a reviewer approves is the
+  // resolution of the stored draft over those results.
+  //
+  // Its DECLARED LOADER is the composer's, deliberately.
+  // `src/lib/studio/publication-workspace.ts` holds no reader of its own and
+  // imports everything that touches the server half from that one file, so this
+  // door's path runs through it by construction. The rule below — that an
+  // approved door must arrive through its declared loader rather than by
+  // importing `resolve.ts` — is what keeps that true.
+  {
+    entry: "src/app/studio/e/[studyId]/revision/page.tsx",
+    loader: "src/lib/studio/presentation-workspace.ts",
+  },
+  {
+    entry: "src/app/studio/e/[studyId]/revision/actions.ts",
+    loader: "src/lib/studio/presentation-workspace.ts",
+  },
 ];
 const appSourceFiles = [];
 const collectAppSources = (dir) => {
