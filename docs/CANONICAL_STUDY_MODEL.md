@@ -226,6 +226,73 @@ function has exactly that hole. `0029` takes `pg_advisory_xact_lock` on the
 study before the first read a decision depends on, which also serialises the
 idempotency lookup with the write it guards.
 
+## Migration 0030: the canonical publication lifecycle
+
+`0030_canonical_publication.sql` is the fifth canonical migration. It exists for
+the same reason `0029` does, and the question was put to a real PostgreSQL in the
+same way: **can the publication model migration `0025` already carries publish a
+canonical schema-version-four presentation?** `npm run test:canonical-publication-audit`
+applies the whole chain to a disposable database, plants both legacy experience
+drafts as the hosted project holds them, saves a canonical draft beside one
+through `0029`'s own RPC, and asks the legacy publication path to publish it.
+**60 executed, 60 passed, nine findings, eight of them UNSAFE.**
+
+| # | finding | how it was established |
+|---|---|---|
+| A | the legacy prepare RPC reads `study_experience_draft` and cannot see the canonical draft at all | refused `55000` at the canonical revision AND at the legacy one; its body never names the canonical table |
+| B | the legacy revision table accepts schema v2/v3 and carries no family discriminator | a v2 definition was accepted and stored as a prepared revision; the column CHECK is a range |
+| C | one pointer and one version sequence would be shared by both families | the pointer's primary key is `study_id` alone; the revision table is unique on `(study_id, revision)`; publishing a second revision MOVED the one pointer |
+| D | binding, package and calculation identity cannot be stored there | no column for any of them; the single `study_fingerprint` accepted the character «x» |
+| E | a snapshot is immutable against UPDATE and not against DELETE | UPDATE raised `2F002`; the table owner deleted a prepared revision outright, and every `SECURITY DEFINER` function runs as that owner |
+| F | publication re-reads the LEGACY draft to decide staleness | a legacy draft that moved made an existing prepared revision unpublishable |
+| G | the only route in requires destroying a legacy draft | the legacy save RPC turned a planted v2 row at revision 72 into a v4 row at revision 73 with different bytes |
+| H | the audit trail and the idempotency namespace would be shared | the `action` CHECK is a closed six-value legacy vocabulary and refused a canonical action with `23514` |
+| I | a legacy revision stores no resolved output at all | it has no such column, by that migration's own stated design |
+
+So `0030` adds canonical-only storage in **three tables of its own**, sharing no
+object with the legacy model:
+
+| object | what it is |
+|---|---|
+| `canonical_presentation_revision` | the IMMUTABLE publication snapshot: the approved document, the resolved render model, and the identity it was produced under. `schema_version` admits **4 by equality** and `document_kind` is a CHECKed literal |
+| `canonical_presentation_publication` | the current-publication pointer, one row per study, and the only mutable thing here |
+| `canonical_presentation_publication_event` | the append-only lifecycle log, and the idempotency ledger for both operations |
+| `publish_canonical_presentation` | the only write path for a publication |
+| `restore_canonical_presentation` | brings a snapshot back into the working draft **through `save_canonical_presentation_draft`**, so the draft keeps its one write path |
+| `read_canonical_publication` | the client-visible projection, three keys, written in SQL |
+| `refuse_canonical_publication_change` | the trigger that refuses UPDATE, and DELETE while the study exists |
+
+**Reproducibility needed BOTH halves, and that is the one real design decision.**
+Storing the resolved render model is what makes reproduction exact — it survives
+a change to the code that produced it, and it is already a public shape, so
+storing it adds no disclosure. Pinning the package identity is what makes drift
+VISIBLE and attributable, and it is what a later filtered recomputation would
+have to be checked against. Neither substitutes for the other. Measured on the
+real approved layout: 24 blocks, **77 660** serialized bytes; the column's
+ceiling is 2 MiB.
+
+**The delete refusal is CONDITIONAL, and the condition is the point.** Refusing
+DELETE outright would make a study undeletable, because `study_id` cascades —
+the failure `0025` correctly avoided by refusing nothing. `0030` refuses a delete
+only while the parent study still exists, so removing one snapshot out from under
+a published report is impossible and removing a whole study still works. Both
+halves are executed.
+
+**An immutable row carries no foreign key to `auth.users`.** `0025` declares
+`prepared_by … on delete set null` on a table whose trigger refuses every UPDATE,
+and those two cannot both hold: removing an authentication identity issues
+exactly that UPDATE and the user becomes undeletable. `0030` stores a bare uuid,
+as the earlier event table already does.
+
+**It is applied to no database.** `npm run test:canonical-publication-live`
+executes it against a disposable PostgreSQL 17 — **188 assertions, 188 passed, 0
+skipped**, including the fourteen proofs the phase names and the whole contract a
+second time over a real PostgREST with `supabase-js`. The hosted activation is a
+separate, later, separately authorized phase, and
+`npm run test:canonical-presentation-hosted-fingerprint` now pins that the three
+tables and the three functions are ABSENT on the hosted project, so their
+appearance would fail a gate rather than pass unnoticed.
+
 ## Security boundary
 
 All 36 new tables — 18 in `0026`, 16 in `0027` and 2 in `0028` — are

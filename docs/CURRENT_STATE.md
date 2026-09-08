@@ -3828,3 +3828,366 @@ contacts no network, no database and no hosted project. **No hosted write was
 repeated, no browser QA was re-run, migration `0029` was not edited, and no
 expensive suite was run.** `test:migration-chain` and `lint` are the only gates
 this closure needed, and both are green.
+
+---
+
+### Unit 6B.4A — the canonical publication lifecycle, the review surface, and the disposable-database proof (2026-09-08)
+
+**A canonical schema-version-four presentation can now be reviewed, published,
+re-published, restored into a new draft revision and served back exactly as it
+was approved — proved against a disposable PostgreSQL 17, a real PostgREST and a
+disposable browser target, and against no hosted project.** No formula changed,
+no canonical value changed, no source mapping changed, no hosted row was written
+and no migration was applied to hosted infrastructure. Results parity stays
+**531/531** and presentation parity **59/59**.
+
+#### The audit came first, and it decided the design
+
+The phase required the existing publication storage to be audited empirically
+before a lifecycle was designed. `npm run test:canonical-publication-audit`
+applies migrations `0000`-`0029` to a disposable database, plants both legacy
+experience drafts exactly as the hosted project holds them, saves a canonical v4
+draft beside one of them through `0029`'s own RPC, and then asks migration
+`0025`'s publication path to publish it. **60 executed, 60 passed, nine
+findings — eight UNSAFE and one PARTIAL.** Every one is the outcome of a
+statement that ran, printed with the SQLSTATE PostgreSQL produced.
+
+| # | finding |
+|---|---|
+| A | `prepare_study_experience_revision` reads the LEGACY draft table by study id and cannot see the canonical draft at all — refused `55000` at the canonical revision AND at the legacy one. It can never originate from an exact canonical draft revision, which is the first lifecycle invariant. |
+| B | `study_experience_revision.schema_version` is a RANGE and the table has no family discriminator. A schema-version-TWO legacy definition was accepted there as a prepared revision. |
+| C | the active pointer is keyed on `study_id` alone and the revision table is unique on `(study_id, revision)`. Publishing a second revision MOVED the one pointer; two families would share it and one version sequence. |
+| D | a legacy revision carries one unstructured `study_fingerprint` — the audit stored the single character «x» in it — and no column for the binding, the registry build, the results contract, the calculation version, the package identity or the plan. |
+| E | UPDATE is refused twice; DELETE only by privilege. The audit deleted a prepared revision as the table owner, and every `SECURITY DEFINER` function runs as that owner. |
+| F | publication re-reads the LEGACY draft to decide staleness, so a canonical publication's staleness would be decided by a v2/v3 document. |
+| G | the only route into that path is writing the canonical document INTO the legacy draft, which the legacy save RPC accepts: a planted v2 row at revision 72 became a v4 row at revision 73 with different bytes. Publishing canonically through `0025` REQUIRES destroying a legacy draft. |
+| H | the legacy event log's `action` CHECK is a closed six-value vocabulary — a canonical action was refused `23514` — over one shared `(study_id, idempotency_key)` namespace, on a table holding 86 hosted rows. |
+| I | a legacy revision stores CONFIGURATION and fingerprints and nothing else, by that migration's own stated design, and recomputes every published number at request time from current data. |
+
+**So the answer is no, and `0030` is the smallest additive alternative.**
+
+#### `0030_canonical_publication.sql` — three tables, four functions, carried by no database
+
+`canonical_presentation_revision` (the immutable snapshot),
+`canonical_presentation_publication` (the current-publication pointer, one row
+per study) and `canonical_presentation_publication_event` (append-only, and the
+idempotency ledger for both operations). It alters no existing table, drops
+nothing, rewrites no row, and changes no policy or grant outside its own
+objects. `service_role` gets **SELECT and nothing else** on all three; the only
+legitimate writer of any of them is a `SECURITY DEFINER` function.
+
+**Reproducibility needed BOTH halves, and that was the one real design
+decision.** The phase asked whether it requires storing the resolved render
+model, pinning an immutable canonical result package, or both. The answer is
+both, for different reasons that do not substitute:
+
+- **the stored render model** is what makes reproduction EXACT. It survives a
+  change to the canonical rows, the calculators, the registry or this code, and
+  it is already a public shape — finished values with no address, no canonical
+  key and no respondent — so storing it adds no disclosure. Measured on the real
+  approved layout: 24 blocks, **77 660** serialized bytes, against a 2 MiB
+  column ceiling;
+- **the pinned package identity** is what makes drift VISIBLE and
+  ATTRIBUTABLE — `binding_fingerprint` beside `results_contract_version`,
+  `calculation_version`, `spec_id`, `mapping_version`,
+  `package_idempotency_key` and `plan_fingerprint` — and it is what a filtered
+  recomputation would have to be checked against the day interactive filters
+  reach a client route.
+
+**Publication output therefore depends on no mutable current data.** A draft
+edited after a publication changes nothing a client is served; that is executed
+in the live gate and again in the browser QA.
+
+**Restoration creates a NEW DRAFT REVISION and nothing else.** It does not move
+the pointer, does not mark a snapshot superseded, does not unpublish and does not
+delete. It writes the draft **through `save_canonical_presentation_draft`**, so
+the draft keeps its single write path and its own event log records an ordinary
+save. Making a restored document live means reviewing and publishing it again,
+against the study's results as they are then.
+
+**Two defects in the earlier model were deliberately not repeated, and one of
+them is a latent fault in applied history.**
+
+1. `0030`'s immutability trigger covers DELETE as well as UPDATE, but
+   CONDITIONALLY — it refuses only while the parent study exists. An
+   unconditional refusal would make a study undeletable, which is the failure
+   `0025` correctly avoided by refusing nothing at all. Both halves are executed:
+   a snapshot cannot be deleted, and a whole study still can.
+2. ⓘ **`0025` makes an authentication identity undeletable, and this was found
+   rather than fixed.** `study_experience_revision.prepared_by` is
+   `references auth.users on delete set null` on a table whose trigger refuses
+   every UPDATE. Removing a user issues exactly that UPDATE, the trigger raises
+   `2F002`, and the delete fails for as long as the row exists. `0025` is applied
+   history and this branch does not edit it. `0030` stores a bare uuid instead,
+   as `0023`'s own event table already does.
+
+#### The publication layer: pure, closed, and with no threshold in it
+
+`src/lib/publication/` is client-safe and reaches no transport: the preflight,
+the inventory, the structural difference and the closed vocabularies all three
+speak. `src/lib/studio/publication-workspace.ts` is the `server-only` half.
+
+- **18 blocker codes, and every one is reachable.** The first draft of the union
+  had 22, of which four — `results_contract_drift`, `calculation_version_drift`,
+  `package_identity_drift`, `plan_fingerprint_drift` — could never be raised,
+  because a stored draft carries two identity columns and all four of those live
+  INSIDE the binding digest. They are an ATTRIBUTION of `binding_drift` now,
+  built from the last publication's own pinned columns, and an informational
+  warning that says the evidence moved. A closed union whose members cannot occur
+  is not a stronger contract.
+- **Warnings stay warnings.** Four require an explicit acknowledgement —
+  `configuration_required_blocks`, `qualitative_review_pending`,
+  `withheld_by_sample_policy`, `nothing_visible` — and the rest are
+  informational. `required` is derived from what was RAISED, so a reviewer is
+  never asked to acknowledge a condition this document does not have.
+- ⓘ **`configuration_required` is a WARNING and never a blocker.** Contract C11:
+  what nobody has finished renders as nothing on the client side. Publishing it
+  is a decision, so it needs an acknowledgement — and blocking on it would make
+  the approved blueprint unpublishable forever, because that blueprint declares
+  the curated pain-cloud slot and leaves it empty on purpose.
+- ⓘ **Qualitative categories nobody reviewed are DECIDED, not refused.**
+  `src/lib/results/qualitative.ts` hands the decision here in as many words:
+  the categories are the source's own coding, "so the publication boundary must
+  decide about them before showing them to a client". Deciding is what an
+  acknowledgement is; blocking would be refusing forever.
+- ⓘ **NO THRESHOLD EXISTS IN THIS LAYER.** There is no number in the preflight,
+  no comparison against a base and no rule about a small sample. The two sample
+  warnings are read off `RenderBlock.sampleDisplay` — the outcome the resolver
+  already decided from an AUTHORED policy carrying a name and a stated reason —
+  so under the system default `show_all` neither can fire, whatever the bases
+  are. The offline gate asserts that over the REAL resolved model, whose bases
+  are as small as two.
+- **A block the contract calls `unresolved` IS a blocker.** Unavailable means the
+  study does not carry that measurement and absence renders as nothing; unresolved
+  means the authorities disagree, and publishing an open question presents it as
+  settled.
+
+#### The review surface
+
+`/studio/e/[studyId]/revision`, behind `requireInternal()`, in plain Spanish. It
+shows the exact draft revision under review and when it was saved, the page and
+block inventory including the parts a client will NOT see, the client-visible
+preview through the product's own renderer at `audience="client"`, blockers in
+their own box apart from warnings, the acknowledgements, the structural
+difference from the current publication, an explicit final confirmation, the
+publication history, and a restore control that says in so many words that
+restoring creates a new draft revision and publishes nothing.
+
+ⓘ **THE BROWSER NEVER HOLDS THE THING BEING PUBLISHED.** The publish action
+takes four numbers and a list of closed codes — the reviewed draft revision, the
+current publication version, the acknowledged warning codes and one idempotency
+key. The server then does the whole job again over a fresh read: it reads the
+stored draft, rebuilds the registry from the study's current canonical results,
+decodes, resolves twice, re-runs the entire preflight, and publishes only if it
+still passes. There is no parameter for a document, a digest, a binding, a
+package identity or a uuid, so there is nothing for a browser to smuggle in — and
+none of those internal values ever crossed to it in the first place.
+
+ⓘ **IT IS A THIRD DOOR AND NOT A THIRD LOADER.** `publication-workspace.ts` holds
+no canonical reader of its own; everything that touches the canonical layer comes
+from `presentation-workspace.ts` — the composer's declared loader — through a
+SINGLE import statement, so the route's path to that layer runs through that file
+by construction rather than by which import happened to be written first. The
+boundary gate's door table names the page beside that loader and the action class
+gains exactly one named member; both fail the moment the publication module grows
+its own edge into the canonical graph.
+
+#### The database and security proof — 188 executed, 188 passed, 0 skipped
+
+`npm run test:canonical-publication-live`, against a disposable PostgreSQL 17.11
+and a real PostgREST 16.2 with `supabase-js`. All fourteen proofs the phase names
+are executed:
+
+| # | proof | how |
+|---|---|---|
+| 1 | canonical and legacy publication storage cannot collide | both families published for ONE study: two pointers in two tables, two independent version sequences, no shared row, and no canonical function naming a legacy object |
+| 2 | schema v2/v3 is refused | v2 and v3 documents refused `22023`; a v2 blob stamped with a `documentKind` of the canonical family refused too; a render model of another schema version refused |
+| 3 | the exact draft revision and digest are required | a wrong revision, a wrong digest and different bytes each refused `55000`; a study with no canonical draft cannot publish |
+| 4 | a stale draft publication is refused | the draft was edited and the reviewed revision became unpublishable, with the message naming the draft |
+| 5 | binding/result/package drift is refused | a binding disagreeing with the document refused `22023`; a SELF-CONSISTENT document bound to another package refused `55000` at the draft comparison; a registry build and a results contract that disagree refused `22023` |
+| 6 | publication is atomic | a publication whose note cannot be stored left every count exactly as it was and the pointer where it was |
+| 7 | retry is idempotent | a replayed key answered with the first attempt's version, wrote nothing, and the stored document of that version was the FIRST attempt's — proved by resending DIFFERENT bytes |
+| 8 | concurrent publication creates only one version | two overlapping publications in separate processes: one winner, one typed `55000`, one version, one pointer, one event |
+| 9 | prior snapshots are immutable even to service-layer code | UPDATE `2F002`; DELETE while the study exists `2F002`; the event log `2F002`; and deleting the whole study still cascades |
+| 10 | browser roles cannot read or write internal publication storage | 27 executed role probes returning `42501` for every read, write and function call of `anon` and `authenticated`, inside explicit transactions; and again over real HTTPS with each role's own key |
+| 11 | client-visible reads contain no internal audit field | `read_canonical_publication` answered with exactly three keys — `version`, `publishedAt`, `renderModel` — and none of the fifteen internal fields; a read scoped to another tenant answered with nothing |
+| 12 | restoration creates a new draft revision and preserves every snapshot | the draft moved by one, the pointer did not move, every snapshot digest was unchanged, a `restored` event was appended, a replay wrote nothing, a stale expectation was `55000`, no reason was `22023`, and another study's snapshot was `42501` |
+| 13 | rollback removes only the new canonical objects | no publication object survived; the canonical DRAFT storage and its rows survived; the legacy publication model survived; and the draft save function still worked afterwards |
+| 14 | legacy rows remain byte-identical | the fingerprint over both planted legacy drafts was identical before, throughout and after the rollback |
+
+ⓘ **`55000` reaches `supabase-js` as `error.code` verbatim**, and the error
+message quotes no part of the document that was refused. Migration `0024` paid
+once for assuming a SQLSTATE survives a transport; this is that lesson executed
+rather than remembered.
+
+#### Real-route browser QA: PASSED, 111/111 — against a DISPOSABLE target
+
+The thing under test IS a write, and the write it makes is the one a client
+would be served, so the whole target is disposable: a throwaway PostgreSQL on a
+unix socket, a real PostgREST, a minimal authentication substitute so the
+product's own `/login` works, a synthetic canonical package committed through the
+product's own commit flow for three studies, and a production build of the app
+pointed at all of it.
+
+What the run drives, rather than photographs:
+
+- **Authorization precedes everything.** Without a session the review answers
+  `/login`, and no publication control is rendered to a stranger.
+- **A study with nothing saved** is told exactly that, told why, and sent to
+  Construcción.
+- **A review WITH BLOCKERS** — a draft bound to a package that is not this study's
+  — lists the reason in Spanish, draws NO client preview, and does not render the
+  publish control at all. No code appears on the screen.
+- **A healthy review** names the exact draft revision, counts its pages, blocks
+  and the blocks a client would see, draws the client-visible preview, lists the
+  inventory, and keeps warnings in their own section apart from blockers.
+- **The publish control stays unusable until it is earned**, driven with a REAL
+  keyboard: each acknowledgement takes focus and is ticked with `Space`, and the
+  control stays `disabled` until the final confirmation is ticked too. It is a
+  native `<button>` with a real `disabled` property, so a keyboard skips it.
+- **Publishing happens once**, and the database agrees: one version, one pointer,
+  one event.
+- **Pressing publish again REPLAYS** and does not publish twice.
+- **A reload** shows which version the client sees, the history, and a difference
+  section saying the structure is identical.
+- **Editing the draft afterwards changes nothing the client is served** — the
+  draft moved to revision 2 and the served bytes were identical.
+- **Publishing a later version** replaces the first and keeps it; the history
+  lists both and marks only the newer one as the one being served.
+- **Restoring version 1** created a NEW draft revision, moved no pointer, left
+  both snapshots, and left the served bytes unchanged. The screen says all three
+  of those things before it asks for a reason.
+- **A conflict** — somebody saved the draft while the screen was open — is
+  reported, publishes nothing, and tells the operator to look again.
+- **Desktop (1440), tablet (768) and phone (390)**: the document never overflows
+  horizontally and every chrome control measures at least 44 **layout** pixels.
+- **Nothing internal reached the browser**: no service key, no password, no
+  protected table name, no RPC name, no 64-character digest anywhere in the
+  document, and — inside the review's own subtree — no uuid of any kind.
+- **The legacy draft is byte-identical** and the legacy publication model was
+  never written: `0|0|0`.
+
+**Two observations, reported and NOT asserted.** Two inline links in the shared
+Studio shell — the skip link and the client's name inside a sentence — measure 16
+and 18 px. Neither is a tap target in the sense the 44 px rule is about, this
+unit changed neither, and holding prose to a touch target would be unrelated
+visual debt dressed as a finding. Two controls inside the rendered client preview
+measure under 44 px at tablet; they are the drawing, not this application's
+chrome.
+
+#### Hosted access: ONE read-only pass, 45/45, before and after
+
+Every request was a `select`. The gate gained a section that pins the OPPOSITE of
+what `0029`'s section pins: `canonical_presentation_revision`,
+`canonical_presentation_publication` and
+`canonical_presentation_publication_event` must be ABSENT, and
+`publish_canonical_presentation`, `restore_canonical_presentation` and
+`read_canonical_publication` must not be callable — all six answered `PGRST205` /
+`PGRST202`. It is written now, in the same run that records their absence, rather
+than at activation time: a check that has never been seen to fail is a check
+nobody has tested. **When the hosted activation happens, invert it rather than
+deleting it**, exactly as Unit 6B.3B inverted `0029`'s.
+
+Everything else was as the previous unit left it: Cuicuilco's legacy draft at
+**schema version 2, revision 72**, P6E's at **3, revision 14**, neither at schema
+version 4, `study_experience_event` at 86 rows, `study_experience_revision` and
+`study_experience_publication` empty, `0029`'s storage holding exactly ONE
+canonical draft — Cuicuilco's, at revision 1, digest `511d7f54…`, binding
+`cf63bdca…`, under one `draft_created` event — no other study carrying one, and
+all eleven protected table counts identical (study 5, respondent 82,
+quant_response 3 364, qual_observation 33, study_participant 60, survey_response
+1 685, performance_observation 252, metric_definition 116, pain_point 50,
+import_job 1, import_job_record 3 559).
+
+#### Gates
+
+- `npm run test:canonical-publication` — **NEW, 167 checks, in `npm test`.** Every
+  blocker by name, the acknowledgement rules, the no-threshold proof over the
+  REAL resolved model, the inventory and difference speaking only in authored
+  titles, the route's authorization order, the RPC allowlist, the payload having
+  no field for anything internal, and the publish control's exact condition.
+- `npm run test:canonical-publication-live` — **NEW, 188 assertions, outside
+  `npm test`** because it needs a cluster.
+- `npm run test:canonical-publication-audit` — **NEW, 60 assertions, outside
+  `npm test`.** The audit above, re-runnable: it asserts facts about `0023`-`0025`
+  and `0029` as they are, so a later change that invalidated a finding fails here.
+- `npm run qa:canonical-publication` — **NEW, 111 checks**, the browser QA above.
+- `test:migration-chain` gained the fifth canonical migration and a block of
+  rules for it: exactly three tables and four functions, no legacy object in its
+  executable SQL, each callable function `SECURITY DEFINER` with an empty
+  `search_path` asserted of THAT function rather than of the file, schema version
+  four by equality, a family discriminator, the render model and its digest, the
+  nine identity columns, and the conditional delete refusal.
+- `shadow-boundary` gained the third door and the second approved action, both by
+  name, and a correction described below.
+- `studio-completion` learned the new reader, so its authorization-order
+  assertion BINDS for the new route rather than falling through to its own
+  vacuous-pass guard.
+- Unchanged and green: `canonical-presentation` 314, `canonical-presentation-persistence`,
+  `canonical-composer`, `canonical-viewer-filters`, `canonical-results`,
+  `canonical-database-source`, `shadow-boundary` 96, `studio-completion` 49,
+  `p8-acceptance` 57.
+- **Both parity gates were RE-RUN against the real workbooks, not asserted.**
+  `canonical-results-parity`: 534 offered, **531 executed, 531 passed**, 0 failed,
+  0 skipped, 0 unresolved, 2 not-applicable, 1 configuration-required.
+  `canonical-presentation-parity`: **59 checks, 59 passed**. Neither number moved.
+  Source digests: `8d7afdb4…` and `bd0e70d7…`.
+
+#### Defects this unit found in its own work, before and during review
+
+1. **The audit's own three assertions were wrong first.** PostgreSQL normalises
+   `between 1 and 1000` into two comparisons before storing a constraint, so a
+   pattern looking for the word `between` failed against a database doing exactly
+   what the migration asked; and the drift probe published a revision of the
+   wrong study, so it succeeded where a refusal was expected. Both corrected
+   before any finding was acted on.
+2. **The preflight's first union carried four unreachable codes and a dead
+   loop** — recorded above.
+3. **The boundary gate compared an absolute path against a relative one.**
+   `@/lib/x` resolved to `src/lib/x.ts` and `./x` to `/home/…/src/lib/x.ts`,
+   because `resolve()` makes a relative specifier absolute against the working
+   directory — and every path in that gate is compared as a STRING. It was
+   invisible while every chain that mattered used `@/`, and it surfaced the first
+   time a declared loader was reached through a relative import: the door was
+   reported as skipping the loader that was three entries earlier in its own
+   path. Normalising fixes the comparison everywhere at once.
+4. **The rollback dropped a trigger function before the table that owns it.**
+   Two tables share `refuse_canonical_publication_change`, so it may only be
+   dropped after BOTH are gone; PostgreSQL refused with `2BP01`. `drop … cascade`
+   would have hidden that rather than fixed it.
+5. **The publish function checked the pointer AFTER writing the snapshot.**
+   The transaction would have rolled the row back anyway, which is exactly why it
+   was worth reordering: a function that writes and then discovers it should not
+   have is one refactor away from a function that writes and forgets to check.
+6. ⓘ **A GENUINE RETRY COULD NEVER REACH THE DATABASE'S REPLAY BRANCH — the one
+   real product defect, found by the browser QA.** Pressing publish twice, which
+   is what a person does when a response does not come back, produced a CONFLICT
+   after a publication that had succeeded: the server ran the preflight first,
+   saw the pointer it had itself just moved, and raised
+   `publication_pointer_moved`. Nothing ever got as far as the RPC, whose replay
+   branch exists precisely for this. The idempotency ledger is now consulted
+   before anything is re-judged — the order the RPC already used and the product
+   did not. The ledger remains the authority: that read is not taken under the
+   study's advisory lock, and the RPC's own replay branch, which is, still
+   catches two simultaneous retries.
+7. **Three defects in the QA harness itself.** It clicked a checkbox before React
+   had hydrated, so the DOM toggled and no state changed — invisible in the
+   section that used a real keyboard, because a focus round trip per control is
+   slow enough to land after hydration. It measured the 16 px checkbox instead of
+   the 44 px label wrapped around it, which would have been "fixed" by making a
+   checkbox 44 px tall. And it scanned the whole document for a uuid, which can
+   never pass on a Studio page: the study id is in the address bar and in every
+   tab's href. All three are corrected in the harness, not in the product.
+8. **The empty-study case tested the wrong sentence.** The study meant to prove
+   «nothing saved» had no canonical package either, so the assertion was made
+   against the «no package» sentence and could only fail. The state under test is
+   now built rather than assumed.
+
+#### Still deferred, and deliberately so
+
+Migration `0030` is applied to no database. No publication was created on the
+hosted project; Cuicuilco and P6E were not published; nothing was deployed; the
+production client route was not switched; no public interactive filter was
+exposed; PDF export was not touched; no legacy draft was converted; no formula or
+approved value moved; no AI was added; and shadow mode is still off everywhere.
+`main` is unchanged.

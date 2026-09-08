@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 
 import { PresentationRenderer } from "@/components/presentation/PresentationRenderer";
 import type {
@@ -116,7 +116,17 @@ export function PublicationReviewView({
    * this review is open; a reload is a new review and gets a new one.
    */
   const publishKey = useMemo(() => `publish-${crypto.randomUUID()}`, []);
-  const restoreKeys = useMemo(() => new Map<number, string>(), []);
+  /**
+   * ONE KEY PER VERSION, and a REF rather than a memo.
+   *
+   * Per version because restoring version 1 and restoring version 2 are two
+   * different acts, and one key for both would make the second a replay of the
+   * first — the store would answer with version 1 and nothing would happen.
+   *
+   * A ref because this map is MUTATED, and a `useMemo` value is not allowed to
+   * be: the lint rule that says so is right, and the mutation is the point.
+   */
+  const restoreKeys = useRef(new Map<number, string>());
 
   const missing = payload.required.filter((code) => !acknowledged.includes(code));
   const blocked = payload.blockers.length > 0;
@@ -143,10 +153,10 @@ export function PublicationReviewView({
 
   const onRestore = (version: number) => {
     setRestoreOutcome(null);
-    let key = restoreKeys.get(version);
+    let key = restoreKeys.current.get(version);
     if (key === undefined) {
       key = `restore-${crypto.randomUUID()}`;
-      restoreKeys.set(version, key);
+      restoreKeys.current.set(version, key);
     }
     const attemptKey = key;
     startTransition(async () => {

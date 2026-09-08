@@ -165,6 +165,32 @@ npm run qa:canonical-presentation-draft # Unit 6B.3A real-route QA against a DIS
                                     #   synthetic canonical package, and a production build of
                                     #   the app pointed at all of it. 58 checks. It CANNOT run
                                     #   against the hosted project, and must not be made to.
+npm run test:canonical-publication  # Unit 6B.4A: the publication lifecycle, offline —
+                                    #   every blocker by name and none confirmable away, the four
+                                    #   warnings that need a person's confirmation and the six that
+                                    #   do not, NO THRESHOLD over the real resolved model,
+                                    #   «espera contenido» as a warning and never a blocker, the
+                                    #   inventory and the difference speaking only in authored
+                                    #   titles, and nothing internal in the payload. 167 checks,
+                                    #   synthetic, offline, in `npm test`.
+npm run test:canonical-publication-live # Unit 6B.4A level 2/3: the SAME lifecycle executed
+                                    #   against a disposable PostgreSQL 17 — the fourteen proofs
+                                    #   the phase names, including two concurrent publications, a
+                                    #   snapshot the table owner cannot delete, a rollback that
+                                    #   keeps the draft storage, and the whole contract a second
+                                    #   time over a real PostgREST with supabase-js. 188
+                                    #   assertions. Outside `npm test` (needs a cluster).
+npm run test:canonical-publication-audit # Unit 6B.4A: the STORAGE AUDIT, re-runnable. It asks a
+                                    #   real PostgreSQL whether migration 0025's publication model
+                                    #   can publish a canonical v4 presentation and answers with
+                                    #   nine findings, eight of them UNSAFE. 60 assertions.
+                                    #   Outside `npm test` (needs a cluster).
+npm run qa:canonical-publication    # Unit 6B.4A real-route QA against a DISPOSABLE target:
+                                    #   a blocked review, an acknowledged one, a publication, a
+                                    #   retry that replays, a reload, an edit that changes nothing
+                                    #   published, a second version, the history, a restoration
+                                    #   into a new draft revision, a conflict, and three viewports.
+                                    #   111 checks. It CANNOT run against the hosted project.
 npm run test:canonical-presentation-hosted-fingerprint # READ-ONLY. Proves the two legacy
                                     #   experience drafts are still v2/72 and v3/14, that neither
                                     #   is v4, that the experience log is unchanged, that 0029's
@@ -834,6 +860,95 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   approved dashboard publishes 79 curated phrases; the contract classifies them
   as editorial review. The blueprint declares the slot and leaves it EMPTY. Never
   copy those phrases into the product and never invent a phrase-splitting rule.
+- ⓘ **THE LEGACY PUBLICATION MODEL CANNOT PUBLISH A CANONICAL PRESENTATION, and
+  that was ASKED of a real PostgreSQL rather than argued.**
+  `npm run test:canonical-publication-audit` plants both legacy experience
+  drafts, saves a canonical v4 draft beside one, and asks migration `0025` to
+  publish it: nine findings, eight UNSAFE. The prepare RPC reads
+  `study_experience_draft` and cannot see the canonical draft at all; the legacy
+  revision table accepts schema v2 and has no family discriminator; the pointer
+  is keyed on `study_id` alone so both families would share ONE answer and one
+  version sequence; there is no column for the binding, the package or the
+  calculation version; publication re-reads the LEGACY draft to decide staleness;
+  and the only route in is to write the canonical document INTO the legacy draft,
+  which the legacy save RPC accepts. **Publishing canonically through `0025`
+  would require destroying a legacy draft.** Migration `0030` is the smallest
+  additive answer: three tables of its own, sharing no object with it. Never
+  reuse `study_experience_revision`, `study_experience_publication` or
+  `study_experience_event` for canonical work.
+- ⓘ **A PUBLICATION STORES THE RESOLVED RENDER MODEL *AND* PINS THE PACKAGE
+  IDENTITY, and neither substitutes for the other.** The stored model is what
+  makes reproduction EXACT — it survives a change to the canonical rows, the
+  calculators, the registry or the code, and it is already a public shape, so
+  storing it adds no disclosure. The pinned identity — binding fingerprint beside
+  results contract, calculation version, spec, mapping version, package key and
+  plan fingerprint — is what makes drift VISIBLE and ATTRIBUTABLE, and it is what
+  a filtered recomputation would have to be checked against. **Publication output
+  therefore depends on no mutable current data**: editing the draft afterwards
+  changes nothing a client is served, which is executed rather than promised. The
+  real approved layout measures 24 blocks and 77 660 serialized bytes against a
+  2 MiB ceiling.
+- ⓘ **RESTORING CREATES A NEW DRAFT REVISION AND PUBLISHES NOTHING.** It does not
+  move the pointer, mark a snapshot superseded, unpublish or delete, and it writes
+  the draft through `save_canonical_presentation_draft` so that table keeps its
+  single write path. Making a restored document live means reviewing and
+  publishing it again, against the study's results as they are then.
+- ⓘ **`configuration_required` IS A WARNING AND NEVER A BLOCKER**, and it requires
+  an explicit acknowledgement. Contract C11: what nobody has finished renders as
+  nothing on the client side, so publishing it is a decision a person makes
+  knowingly. Blocking on it would make the APPROVED BLUEPRINT unpublishable
+  forever — that blueprint declares the curated pain-cloud slot and leaves it
+  empty on purpose. Qualitative categories nobody has reviewed are the same shape
+  of fact: `src/lib/results/qualitative.ts` hands the decision to the publication
+  boundary in as many words, and deciding is what an acknowledgement is.
+- ⓘ **THERE IS NO THRESHOLD IN `src/lib/publication/`.** No number, no comparison
+  against a base, no rule about a small sample. The two sample warnings are read
+  off `RenderBlock.sampleDisplay`, which the resolver decided from an AUTHORED
+  policy carrying a name and a stated reason, so under the system default
+  `show_all` neither can fire whatever the bases are. A preflight that counted
+  respondents and warned below some number would be inventing the suppression
+  rule this product spent a unit removing.
+- ⓘ **THE BROWSER NEVER HOLDS THE THING BEING PUBLISHED.** The publish action
+  takes four numbers and a list of closed codes; the server re-reads the draft,
+  rebuilds the registry from the study's CURRENT canonical results, re-runs the
+  whole preflight and only then publishes. There is no parameter for a document,
+  a digest, a binding, a package identity or a uuid — so a review that went stale
+  between the screen and the click is refused by the numbers rather than trusted,
+  and none of those internal values ever crossed to a browser at all.
+- ⓘ **A RETRY IS ANSWERED BEFORE ANYTHING IS RE-JUDGED.** A retry after a lost
+  response arrives at a world the first attempt already changed, so a preflight
+  run on it sees the pointer that attempt moved and raises a conflict — after a
+  publication that succeeded. `publishStoredPresentation` therefore consults the
+  idempotency ledger FIRST, which is the order the RPC already used. The database
+  remains the authority: that read is not under the study's advisory lock, and the
+  RPC's own replay branch, which is, still catches two simultaneous retries.
+- ⓘ **THERE ARE NOW THREE DOORS TO THE CANONICAL LAYER AND STILL TWO LOADERS.**
+  Unit 6B.4A added `/studio/e/[studyId]/revision`, and it reaches the canonical
+  layer through `src/lib/studio/presentation-workspace.ts` — the composer's own
+  declared loader. `publication-workspace.ts` holds no canonical reader: every
+  name that touches one is imported from that file through a SINGLE import
+  statement, so the route's path runs through it by construction rather than by
+  which import happened to be written first. The door table in
+  `shadow-boundary-test.mjs` §[8] names the page beside that loader and the action
+  class gains exactly one member. **Do not add a fourth door, and do not give the
+  publication module its own edge into the canonical graph** — the door row fails
+  the moment it does.
+- ⓘ **MIGRATION `0025` MAKES AN AUTHENTICATION IDENTITY UNDELETABLE, and it was
+  FOUND rather than fixed.** `study_experience_revision.prepared_by` is
+  `references auth.users on delete set null` on a table whose trigger refuses
+  every UPDATE, so removing a user issues exactly that UPDATE, the trigger raises
+  `2F002`, and the delete fails for as long as the row exists. `0025` is applied
+  history and this branch does not edit it. `0030` stores a bare uuid instead, as
+  `0023`'s own event table already does — and its own immutability trigger refuses
+  DELETE only while the parent study exists, so a snapshot cannot be removed from
+  under a published report and a whole study can still be deleted.
+- ⓘ **`0030` IS APPLIED TO NO DATABASE, and the hosted fingerprint pins that.**
+  `npm run test:canonical-presentation-hosted-fingerprint` asserts that the three
+  publication tables are ABSENT and the three functions not callable on the hosted
+  project — six `PGRST205`/`PGRST202` answers. It was written in the same run that
+  recorded their absence, because a check that has never been seen to fail is a
+  check nobody has tested. **When the hosted activation happens, INVERT it rather
+  than deleting it**, exactly as Unit 6B.3B inverted `0029`'s.
 - `readXlsx()`/`parseXlsx()` are the LEGACY reader and their behaviour is
   frozen — every existing study was imported through them. The canonical
   multi-sheet reader is `readXlsxWorkbook()` in the same module; both must stay

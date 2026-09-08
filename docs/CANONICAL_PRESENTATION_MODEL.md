@@ -630,3 +630,106 @@ makes a retry after a lost response safe.
 stored revision is reported but not adopted, and the only way forward is a person
 choosing to load the stored version — an act that pushes their own document onto
 the undo stack rather than discarding it.
+
+---
+
+## 15. Publication — Unit 6B.4A
+
+A **draft** is the working document, one per study, mutable, and nobody outside
+Be Community ever sees it. A **publication** is an immutable snapshot of one
+exact draft revision, and it is what a client would be served. The two live in
+different tables created by different migrations, and nothing converts between
+them: publishing reads the draft and writes a snapshot; restoring reads a
+snapshot and writes a draft revision.
+
+### The legacy publication model could not carry this, and it was asked
+
+`npm run test:canonical-publication-audit` puts the question to a real
+PostgreSQL: it plants both legacy experience drafts, saves a canonical v4 draft
+beside one through `0029`'s own RPC, and asks migration `0025`'s publication path
+to publish it. Nine findings came back, eight of them UNSAFE — the prepare RPC
+cannot see the canonical draft at all, the legacy revision table accepts schema
+v2 and carries no family discriminator, one pointer and one version sequence
+would be shared by both families, there is no column for the binding or the
+package or the calculation version, publication decides staleness against the
+LEGACY draft, and the only route in requires writing the canonical document into
+that draft — which the legacy save RPC accepts. The full table is in
+`docs/CANONICAL_STUDY_MODEL.md` §"Migration 0030".
+
+### Reproducibility needs both halves
+
+**The resolved render model is stored.** It is what makes reproduction exact: it
+survives a change to the canonical rows, the calculators, the registry or the
+code that produced it, and it is already the public shape — finished, formatted
+values with no address, no canonical key and no respondent — so storing it adds
+no disclosure. The real approved layout measures 24 blocks and 77 660 serialized
+bytes against a 2 MiB column ceiling.
+
+**The package identity is pinned beside it.** `binding_fingerprint`,
+`results_contract_version`, `calculation_version`, `spec_id`, `mapping_version`,
+`package_idempotency_key`, `plan_fingerprint` and the exact
+`source_draft_revision`. The binding is a digest over most of those, so the parts
+are stored so that a drift can be ATTRIBUTED — «the package changed» rather than
+«the fingerprint changed» — and so a filtered recomputation, the day one reaches
+a client route, can be proved to be over the same package.
+
+Neither substitutes for the other, and **publication output depends on no mutable
+current data**: a draft edited after a publication changes nothing a client is
+served, which is executed in the live gate and again in the browser QA.
+
+### Blockers and warnings are different kinds of fact
+
+A **blocker** says the publication would be WRONG: invalid, unresolved, stale,
+unbound, unauthorized, or not reproducible. No acknowledgement is offered for
+one, because a checkbox beside "this document no longer matches this study's
+results" would be a way to publish numbers nobody stands behind.
+
+A **warning** says it would be INCOMPLETE, or would show a client less than the
+study holds. Four require an explicit acknowledgement and the rest are
+informational, and the required list is derived from what was RAISED — a screen
+full of inapplicable checkboxes teaches people to tick every box without reading
+one.
+
+| the warning | why it needs a person |
+|---|---|
+| `configuration_required_blocks` | contract C11: what nobody has finished renders as NOTHING on the client side, so publishing it is a decision to show less than the layout describes. It is **never** a blocker: the approved blueprint declares the curated pain-cloud slot and leaves it empty on purpose, and blocking would make that layout unpublishable forever |
+| `qualitative_review_pending` | `src/lib/results/qualitative.ts` states that the categories are the SOURCE's own coding and hands the decision here in as many words. Deciding is what an acknowledgement is; blocking would be refusing forever |
+| `withheld_by_sample_policy` | somebody wrote a `hide_below` rule with their name and a reason, and it fired |
+| `nothing_visible` | a document a client would see nothing in is valid and a strange deliverable |
+
+**There is no threshold in this layer.** The two sample warnings are read off
+`RenderBlock.sampleDisplay` — the outcome the resolver already decided from an
+AUTHORED policy — so under the system default `show_all` neither can fire,
+however small the bases are. §7 is unchanged and this layer does not get to
+change it.
+
+### The review surface says nothing in a code
+
+`/studio/e/[studyId]/revision` shows the exact draft revision, the page and block
+inventory including what a client will NOT see, the client-visible preview
+through the product's own renderer, blockers apart from warnings, the
+acknowledgements, the structural difference from what is published, an explicit
+final confirmation, the history, and a restore control that says restoring
+creates a new draft revision and publishes nothing.
+
+Every name on it comes from one of three places: the author's own title, a fixed
+Spanish word for a closed vocabulary member, or an ordinal position. Never an id,
+a handle, a semantic, a chart variant or a canonical key — a reviewer approving
+«bloque-cri-2 · touchpoint_satisfaction» would be approving storage.
+
+**The browser never holds the thing being published.** The publish action takes
+the reviewed draft revision, the current publication version, the acknowledged
+codes and one idempotency key; the server re-reads the draft, rebuilds the
+registry from the study's current results, re-runs the whole preflight and only
+then publishes. There is no parameter for a document, a digest, a binding, a
+package identity or a uuid.
+
+### Restoring
+
+A restoration brings an approved document back into the WORKING DRAFT as a new
+revision, through `save_canonical_presentation_draft` so that table keeps its one
+write path. It moves no pointer, marks nothing superseded, unpublishes nothing
+and deletes nothing. What a client is served changes only when somebody publishes
+again — through the whole preflight, against the study's results as they are
+then, which is the only honest way to serve a document approved against results
+that have since changed.
