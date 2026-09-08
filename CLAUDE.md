@@ -368,11 +368,26 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 - The existing ingestion and client read paths remain authoritative. Do not
   switch them to the new tables until the deterministic package importer,
   reconciliation and compatibility tests exist.
-- ⓘ **The results contract is `2.1.0`, and 2.1.0 added a LABEL.** `FilterValue`
-  carried a `value` and nothing else, so the cohort dimension published `active`
-  and `deserter` — internal enum values — to anything that offered them as
-  controls. Additive, so minor: nothing moved, nothing was re-typed and no number
-  changed. Golden parity is still 531/531 and presentation parity 59/59.
+- ⓘ **A NAME A PERSON CHOOSES BY MUST BE UNIQUE, and the qualifier must be
+  true.** Two blocks may carry the same authored title and two filter dimensions
+  may carry the same SOURCE column header — the approved study does both, the
+  second one six times over. `connectionCandidates` qualifies a colliding block
+  by what it draws, then by its page, then by its position; the registry
+  qualifies a colliding dimension by the POPULATION that answers it, read from
+  the answers rather than from the attribute key. Never build a display label
+  out of a handle or a canonical key, and never merge two dimensions that
+  different cohorts answer: each is implicitly scoped to its own population, and
+  one control for both would have to OR across two attribute keys inside the
+  filter engine. Disambiguation is a DISPLAY decision — handles keep coming from
+  the source label, so nothing already saved moves.
+- ⓘ **The results contract is `2.2.0`, and both additions were LABELS.**
+  2.1.0 added `FilterValue.label`, because `FilterValue` carried a `value` and
+  nothing else and the cohort dimension therefore published `active` and
+  `deserter` — internal enum values — to anything that offered them as controls.
+  2.2.0 added `FilterDimension.cohortLabels`, which says which cohorts answered a
+  characteristic so a surface can tell two identically-worded questions apart.
+  Both are additive: nothing moved, nothing was re-typed and no number changed.
+  Golden parity is still 531/531 and presentation parity 59/59.
 - ⓘ **A SELECTION CANNOT CHANGE WHAT EXISTS.** The journey already stated and
   enforced this. Unit 6B.2 found it violated twice more, both silent and both
   live only under a filter: a performance PERIOD vanished when nobody in the

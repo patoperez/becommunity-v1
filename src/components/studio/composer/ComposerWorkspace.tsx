@@ -1906,8 +1906,21 @@ function FilterPanelCard({
         Compartir una característica nunca es una conexión. Un filtro mueve un bloque porque alguien lo
         escribió aquí.
       </p>
+      {/*
+        THE NAME COMES FROM THE ENGINE, and it is unique across BOTH lists.
+
+        An authored title may be shared — the approved layout titles both the
+        recommendation figure and the word cloud «Miembros activos» — and two
+        identical rows here are a choice nobody can make. `connectionCandidates`
+        adds the smallest true context that separates them, so this surface
+        prints a name rather than composing one, and the checkbox's accessible
+        name is that same unique string.
+
+        It was `target.copy.title ?? target.id`, which fell back to the block's
+        opaque identifier the moment a block had no title.
+      */}
       <ul className="mt-2 space-y-1">
-        {candidates.eligible.map(({ block: target, connected }) => (
+        {candidates.eligible.map(({ block: target, label, connected }) => (
           <li key={target.id}>
             <label className="flex min-h-11 items-center gap-2 rounded-lg border border-line bg-surface px-2 text-sm text-body">
               <input
@@ -1921,7 +1934,7 @@ function FilterPanelCard({
                   )
                 }
               />
-              <span className="min-w-0 [overflow-wrap:anywhere]">{target.copy.title ?? target.id}</span>
+              <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
             </label>
           </li>
         ))}
@@ -1932,10 +1945,9 @@ function FilterPanelCard({
             No se pueden conectar ({candidates.ineligible.length})
           </summary>
           <ul className="mt-1 space-y-1 text-xs text-muted">
-            {candidates.ineligible.map(({ block: target, reason }) => (
+            {candidates.ineligible.map(({ block: target, label, reason }) => (
               <li key={target.id}>
-                <span className="[overflow-wrap:anywhere]">{target.copy.title ?? target.id}</span> —{" "}
-                {INELIGIBLE_REASON[reason]}
+                <span className="[overflow-wrap:anywhere]">{label}</span> — {INELIGIBLE_REASON[reason]}
               </li>
             ))}
           </ul>

@@ -285,6 +285,72 @@ function uniqueSegment(used: Set<string>, label: string, ordinal: number): strin
 }
 
 /**
+ * A NAME A READER CAN TELL APART, when the study gives two the same one.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY TWO CHARACTERISTICS CAN SHARE A NAME.
+ *
+ * A dimension's label is the SOURCE's own column header, verbatim, and a study
+ * may ask the same question of two populations on two different sheets. The
+ * approved study does exactly that six times: «Generación», «Giro», «Tipo de
+ * empresa», «Tu Rango de Edad», «Tiempo en BNI Cuicuilco» and «¿Cuánto tiempo
+ * tiene tu empresa?» each exist twice, once for active members and once for
+ * deserters.
+ *
+ * They are NOT one characteristic seen twice. Every answer to one belongs to a
+ * single cohort, so a selection on it silently excludes the other population —
+ * and offering a reader two controls with one name is offering them a choice
+ * they cannot make.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT THE QUALIFIER IS, AND WHERE IT COMES FROM.
+ *
+ * The POPULATION the characteristic is actually recorded for, in the study's
+ * own Spanish, taken from the cohorts that answered it. It is never derived
+ * from the attribute key: `perfil_desertores_g` is storage vocabulary, and a
+ * label built out of it would be a canonical key wearing a sentence.
+ *
+ * When the populations do not separate them either — two identically-named
+ * characteristics answered by the same cohort — the fallback is an ordinal, in
+ * the same spirit as the handle's own disambiguation. It is the last resort and
+ * it is honest: it says these are two, without pretending to know why.
+ *
+ * A label that does NOT collide is returned untouched, so the common case reads
+ * exactly as the study wrote it.
+ *
+ * THE HANDLE IS NOT BUILT FROM THIS. Handles keep coming from the source label,
+ * so nothing a document already saved can name moves.
+ */
+function disambiguateDimensionLabels(dimensions: readonly FilterDimension[]): string[] {
+  const occurrences = new Map<string, number>();
+  for (const dimension of dimensions) {
+    occurrences.set(dimension.label, (occurrences.get(dimension.label) ?? 0) + 1);
+  }
+
+  const seen = new Map<string, number>();
+  return dimensions.map((dimension) => {
+    if ((occurrences.get(dimension.label) ?? 0) < 2) return dimension.label;
+
+    const ordinal = (seen.get(dimension.label) ?? 0) + 1;
+    seen.set(dimension.label, ordinal);
+
+    // ONE population, and no other colliding dimension claims the same one.
+    const population = dimension.cohortLabels.length === 1 ? dimension.cohortLabels[0] : null;
+    const shared =
+      population !== null &&
+      dimensions.some(
+        (other) =>
+          other !== dimension &&
+          other.label === dimension.label &&
+          other.cohortLabels.length === 1 &&
+          other.cohortLabels[0] === population,
+      );
+    if (population !== null && !shared) return `${dimension.label} · ${population}`;
+    return `${dimension.label} · ${ordinal}`;
+  });
+}
+
+/**
  * Build the registry for one finished results document.
  *
  * Pure and deterministic: same document in, byte-identical registry out. It
@@ -301,6 +367,9 @@ export function buildCanonicalPresentationRegistry(
   const dimensionUsed = new Set<string>();
   const dimensionHandles: { handle: PresentationHandle; dimension: FilterDimension }[] = [];
   const filterOptions = new Map<PresentationHandle, readonly RegistryFilterOption[]>();
+  // The DISPLAY name only. The handle below is still built from the source's
+  // own label, so a document saved before this existed names the same entries.
+  const dimensionLabels = disambiguateDimensionLabels(results.filters.dimensions);
   results.filters.dimensions.forEach((dimension, index) => {
     const handle = presentationHandle("dimension", uniqueSegment(dimensionUsed, dimension.label, index + 1));
     dimensionHandles.push({ handle, dimension });
@@ -323,7 +392,7 @@ export function buildCanonicalPresentationRegistry(
     drafts.push({
       handle,
       semantic: "filter_dimension",
-      label: dimension.label,
+      label: dimensionLabels[index],
       availability: "available",
       responseContext: null,
       provenance: "source_reported",

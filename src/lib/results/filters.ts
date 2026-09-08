@@ -63,6 +63,13 @@ function valuesByParticipant(source: CanonicalResultSource): Map<string, Map<str
 export function buildFilterDimensions(source: CanonicalResultSource, spec: StudyResultsSpec): FilterDimension[] {
   const dimensions: FilterDimension[] = [];
 
+  const byKey = new Map<string, ResultAttributeValue[]>();
+  for (const value of source.attributeValues) {
+    const list = byKey.get(value.attributeKey);
+    if (list) list.push(value);
+    else byKey.set(value.attributeKey, [value]);
+  }
+
   const cohortCounts = new Map<string, number>();
   for (const participant of source.participants) {
     cohortCounts.set(participant.cohortKey, (cohortCounts.get(participant.cohortKey) ?? 0) + 1);
@@ -91,18 +98,46 @@ export function buildFilterDimensions(source: CanonicalResultSource, spec: Study
   dimensions.push({
     key: COHORT_DIMENSION_KEY,
     label: "Cohorte",
+    // The cohort dimension IS the cohorts; qualifying it by them would say
+    // «Cohorte (miembros activos, desertores)», which is a sentence about
+    // itself.
+    cohortLabels: [],
     dataType: "category",
     values: cohortValues,
     absent: [],
     forbiddenSections: forbiddenFor(spec, COHORT_DIMENSION_KEY),
   });
 
-  const byKey = new Map<string, ResultAttributeValue[]>();
-  for (const value of source.attributeValues) {
-    const list = byKey.get(value.attributeKey);
-    if (list) list.push(value);
-    else byKey.set(value.attributeKey, [value]);
-  }
+  /**
+   * WHICH POPULATIONS ANSWER A CHARACTERISTIC.
+   *
+   * A study may ask the same question of two cohorts on two different sheets,
+   * and this boundary then publishes two dimensions with byte-identical labels.
+   * They are not the same characteristic to filter on: each is answered by one
+   * population, so selecting a value on one implicitly excludes the other.
+   *
+   * The cohorts are read from the ANSWERS rather than declared anywhere, which
+   * is what makes this true of any study rather than of this one. A cohort the
+   * specification does not declare is named by its own key, the same fallback
+   * `population.cohorts` has always used.
+   */
+  const cohortLabelByKey = new Map(spec.cohorts.map((cohort) => [cohort.key, cohort.label]));
+  const cohortByParticipant = new Map(
+    source.participants.map((participant) => [participant.participantId, participant.cohortKey]),
+  );
+  const cohortsAnswering = (attributeKey: string): string[] => {
+    const keys = new Set<string>();
+    for (const value of byKey.get(attributeKey) ?? []) {
+      if (value.status !== "answered") continue;
+      const cohortKey = cohortByParticipant.get(value.participantId);
+      if (cohortKey !== undefined) keys.add(cohortKey);
+    }
+    // In the specification's own order, so two builds agree and so the order is
+    // the one the study declares rather than the one the rows happened to be in.
+    const declared = spec.cohorts.map((cohort) => cohort.key).filter((key) => keys.has(key));
+    const extra = [...keys].filter((key) => !cohortLabelByKey.has(key)).sort(codepointCompare);
+    return [...declared, ...extra].map((key) => cohortLabelByKey.get(key) ?? key);
+  };
 
   for (const definition of [...source.attributeDefinitions].sort((a, b) =>
     a.displayOrder === b.displayOrder ? codepointCompare(a.key, b.key) : a.displayOrder - b.displayOrder,
@@ -132,6 +167,7 @@ export function buildFilterDimensions(source: CanonicalResultSource, spec: Study
     dimensions.push({
       key: definition.key,
       label: definition.label,
+      cohortLabels: cohortsAnswering(definition.key),
       dataType: definition.dataType,
       // An attribute's answer text IS what a reader is shown, so the value and
       // the label are the same string here. They are still two fields, because

@@ -2864,10 +2864,13 @@ SCREEN pixels while the composer was showing the preview scaled to fit, so a
 44 px control measured 17 px and the product was reported failing; targets are
 now measured in layout pixels, which the transform does not touch.
 
-#### Two findings about the approved study, recorded rather than changed
+#### Two findings about the approved study — CORRECTED, see Unit 6B.2.1
 
-Neither is a defect in this unit's code, and both are things a reader would
-meet.
+They were recorded here as editorial. They are not: both are cases of the
+product showing a person two things it could not tell apart, and both are fixed
+in Unit 6B.2.1 below. The paragraphs are kept because the second one's
+conclusion — "the honest fix is editorial" — was wrong, and tracing the two
+handles to their source is what showed why.
 
 1. **Two blocks in the approved blueprint are titled «Miembros activos»** — the
    recommendation comparison cell and the qualitative cloud. The editor's
@@ -2878,8 +2881,7 @@ meet.
 2. **Two filter dimensions carry the same label**, «¿Cuánto tiempo tiene tu
    empresa?», so the active-filter summary can read «X: 1 a 3 años · X: 1 a 3
    años». The handles differ — `uniqueSegment` disambiguates with an ordinal —
-   but the LABEL a reader sees does not. It is a property of the study's own
-   source columns, and the honest fix is editorial rather than mechanical.
+   but the LABEL a reader sees does not.
 
 #### Deferred, and still deferred
 
@@ -2889,3 +2891,100 @@ client-route switching, wiring the URL codec to a route, PDF/print export, AI or
 category suggestions, authentication changes, migrations, dependencies,
 deployment, shadow activation, journey route/stage authoring, and the legacy
 `QualitativeCloud.tsx` repair.
+
+---
+
+### Unit 6B.2.1 — two names a person could not tell apart (source only, 2026-09-07)
+
+**One focused UX acceptance correction on top of `9b05532`.** No filter
+semantics changed, no formula changed, no canonical value, calculation or source
+mapping changed, no migration, no dependency, no hosted mutation. Results parity
+stays **531/531** and presentation parity **59/59**.
+
+#### 1. Two blocks with one name, in the connection selector
+
+The «Qué mueve» list printed `block.copy.title ?? block.id` — so two blocks an
+author gave the same title were two identical rows, and a block with no title
+showed its opaque identifier to a person.
+
+`connectionCandidates` now names every candidate itself, over BOTH lists at
+once, and adds the smallest TRUE context that separates a collision:
+
+1. **what the block draws** — «Miembros activos · Nube de términos» beside
+   «Miembros activos · Cifra sola», which is exactly the collision the approved
+   layout has;
+2. **which page it is on**, when the drawings match too;
+3. **its position on that page**, when nothing else separates them.
+
+A title that does not collide is returned untouched. The qualifier is chosen per
+COLLISION GROUP and only when it separates the whole group — one that separated
+half of it would leave the rest looking distinguished when they are not. The
+label is display text: no id, no handle, no semantic, no `snake_case`. A
+connection is still saved by the block's own opaque id, and the checkbox takes
+its accessible name from that same unique string.
+
+#### 2. Two characteristics with one name, in the filter panel
+
+**Traced before anything was changed.** A dimension's label is the SOURCE's own
+column header, verbatim (`projector.ts`: "the label is what the source calls the
+column rather than something this file invented"). The approved study has two
+profile sheets — one per cohort — and asks the same questions on both, so the
+contract publishes **six** colliding pairs, not one: «Tu Rango de Edad»,
+«Generación», «¿Cuánto tiempo tiene tu empresa?», «Giro», «Tipo de empresa» and
+«Tiempo en BNI Cuicuilco». The two ROI questions are worded differently on the
+two sheets and were never ambiguous.
+
+**They are not the same characteristic to filter on.** Measured from the real
+package: every answer to a `perfil_cliente_*` dimension belongs to an ACTIVE
+member and every answer to its `perfil_desertores_*` twin belongs to a
+DESERTER — never both. A selection on one therefore excludes the other
+population entirely, which is why the QA run's two-dimension AND matched nobody.
+
+So exposing them once was rejected, and the reason is recorded: one control for
+both would have to OR across two attribute keys inside the filter engine — a
+change to filtering semantics — and it would take away the ability to ask the
+question of one population, which is the only thing either control can do today.
+
+The correction is therefore a truthful, clearly distinct label per
+characteristic, and the qualifier is **the population that actually answers
+it**, in the study's own Spanish: «Generación · Miembros activos» and
+«Generación · Desertores». `FilterDimension` gained `cohortLabels` to say which
+cohorts answered — read from the ANSWERS, so it is true of any study rather than
+of this one — and the contract moved to **2.2.0** (additive). Nothing is derived
+from the attribute key: `perfil_desertores_g` is storage vocabulary, and a label
+built out of it would be a canonical key wearing a sentence.
+
+Where the population cannot separate them either, an ordinal does — the last
+resort, in the same spirit as the handle's own disambiguation.
+
+**The handles did not move.** Disambiguation is a DISPLAY decision, so a handle
+is still derived from the source's own label and the binding fingerprint is
+untouched. A document saved before this existed names exactly the same entries.
+
+#### Gates
+
+`npm run test:canonical-viewer-filters` **236 → 319**, two new sections. They
+prove: every candidate is named and no name repeats across BOTH lists; the
+qualifier escalates through drawing, page and position, each driven by a
+document built for it; a non-colliding title is untouched; no label carries an
+id, a handle, an enum or `snake_case`; a connection is still saved by the block
+id; two same-named characteristics answered by different cohorts are separated
+by population and by an ordinal when they are not; the handle is still built
+from the source label; **selecting each corrected option filters a different
+population and moves the connected block differently**; and the disconnected
+blocks are still byte-identical under both.
+
+`canonical-composer` 383, `canonical-presentation` 314, `canonical-results` 235,
+`canonical-database-source` 74, `shadow-boundary` 96, `studio-completion` 49 —
+all unchanged and green. `tsc --noEmit` clean, lint at the 54-warning baseline.
+
+One assertion of the new gate was wrong twice before it was right, and both are
+recorded in the gate: it scanned the surface's RAW text for the expression the
+fix removed, and found the comment that quotes it; and its "nothing else
+separates them" fixture put the two blocks on different pages, so the page
+qualifier answered and the position branch was never reached.
+
+#### Real-route confirmation
+
+Short and focused — the full 87-check acceptance ran at `9b05532` and is not
+repeated.

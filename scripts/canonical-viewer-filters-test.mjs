@@ -29,7 +29,9 @@
 //  15  the browser holds no calculation and no threshold;
 //  16  retention does not accept a participant filter, and says so up front;
 //  17  a period or a cohort does not vanish because somebody filtered;
-//  18  the positions do not move: a filtered registry binds identically.
+//  18  the positions do not move: a filtered registry binds identically;
+//  19  two blocks an author named the same are told apart in the connection list;
+//  20  two characteristics the SOURCE named the same are told apart by population.
 //
 // Every figure here is invented. No client workbook, name, answer, quote or
 // identifier is committed to this file.
@@ -41,6 +43,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { composerFixtureSource } from "./lib/composer-fixture.mjs";
+import { connectionCandidates } from "../src/lib/composer/editor.ts";
+import { projectPresentationCatalog } from "../src/lib/presentation/registry.ts";
 import { buildPresentationRead, resolveUnderSelection } from "../src/lib/viewer/index.ts";
 import { buildCanonicalPresentationRegistry } from "../src/lib/presentation/registry.ts";
 import { bindPresentationDocument } from "../src/lib/presentation/registry.ts";
@@ -70,6 +74,7 @@ import {
   requestViewerCleared,
   requestViewerOption,
 } from "../src/lib/composer/viewer-session.ts";
+import { connectBlockToPanel, openComposer } from "../src/lib/composer/editor.ts";
 import { PresentationRenderer } from "../src/components/presentation/PresentationRenderer.tsx";
 
 /* -------------------------------------------------------------------------- */
@@ -1084,6 +1089,264 @@ eq(
   "quitar lo que se puso devuelve exactamente la selección neutra",
   JSON.stringify(untoggled),
   JSON.stringify(EMPTY_VIEWER_SELECTION),
+);
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[19] Dos bloques con el mismo título se distinguen en el selector");
+
+/**
+ * A DOCUMENT WHOSE AUTHOR REUSED A TITLE, three times over, on purpose.
+ *
+ * The approved layout does this: «Miembros activos» is the right heading both
+ * for that population's recommendation figure and for the cloud of terms they
+ * wrote. The three pairs below are the three ways a collision can go — same
+ * title with different drawings, with the same drawing on different pages, and
+ * with everything the same — so the qualifier is proved to escalate rather than
+ * to work only in the easy case.
+ */
+const collidingTitles = structuredClone(authored);
+collidingTitles.pages.push({
+  id: "pagina-dos",
+  title: "Segunda página",
+  order: 1,
+  blocks: [
+    { ...result("gemelo-otra-pagina", H.npsCombined, "kpi_value"), copy: { title: "Mismo nombre", description: null, annotation: null } },
+  ],
+});
+collidingTitles.pages[0].blocks.push(
+  // 1. Same title, DIFFERENT drawings — what the approved layout actually has.
+  { ...result("gemelo-cifra", H.npsActive, "kpi_value"), copy: { title: "Miembros activos", description: null, annotation: null } },
+  { ...result("gemelo-nube", H.cloud, "word_cloud"), copy: { title: "Miembros activos", description: null, annotation: null } },
+  // 2. Same title AND the same drawing, on two different pages.
+  { ...result("gemelo-esta-pagina", H.npsDeserter, "kpi_value"), copy: { title: "Mismo nombre", description: null, annotation: null } },
+  // 3. Same title, same drawing, same page — nothing left but position.
+  { ...result("trillizo-a", H.npsCombined, "kpi_value"), copy: { title: "Trillizos", description: null, annotation: null } },
+  { ...result("trillizo-b", H.npsActive, "kpi_value"), copy: { title: "Trillizos", description: null, annotation: null } },
+);
+const collidingBound = bindPresentationDocument(
+  validatePresentationDocument(collidingTitles).value,
+  read.registry,
+);
+const context = { catalog: projectPresentationCatalog(read.registry) };
+const candidates = connectionCandidates(collidingBound, context, PANEL_A);
+const everyCandidate = [...candidates.eligible, ...candidates.ineligible];
+check(everyCandidate.length > 10, `el panel enumera ${everyCandidate.length} bloques`);
+
+const labelled = new Map(everyCandidate.map((entry) => [entry.block.id, entry.label]));
+eq(
+  "cada bloque enumerado tiene un nombre",
+  everyCandidate.filter((entry) => typeof entry.label === "string" && entry.label.length > 0).length,
+  everyCandidate.length,
+);
+eq(
+  "y ningún nombre se repite, ni entre las dos listas",
+  new Set(everyCandidate.map((entry) => entry.label)).size,
+  everyCandidate.length,
+);
+// THE ACCESSIBLE NAME IS THAT SAME STRING. The checkbox takes its accessible
+// name from the text of the label it sits in, so unique labels are unique
+// accessible names — and the surface is asserted to print the engine's name
+// rather than composing one of its own.
+// Comments stripped: the surface's own comment QUOTES the expression it stopped
+// using, and a scan that could not tell an explanation from a call would forbid
+// the explanation. This gate has watched that mistake happen twice already.
+const panelCard = stripComments(
+  readFileSync(join("src", "components", "studio", "composer", "ComposerWorkspace.tsx"), "utf8"),
+);
+check(
+  /candidates\.eligible\.map\(\(\{ block: target, label, connected \}\)/.test(panelCard),
+  "la lista de conectables imprime el nombre que da el motor",
+);
+check(
+  /candidates\.ineligible\.map\(\(\{ block: target, label, reason \}\)/.test(panelCard),
+  "y la de no conectables también",
+);
+check(
+  !/target\.copy\.title \?\? target\.id/.test(panelCard),
+  "y ninguna de las dos cae al identificador opaco del bloque cuando falta un título",
+);
+
+// THE QUALIFIER ESCALATES, and each step is the smallest true thing that works.
+check(
+  labelled.get("gemelo-nube") !== labelled.get("gemelo-cifra"),
+  "dos bloques con el mismo título y distinto dibujo se separan",
+);
+check(
+  String(labelled.get("gemelo-nube")).includes("Nube de términos"),
+  `y la nube se nombra por lo que dibuja: ${JSON.stringify(labelled.get("gemelo-nube"))}`,
+);
+check(
+  String(labelled.get("gemelo-cifra")).includes("Cifra"),
+  `y la cifra por lo suyo: ${JSON.stringify(labelled.get("gemelo-cifra"))}`,
+);
+check(
+  String(labelled.get("gemelo-esta-pagina")).includes("Una página") &&
+    String(labelled.get("gemelo-otra-pagina")).includes("Segunda página"),
+  "dos bloques con el mismo título y el mismo dibujo se separan por su página",
+);
+check(
+  labelled.get("trillizo-a") !== labelled.get("trillizo-b"),
+  "y dos que comparten título, dibujo y página se separan por su posición",
+);
+check(
+  /de su página/.test(String(labelled.get("trillizo-a"))),
+  `y lo dicen así: ${JSON.stringify(labelled.get("trillizo-a"))}`,
+);
+// A TITLE THAT DOES NOT COLLIDE IS DEVUELTO INTACTO.
+const uncollided = everyCandidate.find((entry) => entry.block.id === "renovacion");
+eq("un título que no choca se deja como está", uncollided?.label, "renovacion");
+
+// AND NOTHING TECHNICAL BECOMES VISIBLE.
+for (const entry of everyCandidate) {
+  const label = String(entry.label);
+  check(!/_/.test(label), `«${label}» no lleva snake_case`);
+  check(!/:/.test(label) || /«/.test(label), `«${label}» no lleva un handle`);
+  check(!label.includes(entry.block.id) || entry.block.id === label, `«${label}» no expone el identificador del bloque`);
+}
+check(
+  everyCandidate.every((entry) => !/value:|dimension:|qualitative:|journey-|filter_panel|kpi_|word_cloud/.test(String(entry.label))),
+  "ninguna etiqueta lleva un handle, un enum ni una variante en su forma almacenada",
+);
+// The connection is still saved by the block's own opaque id.
+const connectedByLabel = connectBlockToPanel(openComposer(collidingBound), context, "gemelo-nube", PANEL_A);
+check(
+  connectedByLabel.document.pages
+    .flatMap((page) => page.blocks)
+    .find((block) => block.id === "gemelo-nube")
+    .connectedFilterPanelIds.includes(PANEL_A),
+  "y conectar sigue guardándose por el identificador opaco del bloque, no por su nombre",
+);
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[20] Dos características con el mismo nombre se distinguen por su población");
+
+/**
+ * A SOURCE THAT ASKS ONE QUESTION OF TWO POPULATIONS.
+ *
+ * The approved study does this six times: a profile sheet per cohort, the same
+ * column header on both. The two are NOT interchangeable — every answer to one
+ * belongs to a single cohort — so a selection on one silently excludes the
+ * other population, and one control for both would be a control that lies.
+ */
+const twinSource = viewerFixtureSource();
+twinSource.attributeDefinitions.push({
+  key: "perfil_desertores_e",
+  label: "Generación",
+  dataType: "category",
+  sensitivity: "internal",
+  filterable: true,
+  displayOrder: 2,
+});
+twinSource.attributeValues.push(
+  { participantId: "d1", attributeKey: "perfil_desertores_e", status: "answered", text: "Boomer", numeric: null },
+  { participantId: "d2", attributeKey: "perfil_desertores_e", status: "answered", text: "Boomer", numeric: null },
+);
+const twinRead = buildPresentationRead(twinSource);
+const twinDimensions = twinRead.results.filters.dimensions.filter((dimension) => dimension.label === "Generación");
+eq("la fuente publica dos características llamadas «Generación»", twinDimensions.length, 2);
+eq(
+  "la de los miembros activos la responde una sola cohorte",
+  twinDimensions.find((dimension) => dimension.key === "perfil_cliente_e")?.cohortLabels.join(","),
+  "Miembros activos",
+);
+eq(
+  "y la de los desertores, la otra",
+  twinDimensions.find((dimension) => dimension.key === "perfil_desertores_e")?.cohortLabels.join(","),
+  "Desertores",
+);
+check(
+  twinRead.results.filters.dimensions.find((dimension) => dimension.key === "cohort").cohortLabels.length === 0,
+  "y la propia cohorte no se califica por sí misma",
+);
+
+const twinEntries = twinRead.registry.entries.filter((entry) => entry.semantic === "filter_dimension");
+const twinLabels = twinEntries.map((entry) => entry.label);
+eq("ninguna característica se ofrece dos veces con el mismo nombre", new Set(twinLabels).size, twinLabels.length);
+check(twinLabels.includes("Generación · Miembros activos"), `«Generación · Miembros activos» se ofrece (${twinLabels.join(" | ")})`);
+check(twinLabels.includes("Generación · Desertores"), "«Generación · Desertores» también");
+check(twinLabels.includes("Esfera"), "y una característica que no choca se deja exactamente como el estudio la escribió");
+check(
+  twinLabels.every((label) => !/_|perfil|dimension:/.test(label)),
+  "ninguna etiqueta lleva una clave canónica ni un handle",
+);
+// THE HANDLE DID NOT MOVE. Disambiguation is a DISPLAY decision, so a document
+// saved before it existed still names the same entries.
+check(
+  twinEntries.some((entry) => entry.handle === "dimension:generacion"),
+  "el handle se sigue derivando de la etiqueta de la fuente, no de la desambiguada",
+);
+check(
+  twinEntries.every((entry) => !entry.handle.includes("miembros-activos")),
+  "así que ningún handle lleva el calificativo",
+);
+
+// AND EACH CORRECTED OPTION STILL FILTERS THE BLOCK IT IS MEANT TO.
+const twinPanelDoc = structuredClone(authored);
+const activeHandle = twinEntries.find((entry) => entry.label === "Generación · Miembros activos").handle;
+const deserterHandle = twinEntries.find((entry) => entry.label === "Generación · Desertores").handle;
+twinPanelDoc.pages[0].blocks.find((block) => block.id === PANEL_A).dimensions = [activeHandle, deserterHandle];
+const twinBound = bindPresentationDocument(
+  validatePresentationDocument(twinPanelDoc).value,
+  twinRead.registry,
+);
+const byActive = resolveUnderSelection(twinRead, twinBound, select([PANEL_A, activeHandle, GEN_X]));
+const byDeserter = resolveUnderSelection(twinRead, twinBound, select([PANEL_A, deserterHandle, filterOptionToken(0)]));
+check(byActive.ok && byDeserter.ok, "las dos selecciones resuelven");
+const peopleIn = (outcome) =>
+  outcome.model.pages[0].blocks.find((block) => block.id === PANEL_A).payload.selection.selectedPeople;
+eq("elegir «Generación X» entre los activos deja", peopleIn(byActive), 3);
+eq("y elegir «Boomer» entre los desertores deja", peopleIn(byDeserter), 2);
+check(
+  peopleIn(byActive) !== peopleIn(byDeserter),
+  "así que las dos opciones corregidas filtran poblaciones distintas, no la misma",
+);
+const blockIn = (outcome, id) =>
+  serializeDeterministic(outcome.model.pages[0].blocks.find((block) => block.id === id).payload);
+check(
+  blockIn(byActive, "nps-conectado") !== blockIn(byDeserter, "nps-conectado"),
+  "y el bloque conectado responde de forma distinta a cada una",
+);
+// DISCONNECTED-BLOCK INVARIANCE SURVIVES THE CHANGE.
+const twinNeutral = resolveUnderSelection(twinRead, twinBound, EMPTY_VIEWER_SELECTION);
+for (const id of ["nps-suelto", "retencion"]) {
+  check(
+    blockIn(twinNeutral, id) === blockIn(byActive, id) && blockIn(twinNeutral, id) === blockIn(byDeserter, id),
+    `«${id}», que ningún panel nombra, sigue sin moverse un byte`,
+  );
+}
+
+// TWO CHARACTERISTICS WITH THE SAME NAME AND THE SAME POPULATION.
+// The population cannot separate them, so an ordinal does — the last resort,
+// and honest about being one.
+const sameCohortSource = viewerFixtureSource();
+sameCohortSource.attributeDefinitions.push({
+  key: "perfil_cliente_z",
+  label: "Generación",
+  dataType: "category",
+  sensitivity: "internal",
+  filterable: true,
+  displayOrder: 9,
+});
+sameCohortSource.attributeValues.push({
+  participantId: "a1",
+  attributeKey: "perfil_cliente_z",
+  status: "answered",
+  text: "Boomer",
+  numeric: null,
+});
+const sameCohortLabels = buildPresentationRead(sameCohortSource)
+  .registry.entries.filter((entry) => entry.semantic === "filter_dimension")
+  .map((entry) => entry.label);
+eq(
+  "dos características de la misma población tampoco comparten nombre",
+  new Set(sameCohortLabels).size,
+  sameCohortLabels.length,
+);
+check(
+  sameCohortLabels.some((label) => label === "Generación · 1") && sameCohortLabels.some((label) => label === "Generación · 2"),
+  `y se separan por un ordinal cuando nada más las separa (${sameCohortLabels.filter((label) => label.startsWith("Generación")).join(" | ")})`,
 );
 
 /* -------------------------------------------------------------------------- */

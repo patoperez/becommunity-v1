@@ -48,8 +48,10 @@
  */
 
 import {
+  BLOCK_KIND_LABEL,
   DEFAULT_DISPLAY_FORMAT,
   GRID_COLUMNS,
+  chartVariantLabel,
   duplicateBlock as clonePresentationBlock,
   duplicatePage as clonePresentationPage,
   isPresentationHandle,
@@ -1369,41 +1371,146 @@ export type IneligibleReason =
   | "forbidden_filter_cross"
   | "unsupported_filter_dimension";
 
+/**
+ * A NAME THAT TELLS TWO BLOCKS APART, when an author has given them one name.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THIS IS NEEDED AT ALL.
+ *
+ * A block's title is authored, and nothing stops two blocks carrying the same
+ * one — the approved layout does it deliberately, because «Miembros activos» is
+ * the right heading both for the recommendation figure of that population and
+ * for the cloud of terms they wrote. On the page that is fine: the two sit in
+ * different sections and a reader is never asked to choose between them.
+ *
+ * In the connection list they ARE the choice, and two identical rows are a
+ * control nobody can operate. An author ticking one of them cannot know which
+ * block they just wired to the panel.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT THE QUALIFIER IS.
+ *
+ * TRUE CONTEXT, in plain Spanish, in order of how much it tells somebody:
+ *
+ *   1. WHAT THE BLOCK DRAWS — «Nube de términos», «Cifra sola». This is the
+ *      one a person actually recognises, and it is the distinction the approved
+ *      layout's own collision has.
+ *   2. WHICH PAGE it is on, when the drawings are the same too.
+ *   3. ITS POSITION on its page, when nothing else separates them. Last resort,
+ *      always distinct, and honest about being a position.
+ *
+ * A title that does not collide is returned untouched.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * AND IT IS DISPLAY TEXT, NEVER AN IDENTIFIER.
+ *
+ * No block id, no handle, no semantic, no `snake_case`. A connection is still
+ * saved by the block's own opaque id; this only decides what a person reads
+ * beside the checkbox — and, because the checkbox takes its accessible name
+ * from that text, what a screen reader announces.
+ */
+function candidateLabels(
+  document: PresentationDocument,
+  candidates: readonly { block: PresentationBlock; pageId: string }[],
+): Map<string, string> {
+  const pageTitle = new Map(document.pages.map((page) => [page.id, page.title]));
+  const positionOnPage = new Map<string, number>();
+  for (const page of document.pages) {
+    page.blocks.forEach((block, index) => positionOnPage.set(block.id, index + 1));
+  }
+
+  const base = (block: PresentationBlock): string => {
+    const authored = block.copy.title === null ? "" : block.copy.title.trim();
+    return authored.length > 0 ? authored : BLOCK_KIND_LABEL[block.kind];
+  };
+  const drawing = (block: PresentationBlock): string =>
+    block.kind === "result" || block.kind === "journey_routes"
+      ? chartVariantLabel(block.chartVariant as ChartVariant)
+      : BLOCK_KIND_LABEL[block.kind];
+
+  const groups = new Map<string, { block: PresentationBlock; pageId: string }[]>();
+  for (const candidate of candidates) {
+    const name = base(candidate.block);
+    groups.set(name, [...(groups.get(name) ?? []), candidate]);
+  }
+
+  const labels = new Map<string, string>();
+  for (const [name, group] of groups) {
+    if (group.length === 1) {
+      labels.set(group[0].block.id, name);
+      continue;
+    }
+    // Try each qualifier in turn and take the first that separates the WHOLE
+    // group. A qualifier that separates only some of it would leave the rest
+    // looking distinguished when they are not.
+    const qualifiers: ((entry: { block: PresentationBlock; pageId: string }) => string)[] = [
+      (entry) => drawing(entry.block),
+      (entry) => `en «${pageTitle.get(entry.pageId) ?? ""}»`,
+      (entry) => `${drawing(entry.block)}, en «${pageTitle.get(entry.pageId) ?? ""}»`,
+      (entry) => `${drawing(entry.block)}, ${positionOnPage.get(entry.block.id) ?? 0}.º de su página`,
+    ];
+    const chosen =
+      qualifiers.find((qualifier) => new Set(group.map(qualifier)).size === group.length) ??
+      qualifiers[qualifiers.length - 1];
+    for (const entry of group) labels.set(entry.block.id, `${name} · ${chosen(entry)}`);
+  }
+  return labels;
+}
+
 export function connectionCandidates(
   document: PresentationDocument,
   context: ComposerContext,
   panelId: string,
 ): {
-  eligible: { block: PresentationBlock; pageId: string; connected: boolean }[];
-  ineligible: { block: PresentationBlock; pageId: string; reason: IneligibleReason }[];
+  eligible: { block: PresentationBlock; pageId: string; label: string; connected: boolean }[];
+  ineligible: { block: PresentationBlock; pageId: string; label: string; reason: IneligibleReason }[];
 } {
   const panel = findBlock(document, panelId);
-  const eligible: { block: PresentationBlock; pageId: string; connected: boolean }[] = [];
-  const ineligible: { block: PresentationBlock; pageId: string; reason: IneligibleReason }[] = [];
+  const eligible: { block: PresentationBlock; pageId: string; label: string; connected: boolean }[] = [];
+  const ineligible: { block: PresentationBlock; pageId: string; label: string; reason: IneligibleReason }[] = [];
   if (!panel || panel.block.kind !== "filter_panel") return { eligible, ineligible };
   const dimensions = panel.block.dimensions;
+
+  // EVERY candidate is named once, over the whole set, before any of them is
+  // classified. Naming them per list would let an eligible block and an
+  // ineligible one end up sharing a name — and the two lists sit one above the
+  // other on the same card.
+  const named: { block: PresentationBlock; pageId: string }[] = [];
+  for (const page of document.pages) {
+    for (const block of page.blocks) {
+      if (block.id === panelId) continue;
+      named.push({ block, pageId: page.id });
+    }
+  }
+  const labels = candidateLabels(document, named);
+  const labelOf = (block: PresentationBlock): string => labels.get(block.id) ?? BLOCK_KIND_LABEL[block.kind];
 
   for (const page of document.pages) {
     for (const block of page.blocks) {
       if (block.id === panelId) continue;
       if (!blockIsFilterable(block)) {
-        ineligible.push({ block, pageId: page.id, reason: "block_not_filterable" });
+        ineligible.push({ block, pageId: page.id, label: labelOf(block), reason: "block_not_filterable" });
         continue;
       }
       const entry = block.kind === "result" ? catalogEntry(context.catalog, block.binding) : null;
       if (!entry) {
-        ineligible.push({ block, pageId: page.id, reason: "unknown_handle" });
+        ineligible.push({ block, pageId: page.id, label: labelOf(block), reason: "unknown_handle" });
         continue;
       }
       if (dimensions.some((dimension) => entry.forbiddenFilters.includes(dimension))) {
-        ineligible.push({ block, pageId: page.id, reason: "forbidden_filter_cross" });
+        ineligible.push({ block, pageId: page.id, label: labelOf(block), reason: "forbidden_filter_cross" });
         continue;
       }
       if (dimensions.some((dimension) => !entry.supportedFilters.includes(dimension))) {
-        ineligible.push({ block, pageId: page.id, reason: "unsupported_filter_dimension" });
+        ineligible.push({ block, pageId: page.id, label: labelOf(block), reason: "unsupported_filter_dimension" });
         continue;
       }
-      eligible.push({ block, pageId: page.id, connected: block.connectedFilterPanelIds.includes(panelId) });
+      eligible.push({
+        block,
+        pageId: page.id,
+        label: labelOf(block),
+        connected: block.connectedFilterPanelIds.includes(panelId),
+      });
     }
   }
   return { eligible, ineligible };

@@ -56,8 +56,18 @@
  * «Desertores» — sat unused in the specification. A surface offering those
  * values as controls would print the enum. Additive, so minor: nothing moved,
  * nothing was re-typed, and no number changed.
+ *
+ * 2.2.0 — `FilterDimension` gained `cohortLabels`. A study can ask the SAME
+ * question of two different populations on two different sheets, and this
+ * contract then publishes two dimensions with byte-identical labels —
+ * «Generación» twice, «Giro» twice, six pairs in the approved study. They are
+ * not interchangeable: each is answered by exactly one cohort, so a selection
+ * on one is implicitly scoped to that cohort, and a surface that showed them
+ * under one name would offer a reader two controls it could not tell apart.
+ * Which cohorts answered is a fact this layer already holds; saying it is what
+ * lets a surface name them truthfully. Additive, so minor.
  */
-export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.1.0";
+export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.2.0";
 
 /**
  * The unit a number lives in. Presentation may style it; it may not change it.
@@ -364,6 +374,20 @@ export type FilterValue = {
 export type FilterDimension = {
   key: string;
   label: string;
+  /**
+   * The study's own words for the cohorts that ANSWERED this characteristic.
+   *
+   * Empty for the cohort dimension itself — it IS the cohorts — and empty for a
+   * characteristic nobody answered. One entry means the characteristic is
+   * recorded for exactly that population, which is what a surface needs in
+   * order to tell two identically-worded questions apart without inventing a
+   * distinction. Two or more means it is asked of several, and no qualifier is
+   * needed.
+   *
+   * It is a DESCRIPTION and not a filter: nothing here narrows a population, and
+   * a dimension's own `values` and counts are unchanged by it.
+   */
+  cohortLabels: string[];
   dataType: "text" | "category" | "number" | "date" | "boolean";
   values: FilterValue[];
   /**
