@@ -1153,6 +1153,18 @@ The full record — counts per table, parity, the backup and its restore
 rehearsal, the legacy before/after and every skipped check — is in
 `docs/CURRENT_STATE.md` §"Unit 5 Phase 2".
 
+**An import is not a conversion, and this is where the two are easiest to
+confuse.** Writing 8 588 canonical rows read nothing from the legacy experience
+tables and rewrote nothing in them. The Cuicuilco legacy draft was at schema
+version 2, revision 72 before the import and is at schema version 2, revision 72
+now; `study_experience_draft` still holds its two rows and
+`study_experience_event` its 86. The canonical presentation draft that arrived
+later — Unit 6B.3B, 2026-09-08 — is a **separate** schema-version-4 row in
+`canonical_presentation_draft`, the table migration `0029` created. It is not
+that legacy row converted, and it could not be: the two live in different
+tables, and `0029`'s `schema_version` column admits 4 by equality while the
+legacy column admits 1 to 1000.
+
 ⚠️ **T7 is still unproved**: recovery from a timeout killed mid-commit. This
 commit did not come near the timeout, which is evidence about THIS package and
 not about the failure mode.

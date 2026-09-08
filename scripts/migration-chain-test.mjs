@@ -59,13 +59,34 @@
 //       hosted project has never been contacted. Since 2026-09-06 the canonical
 //       chain IS applied to the hosted project, so the claim this section
 //       guards has inverted with the fact: every governing document must now
-//       RECORD that application, none may call it pending, and none may claim
-//       the step that has NOT happened — a real workbook imported into the
-//       canonical tables.
+//       RECORD that application and none may call it pending.
 //
-// It contacts nothing. It reads files.
+//       THE REAL WORKBOOK IMPORT INVERTED WITH IT, AND THIS SECTION WAS THE
+//       LAST PLACE STILL SAYING OTHERWISE. It carried "none may claim the step
+//       that has NOT happened — a real workbook imported into the canonical
+//       tables" until 2026-09-08, five weeks after Unit 5 Phase 2 imported the
+//       real Cuicuilco package on 2026-09-06. The rule passed only because its
+//       subject pattern did not match the words the documents actually use, so
+//       it was a false premise AND a check of nothing. It is replaced by the
+//       four distinctions the fact actually has, which are not the same claim
+//       and must not be collapsed into one:
+//
+//         (a) the real workbook PACKAGE was imported into the canonical tables;
+//         (b) the raw workbook BYTES were not committed to git — an import is
+//             not a checkout, and the source files carry respondent answers;
+//         (c) importing canonical evidence CONVERTED NOTHING: the legacy
+//             experience drafts were not read, rewritten or migrated by it, and
+//             the hosted Cuicuilco legacy draft is still schema version 2
+//             revision 72;
+//         (d) the canonical presentation draft is a SEPARATE schema-version-4
+//             row in a table migration 0029 created — not that legacy row
+//             converted, and not a second row beside it in the legacy table.
+//
+// It contacts nothing — no network, no database, no hosted project. It reads
+// files, and asks the local git index which of them are committed.
 // =============================================================================
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -698,9 +719,10 @@ console.log("\n[7] The documentation does not claim an application that never ha
   // applied, and none may regress to calling that work pending.
   //
   // What has NOT changed is the thing worth protecting — a document must never
-  // describe a step as done that has not happened. The real-workbook import is
-  // still not done, so it is guarded here in exactly the way the migration
-  // application used to be.
+  // describe a step as done that has not happened, and must never describe a
+  // step as undone that HAS. The second half is what this section forgot: it
+  // went on guarding "no real workbook has been imported" for five weeks after
+  // Unit 5 Phase 2 imported one. See the four distinctions in the file header.
   const NEGATOR = /\b(?:not|never|no|none|nothing|neither|nor|pending|until|unless|without|cannot)\b/i;
   const sentences = (text) =>
     text
@@ -729,11 +751,97 @@ console.log("\n[7] The documentation does not claim an application that never ha
       (s) => PRESENTATION_APPLIED_SUBJECT.test(s) && APPLIED_VERB.test(s) && !NEGATOR.test(s),
     );
 
-  /** Sentences claiming a real workbook has been imported — still forbidden. */
-  const IMPORT_SUBJECT = /\breal (?:workbook|package)s?\b|\bCuicuilco workbooks?\b/i;
-  const IMPORT_VERB = /\b(?:has|have|was|were|is|are)\s+(?:been\s+)?(?:imported|loaded|uploaded)\b/i;
-  const claimsRealImport = (text) =>
+  /**
+   * (a) Sentences RECORDING the real workbook import — now required.
+   *
+   * The subject deliberately tolerates a word between "real" and the noun,
+   * because every document writes "the real Cuicuilco package" and the previous
+   * pattern demanded them adjacent. That gap is why the obsolete rule this
+   * replaces passed: it was a false premise that also matched nothing, and the
+   * second failure hid the first.
+   */
+  const IMPORT_SUBJECT =
+    /\breal\b[^.]{0,40}\b(?:workbook|package)s?\b|\bCuicuilco (?:workbook|package)s?\b/i;
+  const IMPORT_VERB = /\b(?:has|have|was|were|is|are)\s+(?:been\s+)?imported\b/i;
+  const assertsRealImport = (text) =>
     sentences(text).filter((s) => IMPORT_SUBJECT.test(s) && IMPORT_VERB.test(s) && !NEGATOR.test(s));
+
+  /**
+   * (c) Sentences recording that the import left the legacy drafts alone.
+   *
+   * `NEGATOR` is deliberately NOT applied here. The claim worth requiring IS a
+   * negative — "no legacy draft was touched" — so filtering negated sentences
+   * out would reject exactly the sentence being asked for.
+   */
+  const LEGACY_SUBJECT = /\blegacy (?:experience )?drafts?\b|\bstudy_experience_draft\b/i;
+  const LEGACY_INTACT =
+    /\b(?:byte-identical|unchanged|untouched|not touched|never touched|is not read|not migrated|not converted|not overwritten|structurally unreachable)\b/i;
+  const assertsLegacyIntact = (text) =>
+    sentences(text).filter((s) => LEGACY_SUBJECT.test(s) && LEGACY_INTACT.test(s));
+
+  /**
+   * (c continued) The hosted Cuicuilco legacy draft, at the version and
+   * revision it has held throughout.
+   *
+   * A sentence about a PLANTED row does not count. `0029`'s own audit planted a
+   * legacy row at revision 72 on a disposable database and then watched the
+   * legacy RPC move it to 73 — so "revision 72" appears in these documents
+   * describing a row that was deliberately destroyed to prove a point. Letting
+   * that satisfy this check would be the same defect in a new place: a check
+   * passing on the strength of a sentence about something else.
+   */
+  const PLANTED = /\b(?:planted|disposable|throwaway|synthetic|stand-in)\b/i;
+  const assertsCuicuilcoLegacyRevision = (text) =>
+    sentences(text).filter(
+      (s) =>
+        /\bCuicuilco\b/i.test(s) &&
+        /\brevision 72\b|\bv2\/72\b/i.test(s) &&
+        /\bversion 2\b|\bv2\b|\bschema_version 2\b/i.test(s) &&
+        !PLANTED.test(s),
+    );
+
+  /**
+   * (d) The canonical presentation draft is a SEPARATE row of its own family.
+   *
+   * Two requirements rather than one sentence, because no document states both
+   * halves in one breath and forcing them together would only teach the next
+   * author to write a sentence for the gate: `0029` creates a separate table,
+   * and what that table holds is a schema-version-four draft.
+   */
+  // `\b0029\b` DOES NOT MATCH `0029_canonical_presentation_draft.sql`, because
+  // `_` is a word character and there is therefore no boundary after the digits.
+  // Every document names the migration by its filename at least once, so a
+  // pattern that cannot see the filename form is a pattern that reads half the
+  // evidence — which is how the rule this section replaces came to check
+  // nothing at all.
+  const PRESENTATION_MIGRATION =
+    /(?<![0-9])0029(?![0-9])|canonical_presentation_draft|canonical presentation draft/i;
+
+  const assertsSeparateDraftTable = (text) =>
+    sentences(text).filter((s) => PRESENTATION_MIGRATION.test(s) && /\bseparate\b/i.test(s));
+  const assertsDraftIsVersionFour = (text) =>
+    sentences(text).filter(
+      (s) =>
+        (PRESENTATION_MIGRATION.test(s) || /\bpresentation documents?\b/i.test(s)) &&
+        /\bv4\b|\bversion 4\b|\bversion four\b|\bschema_?[Vv]ersion:? ?4\b|\bschema version 4\b|\badmits \*\*4 by equality\*\*/i.test(s),
+    );
+
+  /**
+   * (c) A claim that a legacy draft WAS converted — forbidden, and checked per
+   * sentence rather than over the whole document.
+   *
+   * It lives here instead of in `WITHDRAWN` because `WITHDRAWN` matches raw
+   * text, and the sentence this must not fire on is
+   * "…no legacy draft was converted, no formula moved…" — a true statement
+   * whose negation a whole-document regex cannot see. Put in that list it
+   * failed the very document that says the right thing.
+   */
+  const claimsLegacyConverted = (text) =>
+    sentences(text).filter(
+      (s) =>
+        /\blegacy (?:experience )?drafts?\b[^.]{0,60}\b(?:was|were|has been|have been) (?:converted|migrated|rewritten|overwritten)\b/i.test(s) &&
+        !NEGATOR.test(s),
+    );
 
   // Claims the hosted work of this unit has already withdrawn. Each was true
   // when written and is false now; leaving one in place tells the next session
@@ -754,6 +862,24 @@ console.log("\n[7] The documentation does not claim an application that never ha
     [/\bcanonical_presentation_draft\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
       "canonical_presentation_draft EXISTS on the hosted project"],
     [/\bno study has a canonical (?:presentation )?draft\b/i, "Cuicuilco has one, at revision 1"],
+    // Withdrawn on 2026-09-06 by Unit 5 Phase 2, and guarded here only from
+    // 2026-09-08 — this section spent five weeks asserting the opposite.
+    //
+    // EVERY PATTERN SAYS "imported", NEVER "uploaded" OR "supplied", and that is
+    // deliberate. `docs/CANONICAL_STUDY_MODEL.md` truthfully records that the
+    // synthetic acceptance run had "no real workbook uploaded", and both parity
+    // gates truthfully record runs where the real workbooks were "deliberately
+    // not supplied". Those sentences are about a FILE reaching a run; these
+    // patterns are about a PACKAGE reaching the canonical tables, which did
+    // happen. Widening these to the other verbs would fail three true sentences.
+    [/\bno real\b[^.]{0,40}\b(?:workbook|package)s?\b[^.]{0,40}\b(?:was|were|has been|have been) imported\b/i,
+      "the real Cuicuilco package WAS imported into the canonical tables (2026-09-06)"],
+    [/\breal[- ](?:workbook|package) import (?:is|remains) (?:still )?(?:not done|pending|outstanding)\b/i,
+      "the real-workbook import is DONE"],
+    [/\bthe real workbooks?\b[^.]{0,30}\b(?:was|were) not imported\b/i,
+      "they were imported on 2026-09-06"],
+    [/\bnothing (?:real )?(?:has been|was) imported into the canonical tables\b/i,
+      "8 588 rows across 32 families were"],
   ];
 
   for (const doc of DOCS) {
@@ -780,10 +906,47 @@ console.log("\n[7] The documentation does not claim an application that never ha
       `${doc} no longer calls the hosted migration application pending${stillPending.length ? ` — "…${stillPending[0].slice(0, 90)}"` : ""}`,
     );
 
-    const imported = claimsRealImport(text);
+    const imported = assertsRealImport(text);
     check(
-      imported.length === 0,
-      `${doc} never claims a real workbook was imported into canonical tables${imported.length ? ` — "…${imported[0].slice(0, 90)}"` : ""}`,
+      imported.length > 0,
+      `${doc} records that the real workbook package WAS imported into the canonical tables` +
+        `${imported.length ? "" : " — it does not, and it was, on 2026-09-06"}`,
+    );
+
+    const legacyIntact = assertsLegacyIntact(text);
+    check(
+      legacyIntact.length > 0,
+      `${doc} records that the import converted no legacy experience draft` +
+        `${legacyIntact.length ? "" : " — it does not, and an import that silently rewrote one is the failure this whole line of work exists to prevent"}`,
+    );
+
+    const legacyRevision = assertsCuicuilcoLegacyRevision(text);
+    check(
+      legacyRevision.length > 0,
+      `${doc} records the hosted Cuicuilco legacy draft at schema version 2 revision 72, ` +
+        `in a sentence that is not about a planted or disposable row` +
+        `${legacyRevision.length ? "" : " — it does not"}`,
+    );
+
+    const separateTable = assertsSeparateDraftTable(text);
+    check(
+      separateTable.length > 0,
+      `${doc} records that 0029's storage is SEPARATE from the legacy draft table` +
+        `${separateTable.length ? "" : " — it does not, and a reader could take the canonical draft for a converted legacy row"}`,
+    );
+
+    const versionFour = assertsDraftIsVersionFour(text);
+    check(
+      versionFour.length > 0,
+      `${doc} records that what that table holds is a schema-version-FOUR draft` +
+        `${versionFour.length ? "" : " — it does not"}`,
+    );
+
+    const converted = claimsLegacyConverted(text);
+    check(
+      converted.length === 0,
+      `${doc} never claims a legacy experience draft was converted or overwritten` +
+        `${converted.length ? ` — "…${converted[0].slice(0, 90)}"` : ""}`,
     );
 
     for (const [pattern, why] of WITHDRAWN) {
@@ -816,6 +979,79 @@ console.log("\n[7] The documentation does not claim an application that never ha
       `${doc} names the current canonical numbers (${canonical.map((e) => e.prefix).join(", ")})`,
     );
   }
+
+  // ---- (b) the workbook was IMPORTED, and that is not a checkout -----------
+  //
+  // The two facts are easy to slide together and must not be. A package
+  // reaching the canonical tables of one hosted project is not the same event
+  // as its source bytes entering a git history that every clone carries
+  // forever — and those bytes are 60 people's answers.
+  //
+  // THE FILE LIST COMES FROM GIT, NOT FROM A DIRECTORY WALK. A walk would
+  // answer "is a workbook sitting in this folder", which is a different and
+  // much weaker question: the real workbooks DO sit beside the main checkout,
+  // untracked, and a gate that failed on that would be crying about the correct
+  // state of the world. `git ls-files` answers the question actually asked —
+  // what is committed. It is a local read of the repository's own index; this
+  // gate still contacts no network and no database.
+  // A missing git is a FAILED CHECK, not an uncaught exception. This gate is in
+  // the mandatory offline chain, and a stack trace where a verdict belongs
+  // reads like a broken harness rather than an unanswered question.
+  let tracked = null;
+  try {
+    tracked = execFileSync("git", ["-C", root, "ls-files", "-z"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .split("\0")
+      .filter(Boolean);
+  } catch {
+    tracked = null;
+  }
+  check(
+    tracked !== null && tracked.length > 0,
+    "the committed file list is readable, so what is in git can be checked at all" +
+      `${tracked === null ? " — git did not answer, and this check cannot be skipped quietly" : ""}`,
+  );
+  tracked = tracked ?? [];
+
+  const spreadsheets = tracked.filter((p) => /\.(?:xlsx|xlsm|xls)$/i.test(p));
+  check(
+    spreadsheets.length === 0,
+    `no spreadsheet is committed to this repository (${tracked.length} tracked files scanned)` +
+      `${spreadsheets.length ? ` — TRACKED: ${spreadsheets.slice(0, 3).join(", ")}` : ""}`,
+  );
+
+  // And by CONTENT, not only by extension, because a rename is not a redaction.
+  // The two digests are the ones `docs/CURRENT_STATE.md` pins for the imported
+  // package's source assets; the doc is checked to still pin them, so neither
+  // side can drift into agreeing with itself.
+  const REAL_WORKBOOK_SHA256 = {
+    clean_study_data: "8d7afdb479208d47e4cd2b08fac5d480f3f945edcf448f52eb588a41e167bca5",
+    curated_pain_map: "bd0e70d7fbb73a6834c8e4cfd5ad768ea6c3db6ffcf0682179fe58fcc3fbc890",
+  };
+  const stateDoc = read("docs/CURRENT_STATE.md");
+  for (const [role, digest] of Object.entries(REAL_WORKBOOK_SHA256)) {
+    check(
+      stateDoc.includes(digest),
+      `docs/CURRENT_STATE.md still pins the ${role} source digest this check compares against`,
+    );
+  }
+  const byContent = tracked.filter((path) => {
+    let bytes;
+    try {
+      bytes = readBytes(path);
+    } catch {
+      return false; // a tracked path that is not a readable file here is not a workbook
+    }
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    return Object.values(REAL_WORKBOOK_SHA256).includes(digest);
+  });
+  check(
+    byContent.length === 0,
+    `and no committed file carries the real workbook bytes under any name` +
+      `${byContent.length ? ` — TRACKED: ${byContent.join(", ")}` : ""}`,
+  );
 
   // The gate itself must be in the offline chain: a rule nobody runs is not a
   // rule, and this one exists precisely because the collision was silent.

@@ -3604,6 +3604,12 @@ what proves only one write happened.
 | written at | **2026-09-08 19:25:48.039969 UTC**, `created_at` = `updated_at` |
 | `canonical_presentation_draft_event` | **1 row** — `draft_created`, revision 1, idempotency key `save-6153faa8-8c26-46b2-9572-4dc6d85ca17d` |
 
+**It is a new row in a separate table, not a converted legacy one.**
+`canonical_presentation_draft` is the table migration `0029` created; the
+Cuicuilco legacy draft sits where it always has, in `study_experience_draft`, at
+schema version 2 revision 72. The canonical row is schema version 4. Nothing
+converted, nothing migrated, and nothing read the legacy row on the way.
+
 **The stored document is the expected document, byte-semantically.** It was read
 back out of the row, re-serialized canonically and compared with the document
 built before the write: identical canonical JSON, identical SHA-256, and every
@@ -3702,10 +3708,9 @@ finding as one that gained it unexpectedly.
    schema is deliberately excluded, as in every previous backup; the sign-ins
    this unit performed wrote auth sessions, which are not restorable state and
    are not part of what this phase could affect.
-5. **`migration-chain-test.mjs`'s "no document claims a real workbook was
-   imported" rule is stale** — one WAS imported on 2026-09-06 and `CLAUDE.md`
-   says so; the rule passes only because its subject pattern does not match the
-   phrasing used. Pre-existing, untouched here, and worth a separate look.
+5. ~~**`migration-chain-test.mjs`'s "no document claims a real workbook was
+   imported" rule is stale**~~ — **CLOSED 2026-09-08**, see §"Unit 6B.3B.1"
+   below.
 
 #### Still deferred, and deliberately so
 
@@ -3713,3 +3718,113 @@ P6E has **no** canonical draft and did not get one. Nothing was deployed, no
 application code was promoted, the client route was not switched, no publication
 or immutable snapshot was created, no legacy draft was converted, no formula
 moved, and shadow mode is still off everywhere.
+
+---
+
+### Unit 6B.3B.1 — the stale import rule, closed (2026-09-08)
+
+One narrow test-integrity fix. `migration-chain-test.mjs` §[7] carried a rule
+forbidding any governing document from saying a real workbook had been imported
+into the canonical tables. **That premise was false for five weeks**: Unit 5
+Phase 2 imported the real Cuicuilco package on 2026-09-06, and `CLAUDE.md`,
+`docs/CURRENT_STATE.md` and `docs/CANONICAL_STUDY_MODEL.md` all say so.
+
+**It passed anyway, and that is the more interesting half.** Its subject pattern
+was `/\breal (?:workbook|package)s?\b/` — the two words adjacent — while every
+document writes "the real Cuicuilco **package**". So the rule matched nothing,
+in three documents that contradicted it. A false premise and a check of nothing,
+each hiding the other: had the pattern worked, the false premise would have
+failed the gate the day the import happened and been corrected then.
+
+#### What replaced it
+
+Not one inverted rule. The fact has four distinctions that a single sentence
+would collapse, and collapsing them is how a reader ends up believing the
+canonical draft is the legacy draft converted:
+
+| # | the distinction | how it is checked |
+|---|---|---|
+| (a) | the real workbook **package** was imported into the canonical tables | every governing document must carry a non-negated sentence saying so |
+| (b) | the raw workbook **bytes** were not committed to git | no tracked `.xlsx`/`.xlsm`/`.xls`, and no tracked file whose SHA-256 is either pinned source digest — by content, because a rename is not a redaction |
+| (c) | importing canonical evidence **converted nothing** | each document must record the legacy drafts as untouched, must record the hosted Cuicuilco legacy draft at **schema version 2 revision 72**, and may not claim a legacy draft was converted, migrated, rewritten or overwritten |
+| (d) | the canonical presentation draft is a **separate** schema-version-4 row | each document must say `0029`'s storage is separate from the legacy table, and separately that what it holds is a v4 draft |
+
+Plus five withdrawn-claim patterns so no document can go back to denying the
+import.
+
+**Three things in that list are deliberate and would be wrong the obvious way.**
+(1) `NEGATOR` is NOT applied to (c)'s first check — the claim being required IS
+a negative, and filtering negated sentences would reject the very sentence asked
+for. (2) The withdrawn patterns say "imported", never "uploaded" or "supplied":
+`docs/CANONICAL_STUDY_MODEL.md` truthfully records a synthetic run with "no real
+workbook uploaded", and both parity gates truthfully record runs where the real
+workbooks were "deliberately not supplied" — widening the verbs would fail three
+true sentences. (3) (c)'s revision check **excludes sentences about a planted or
+disposable row**, because `0029`'s own audit planted a legacy row at revision 72
+and watched the legacy RPC move it to 73; letting that satisfy a check about the
+hosted row would be the same defect in a new place.
+
+#### Two of the new rules were wrong first, and the mutation proof is what said so
+
+`\b0029\b` does not match `0029_canonical_presentation_draft.sql` — `_` is a
+word character, so there is no boundary after the digits — and the first draft of
+(d) therefore failed two documents that state exactly what it asked for. And
+(c)'s "no legacy draft was converted" started life in the whole-document
+`WITHDRAWN` list, where it fired on `docs/CURRENT_STATE.md`'s own true sentence
+*"no legacy draft was converted, no formula moved"*: a raw-text regex cannot see
+a negation. It is a per-sentence check now. **Both are the failure this unit is
+about, met twice while fixing it.**
+
+#### The proof that the rules discriminate
+
+A rule that passes is not evidence until it has been made to fail for the reason
+it claims to guard. **Eight mutations, eight failures, each naming its own
+distinction**, every one reverted and the four touched files digested before and
+after:
+
+1. a document denies the import → the withdrawn pattern fires;
+2. **the stale rule itself, restored with a working subject pattern** → it fails
+   on `CLAUDE.md`, which is the demonstration that its premise was false;
+3. a document stops recording the import → (a) fails;
+4. a document asserts the legacy row itself became the canonical one → (c) fails;
+5. the hosted Cuicuilco draft is recorded at another revision → (c) fails;
+6. a document stops calling `0029`'s storage separate → (d) fails;
+7. a spreadsheet becomes tracked → (b) fails, naming the file;
+8. the content scan aimed at a file that IS tracked → (b) fails, naming it.
+
+⚠️ **A text rule cannot tell use from mention, and this document had to be
+written around that.** The mutation list above originally spelled out the
+forbidden sentence in order to say it was forbidden, and (c) fired on this very
+section — correctly, by its own lights. There is no fix inside the rule that
+would not also let the real claim through under a thin wrapper, so the
+convention is the other way round: a governing document DESCRIBES a forbidden
+claim, it never quotes one. Anyone extending these rules should expect to pay
+that cost again.
+
+Mutation 8 uses a tracked synthetic sample rather than the real workbook:
+staging respondent answers to prove respondent answers are not staged would be
+the joke it sounds like, and it exercises the identical comparison.
+
+All four files restored **byte-for-byte** (SHA-256 before and after), and the
+gate is green again after the last revert.
+
+#### Documentation changed only where a check found a real gap
+
+- `docs/CANONICAL_STUDY_MODEL.md` recorded the import but never the hosted
+  Cuicuilco legacy draft's own state; it now says the draft was at v2 revision
+  72 before the import and is at v2 revision 72 now, and that the later
+  canonical draft is a separate v4 row in the table `0029` created.
+- `docs/CURRENT_STATE.md` never said the canonical draft's table is SEPARATE
+  from the legacy one — it described the migration at length and left a reader
+  to infer it. One paragraph in §"Unit 6B.3B" now says it outright.
+
+Both gaps were found by the new checks rather than by reading, which is the
+point of having them.
+
+#### Scope
+
+The gate reads files and asks the local git index which are committed; it still
+contacts no network, no database and no hosted project. **No hosted write was
+repeated, no browser QA was re-run, migration `0029` was not edited, and no
+expensive suite was run.** `test:migration-chain` and `lint` are the only gates
+this closure needed, and both are green.
