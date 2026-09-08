@@ -37,9 +37,27 @@ import "server-only";
  * is built by NAMING what goes in rather than by removing what must not. A
  * filter has to be right every time; a whitelist has to be right once.
  *
- * The registry never leaves this module. `projectPresentationCatalog` is a drop
- * that removes `source` and `addresses`, and `resolvePresentation` returns a
- * model whose types have nowhere to put either.
+ * The registry never leaves this module TOWARDS A BROWSER.
+ * `projectPresentationCatalog` is a drop that removes `source` and `addresses`,
+ * and `resolvePresentation` returns a model whose types have nowhere to put
+ * either.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT DOES LEAVE THIS MODULE TOWARDS ONE OTHER SERVER-ONLY MODULE, AND THAT IS A
+ * CORRECTION TO THE SENTENCE ABOVE.
+ *
+ * Unit 6B.4A added `src/lib/studio/publication-workspace.ts`, which needs the
+ * same canonical read: a publication has to be checked against the study's
+ * CURRENT results, and the registry those results build is where the binding,
+ * the package identity and the plan fingerprint come from. So `readAndBuild`,
+ * `readStoredDraftRow`, `decodeStoredDraft` and `refusalFor` are exported.
+ *
+ * They are exported to a `server-only` module and to nothing else, and the
+ * arrangement is deliberate rather than convenient: the alternative was a second
+ * module holding its own `SupabaseClient` and doing its own canonical read,
+ * which would be a THIRD door to the canonical layer. Sharing this one keeps the
+ * door count at two — the publication route's chain passes through this file, and
+ * the boundary gate's door table asserts exactly that by name.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT IT WILL NOT DO WHEN THERE IS NO CANONICAL PACKAGE.
@@ -98,9 +116,12 @@ import type {
 import {
   EMPTY_VIEWER_SELECTION,
   PresentationError,
+  serializeDeterministic,
   type PresentationDocument,
   type PresentationIssue,
+  type PresentationRenderModel,
 } from "@/lib/presentation";
+import { sha256Hex } from "@/lib/ingestion/canonical-commit/sha256";
 import {
   bindPresentationDocument,
   buildApprovedCuicuilcoBlueprint,
@@ -240,7 +261,7 @@ export type ComposerScope = {
  * read, one registry, one resolution: that is why they are built here and not
  * fetched separately by whoever needs them.
  */
-async function readAndBuild(
+export async function readAndBuild(
   client: SupabaseClient,
   scope: ComposerScope,
 ): Promise<CanonicalPresentationRead> {
@@ -262,7 +283,7 @@ async function readAndBuild(
   return buildPresentationRead(source);
 }
 
-function refusalFor(error: unknown): ComposerUnavailable {
+export function refusalFor(error: unknown): ComposerUnavailable {
   if (error instanceof CanonicalReadError) {
     return (
       READ_REFUSALS[error.code] ?? {
@@ -481,10 +502,50 @@ export async function resolveEditedPresentation(
  * ground moved under them, and nothing is written.
  */
 
+/* -------------------------------------------------------------------------- */
+/* THE ONE WAY THROUGH — Unit 6B.4A                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * WHY THIS FILE RE-EXPORTS THREE THINGS IT DOES NOT OWN.
+ *
+ * `src/lib/studio/publication-workspace.ts` needs to resolve a document, seal a
+ * storage envelope and digest a render model. Every one of those reaches the
+ * canonical layer — `@/lib/viewer` through the registry, `@/lib/presentation/server`
+ * through persistence — and importing them THERE would give that module its own
+ * edge into the canonical graph.
+ *
+ * That is not a style problem. The boundary gate's door table asserts that each
+ * approved page reaches the canonical layer THROUGH ITS DECLARED LOADER, and it
+ * follows the first path it finds. A publication module with its own direct edge
+ * would sometimes be found by that path and sometimes by this one, depending on
+ * the order two imports happen to be written in — a door that is approved on
+ * Tuesday and unapproved on Wednesday because somebody sorted an import block.
+ *
+ * So the publication workspace imports from HERE and from nothing else that
+ * touches the canonical layer, and its route's path to that layer is this file,
+ * always, by construction rather than by luck.
+ */
+export { resolveUnderSelection } from "@/lib/viewer";
+export type { CanonicalPresentationRead } from "@/lib/viewer";
+export { encodePresentationForStorage } from "@/lib/presentation/server";
+
+/**
+ * SHA-256 over the canonical, key-sorted serialization of a render model.
+ *
+ * The same digest, from the same helper, that every other identity in this
+ * system uses. It lives here rather than in the presentation layer because that
+ * layer must not grow a reason to hash a render model: a render model is an
+ * OUTPUT, and hashing it is a storage concern.
+ */
+export function renderModelDigest(model: PresentationRenderModel): string {
+  return sha256Hex(serializeDeterministic(model));
+}
+
 const DRAFT_TABLE = "canonical_presentation_draft";
 
 /** The row shape read back. Every column is named; none is a respondent's. */
-type DraftRow = {
+export type DraftRow = {
   schema_version: number;
   document_kind: string;
   registry_version: string;
@@ -492,6 +553,8 @@ type DraftRow = {
   revision: number;
   definition: unknown;
   definition_sha256: string;
+  /** When this revision was written. Read so a review can say WHICH revision. */
+  updated_at: string;
 };
 
 /**
@@ -500,19 +563,19 @@ type DraftRow = {
  * the first time somebody presses save. So "no row" is a success carrying null,
  * and only a transport refusal is `ok: false`.
  */
-type StoredDraftRead =
+export type StoredDraftRead =
   | { ok: true; row: DraftRow | null }
   | { ok: false; unavailable: ComposerUnavailable };
 
 /** The transport half: one row, or none, or a named refusal. Decodes nothing. */
-async function readStoredDraftRow(
+export async function readStoredDraftRow(
   client: SupabaseClient,
   scope: ComposerScope,
 ): Promise<StoredDraftRead> {
   const { data, error } = await client
     .from(DRAFT_TABLE)
     .select(
-      "schema_version, document_kind, registry_version, binding_fingerprint, revision, definition, definition_sha256",
+      "schema_version, document_kind, registry_version, binding_fingerprint, revision, definition, definition_sha256, updated_at",
     )
     .eq("study_id", scope.studyId)
     // TENANT AS WELL AS STUDY. The study id is a primary key and is already
@@ -539,7 +602,7 @@ async function readStoredDraftRow(
 }
 
 /** The decoding half: pure over a row, so both callers refuse identically. */
-function decodeStoredDraft(row: DraftRow, scope: ComposerScope) {
+export function decodeStoredDraft(row: DraftRow, scope: ComposerScope) {
   return decodePresentationFromStorage(
     {
       schemaVersion: row.schema_version,

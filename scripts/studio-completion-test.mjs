@@ -158,6 +158,7 @@ for (const required of [
   // about most — the one that was missing, and the one Unit 6B.1 added.
   "src/app/studio/e/[studyId]/interpretacion/page.tsx",
   "src/app/studio/e/[studyId]/construccion/page.tsx",
+  "src/app/studio/e/[studyId]/revision/page.tsx",
 ]) {
   assert.ok(STUDIO_ROUTES.includes(required), `the Studio route walk must find ${required}`);
 }
@@ -173,6 +174,10 @@ const KNOWN_READERS = [
   "loadAttentionBoard(",
   "loadPresentationComposerWorkspace(",
   "loadStudyInterpretation(",
+  // Unit 6B.4A. Added the day the reader was, so the order assertion BINDS for
+  // the publication review rather than falling through to the vacuous-pass
+  // guard — which would have reported a passing route it never checked.
+  "loadPublicationReview(",
 ];
 
 /**

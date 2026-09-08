@@ -854,6 +854,32 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       loader: "src/lib/studio/presentation-workspace.ts",
       via: null,
     },
+    /**
+     * THE THIRD DOOR, AND IT IS NOT A THIRD LOADER.
+     *
+     * Unit 6B.4A adds the canonical publication review. It needs canonical data
+     * for a reason nothing else supplies: a publication has to be checked
+     * against the study's results AS THEY ARE NOW, and the client-visible
+     * preview a reviewer approves is the resolution of the stored draft over
+     * those results.
+     *
+     * The standing rule — "if a surface needs canonical data it goes through one
+     * of the loaders above, or a new one is argued for in the gate first" — is
+     * satisfied by going through one of them. `publication-workspace.ts` holds
+     * no canonical reader of its own; it imports everything that touches one
+     * from `presentation-workspace.ts`, through a single import statement, so
+     * this page's path to the canonical layer runs through that file BY
+     * CONSTRUCTION rather than by which import happened to be written first.
+     *
+     * The `loader` field is what makes that a proof: this row fails the moment
+     * the publication module grows its own edge into the canonical graph, which
+     * is exactly the change that would make it a third loader.
+     */
+    {
+      page: "src/app/studio/e/[studyId]/revision/page.tsx",
+      loader: "src/lib/studio/presentation-workspace.ts",
+      via: null,
+    },
   ];
   /**
    * THE ONE SERVER ACTION THAT MAY REACH IT, and why the class stays closed.
@@ -875,10 +901,29 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
    * row rather than taking it from the request, treats the document as hostile,
    * and writes nothing.
    */
-  const APPROVED_ACTION = {
-    file: "src/app/studio/e/[studyId]/construccion/actions.ts",
-    loader: "src/lib/studio/presentation-workspace.ts",
-  };
+  const APPROVED_ACTIONS = [
+    {
+      file: "src/app/studio/e/[studyId]/construccion/actions.ts",
+      loader: "src/lib/studio/presentation-workspace.ts",
+    },
+    /**
+     * Unit 6B.4A. The publication review's two actions, for the same forced
+     * reason: publishing has to re-run the whole preflight over a fresh
+     * canonical read on the server, and the only two ways to be called from a
+     * browser are a Server Action and an HTTP route handler — and route
+     * handlers are refused above, for stronger reasons.
+     *
+     * It re-authorizes with `getUser()`, reads the role from the database,
+     * validates the study id as a UUID, reads the tenant back from the row
+     * rather than taking it from the request, and accepts NO document: four
+     * numbers and a list of closed codes, so there is nothing for a browser to
+     * smuggle in.
+     */
+    {
+      file: "src/app/studio/e/[studyId]/revision/actions.ts",
+      loader: "src/lib/studio/presentation-workspace.ts",
+    },
+  ];
   // The insights door by name, for the two checks further down that are about
   // THAT door specifically — that its page binds only the legacy payload, and
   // that its loader is server-only and mutates nothing. Derived from the table
@@ -965,11 +1010,19 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     // The composer door must NOT travel through the shadow orchestrator. Its
     // read is a read, and borrowing the comparison path would put a diagnostic
     // in the way of a product surface.
-    const composer = reaching.find((entry) => entry.page === APPROVED_DOORS[1].page);
-    assert.ok(
-      composer && !composer.path.some((step) => isShadow(step)),
-      `the composer door goes through the shadow layer: ${JSON.stringify(composer?.path)}`,
-    );
+    // NEITHER STUDIO DOOR TRAVELS THROUGH THE SHADOW ORCHESTRATOR. Their reads
+    // are reads, and borrowing the comparison path would put a diagnostic in the
+    // way of a product surface. Written as a loop over the doors that declare no
+    // `via` rather than as `APPROVED_DOORS[1]`, because an index silently means
+    // a different door the moment a row is added — which is exactly what Unit
+    // 6B.4A did.
+    for (const door of APPROVED_DOORS.filter((entry) => entry.via === null)) {
+      const found = reaching.find((entry) => entry.page === door.page);
+      assert.ok(
+        found && !found.path.some((step) => isShadow(step)),
+        `${door.page} goes through the shadow layer: ${JSON.stringify(found?.path)}`,
+      );
+    }
   });
 
   check("SÓLO la acción aprobada alcanza la capa canónica; la clase sigue cerrada", () => {
@@ -982,14 +1035,24 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     }
     assert.equal(
       reaching.length,
-      1,
+      APPROVED_ACTIONS.length,
       `server actions reaching the canonical layer: ${reaching.map((r) => r.file).join(", ")}`,
     );
-    assert.equal(reaching[0].file, APPROVED_ACTION.file);
-    assert.ok(
-      reaching[0].path.includes(APPROVED_ACTION.loader),
-      `the action skips its declared loader: ${JSON.stringify(reaching[0].path)}`,
-    );
+    for (const approved of APPROVED_ACTIONS) {
+      const found = reaching.find((entry) => entry.file === approved.file);
+      assert.ok(found, `the approved action ${approved.file} no longer reaches the canonical layer`);
+      assert.ok(
+        found.path.includes(approved.loader),
+        `${approved.file} skips its declared loader ${approved.loader}: ${JSON.stringify(found.path)}`,
+      );
+    }
+    // An action that is not in the table is an action nobody approved.
+    for (const entry of reaching) {
+      assert.ok(
+        APPROVED_ACTIONS.some((approved) => approved.file === entry.file),
+        `unapproved action reaches the canonical layer: ${entry.file}\n  via ${JSON.stringify(entry.path)}`,
+      );
+    }
     // And it writes nothing. An action that may read the canonical layer and
     // could also write one is a different door from the one that was argued for.
     //
@@ -1011,9 +1074,11 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     //
     // A gate that kept certifying the wider claim would be certifying something
     // nobody checks any more, which is worse than checking less on purpose.
-    const source = stripComments(readFileSync(APPROVED_ACTION.file, "utf8"));
-    for (const writer of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath"]) {
-      assert.ok(!source.includes(writer), `the approved action performs ${writer} directly`);
+    for (const approved of APPROVED_ACTIONS) {
+      const source = stripComments(readFileSync(approved.file, "utf8"));
+      for (const writer of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath"]) {
+        assert.ok(!source.includes(writer), `${approved.file} performs ${writer} directly`);
+      }
     }
   });
 

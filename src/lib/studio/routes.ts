@@ -38,6 +38,23 @@ export const studioStudyInterpretation = (studyId: string) => `/studio/e/${study
  * an addition between two of them keeps that order rather than breaking it.
  */
 export const studioStudyConstruction = (studyId: string) => `/studio/e/${studyId}/construccion`;
+/**
+ * The canonical publication review (Unit 6B.4A).
+ *
+ * Between the composer and the client preview, because reviewing a composed
+ * presentation is what turns one into something a client can be served. It is
+ * declared BEFORE `studioStudyPreview` for the same reason the composer is:
+ * `scripts/p8-final-acceptance-test.mjs` matches this file against an
+ * order-sensitive pattern requiring interpretation, then preview, then publish,
+ * and an addition between two of them keeps that order rather than breaking it.
+ *
+ * IT IS NOT `studioStudyPublish`. That address moves the STUDY between draft,
+ * published and archived — who may open the portal at all — and this one decides
+ * which canonical presentation a client is served inside it. Two different
+ * decisions, two surfaces, and collapsing them would make one of the two
+ * invisible.
+ */
+export const studioStudyReview = (studyId: string) => `/studio/e/${studyId}/revision`;
 export const studioStudyPreview = (studyId: string) => `/studio/e/${studyId}/vista-cliente`;
 export const studioStudyPublish = (studyId: string) => `/studio/e/${studyId}/publicar`;
 

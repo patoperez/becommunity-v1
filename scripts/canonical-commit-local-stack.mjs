@@ -12,7 +12,7 @@
 // would get.
 //
 // It creates one disposable database, applies the bootstrap and migrations
-// 0000-0028 verbatim, starts PostgREST and the path shim, then executes
+// 0000-0030 verbatim, starts PostgREST and the path shim, then executes
 // `scripts/canonical-commit-hosted-test.mjs` as a child process with the
 // environment that gate demands — so the gate's own authorization guard is
 // exercised for real rather than bypassed.
@@ -70,7 +70,7 @@ console.log(`  postgrest binary: ${BINARY}`);
 let exitCode = 1;
 
 await withDisposableDatabase(target, "localstack", async (db) => {
-  console.log("\n[stack] applying the bootstrap and migrations 0000-0029");
+  console.log("\n[stack] applying the bootstrap and migrations 0000-0030");
   psqlSuiteTransport(db).prepare();
 
   console.log("[stack] starting PostgREST and the /rest/v1 path shim");

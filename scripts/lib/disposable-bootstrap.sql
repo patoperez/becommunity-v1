@@ -4,7 +4,7 @@
 -- The tracked migrations are written for a Supabase database and reference two
 -- things a bare PostgreSQL cluster does not have: the three API roles, and the
 -- `auth` schema that owns the authentication identity. This file supplies the
--- SMALLEST believable stand-in for each, so migrations 0000-0029 can be applied
+-- SMALLEST believable stand-in for each, so migrations 0000-0030 can be applied
 -- VERBATIM to a disposable database.
 --
 -- It is test scaffolding and nothing else. It is never applied to any hosted

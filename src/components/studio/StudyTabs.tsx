@@ -9,6 +9,7 @@ import {
   studioStudyPreview,
   studioStudyPublish,
   studioStudyQualitative,
+  studioStudyReview,
 } from "@/lib/studio/routes";
 
 /**
@@ -28,6 +29,7 @@ export type StudyTabId =
   | "cualitativo"
   | "interpretacion"
   | "construccion"
+  | "revision"
   | "vista-cliente"
   | "publicar";
 
@@ -98,6 +100,18 @@ export function studySteps(workspace: StudioStudyWorkspace): Step[] {
       label: "Construcción",
       href: studioStudyConstruction(study.id),
       state: study.stages.length === 0 ? "sin recorrido todavía" : "sesión sin guardar",
+      tone: "quiet",
+    },
+    {
+      // Between composing and previewing, because reviewing is what turns the
+      // one into the other. Its state is deliberately a plain word rather than a
+      // count: whether this study has a canonical publication is a fact in a
+      // table this component does not read, and inventing a count from what it
+      // CAN see would be a progress flag pretending to be a measurement.
+      id: "revision",
+      label: "Revisión y publicación",
+      href: studioStudyReview(study.id),
+      state: "revisar y publicar",
       tone: "quiet",
     },
     {

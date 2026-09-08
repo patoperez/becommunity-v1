@@ -288,6 +288,14 @@ const CANONICAL_ORDER = [
   // other three: a canonical presentation is a presentation OF canonical
   // results, and there are none until the commit migration exists.
   "canonical_presentation_draft",
+  // Unit 6B.4A. The canonical publication lifecycle: an immutable snapshot, a
+  // current-publication pointer and an append-only log, in tables of their own.
+  // Last because it presupposes every one above it — a canonical publication is
+  // a publication OF a canonical presentation draft, which is a presentation OF
+  // canonical results — and because `scripts/canonical-publication-audit.mjs`
+  // proved, against a real PostgreSQL, that the legacy publication model cannot
+  // carry it.
+  "canonical_publication",
 ];
 
 /**
@@ -506,6 +514,19 @@ const COMMIT_TABLES = ["import_job_record", "retention_period"];
 /** Unit 6B.3A. The draft and its append-only event log. */
 const PRESENTATION_SLUG = "canonical_presentation_draft";
 const PRESENTATION_TABLES = ["canonical_presentation_draft", "canonical_presentation_draft_event"];
+/** Unit 6B.4A. The immutable snapshot, the current pointer and the lifecycle log. */
+const PUBLICATION_SLUG = "canonical_publication";
+const PUBLICATION_TABLES = [
+  "canonical_presentation_revision",
+  "canonical_presentation_publication",
+  "canonical_presentation_publication_event",
+];
+const PUBLICATION_FUNCTIONS = [
+  "refuse_canonical_publication_change",
+  "publish_canonical_presentation",
+  "restore_canonical_presentation",
+  "read_canonical_publication",
+];
 const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "commit_canonical_package", "rollback_canonical_package"];
 
 {
@@ -628,6 +649,103 @@ const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "c
     );
   }
 
+  {
+    // UNIT 6B.4A — THE PUBLICATION MIGRATION, held to the draft migration's
+    // standard and to four rules that one did not need.
+    const publication = bySlug(PUBLICATION_SLUG);
+    check(
+      sameMembers(createdTables(publication), PUBLICATION_TABLES),
+      `the publication migration still creates exactly its three tables (${createdTables(publication).length})`,
+    );
+    const publicationFunctions = [...publication.matchAll(/create or replace function public\.([a-z_]+)\(/g)].map((m) => m[1]);
+    check(
+      sameMembers(publicationFunctions, PUBLICATION_FUNCTIONS),
+      `and exactly its four functions (${publicationFunctions.join(", ") || "none"})`,
+    );
+    // THE COEXISTENCE GUARANTEE, REDUCED TO SOMETHING A GATE CAN READ. The
+    // canonical publication path addresses different tables from the legacy one,
+    // so there is no argument by which it reaches the two hosted legacy rows,
+    // the legacy revision table or the legacy publication pointer.
+    check(
+      !/study_experience/.test(executableSql(publication).join(" ")),
+      "and its executable SQL never names a legacy experience object",
+    );
+    // SCOPED TO EACH FUNCTION'S OWN DECLARATION, never to the file: this
+    // migration declares four, and a file-wide test is satisfied when ANY of
+    // them is SECURITY DEFINER — which the trigger function deliberately is not,
+    // and which the other three must each be on their own account.
+    for (const [name, terminator] of [
+      ["publish_canonical_presentation", "publish"],
+      ["restore_canonical_presentation", "restore"],
+      ["read_canonical_publication", "read"],
+    ]) {
+      const declaration = new RegExp(
+        "create or replace function public\\." + name + "\\([\\s\\S]*?\\bas \\$" + terminator + "\\$",
+      ).exec(publication);
+      check(declaration !== null, `${name}'s declaration is readable`);
+      if (!declaration) continue;
+      check(
+        /security definer/i.test(declaration[0]),
+        `${name} is SECURITY DEFINER — asserted of that function, not of the file`,
+      );
+      check(
+        /set search_path = ''/.test(declaration[0]),
+        `and ${name} pins an EMPTY search_path in the same declaration`,
+      );
+      check(
+        new RegExp("revoke execute on function public\\." + name + "\\([^)]*\\)\\s*from public, anon, authenticated", "i").test(publication),
+        `${name} is revoked from public, anon and authenticated`,
+      );
+      check(
+        new RegExp("grant execute on function public\\." + name + "\\([^)]*\\)\\s*to service_role", "i").test(publication),
+        `and ${name} is granted to service_role and nothing else`,
+      );
+    }
+    // SCHEMA VERSION FOUR BY EQUALITY, and a family discriminator beside it.
+    // The audit's finding B is that the legacy revision table has neither.
+    check(
+      /schema_version\s+integer not null check \(schema_version = 4\)/.test(publication),
+      "the snapshot column admits schema version four by EQUALITY, never a range",
+    );
+    check(
+      /document_kind\s+text not null check \(document_kind = 'canonical_presentation'\)/.test(publication),
+      "and carries a family discriminator, which the legacy revision table has no column for",
+    );
+    // THE REPRODUCIBILITY HALF. A publication storing only configuration would
+    // recompute its numbers from mutable current data — the audit's finding I.
+    check(
+      /render_model\s+jsonb not null/.test(publication) && /render_model_sha256\s+text not null/.test(publication),
+      "a snapshot stores the RESOLVED render model and a digest over it",
+    );
+    // THE IDENTITY HALF, in separate columns, so drift can be ATTRIBUTED rather
+    // than merely detected — the audit's finding D.
+    for (const column of [
+      "binding_fingerprint", "registry_version", "results_contract_version",
+      "calculation_version", "spec_id", "mapping_version",
+      "package_idempotency_key", "plan_fingerprint", "source_draft_revision",
+    ]) {
+      check(
+        new RegExp("^  " + column + "\\s", "m").test(publication),
+        "and pins " + column + " in its own column",
+      );
+    }
+    // DELETE IS REFUSED TOO, CONDITIONALLY — the audit's finding E. An
+    // unconditional refusal would make a study undeletable, which is why the
+    // condition is part of the rule rather than a weakening of it.
+    check(
+      /before update or delete on public\.canonical_presentation_revision/.test(publication),
+      "the immutability trigger covers DELETE as well as UPDATE",
+    );
+    check(
+      /if exists \(select 1 from public\.study where id = old\.study_id\)/.test(publication),
+      "and refuses a delete only while the study still exists, so a cascade still works",
+    );
+    check(
+      /pg_advisory_xact_lock/.test(publication),
+      "and publication serialises on the same advisory lock the draft save takes",
+    );
+  }
+
   const functions = [...commit.matchAll(/create or replace function public\.([a-z_]+)\(/g)].map((m) => m[1]);
   check(sameMembers(functions, COMMIT_FUNCTIONS), `the commit migration still creates exactly the four canonical RPCs (${functions.length})`);
   const definer = commit.match(/language plpgsql\s*\n\s*security definer\s*\n\s*set search_path = ''/g) ?? [];
@@ -643,13 +761,13 @@ const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "c
     );
   }
 
-  for (const [label, sql] of [["ingestion", foundation], ["analysis", analysis], ["commit", commit], ["presentation", bySlug(PRESENTATION_SLUG)]]) {
+  for (const [label, sql] of [["ingestion", foundation], ["analysis", analysis], ["commit", commit], ["presentation", bySlug(PRESENTATION_SLUG)], ["publication", bySlug(PUBLICATION_SLUG)]]) {
     const statements = executableSql(sql);
     check(statements[0] === "begin;", `${label} still opens its transaction on the first executable statement`);
     check(statements[statements.length - 1] === "commit;", `and still closes it on the last`);
     check(!/\b(rollback|savepoint|set transaction)\b/i.test(statements.join("\n")), `and declares no other transaction control`);
   }
-  for (const [label, sql] of [["ingestion", foundationBack], ["analysis", analysisBack], ["commit", commitBack], ["presentation", backBySlug(PRESENTATION_SLUG)]]) {
+  for (const [label, sql] of [["ingestion", foundationBack], ["analysis", analysisBack], ["commit", commitBack], ["presentation", backBySlug(PRESENTATION_SLUG)], ["publication", backBySlug(PUBLICATION_SLUG)]]) {
     const statements = executableSql(sql);
     check(statements[0] === "begin;" && statements[statements.length - 1] === "commit;", `${label}'s rollback is a single transaction too`);
   }
@@ -660,6 +778,10 @@ const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "c
   check(
     sameMembers(droppedTables(backBySlug(PRESENTATION_SLUG)), PRESENTATION_TABLES),
     "the presentation rollback still drops both draft tables",
+  );
+  check(
+    sameMembers(droppedTables(backBySlug(PUBLICATION_SLUG)), PUBLICATION_TABLES),
+    "and the publication rollback drops all three publication tables",
   );
 
   const SHARED_LOCKDOWN = [
@@ -688,6 +810,11 @@ const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "c
     ["analysis", analysis, ANALYSIS_TABLES, [GRANT_ALL]],
     ["commit", commit, COMMIT_TABLES, [GRANT_ALL]],
     ["presentation", bySlug(PRESENTATION_SLUG), PRESENTATION_TABLES, GRANT_SELECT_ONLY],
+    // The publication tables get the SAME strict grant as the draft, and for the
+    // same reason: their only legitimate writer is a SECURITY DEFINER function.
+    // A service_role able to UPDATE the pointer directly could change what a
+    // client is served with no event, no expected-version check and no lock.
+    ["publication", bySlug(PUBLICATION_SLUG), PUBLICATION_TABLES, GRANT_SELECT_ONLY],
   ]) {
     const LOCKDOWN = [...SHARED_LOCKDOWN, ...extra];
     const loops = securityLoops(sql);
