@@ -2449,3 +2449,93 @@ hole means changing a page that is not this unit's to change.
 All verification ran in WSL as `patop` on Node 24.11.1 / npm 10.9.2. No hosted
 service was contacted, no credential printed, no Supabase row read or written,
 no migration run, no deploy, no shadow mode, and no other worktree touched.
+
+---
+
+### Unit 6B.1 — acceptance closure (2026-09-07)
+
+Five commits on top of `8f60dc1`, ending at `e487d98`. They close five
+acceptance findings and record one that was deliberately left alone.
+
+**Retention is drawn again.** The approved blueprint bound `retention_series` to
+`bar_vertical`, and that pairing rendered NOTHING: `BarVertical` reads category
+rows, a series has none, so the block was a heading and a description over a
+blank. Every existing check passed — the variant is compatible, the payload is
+full, a component exists — because none of them drew it. `period_cards` is a new
+member of the closed vocabulary and the approved reading of a series: one card
+per period, each measure as its own figure above its own meter, which is what
+the reference dashboard draws and why a one-value-per-mark picture cannot
+replace it. The same defect had a second home — `buildGenericStartingBlueprint`
+chose from a GLOBAL union of everything drawn for any semantic — and the fix
+there exposed a third: a `journey_routes` block is not a result bound to a
+group, so asking `journey_group`'s (deliberately empty) list what to draw it as
+silently removed the journey from every generic layout.
+
+**The four-term clouds compose.** `terms.length >= 5` meant neither published
+cloud ever turned a word, so both rendered as flat lists. They now use the
+approved typographic composition: the longer words stack into a centred column,
+the shortest one or two stand at exactly −90° beside it, size is
+`min + (max−min)·√(count/largest)`, and it is built out of ordinary flow so
+overlap and clipping are impossible rather than merely untested. No connector,
+halo, bubble or diagonal. Exact count and share stay reachable by hover, focus,
+tap and the accessible name, assembled from values the server already formatted.
+
+**Sample-policy authoring is complete.** One editor serves both scopes: inherit
+(blocks only), show everything, annotate below X, hide below X. X is typed in a
+number field and every hard-coded `5` is gone; the schema always accepted
+1-10 000 and only the editor pretended otherwise. The two restrictive modes
+still require an author and a stated reason, `show_all` is still the default,
+and the
+software still suppresses nothing on its own. A block's control now exposes the
+WHOLE policy rather than only handing the decision back to the document.
+
+**The editor stopped speaking `snake_case`.** `src/lib/presentation/labels.ts`
+holds exhaustive Spanish maps over each closed vocabulary — a label map, never a
+rename, so every stored value is untouched and nothing parses a label back into
+a code. Refusal codes keep their tokens beside their sentences, because the
+surface is internal and a reviewer needs the exact string.
+
+**All 13 Studio routes are covered.** `STUDIO_ROUTES` is walked from disk, so a
+new page is covered the day it exists. The hole recorded above is closed: the
+two rules that shared one list now have two, and the serialization rule carries
+two exemptions named and argued, with a test that tells a structure rendered to
+a reader from one posted in a form value. Two further gaps found while closing
+it: a page matching no known reader passed the order rule vacuously, and one
+member of the reader allowlist matched no Studio page at all.
+
+**Gates.** `test:canonical-presentation` 294 → **314**,
+`test:canonical-composer` 321 → **371**, presentation parity 51 → **59**.
+Results parity stays
+**531/531** and presentation parity is **59/59**, with CRI 33 → "33.0", «Salida»
+TDP 133.3 unclamped, NPS 30.8 / 46.4 / −9.1, five routes and 110 journey figures
+unchanged. Six real retention periods and their twelve figures are now asserted
+where the workbooks are. Eight discrimination probes, 8/8 discriminating. Lint
+is back at the 54-warning baseline and `npm test` reports the same single
+known-red
+`hosted-target-guard` failure as `b2506e9`.
+
+**Authenticated real-route browser QA is DEFERRED, not passed.**
+Status: `AUTHENTICATED_ROUTE_QA_DEFERRED`. The three configured synthetic actors
+are refused by the hosted project with `invalid_credentials` while its auth
+service answers health 200, and rotating, resetting or creating a credential was
+out of scope. What WAS proved of the route: it answers 307 to `/login` with no
+session, and the study uuid, the composer banner and the retention heading each
+appear zero times in that response. What was NOT proved: hydration, the explicit
+preview refresh, an edit updating the preview, and a reload discarding it.
+
+**No screenshot is claimed as real-route evidence.** None was captured for that
+route, deliberately — a substitute image renamed would be worse than an absence.
+Evidence lives outside git at `C:\dev\becommunity-qa\unit-6b1-acceptance\`.
+
+**Recorded, not fixed:** `src/components/evidence/QualitativeCloud.tsx` places
+terms at nine hard-coded positions and silently DROPS any beyond the ninth
+(`items.slice(0, positions.length)`). It is the legacy client dashboard's cloud,
+mounted on a published client route, and is not this unit's to change. It is
+technical debt named here rather than repaired quietly.
+
+Four read-only hosted requests were made in this pass — one auth health check
+and three refused sign-ins — plus one read-only fingerprint. No insert, update,
+upsert, delete, RPC or migration was issued. The Cuicuilco counts (60 / 3 282 /
+31), both experience-draft revisions (v3 r14 and v2 r72) and the 86 experience
+events are identical to the values recorded above, which is the zero-mutation
+proof: a single save would have moved a revision.
