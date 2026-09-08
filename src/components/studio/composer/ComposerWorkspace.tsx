@@ -396,6 +396,13 @@ export function ComposerWorkspace({
   // open, so it is measured rather than derived from a breakpoint.
   const canvasFrame = useRef<HTMLDivElement | null>(null);
   const [room, setRoom] = useState(0);
+  // RE-ATTACHED WHEN THE SURFACE CHANGES.
+  //
+  // The canvas and the reading view are two different elements in the same
+  // place, and only one is mounted at a time. An empty dependency list left the
+  // observer watching the element that had just been unmounted, so `room`
+  // froze at whatever it last measured and the automatic "fit" zoom stopped
+  // following the window on whichever surface was opened second.
   useEffect(() => {
     const element = canvasFrame.current;
     if (!element) return;
@@ -404,7 +411,7 @@ export function ComposerWorkspace({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [chrome.surface]);
   const canvasWidth = CANVAS_WIDTH[chrome.mode];
   const previewFits = room === 0 || room >= canvasWidth;
   const zoomIsAutomatic = !chrome.zoomChosen && !previewFits;

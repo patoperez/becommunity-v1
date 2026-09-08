@@ -2722,7 +2722,7 @@ production client route is not switched in this unit.
 |---|---:|---|
 | `npm run test:canonical-viewer-filters` | **236** (new) | yes |
 | `npm run test:canonical-composer` | **383** (was 371) | yes |
-| `npm run test:studio-completion` | **50** (was 48) | yes |
+| `npm run test:studio-completion` | **49** (was 48) | yes |
 | `npm run test:canonical-presentation` | **314**, unchanged | yes |
 | `npm run test:canonical-results` | **235**, unchanged | yes |
 | `npm run test:canonical-database-source` | **74**, unchanged | yes |
