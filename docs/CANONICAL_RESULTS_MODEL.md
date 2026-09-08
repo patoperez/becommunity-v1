@@ -209,6 +209,54 @@ state, which is exact rather than approximate: only that one token maps to it.
 
 ---
 
+### The contract is at 2.1.0, and what moved was a LABEL
+
+`FilterValue` gained `label`. It was the only place this contract published a
+string a reader would be shown without the study's own words for it: the cohort
+dimension's values are `active` and `deserter`, and «Miembros activos» and
+«Desertores» sat unused in the specification. A surface offering those values as
+controls would have printed the enum, and Unit 6B.2 needed controls. Additive,
+so minor; nothing moved, nothing was re-typed, no number changed, and golden
+parity is still 531/531.
+
+For an attribute the label IS the answer text, so `value` and `label` are the
+same string there. They are still two fields, because a surface must never have
+to know which dimension is the exception.
+
+### A SELECTION CANNOT CHANGE WHAT EXISTS, and two places where it could
+
+The journey already stated this rule and enforced it: whether a column is broken
+is decided over every session the instrument has, never inside the selection.
+Unit 6B.2 found the same class of defect twice more, both live only under a
+filter and both silent:
+
+- **`performance.dimensions[].periods`** was bucketed from the SCOPED
+  observations, so a month in which nobody in the selection was observed
+  disappeared from the series and the months after it moved up. A reader
+  comparing a filtered chart with an unfiltered one would have read a missing
+  month as a fact about the study. Buckets and labels now come from the source;
+  only the contents are taken inside the selection, and an empty month reports
+  its absence in the contract's own vocabulary.
+
+- **`population.cohorts`** dropped an UNDECLARED cohort whose scoped count fell
+  to zero. Latent for Cuicuilco, whose two cohorts are both declared, and live
+  for the next study. A cohort the source has keeps its row and reports
+  `total: 0`, which is the true statement about that selection.
+
+Neither changes an unfiltered document: unfiltered, the scoped set is the whole
+set. Both are asserted by `npm run test:canonical-viewer-filters`.
+
+### RETENTION IS THE ONE SECTION A PARTICIPANT FILTER CANNOT MOVE
+
+`buildRetention` answers `cross_not_permitted` for every period the moment
+`scope.filtered` is true, for ANY dimension including cohort, because retention
+is measured over the period's roster rather than over the people who answered
+anything. That is a property of the measurement, and the presentation registry
+now declares it up front instead of advertising a capability that would fail at
+reading time.
+
+---
+
 ## 4. Population is not a denominator
 
 The chapter holds **60** people: **28** active and **32** former. None of those

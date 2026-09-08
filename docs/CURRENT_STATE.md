@@ -2576,3 +2576,213 @@ upsert, delete, RPC or migration was issued. The Cuicuilco counts (60 / 3 282 /
 31), both experience-draft revisions (v3 r14 and v2 r72) and the 86 experience
 events are identical to the values recorded above, which is the zero-mutation
 proof: a single save would have moved a revision.
+
+---
+
+### Unit 6B.2 — interactive canonical filters and the ephemeral viewer state (source only, 2026-09-07)
+
+**Branch `codex/canonical-experience-integration`, on top of Unit 6B.1's
+acceptance closure (`24c640e`).** The disabled filter panels became real viewer
+controls. Every filtered figure is recomputed by the canonical results layer on
+the server and returned as a new `PresentationRenderModel`; the browser holds
+presentation configuration and a reader's selection, and nothing else.
+
+**Nothing is stored.** No draft, no revision, no publication, no autosave, no
+`revalidatePath`, no migration, no dependency, no lockfile change, no hosted
+mutation. The Cuicuilco legacy v2 draft is not read, migrated or overwritten.
+No formula changed and no approved figure moved.
+
+#### The architecture, in the order a request travels it
+
+1. **The viewer selection is its own contract** — `src/lib/presentation/viewer.ts`.
+   It is NOT part of `PresentationDocument` and cannot be: the strict v4 schema
+   refuses an unknown field, so a selection cannot be smuggled into a stored
+   layout even by accident. A selection names three things and all three are
+   opaque: a PANEL ID the document authored, a DIMENSION HANDLE the catalogue
+   publishes, and an OPTION TOKEN — `o0`, `o1`, … — which is the ordinal
+   position of a value inside the list the server offered. There is nowhere in
+   the type to put a column, an address, a study, a predicate or a value.
+
+2. **The action treats it as hostile, separately from the document.**
+   `refreshPresentationPreview` gained a third argument with its own 64 KiB
+   ceiling, its own `JSON.parse` inside its own `try`, and its own validation.
+   It re-authorizes with `getUser()`, reads the role from the database, reads
+   the tenant back from the study row, and still writes nothing.
+
+3. **`src/lib/viewer/` is the composition, and it is PURE.** One read of the
+   evidence; one recomputation of the whole study per DISTINCT constraint set;
+   one registry rebuilt from each recomputation; one resolution. It carries no
+   `server-only` marker and no transport, which is why the offline gate drives
+   the real composition rather than a copy of it.
+
+4. **The resolver resolves per block.** `ResolveInput` gained an optional
+   `viewer` carrying the selection and a map of recomputations keyed by
+   `viewerConstraintKey`. Each block resolves against the view its OWN
+   connections name; a block no panel names resolves under the empty key, which
+   is the study's unfiltered document.
+
+#### The semantics, said once
+
+| rule | where it lives |
+|---|---|
+| a filter moves a block only when `connectedFilterPanelIds` names the panel | `viewerConstraintsFor` |
+| values inside one characteristic combine as OR | `applyFilters`, `values.includes` |
+| characteristics combine as AND | `applyFilters`, the outer loop |
+| panels moving one block combine as AND | one `AppliedFilter` per constraint, never merged |
+| «Todas las personas» is neutral | an empty constraint list, key `""` |
+| an empty result is an explicit state | `empty_filtered_population`, never a measured zero |
+
+**Two panels constraining the same characteristic are kept APART on purpose.**
+Merging them into an intersection here could produce an empty value list, and
+an empty list means "not constrained" to the canonical filter engine — the one
+spelling that would turn "nobody matches" into "everybody matches".
+
+#### Four defects this unit found and fixed
+
+1. **The cohort dimension was publishing its enum.** `FilterValue` carried a
+   `value` and no label, so a control would have offered a reader `active` and
+   `deserter` while «Miembros activos» and «Desertores» sat unused in the
+   specification. `FilterValue.label` was added and
+   `CANONICAL_RESULTS_CONTRACT_VERSION` moved to **2.1.0** — additive, so minor;
+   nothing moved and no number changed.
+
+2. **Retention advertised a capability it does not have.** The registry declared
+   `supportedFilters` for every section except `none`, while `buildRetention`
+   refuses to recompute a ROSTER under a participant selection and answers
+   `cross_not_permitted` for every period. An author could connect a retention
+   block, the resolver would accept it, and the block would go blank at reading
+   time under a refusal nobody was shown. `SECTION_ACCEPTS_PARTICIPANT_FILTERS`
+   is now an exhaustive `Record` over the closed section vocabulary.
+
+3. **A performance period vanished under a filter.** The month buckets were
+   built from the SCOPED observations, so a month in which nobody in the
+   selection was observed disappeared from the series and the months after it
+   moved up — a reader comparing a filtered chart with an unfiltered one would
+   have read a missing month as a fact about the study. Buckets and labels now
+   come from the source; only the contents are taken inside the selection.
+
+4. **An undeclared cohort's row vanished under a filter.** Same class, latent
+   for Cuicuilco (both cohorts are declared) and live for the next study.
+
+#### What the browser receives, and what it cannot
+
+`RenderFilterDimension.options` carries `{ token, label, participants }`. The
+canonical `value` has no field to travel in: it stays in the registry's
+server-only `filterOptions` map, beside the address map. The per-option counts
+are the UNFILTERED figures, deliberately — how many people carry a
+characteristic is a fact about the study, and a count that moved with the
+selection would be a number nobody measured under the selection that produced
+it.
+
+Everything a reader is told about what their selection DID arrives as a finished
+sentence: the active summary, «Con esta selección quedan 24 personas de 60.»,
+and «Ninguna persona del estudio combina estas características.» A browser
+holding a base, a threshold and a rule would be a browser doing the comparison.
+
+#### Two surfaces, opposite on purpose
+
+The authoring canvas keeps its `inert` wrapper and is handed NO viewer controls,
+so every filter control there is genuinely `disabled` under a sentence saying
+where filtering works. The new **reading view** (`chrome.surface === "read"`)
+mounts the same model the way a reader will get it: the client audience, no
+`inert` wrapper, live controls. Unit 6B.2 could have been built by making the
+canvas operable, and that would have made every chart, link and control inside
+every block operable with it.
+
+**Leaving the reading view clears the selection.** The canvas is where somebody
+authors a sample-policy threshold against the base they can see, and a
+threshold written against one selection's base is a threshold against the wrong
+number. The canvas always shows the whole study, and says so in a banner for the
+round trip it takes to get back there.
+
+#### Stale-response protection
+
+ONE counter for both callers. A reader ticking three boxes sends three requests
+and the second may come back after the third, and an explicit «Actualizar vista
+previa» races the same way — a neutral refresh landing after a filter would
+replace filtered figures with everybody's while the controls still read
+«Generación X». `acceptViewerResponse` is the pure half, and it returns the
+session it was given — reference-identical — when a response is not the newest,
+so a gate can assert that nothing happened rather than infer it. A refusal puts
+the controls back to the selection the figures were computed under.
+
+#### The URL codec exists and is wired to nothing
+
+`src/lib/presentation/viewer-codec.ts` encodes a selection as
+`panel~dimension:handle=o0.o1;panel2~…` and decodes it against an ALLOWLIST
+built from this document and this study — a panel that exists, a dimension that
+panel offers, a position the study minted. It fails closed on all four, and no
+refusal ever echoes what it was sent. Unknown query parameters are discarded
+explicitly, **by name and never by value**. **No route reads or writes it**: the
+production client route is not switched in this unit.
+
+#### Gates
+
+| gate | assertions | in `npm test`? |
+|---|---:|---|
+| `npm run test:canonical-viewer-filters` | **236** (new) | yes |
+| `npm run test:canonical-composer` | **383** (was 371) | yes |
+| `npm run test:studio-completion` | **50** (was 48) | yes |
+| `npm run test:canonical-presentation` | **314**, unchanged | yes |
+| `npm run test:canonical-results` | **235**, unchanged | yes |
+| `npm run test:canonical-database-source` | **74**, unchanged | yes |
+| `npm run test:shadow-boundary` | **96**, unchanged, doors still two | yes |
+| `npm run test:canonical-results-parity` | **531/531** | no — machine-specific workbooks |
+| `npm run test:canonical-presentation-parity` | **59/59** | no — machine-specific workbooks |
+
+**Parity, executed with the two real workbooks.** `ofrecidas=534 ejecutadas=531
+aprobadas=531 falladas=0 omitidas=0 sin-resolver=0 no-aplica=2
+requieren-configuración=1`, and presentation parity 59/59: the renewal index is
+**33** and renders **"33.0"**, «Salida» TDP is **133.3** unclamped, the approved
+recommendation figures are **30.8 / 46.4 / −9.1**, five routes over four source
+groups, 110 journey figures with one decimal, six retention periods.
+
+**One existing assertion was replaced by a stricter pair.** The composer gate
+checked that the loader's text said `bindPresentationDocument(` before
+`resolvePresentation(`. Resolution moved into `src/lib/viewer/`, so the rule is
+now structural: the loader binds and NEVER resolves, the viewer module resolves
+and NEVER binds. Before, one file could have done both in either order as long
+as the text came out in sequence.
+
+#### Discrimination — 23 probes, 23 discriminate
+
+One defect at a time, restored byte-identically with SHA-256 compared before and
+after, and the gate green again afterwards. They are: sharing a dimension
+becomes a connection; OR becomes equality on a cohort; OR becomes equality on an
+attribute; AND becomes OR; two panels merged as a union; an unconnected block
+reading a filtered view; the panel's offer not checked; a forbidden cross
+collapsed into an unsupported one; a cloud not recomputed; an empty selection
+not declared; the sample policy decided against the unfiltered base; a position
+accepted unvalidated; the codec skipping its allowlist; a stale response
+applied; the raw value travelling beside the token; the browser dividing;
+retention advertising filters again; a period vanishing; registry drift not
+refused; the cohort enum reaching a reader; the canvas becoming operable; the
+approved journey panel offering Esfera; and a filtered metric publishing a
+measured zero.
+
+**Five probes first proved nothing, and three of the five were the gate's
+fault.** The OR probe broke only the cohort branch of an engine that has two,
+and no assertion crossed it — the gate now proves the OR on both branches. The
+sample-policy probe went green because `hide_below` is caught twice, at the
+header and inside the payload; `annotate_below` is caught once, at the header,
+and it is now the case that drives it, together with a block's `availability`.
+The unvalidated-position probe went green because a SECOND, independent guard
+refused — which is defence in depth working — so the gate now also drives the
+validator directly, and the probe hits its own assertion instead of the other
+one's. The remaining two probes were badly written and were rewritten.
+
+#### Known-red gates, unchanged
+
+`hosted-target-guard`'s worktree-versus-main rule and Suite D's five, exactly as
+`24c640e` reports them. Neither is called passed. `tsc --noEmit` is clean and
+lint is at the **54-warning baseline** with zero errors and zero warnings from
+any file this unit added or changed.
+
+#### Deferred, and still deferred
+
+Draft storage, autosave, revision conflict handling, publication, review,
+immutable snapshots, restore, conversion of the legacy v2/v3 drafts, production
+client-route switching, wiring the URL codec to a route, PDF/print export, AI or
+category suggestions, authentication changes, migrations, dependencies,
+deployment, shadow activation, journey route/stage authoring, and the legacy
+`QualitativeCloud.tsx` repair.

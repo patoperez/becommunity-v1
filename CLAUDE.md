@@ -127,6 +127,13 @@ npm run test:migration-chain # migration numbering contract: no duplicate number
 npm run test:isolation    # the legacy isolation gate alone; Suite A executes it as A1.5
 npm run test:rls-coverage # live RLS coverage + 0014 privilege model (service_role / anon / authenticated)
 npm run test:pivot        # the pivot allowlist gate alone; Suite C executes it as C3.1
+npm run test:canonical-viewer-filters # Unit 6B.2: interactive filter semantics — explicit
+                                    #   connection only, OR/AND combination, multi-panel AND,
+                                    #   unconnected-block byte identity, the honest empty state,
+                                    #   the authored sample policy AFTER filtering, tampered and
+                                    #   stale selections, the URL codec, out-of-order responses,
+                                    #   and that no raw value or canonical key crosses.
+                                    #   Synthetic, offline, in `npm test`.
 npm run test:canonical-presentation # Unit 6A: opaque-handle registry, versioned presentation
                                     #   document, pure resolver, approved blueprint. Synthetic,
                                     #   offline, in `npm test`.
@@ -361,6 +368,18 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 - The existing ingestion and client read paths remain authoritative. Do not
   switch them to the new tables until the deterministic package importer,
   reconciliation and compatibility tests exist.
+- ⓘ **The results contract is `2.1.0`, and 2.1.0 added a LABEL.** `FilterValue`
+  carried a `value` and nothing else, so the cohort dimension published `active`
+  and `deserter` — internal enum values — to anything that offered them as
+  controls. Additive, so minor: nothing moved, nothing was re-typed and no number
+  changed. Golden parity is still 531/531 and presentation parity 59/59.
+- ⓘ **A SELECTION CANNOT CHANGE WHAT EXISTS.** The journey already stated and
+  enforced this. Unit 6B.2 found it violated twice more, both silent and both
+  live only under a filter: a performance PERIOD vanished when nobody in the
+  selection was observed in it, and an undeclared COHORT's row vanished when the
+  selection emptied it. Buckets, labels and rows now come from the source; only
+  the contents are taken inside the selection. Neither changes an unfiltered
+  document.
 - ⓘ **The server-side results layer EXISTS: `src/lib/results/`.** Unit 5 Phase 1
   built the versioned, aggregate-only contract a future dashboard receives, plus
   its in-memory adapter over the canonical projection. Its rules, its two open
@@ -657,9 +676,47 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 - ⓘ **A filter moves a block only when a connection names it.** Sharing a
   dimension is never a connection — the approved dashboard's "Razones declaradas
   de riesgo" shares every dimension with its risk panel and is deliberately not
-  moved by it. `unsupported_filter_dimension` and `forbidden_filter_cross` are
-  SEPARATE codes and must stay separate: one is a capability gap, the other is an
-  authority refusing publication.
+  moved by it. `unsupported_filter_dimension`, `forbidden_filter_cross` and
+  `filter_dimension_not_offered` are THREE codes for three different sentences
+  and must stay apart: a result cannot do it, an authority forbids it, nobody put
+  the control there.
+- ⓘ **THE FILTERS ARE LIVE, AND EVERY FILTERED FIGURE IS RECOMPUTED ON THE
+  SERVER.** Unit 6B.2 turned the disabled panels into viewer controls. A reader's
+  selection is EPHEMERAL and travels in its own contract
+  (`src/lib/presentation/viewer.ts`); it is never part of `PresentationDocument`,
+  and the strict v4 schema refuses an unknown field so it cannot become one by
+  accident. What a browser may name is a panel id, a dimension handle and an
+  ORDINAL OPTION TOKEN (`o0`, `o1`, …). The canonical value — a cohort's `active`,
+  an attribute's answer text — has no field to travel in and stays in the
+  registry's server-only `filterOptions` map. `src/lib/viewer/` is the pure
+  composition: one read, one recomputation per DISTINCT constraint set, one
+  registry rebuilt from each recomputation, one resolution. Read
+  `docs/CURRENT_STATE.md` §"Unit 6B.2" before touching any of it.
+- ⓘ **EACH RECOMPUTATION BRINGS ITS OWN REGISTRY, and the resolver compares the
+  bindings.** Addresses are array positions and they are invariant under a
+  filter — every addressed array is derived from the source or the specification
+  — but `availability` and every BASE are not, and the sample policy decides
+  against a base. Resolving a filtered document against the UNFILTERED registry
+  dereferences cleanly and decides every `annotate_below` against a base nobody
+  in the selection has. `filter_registry_drift` is the refusal that keeps the
+  invariance a fact rather than a promise.
+- ⓘ **Two panels on one block combine as AND, and their constraints are kept
+  APART.** Merging them into an intersection in the presentation layer could
+  produce an empty value list, and an empty list means "not constrained" to the
+  canonical filter engine — the one spelling that turns "nobody matches" into
+  "everybody matches".
+- ⓘ **RETENTION ACCEPTS NO PARTICIPANT FILTER.** It is measured over the period's
+  roster, and `buildRetention` answers `cross_not_permitted` under any selection.
+  `SECTION_ACCEPTS_PARTICIPANT_FILTERS` in the registry is an exhaustive `Record`
+  over the closed section vocabulary so a section added later cannot inherit an
+  answer nobody gave. Do not replace it with an exclusion list.
+- ⓘ **The authoring canvas stays inert; the reading view is where filters work.**
+  The canvas wraps every drawing in an `inert` container and is handed NO viewer
+  controls, so its filter controls are genuinely `disabled` under a sentence
+  saying where filtering works. Making the canvas operable would make every
+  chart, link and control inside every block operable with it. Leaving the
+  reading view CLEARS the selection: the canvas is where somebody authors a
+  threshold against the base they can see.
 - ⓘ **Esfera × CRI: the approved dashboard's risk panel offers it and the
   canonical contract forbids it.** The blueprint corrects the deviation BY
   CONSTRUCTION — its risk panel is built from the dimensions the renewal result

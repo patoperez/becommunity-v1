@@ -219,6 +219,68 @@ Two refusals are kept apart on purpose:
 Collapsing them would let a future change quietly reclassify a prohibition as a
 capability gap.
 
+### A SELECTION IS EPHEMERAL, AND IT IS NOT PART OF THE DOCUMENT
+
+Unit 6B.2 made the panels work, and the first decision it took was that a
+reader's selection travels in its OWN contract (`viewer.ts`), never inside
+`PresentationDocument`. A document is what an author writes and a publisher
+stores; a selection is what one reader is looking at right now, and two readers
+of the same published study hold different ones at the same moment. Storing one
+would make a momentary choice part of everybody's layout. The strict v4 schema
+refuses an unknown field, so this cannot be done by accident.
+
+A selection names three things, all opaque: a **panel id** the document
+authored, a **dimension handle** the catalogue publishes, and an **option
+token** — `o0`, `o1`, … — which is the ORDINAL POSITION of a value inside the
+list the server offered. The canonical `value` never crosses: a cohort's is the
+enum `active` and an attribute's is a respondent's own answer text, and both
+stay in the registry's server-only `filterOptions` map beside the address map.
+The translation from a position back to a value is a lookup against this
+study's own results, so there is no string a browser can send that becomes a
+value the study never published.
+
+### HOW SELECTIONS COMBINE
+
+    several values inside ONE characteristic  → OR
+    several characteristics inside ONE panel  → AND
+    several panels moving ONE block           → AND
+
+The third is why a block's constraint list may carry the same dimension twice.
+Two panels constraining «Generación» differently are kept APART rather than
+intersected here: an intersection computed in the presentation layer could come
+out empty, and an empty value list means "not constrained" to the canonical
+filter engine — the one spelling that turns "nobody matches" into "everybody
+matches". Two constraints sharing no value simply match nobody, which is what
+the reader asked for and what they are told.
+
+### EVERY FILTERED FIGURE IS RECOMPUTED, PER CONNECTED PANEL SET
+
+`resolvePresentation` takes an optional `viewer` carrying the selection and a
+map of recomputations keyed by `viewerConstraintKey`. Each block resolves
+against the view its OWN connections name; a block no panel names resolves under
+the empty key, which is the study's unfiltered document — so "an unconnected
+block is byte-identical" is true by construction rather than by comparison.
+
+Each recomputation arrives with **the registry built from it**, and the resolver
+refuses on `filter_registry_drift` unless that registry's binding equals the
+bound one. Addresses are array positions and they stay put — every addressed
+array is derived from the source or the specification, never from the selection
+— but `availability` and every BASE are not, and the sample policy decides
+against a base. Reusing the unfiltered registry would dereference every address
+cleanly and decide every `annotate_below` against a base nobody in the selection
+has: a hollow pass of exactly the class the binding checks exist to close.
+
+### RETENTION ACCEPTS NO PARTICIPANT FILTER, AND SAYS SO UP FRONT
+
+`SECTION_ACCEPTS_PARTICIPANT_FILTERS` is an exhaustive `Record` over the closed
+section vocabulary, and `retention` is `false`. Retention is measured over the
+period's ROSTER, and `buildRetention` refuses to recompute one under a
+participant selection. The registry used to advertise every dimension for every
+section but `none`, so an author could connect a retention block, the resolver
+would accept it, and the block would go blank at reading time under a refusal
+nobody was ever shown. A capability the calculation layer does not have must not
+be offered.
+
 ### Esfera × CRI, and the one place the oracle is not followed
 
 The methodology forbids crossing Esfera with the CRI (§5.2, «OJO: La esfera no se
@@ -231,6 +293,23 @@ risk panel is built from the dimensions the renewal result itself declares it
 supports, and the registry has already removed the forbidden cross from that
 list. A hand-maintained exclusion is something somebody can forget to update; a
 derivation is not.
+
+**And a reader cannot put it back.** A selection is validated against what this
+DOCUMENT offers — the panels it contains and the dimensions each panel offers —
+before a single filter is applied, so a hand-built request naming Esfera on the
+risk panel is refused as `filter_dimension_not_offered` and never reaches the
+calculation layer. If it ever did, that layer refuses it too: `crossIsForbidden`
+answers `cross_not_permitted`, the index goes unavailable and the distribution
+is withdrawn whole. Two independent refusals, and the gate drives both.
+
+**The journey panel's omission is a different fact and stays a different fact.**
+The approved dashboard leaves Esfera out of its journey filters because the
+chapter asked for it out of that panel — a presentation decision, recorded in
+the reference's own source. No authority forbids the cross, the registry lists
+it among the journey's supported dimensions, and the blueprint omits it
+deliberately. `unsupported_filter_dimension`, `forbidden_filter_cross` and
+`filter_dimension_not_offered` are three codes for three different sentences: a
+result cannot do it, an authority forbids it, nobody put the control there.
 
 ---
 
