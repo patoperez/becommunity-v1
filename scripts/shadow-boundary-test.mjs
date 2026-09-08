@@ -25,7 +25,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname, relative, resolve } from "node:path";
 
 import { buildStudyDashboard } from "../src/lib/dashboard/view.ts";
 import {
@@ -790,7 +790,23 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     else return null;
     for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")]) {
       try {
-        if (statSync(candidate).isFile()) return candidate.replace(/\\/g, "/");
+        // ALWAYS REPO-RELATIVE, WHICHEVER WAY THE IMPORT WAS WRITTEN.
+        //
+        // `@/lib/x` produced `src/lib/x.ts` and `./x` produced
+        // `/home/…/src/lib/x.ts`, because `resolve()` makes a relative specifier
+        // absolute against the working directory. Every path in this file is
+        // then compared as a STRING — against `APPROVED_DOORS[].loader`, against
+        // `isCanonical`, against `isShadow` — so the same module was two
+        // different keys depending only on how somebody wrote an import.
+        //
+        // It was invisible while every chain that mattered happened to use `@/`,
+        // and it surfaced the first time a declared loader was reached through a
+        // relative import: the door was reported as skipping the loader that was
+        // three entries earlier in its own path. Normalising here fixes the
+        // comparison everywhere at once, and makes the reported paths readable.
+        if (statSync(candidate).isFile()) {
+          return relative(process.cwd(), candidate).replace(/\\/g, "/");
+        }
       } catch {
         /* not this candidate */
       }
