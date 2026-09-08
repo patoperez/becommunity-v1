@@ -604,7 +604,26 @@ begin
       message = 'the registry build is not the one that draft was authored against';
   end if;
 
-  -- 7. THE VERSION, THE SNAPSHOT, THE POINTER AND THE EVENT — one transaction.
+  -- 7. THE POINTER, BEFORE ANYTHING IS WRITTEN.
+  --
+  -- The order matters even though the transaction would roll an early insert
+  -- back anyway: a function that writes and then discovers it should not have
+  -- is one refactor away from a function that writes and forgets to check. Every
+  -- precondition is settled first, and only then does anything become a row.
+  select * into pointer
+    from public.canonical_presentation_publication
+   where study_id = target.id
+     for update;
+  previous_id := case when found then pointer.active_revision_id end;
+
+  -- TWO PEOPLE DECIDING AT ONCE: one wins, the other is told what happened
+  -- rather than silently replacing it.
+  if p_expected_active_revision_id is distinct from previous_id then
+    raise exception using errcode = '55000',
+      message = 'the published version changed while you were deciding; reload and look again';
+  end if;
+
+  -- 8. THE VERSION, THE SNAPSHOT, THE POINTER AND THE EVENT — one transaction.
   --
   -- The advisory lock above is what serialises two concurrent publications of
   -- one study, so this `max()` cannot be read twice with the same answer.
@@ -625,19 +644,6 @@ begin
     p_definition, p_definition_sha256, p_render_model, p_render_model_sha256,
     coalesce(p_acknowledged_warnings, '{}'), p_actor, now(), p_note
   ) returning * into snapshot;
-
-  select * into pointer
-    from public.canonical_presentation_publication
-   where study_id = target.id
-     for update;
-  previous_id := case when found then pointer.active_revision_id end;
-
-  -- TWO PEOPLE DECIDING AT ONCE: one wins, the other is told what happened
-  -- rather than silently replacing it.
-  if p_expected_active_revision_id is distinct from previous_id then
-    raise exception using errcode = '55000',
-      message = 'the published version changed while you were deciding; reload and look again';
-  end if;
 
   insert into public.canonical_presentation_publication_event (
     study_id, tenant_id, actor_user_id, action, version, revision_id,
