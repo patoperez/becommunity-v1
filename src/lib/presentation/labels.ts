@@ -153,6 +153,16 @@ export const PRESENTATION_ERROR_LABEL: Readonly<Record<PresentationErrorCode, st
   unsupported_filter_dimension: "Esa medición no se puede desglosar por una de las características del panel.",
   forbidden_filter_cross: "Una autoridad del estudio prohíbe cruzar esa característica con esa medición.",
   invalid_filter_connection: "Esa conexión de filtro no es válida.",
+  viewer_selection_malformed: "La selección de filtros recibida no tiene la forma que esta capa admite.",
+  unknown_filter_panel: "La selección menciona un panel de filtros que esta presentación no tiene.",
+  filter_dimension_not_offered: "La selección usa una característica que ese panel no ofrece.",
+  unknown_filter_option: "La selección usa un valor que esa característica no tiene.",
+  too_many_filter_recomputations:
+    "Esta selección obligaría a recalcular el estudio más veces de las que esta capa admite en una sola petición.",
+  filter_recomputation_missing:
+    "Falta el recálculo de un bloque filtrado, así que no se dibuja: mostrar las cifras sin filtrar sería peor que no mostrar nada.",
+  filter_registry_drift:
+    "El recálculo filtrado no describe las mismas posiciones que el documento enlazó, así que se niega en vez de responder con otras cifras.",
   route_touchpoint_outside_group: "Una ruta reclama un punto que su grupo de origen no contiene.",
   route_touchpoint_duplicated: "Un punto aparece en dos rutas del mismo bloque.",
   persistence_scope_mismatch: "El documento guardado pertenece a otro estudio.",

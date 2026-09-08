@@ -127,12 +127,63 @@ export type RenderInstrumentBase = {
   base: ResponseContext;
 };
 
+/** One value a filter control offers, as a reader sees it. */
+export type RenderFilterOption = {
+  /**
+   * The opaque ORDINAL token a selection names this option by.
+   *
+   * Never the canonical value. A cohort's value is the enum `active` and an
+   * attribute's is a respondent's own answer text; neither is something a
+   * browser should hold, echo into a URL, or send back.
+   */
+  token: string;
+  /** The study's own words for this value. The only thing drawn. */
+  label: string;
+  /** How many people carry it in the UNFILTERED population. Already counted. */
+  participants: number;
+};
+
 /** One filter control a panel offers. */
 export type RenderFilterDimension = {
   /** The opaque handle, so a selection can name it without naming storage. */
   handle: string;
   label: string;
-  options: { value: string; participants: number }[];
+  options: RenderFilterOption[];
+  /** The tokens currently chosen. Empty is the neutral «Todas las personas». */
+  selected: string[];
+};
+
+/**
+ * WHAT THIS PANEL'S OWN SELECTION DID, decided on the server.
+ *
+ * Every field is finished. The two counts were measured by the canonical layer
+ * — they are two `resultingPopulation` figures, one from the unfiltered
+ * document and one from this panel's own recomputation — and the two sentences
+ * were written from them here, where the study's numbers are. A browser holding
+ * a threshold, a base and a rule would be a browser doing the comparison, and
+ * comparing is calculating.
+ */
+export type RenderFilterSelection = {
+  /** True when nothing is constrained. */
+  neutral: boolean;
+  /** «Generación: X, Boomer · Giro: Servicios», or null when neutral. */
+  summary: string | null;
+  /** People this panel's own selection leaves. */
+  selectedPeople: number;
+  /** People in the study, before any selection. */
+  basePeople: number;
+  /** «Con esta selección quedan 24 de 60 personas.» Always present. */
+  countSentence: string;
+  /** True when this panel's own selection matches nobody. */
+  empty: boolean;
+  /**
+   * Blocks this panel actually moves.
+   *
+   * Zero means the controls would change nothing, and a control that changes
+   * nothing must not look live. The count is over the document, not over the
+   * data, so it is a structural fact rather than a measurement.
+   */
+  movesBlocks: number;
 };
 
 /** One VISIBLE journey route: a presentation decision, resolved. */
@@ -168,7 +219,7 @@ export type RenderPayload =
   | { shape: "touchpoint"; label: string; satisfaction: RenderValue | null; processUnawareness: RenderValue | null; unawarenessShare: RenderValue | null }
   | { shape: "journey_group"; label: string; touchpointCount: number }
   | { shape: "routes"; routes: RenderRoute[] }
-  | { shape: "filter_controls"; dimensions: RenderFilterDimension[] }
+  | { shape: "filter_controls"; dimensions: RenderFilterDimension[]; selection: RenderFilterSelection }
   | { shape: "editorial"; body: string | null; absence: RenderAbsence | null };
 
 /**
@@ -221,6 +272,16 @@ export type RenderBlock = {
 
   /** Panels that move this block. Empty means nothing moves it. */
   connectedFilterPanelIds: string[];
+  /**
+   * WHAT A READER'S SELECTION DID TO THIS BLOCK, as a finished sentence.
+   *
+   * `null` for a block no panel moves and for a block whose panels are all
+   * neutral, which is the same visible state and deliberately the same value:
+   * an unconnected block must be byte-identical to what an unfiltered page
+   * would have produced, and a field that said "not filtered" rather than
+   * saying nothing would break that by existing.
+   */
+  activeFilterSummary: string | null;
 };
 
 export type RenderPage = {

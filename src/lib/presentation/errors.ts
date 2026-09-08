@@ -86,6 +86,53 @@ export type PresentationErrorCode =
   /** A block connects to something that is not a filter panel. */
   | "invalid_filter_connection"
 
+  /* -------- viewer selections (ephemeral, never stored) -------- */
+  /**
+   * The selection is not shaped like a viewer selection at all.
+   *
+   * Its own code rather than `malformed_document`, because the two arrive from
+   * different places and mean different things: a malformed DOCUMENT is an
+   * authoring failure, a malformed SELECTION is a browser — or a link — sending
+   * something the product never emitted.
+   */
+  | "viewer_selection_malformed"
+  /** The selection names a panel this document does not contain. */
+  | "unknown_filter_panel"
+  /**
+   * The panel exists and does not OFFER that dimension.
+   *
+   * Kept apart from `unsupported_filter_dimension` on purpose. That one says a
+   * RESULT cannot be broken down that way; this one says nobody put the control
+   * on this panel — so the cross it would create has never been checked against
+   * the blocks the panel moves, and honouring it would apply a cross no author
+   * ever approved.
+   */
+  | "filter_dimension_not_offered"
+  /** The selection names an option the dimension does not have. */
+  | "unknown_filter_option"
+  /** The selection would require more distinct recomputations than the ceiling allows. */
+  | "too_many_filter_recomputations"
+  /**
+   * A block's constraint set has no recomputed results behind it.
+   *
+   * Impossible by construction — the same pure function decides what to compute
+   * and what to read — which is exactly why it refuses instead of falling back
+   * to the unfiltered document. A block quietly answering with everybody's
+   * numbers under an active filter is the worst outcome this layer can produce.
+   */
+  | "filter_recomputation_missing"
+  /**
+   * A filtered recomputation produced a registry that addresses different
+   * things than the one the document is bound to.
+   *
+   * Every `CanonicalAddress` is an array position, and a filter is only safe to
+   * apply because every addressed array is derived from the source or the
+   * specification rather than from the selection. That is a property, not a
+   * promise: this code is what happens when it stops being true, and it refuses
+   * rather than resolving cleanly against positions that moved.
+   */
+  | "filter_registry_drift"
+
   /* -------- journey -------- */
   /** A visible route claims a touchpoint its declared source group does not contain. */
   | "route_touchpoint_outside_group"

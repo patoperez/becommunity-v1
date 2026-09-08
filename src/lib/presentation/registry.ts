@@ -33,6 +33,7 @@
  */
 
 import type {
+  AppliedFilter,
   CanonicalStudyResults,
   FilterDimension,
   MetricResult,
@@ -48,12 +49,19 @@ import {
 } from "./capabilities";
 import { sha256Hex } from "../ingestion/canonical-commit/sha256";
 import type { PresentationCatalog, RegistryEntry, ResponseContext } from "./catalog";
+import type { PresentationDocument } from "./document";
 import {
   compareHandles,
   presentationHandle,
   slugifyLabel,
   type PresentationHandle,
 } from "./handles";
+import {
+  filterOptionToken,
+  viewerPanelOffers,
+  type ViewerConstraint,
+  type ViewerOffer,
+} from "./viewer";
 
 /* -------------------------------------------------------------------------- */
 /* the server-only address                                                     */
@@ -146,6 +154,32 @@ export type CanonicalPresentationRegistry = {
   entries: readonly RegistryEntry[];
   /** SERVER ONLY. Dropped by `projectCatalog`; absent from every render model. */
   addresses: ReadonlyMap<PresentationHandle, CanonicalAddress>;
+  /**
+   * SERVER ONLY. What each filter dimension may be constrained to.
+   *
+   * The token is an ORDINAL POSITION, the label is the study's own Spanish, and
+   * the `value` is the canonical string the filter engine matches on. Only the
+   * first two ever cross to a browser; the third is the reason this map is on
+   * the server half, because a cohort's value is the enum `active` and an
+   * attribute's is a respondent's own answer text.
+   *
+   * A reader's selection therefore arrives as positions and is turned back into
+   * values HERE, which is what makes it impossible for a browser to name a
+   * value the study never offered.
+   */
+  filterOptions: ReadonlyMap<PresentationHandle, readonly RegistryFilterOption[]>;
+};
+
+/** One value a filter dimension may be constrained to. SERVER ONLY as a whole. */
+export type RegistryFilterOption = {
+  /** Opaque ordinal token — the only half a browser ever sees, with the label. */
+  token: string;
+  /** The study's own words for this value. Client-safe. */
+  label: string;
+  /** The canonical value the filter engine matches on. NEVER crosses. */
+  value: string;
+  /** How many people carry it in the UNFILTERED population. Client-safe. */
+  participants: number;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -162,6 +196,40 @@ type ContractSection =
   | "performance"
   | "qualitative"
   | "none";
+
+/**
+ * WHICH SECTIONS A PARTICIPANT FILTER CAN ACTUALLY MOVE.
+ *
+ * This was `draft.section !== "none"`, and that was wrong for exactly one
+ * section. RETENTION is measured over the period's ROSTER — the membership at
+ * the start of the period — and not over the people who answered anything, so
+ * `buildRetention` refuses to recompute under ANY participant selection and
+ * returns `cross_not_permitted` for every period. The registry meanwhile
+ * advertised that retention supported every dimension, so the editor would
+ * happily connect a retention block to a panel, the resolver would accept the
+ * connection, and the block would then go blank at reading time under a refusal
+ * the author was never shown.
+ *
+ * A capability the calculation layer does not have must not be advertised. It
+ * is a `Record` over the closed section vocabulary rather than an exclusion
+ * list, so a section added later cannot inherit an answer nobody gave.
+ *
+ * `none` is the sections that are not a measurement at all — a filter control,
+ * an editorial slot — and they accept nothing for a different reason: there is
+ * no number to recompute.
+ */
+const SECTION_ACCEPTS_PARTICIPANT_FILTERS: Readonly<Record<ContractSection, boolean>> = Object.freeze({
+  population: true,
+  recommendation: true,
+  renewal: true,
+  // The roster is not the respondents. `src/lib/results/retention.ts` states it
+  // and enforces it; this is the same fact, said where an editor can read it.
+  retention: false,
+  journey: true,
+  performance: true,
+  qualitative: true,
+  none: false,
+});
 
 type Draft = {
   handle: PresentationHandle;
@@ -232,9 +300,26 @@ export function buildCanonicalPresentationRegistry(
 
   const dimensionUsed = new Set<string>();
   const dimensionHandles: { handle: PresentationHandle; dimension: FilterDimension }[] = [];
+  const filterOptions = new Map<PresentationHandle, readonly RegistryFilterOption[]>();
   results.filters.dimensions.forEach((dimension, index) => {
     const handle = presentationHandle("dimension", uniqueSegment(dimensionUsed, dimension.label, index + 1));
     dimensionHandles.push({ handle, dimension });
+    // THE OPTIONS, MINTED ONCE, HERE.
+    //
+    // The token is the value's ORDINAL POSITION in the dimension the canonical
+    // layer published. That list is derived from the source alone and never
+    // from an active selection, so a position means the same thing for as long
+    // as the package behind it does — and the binding fingerprint already
+    // refuses a document whose package moved.
+    filterOptions.set(
+      handle,
+      dimension.values.map((value, position) => ({
+        token: filterOptionToken(position),
+        label: value.label,
+        value: value.value,
+        participants: value.participants,
+      })),
+    );
     drafts.push({
       handle,
       semantic: "filter_dimension",
@@ -556,7 +641,7 @@ export function buildCanonicalPresentationRegistry(
   const allDimensionHandles = dimensionHandles.map(({ handle }) => handle);
   const entries: RegistryEntry[] = drafts.map((draft) => {
     const forbidden = forbiddenFor(draft.section);
-    const acceptsFilters = draft.section !== "none";
+    const acceptsFilters = SECTION_ACCEPTS_PARTICIPANT_FILTERS[draft.section];
     const supported = acceptsFilters
       ? allDimensionHandles.filter((handle) => !forbidden.includes(handle))
       : [];
@@ -602,6 +687,7 @@ export function buildCanonicalPresentationRegistry(
     }),
     entries,
     addresses,
+    filterOptions,
   };
 }
 
@@ -671,6 +757,72 @@ export function bindPresentationDocument<T extends { registryVersion: string; bi
   registry: CanonicalPresentationRegistry,
 ): T {
   return { ...document, registryVersion: registry.registryVersion, binding: registry.binding };
+}
+
+/**
+ * What this document, against this registry, legitimately offers a reader.
+ *
+ * TWO HALVES FROM TWO PLACES, and neither may be taken from the request. Which
+ * panels exist and which dimensions each one OFFERS comes from the DOCUMENT —
+ * an author put the control there, and putting it there is what made the cross
+ * it creates get checked against every block that panel moves. Which option
+ * tokens exist comes from the REGISTRY, which minted them from the study's own
+ * unfiltered values.
+ *
+ * A selection is validated against this and against nothing else.
+ */
+export function viewerOfferFor(
+  document: PresentationDocument,
+  registry: CanonicalPresentationRegistry,
+): ViewerOffer {
+  const options = new Map<PresentationHandle, ReadonlySet<string>>();
+  for (const [handle, list] of registry.filterOptions) {
+    options.set(handle, new Set(list.map((option) => option.token)));
+  }
+  return { panels: viewerPanelOffers(document), options };
+}
+
+/**
+ * Turn a reader's positions back into the values the filter engine matches on.
+ *
+ * THE ONLY PLACE THE TRANSLATION HAPPENS, and it is a lookup rather than a
+ * parse: a token that is not in the map produced by this study's own results is
+ * refused, so there is no string a browser can send that becomes a value the
+ * study never published. `null` means refuse — never "apply what parsed".
+ *
+ * One `AppliedFilter` per constraint, and constraints repeating a dimension are
+ * NOT merged. `applyFilters` requires a person to satisfy every entry, so two
+ * panels constraining the same dimension differently intersect — which is what
+ * "several panels moving one block combine as AND" means. Merging them here
+ * could produce an empty value list, and an empty list means "not constrained"
+ * to that engine: the one spelling that would turn "nobody matches" into
+ * "everybody matches".
+ */
+export function viewerAppliedFilters(
+  registry: CanonicalPresentationRegistry,
+  results: CanonicalStudyResults,
+  constraints: readonly ViewerConstraint[],
+): AppliedFilter[] | null {
+  const applied: AppliedFilter[] = [];
+  for (const constraint of constraints) {
+    const handle = constraint.handle as PresentationHandle;
+    const address = registry.addresses.get(handle);
+    if (!address || address.at !== "filter.dimension") return null;
+    const dimension = results.filters.dimensions[address.dimensionIndex];
+    if (!dimension) return null;
+    const options = registry.filterOptions.get(handle);
+    if (!options) return null;
+
+    const values: string[] = [];
+    for (const token of constraint.options) {
+      const option = options.find((candidate) => candidate.token === token);
+      if (!option) return null;
+      values.push(option.value);
+    }
+    if (values.length === 0) return null;
+    applied.push({ dimensionKey: dimension.key, values });
+  }
+  return applied;
 }
 
 /**

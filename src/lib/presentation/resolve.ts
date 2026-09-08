@@ -77,6 +77,8 @@ import type {
   RenderBand,
   RenderBlock,
   RenderCategory,
+  RenderFilterDimension,
+  RenderFilterSelection,
   RenderMeasure,
   RenderMethodology,
   RenderPage,
@@ -87,6 +89,15 @@ import type {
   RenderSeriesPoint,
   RenderValue,
 } from "./render-model";
+import {
+  EMPTY_VIEWER_SELECTION,
+  viewerConstraintsFor,
+  viewerDimensionOptions,
+  viewerKeyForBlock,
+  viewerKeyForPanel,
+  type ViewerConstraint,
+  type ViewerSelection,
+} from "./viewer";
 
 /**
  * Display names for the three recommendation bands.
@@ -126,6 +137,43 @@ export type ResolveInput = {
   document: PresentationDocument;
   registry: CanonicalPresentationRegistry;
   results: CanonicalStudyResults;
+  /**
+   * A reader's selection, and the recomputations it requires.
+   *
+   * Omitted, the whole document resolves against the unfiltered results exactly
+   * as it always has — which is what makes "an unconnected block is byte-
+   * identical" true by construction rather than by comparison.
+   */
+  viewer?: ResolveViewerInput;
+};
+
+/**
+ * WHAT A FILTERED RESOLUTION IS HANDED, and why it is handed a registry too.
+ *
+ * A filtered `CanonicalStudyResults` is a DIFFERENT document from the
+ * unfiltered one. Its addressed arrays are in the same positions — every one of
+ * them is derived from the source or the specification, never from the
+ * selection — but its `availability` and its BASES are not: a block that had a
+ * base of 54 may have a base of 6, and the sample policy's decision is taken
+ * against a base.
+ *
+ * So each recomputation arrives with the registry BUILT FROM IT. Reusing the
+ * unfiltered registry would dereference every address cleanly and then decide
+ * every "annotate below" and "hide below" against a base nobody in the
+ * selection has — a hollow pass of exactly the class the binding checks above
+ * exist to close. The bindings are compared instead, which is the assertion
+ * that the positions really did stay put.
+ *
+ * The key is `viewerConstraintKey`, computed by the same pure function the
+ * block walk uses to ask for one, so a key that is computed cannot fail to be
+ * the key that was built.
+ */
+export type ResolveViewerInput = {
+  selection: ViewerSelection;
+  views: ReadonlyMap<
+    string,
+    { results: CanonicalStudyResults; registry: CanonicalPresentationRegistry }
+  >;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -501,23 +549,16 @@ function payloadFor(
       });
       return { shape: "series", points };
     }
-    case "filter.dimension": {
-      const dimension = results.filters.dimensions[address.dimensionIndex];
-      if (!dimension) return null;
-      return {
-        shape: "filter_controls",
-        dimensions: [
-          {
-            handle: entry.handle,
-            label: dimension.label,
-            options: dimension.values.map((value) => ({
-              value: value.value,
-              participants: value.participants,
-            })),
-          },
-        ],
-      };
-    }
+    // A FILTER DIMENSION IS NOT A RESULT, and never had a payload of its own.
+    //
+    // It used to return a one-dimension `filter_controls` payload that the
+    // panel branch then spread into its own, which meant the panel's control
+    // list was assembled in two places and the option strings were the SOURCE'S
+    // values rather than the study's labels. The panel builds its controls from
+    // the registry's option map now, so nothing dereferences this address for a
+    // payload and the only honest answer here is that there is none.
+    case "filter.dimension":
+      return null;
     case "configuration.requirement": {
       const requirement = results.configurationRequired[address.requirementIndex];
       if (!requirement) return null;
@@ -725,11 +766,49 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
 
   /** Every filter panel in the document, by id, with the dimensions it offers. */
   const panels = new Map<string, PresentationHandle[]>();
+  /** How many blocks each panel actually moves. A structural fact, not a measurement. */
+  const movesBlocks = new Map<string, number>();
   for (const page of document.pages) {
     for (const block of page.blocks) {
       if (block.kind === "filter_panel") panels.set(block.id, block.dimensions);
+      for (const panelId of block.connectedFilterPanelIds) {
+        movesBlocks.set(panelId, (movesBlocks.get(panelId) ?? 0) + 1);
+      }
     }
   }
+
+  // ── THE VIEWS ──────────────────────────────────────────────────────────────
+  //
+  // One per DISTINCT constraint set, plus the unfiltered one under the empty
+  // key. Each filtered view is refused unless the registry built from it
+  // addresses exactly what the bound one addresses: the filter is only safe to
+  // apply because every addressed array is derived from the source or the
+  // specification, and this is where that stops being a promise.
+  const selection: ViewerSelection = input.viewer?.selection ?? EMPTY_VIEWER_SELECTION;
+  const views = new Map<string, ResolvedView>();
+  views.set("", { results, registry, byHandle });
+  for (const [key, view] of input.viewer?.views ?? []) {
+    // The empty key is the unfiltered document and is not something a caller
+    // may substitute. Letting one be overridden would let a filtered document
+    // stand in for the study itself.
+    if (key.length === 0) continue;
+    if (view.registry.binding !== registry.binding) {
+      errors.push(
+        issue(
+          "filter_registry_drift",
+          "$",
+          "un recálculo filtrado no direcciona lo mismo que el documento enlazó. Cada dirección " +
+            "canónica es una posición, así que resolver contra él no fallaría: respondería con otras " +
+            "cifras.",
+        ),
+      );
+      continue;
+    }
+    const viewHandles = new Map<PresentationHandle, RegistryEntry>();
+    for (const entry of view.registry.entries) viewHandles.set(entry.handle, entry);
+    views.set(key, { results: view.results, registry: view.registry, byHandle: viewHandles });
+  }
+  if (errors.length > 0) return failure(errors);
 
   const pages: RenderPage[] = [];
 
@@ -755,16 +834,67 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
       const policy = block.samplePolicy ?? document.samplePolicy ?? DEFAULT_SAMPLE_POLICY;
       const level = block.methodologyDisclosure ?? document.methodologyDisclosure;
 
+      // WHICH RECOMPUTATION THIS BLOCK READS.
+      //
+      // Its own connections and nothing else. A block no panel names resolves
+      // under the empty key, which is the study's unfiltered document — so it
+      // is byte-identical to what an unfiltered page would have produced, and
+      // sharing a dimension with a panel remains exactly as inert as the
+      // contract says it is.
+      const panelResultsFor = (panelId: string): CanonicalStudyResults | null => {
+        const panelKey = viewerKeyForPanel(selection, panelId);
+        if (panelKey.length === 0) return results;
+        return views.get(panelKey)?.results ?? null;
+      };
+
+      const blockKey = viewerKeyForBlock(selection, block);
+      const view = views.get(blockKey);
+      if (block.kind === "filter_panel" && panelResultsFor(block.id) === null) {
+        errors.push(
+          issue(
+            "filter_recomputation_missing",
+            path,
+            "falta el recálculo de la selección de este panel, así que no se dibuja: publicar la " +
+              "población sin filtrar bajo la frase de una selección sería peor que no publicar nada.",
+          ),
+        );
+        continue;
+      }
+      if (!view) {
+        // Impossible by construction: the same pure function decided what to
+        // compute and what to read. It refuses rather than falling back to the
+        // unfiltered view, because a block quietly answering with everybody's
+        // numbers under an active filter is the worst thing this layer can do.
+        errors.push(
+          issue(
+            "filter_recomputation_missing",
+            path,
+            "falta el recálculo de este bloque bajo la selección activa, así que no se dibuja.",
+          ),
+        );
+        continue;
+      }
+
       const rendered = resolveBlock({
         block,
         path,
         policy,
         level,
-        byHandle,
+        byHandle: view.byHandle,
         panels,
-        registry,
-        results,
+        registry: view.registry,
+        results: view.results,
         errors,
+        selection,
+        baseResults: results,
+        // A PANEL REPORTS ITS OWN SELECTION, and the empty key is the study
+        // itself. A NEUTRAL panel legitimately resolves against the unfiltered
+        // document; a constrained one whose recomputation is missing must NOT
+        // fall back to it, because the count it would then print — "quedan 60
+        // de 60" — is the unfiltered population wearing a filtered selection's
+        // sentence. `null` here is the signal to refuse, not to guess.
+        panelResults: block.kind === "filter_panel" ? panelResultsFor(block.id) : null,
+        movesBlocks: block.kind === "filter_panel" ? movesBlocks.get(block.id) ?? 0 : 0,
       });
       if (rendered) renderedBlocks.push(reconcileSampleDisplay(rendered, policy));
     }
@@ -784,17 +914,108 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
   });
 }
 
+/** One results document with the registry built from it, and its handle index. */
+type ResolvedView = {
+  results: CanonicalStudyResults;
+  registry: CanonicalPresentationRegistry;
+  byHandle: Map<PresentationHandle, RegistryEntry>;
+};
+
 type BlockContext = {
   block: PresentationBlock;
   path: string;
   policy: SampleDisplayPolicy;
   level: MethodologyDisclosureLevel;
+  /** The handle index of THIS BLOCK'S view, never the unfiltered one. */
   byHandle: Map<PresentationHandle, RegistryEntry>;
   panels: Map<string, PresentationHandle[]>;
+  /** The registry built from THIS BLOCK'S results. */
   registry: CanonicalPresentationRegistry;
+  /** The results this block resolves against — filtered when it is connected. */
   results: CanonicalStudyResults;
   errors: PresentationIssue[];
+  /** The reader's whole selection. Read only to describe it. */
+  selection: ViewerSelection;
+  /** The study's UNFILTERED results, for the "N of M people" a panel reports. */
+  baseResults: CanonicalStudyResults;
+  /** For a filter panel: the results ITS OWN selection produces. */
+  panelResults: CanonicalStudyResults | null;
+  /** For a filter panel: how many blocks it moves. */
+  movesBlocks: number;
 };
+
+/* -------------------------------------------------------------------------- */
+/* saying what a selection did, in the study's own words                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Name a constraint set the way a reader would say it out loud.
+ *
+ * «Generación: Boomer, Generación X · Giro: Servicios» — the dimension's own
+ * label, then the LABELS of the chosen values, never their canonical values and
+ * never their tokens. A constraint whose handle or token this registry does not
+ * know contributes nothing rather than a placeholder: a summary is a sentence a
+ * reader trusts, and half of one is worse than none.
+ *
+ * Returns null when nothing is constrained, which is the same value an
+ * unconnected block gets — the two are the same visible state and must be the
+ * same bytes.
+ */
+function describeConstraints(
+  constraints: readonly ViewerConstraint[],
+  registry: CanonicalPresentationRegistry,
+  byHandle: Map<PresentationHandle, RegistryEntry>,
+): string | null {
+  const parts: string[] = [];
+  for (const constraint of constraints) {
+    const handle = constraint.handle as PresentationHandle;
+    const entry = byHandle.get(handle);
+    const options = registry.filterOptions.get(handle);
+    if (!entry || !options) continue;
+    const labels: string[] = [];
+    for (const token of constraint.options) {
+      const option = options.find((candidate) => candidate.token === token);
+      if (option) labels.push(option.label);
+    }
+    if (labels.length === 0) continue;
+    parts.push(`${entry.label}: ${labels.join(", ")}`);
+  }
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
+/** «1 persona» / «24 personas». Spelling, not arithmetic. */
+function people(count: number): string {
+  return count === 1 ? "1 persona" : `${count} personas`;
+}
+
+/**
+ * WHAT THIS PANEL'S OWN SELECTION DID, as finished text and finished counts.
+ *
+ * Both numbers are read, never derived: `resultingPopulation` is what the
+ * canonical layer measured for a selection, and the unfiltered document's own
+ * figure is the study's population before anybody chose anything. Nothing here
+ * adds, subtracts, divides or compares a threshold — it chooses between three
+ * sentences on the strength of facts the results already state (`empty`, and
+ * whether anything was constrained at all).
+ */
+function describePanelSelection(context: BlockContext, panelId: string): RenderFilterSelection {
+  const { selection, registry, byHandle, baseResults, panelResults, movesBlocks } = context;
+  const constraints = viewerConstraintsFor(selection, [panelId]);
+  const summary = describeConstraints(constraints, registry, byHandle);
+  const basePeople = baseResults.filters.resultingPopulation;
+  const own = panelResults ?? baseResults;
+  const selectedPeople = own.filters.resultingPopulation;
+  const neutral = constraints.length === 0;
+  const empty = !neutral && own.filters.empty;
+
+  const countSentence = neutral
+    ? `Se muestran las ${people(basePeople)} del estudio.`
+    : empty
+      ? "Ninguna persona del estudio combina estas características."
+      : `Con esta selección quedan ${people(selectedPeople)} de ${basePeople}.`;
+
+  return { neutral, summary, selectedPeople, basePeople, countSentence, empty, movesBlocks };
+}
 
 /**
  * Check every filter panel connected to this block against the bound entry.
@@ -900,10 +1121,21 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
     // renderer would faithfully draw.
     sampleDisplay: sampleDisplayFor(policy, boundEntry?.responseContext ?? null),
     connectedFilterPanelIds: block.connectedFilterPanelIds.slice(),
+    // WHAT MOVED THIS BLOCK, said once, on the server.
+    //
+    // Built from the block's OWN connections, so a block that shares a
+    // dimension with a panel it is not connected to says nothing — the same
+    // `null` an unconnected block gets under no selection at all, because they
+    // are the same visible state and must be the same bytes.
+    activeFilterSummary: describeConstraints(
+      viewerConstraintsFor(context.selection, block.connectedFilterPanelIds),
+      registry,
+      byHandle,
+    ),
   };
 
   if (block.kind === "filter_panel") {
-    const dimensions = [];
+    const dimensions: RenderFilterDimension[] = [];
     for (const handle of block.dimensions) {
       const entry = byHandle.get(handle);
       if (!entry) {
@@ -916,10 +1148,32 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
         );
         continue;
       }
-      const address = registry.addresses.get(handle);
-      if (!address) continue;
-      const payload = payloadFor(address, results, entry, policy, block.displayFormat, spell);
-      if (payload && payload.shape === "filter_controls") dimensions.push(...payload.dimensions);
+      const options = registry.filterOptions.get(handle);
+      if (!options) {
+        errors.push(issue("unknown_handle", path, `«${handle}» no tiene valores en este registro.`));
+        continue;
+      }
+      // THE TOKEN AND THE LABEL CROSS; THE VALUE DOES NOT.
+      //
+      // `RegistryFilterOption.value` is the canonical string — a cohort's enum,
+      // or a respondent's own answer text — and it has no field to travel in
+      // here. What a reader sees is the study's own label; what a reader sends
+      // back is an ordinal position.
+      //
+      // The counts are the UNFILTERED ones, deliberately: how many people carry
+      // a characteristic is a fact about the study, and a count that moved with
+      // the selection would be a number nobody measured under the selection
+      // that produced it.
+      dimensions.push({
+        handle,
+        label: entry.label,
+        options: options.map((option) => ({
+          token: option.token,
+          label: option.label,
+          participants: option.participants,
+        })),
+        selected: viewerDimensionOptions(context.selection, block.id, handle),
+      });
     }
     return {
       ...shell,
@@ -927,7 +1181,11 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
       chartVariant: "filter_control",
       availability: "available",
       provenance: "source_reported",
-      payload: { shape: "filter_controls", dimensions },
+      payload: {
+        shape: "filter_controls",
+        dimensions,
+        selection: describePanelSelection(context, block.id),
+      },
       methodology: methodologyFor(level, null, results, null),
     };
   }

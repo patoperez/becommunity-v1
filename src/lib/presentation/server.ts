@@ -35,11 +35,18 @@ export {
   presentationBindingFingerprint,
   projectPresentationCatalog,
   registryEntry,
+  viewerAppliedFilters,
+  viewerOfferFor,
 } from "./registry";
-export type { CanonicalAddress, CanonicalPresentationRegistry, RegistrySource } from "./registry";
+export type {
+  CanonicalAddress,
+  CanonicalPresentationRegistry,
+  RegistryFilterOption,
+  RegistrySource,
+} from "./registry";
 
 export { resolvePresentation } from "./resolve";
-export type { ResolveInput } from "./resolve";
+export type { ResolveInput, ResolveViewerInput } from "./resolve";
 
 export { decodePresentationFromStorage, encodePresentationForStorage } from "./persistence";
 export type { PresentationPublicationState, PresentationScope, StoredPresentation } from "./persistence";

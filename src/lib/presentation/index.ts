@@ -106,6 +106,54 @@ export type {
 
 export { SERIALIZED_BYTE_LIMIT, serializeDeterministic, serializedBytes, withinSizeLimit } from "./serialize";
 
+/**
+ * THE EPHEMERAL VIEWER SELECTION, and it is client-safe on its own terms.
+ *
+ * A selection names a panel the document already contains, a dimension that
+ * panel already offers, and an ORDINAL position inside a list the server sent.
+ * There is nowhere in these types to put a column, an address, a study, a
+ * predicate or a value, so a browser holding one holds nothing it could ask the
+ * wrong question with. The translation from a position back to a canonical
+ * value happens on the server, behind `./server`.
+ */
+export {
+  EMPTY_VIEWER_SELECTION,
+  VIEWER_LIMITS,
+  clearViewerPanel,
+  filterOptionToken,
+  isFilterOptionToken,
+  isViewerPanelId,
+  normalizeViewerSelection,
+  toggleViewerOption,
+  validateViewerSelection,
+  viewerConstraintKey,
+  viewerConstraintsFor,
+  viewerDimensionOptions,
+  viewerKeyForBlock,
+  viewerKeyForPanel,
+  viewerPanelOffers,
+  viewerPanelSelection,
+  viewerRecomputations,
+  viewerSelectionIsNeutral,
+} from "./viewer";
+export type {
+  ViewerConstraint,
+  ViewerDimensionSelection,
+  ViewerOffer,
+  ViewerPanelSelection,
+  ViewerRefusalCode,
+  ViewerSelection,
+  ViewerValidation,
+} from "./viewer";
+
+export {
+  VIEWER_STATE_PARAM,
+  decodeViewerSelection,
+  encodeViewerSelection,
+  readViewerStateParams,
+} from "./viewer-codec";
+export type { ViewerDecode } from "./viewer-codec";
+
 /** Public render-model TYPES. The resolver that produces them is server-only. */
 export type {
   PresentationRenderModel,
@@ -115,6 +163,8 @@ export type {
   RenderCategory,
   RenderCohort,
   RenderFilterDimension,
+  RenderFilterOption,
+  RenderFilterSelection,
   RenderInstrumentBase,
   RenderMeasure,
   RenderMethodology,
