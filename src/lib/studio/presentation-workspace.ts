@@ -62,7 +62,12 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CanonicalReadError } from "@/lib/canonical-source";
-import { loadCanonicalStudyResults } from "@/lib/canonical-source/server";
+import { loadCanonicalResultSource } from "@/lib/canonical-source/server";
+import {
+  buildPresentationRead,
+  resolveUnderSelection,
+  type CanonicalPresentationRead,
+} from "@/lib/viewer";
 import { JOURNEY_ROUTES_VARIANTS, offeredChartVariants } from "@/lib/composer";
 // The payload types are declared on the CLIENT-SAFE side and imported here, not
 // declared here and imported there. A `"use client"` composer surface has to
@@ -76,6 +81,7 @@ import type {
   PreviewResult,
 } from "@/lib/composer";
 import {
+  EMPTY_VIEWER_SELECTION,
   PresentationError,
   type PresentationDocument,
   type PresentationIssue,
@@ -83,10 +89,8 @@ import {
 import {
   bindPresentationDocument,
   buildApprovedCuicuilcoBlueprint,
-  buildCanonicalPresentationRegistry,
   buildGenericStartingBlueprint,
   projectPresentationCatalog,
-  resolvePresentation,
   type CanonicalPresentationRegistry,
 } from "@/lib/presentation/server";
 import { validatePresentationDocument } from "@/lib/presentation";
@@ -219,13 +223,26 @@ export type ComposerScope = {
  * read, one registry, one resolution: that is why they are built here and not
  * fetched separately by whoever needs them.
  */
-async function readAndBuild(client: SupabaseClient, scope: ComposerScope) {
-  const results = await loadCanonicalStudyResults(client, {
+async function readAndBuild(
+  client: SupabaseClient,
+  scope: ComposerScope,
+): Promise<CanonicalPresentationRead> {
+  // ONE READ, MANY BUILDS.
+  //
+  // The source is read from the database once and every filtered recomputation
+  // is built from that same in-memory object. Reading again per selection would
+  // multiply the twenty-six paged queries by the number of panels a page has,
+  // and — worse — two reads could disagree, which is the one way two registries
+  // built in the same request could address different things.
+  //
+  // This function is the ONLY thing in the filtered path that touches a
+  // transport; everything after it is `src/lib/viewer`, which is pure and which
+  // an offline gate therefore drives for real rather than in copy.
+  const source = await loadCanonicalResultSource(client, {
     tenantId: scope.tenantId,
     studyId: scope.studyId,
   });
-  const registry = buildCanonicalPresentationRegistry(results);
-  return { results, registry };
+  return buildPresentationRead(source);
 }
 
 function refusalFor(error: unknown): ComposerUnavailable {
@@ -250,7 +267,7 @@ export async function loadPresentationComposerWorkspace(
   } catch (error) {
     return { ok: false, unavailable: refusalFor(error) };
   }
-  const { results, registry } = built;
+  const { registry } = built;
 
   let chosen;
   try {
@@ -279,29 +296,37 @@ export async function loadPresentationComposerWorkspace(
 
   // THE BINDING IS AN ACT, AND IT HAPPENS HERE, ONCE, ON THE SERVER.
   // The blueprint is emitted unbound on purpose — a layout is a layout, and
-  // which registry it answers for is the publisher's decision. `resolve` refuses
-  // an unbound document rather than binding one on the way past, because a
-  // binding made on the read path agrees by construction and proves nothing.
+  // which registry it answers for is the publisher's decision. Resolution
+  // refuses an unbound document rather than binding one on the way past,
+  // because a binding made on the read path agrees by construction and proves
+  // nothing.
   const bound = bindPresentationDocument(validated.value, registry);
-  const resolved = resolvePresentation({ document: bound, registry, results });
-  if (!resolved.ok) return { ok: false, unavailable: unresolved(resolved.errors) };
+  // A FIRST LOAD IS THE NEUTRAL SELECTION, resolved by the same one function a
+  // reader's filter change goes through. Two paths here would be two sets of
+  // refusals, and the neutral one is the path nobody would think to test.
+  const resolved = resolveUnderSelection(built, bound, EMPTY_VIEWER_SELECTION);
+  if (!resolved.ok) return { ok: false, unavailable: unresolvedIssues(resolved.issues) };
 
   return {
     ok: true,
-    payload: { document: bound, catalog: projectPresentationCatalog(registry), model: resolved.value, blueprint: chosen.choice },
+    payload: { document: bound, catalog: projectPresentationCatalog(registry), model: resolved.model, blueprint: chosen.choice },
   };
 }
 
 function unresolved(errors: readonly PresentationIssue[]): ComposerUnavailable {
+  // CODES AND PATHS, never `detail`. The contract's own prose is written for
+  // a reviewer auditing a document and 6A.1 already decided it stops at the
+  // server; this keeps that decision even though the reader here IS internal,
+  // because the payload is the same shape the client route will eventually use.
+  return unresolvedIssues(errors.map((issue) => ({ code: issue.code, path: issue.path })));
+}
+
+function unresolvedIssues(issues: { code: string; path: string }[]): ComposerUnavailable {
   return {
     reason: "presentation_unresolved",
     detail:
       "El documento de partida no resuelve contra los resultados de este estudio. Se muestran los códigos para que alguien lo revise; no se dibuja una aproximación.",
-    // CODES AND PATHS, never `detail`. The contract's own prose is written for
-    // a reviewer auditing a document and 6A.1 already decided it stops at the
-    // server; this keeps that decision even though the reader here IS internal,
-    // because the payload is the same shape the client route will eventually use.
-    issues: errors.map((issue) => ({ code: issue.code, path: issue.path })),
+    issues,
   };
 }
 
@@ -325,6 +350,7 @@ export async function resolveEditedPresentation(
   client: SupabaseClient,
   scope: ComposerScope,
   candidate: unknown,
+  viewerCandidate: unknown = EMPTY_VIEWER_SELECTION,
 ): Promise<PreviewResult> {
   const validated = validatePresentationDocument(candidate);
   if (!validated.ok) return { ok: false, unavailable: unresolved(validated.errors) };
@@ -335,14 +361,13 @@ export async function resolveEditedPresentation(
   } catch (error) {
     return { ok: false, unavailable: refusalFor(error) };
   }
-  const { results, registry } = built;
 
   // Re-bind rather than trust. The client's document may carry a stale binding,
   // a fabricated one, or none; binding it here from the registry this request
   // built means the fingerprint describes THIS study's THIS package, and the
   // resolver's own refusals still apply to everything else in the document.
-  const bound = bindPresentationDocument(validated.value, registry);
-  const resolved = resolvePresentation({ document: bound, registry, results });
-  if (!resolved.ok) return { ok: false, unavailable: unresolved(resolved.errors) };
-  return { ok: true, model: resolved.value, document: bound };
+  const bound = bindPresentationDocument(validated.value, built.registry);
+  const resolved = resolveUnderSelection(built, bound, viewerCandidate);
+  if (!resolved.ok) return { ok: false, unavailable: unresolvedIssues(resolved.issues) };
+  return { ok: true, model: resolved.model, document: bound, selection: resolved.selection };
 }
