@@ -550,7 +550,6 @@ export async function loadPublicationReview(
         ? structuralDifference(assembled.publishedModel, model)
         : null,
     history: assembled.history,
-    publishable: preflight.blockers.length === 0,
   };
 
   return { ok: true, payload };
@@ -684,6 +683,14 @@ export async function publishStoredPresentation(
     p_mapping_version: identity.mappingVersion,
     p_package_idempotency_key: identity.packageIdempotencyKey,
     p_plan_fingerprint: identity.planFingerprint,
+    // THE SET THE PREFLIGHT REQUIRED, WHICH IS THE SET THAT WAS GIVEN.
+    //
+    // `canPublish` is false while any required acknowledgement is missing, and
+    // this line is only reached when it is true — so these are exactly the codes
+    // a person ticked. It is written as the REQUIRED set rather than as what the
+    // browser sent, because what the browser sent is an assertion and what the
+    // preflight required is a fact; a caller acknowledging codes this document
+    // does not have would otherwise write them into an audit record.
     p_acknowledged_warnings: [...preflight.required].sort(),
     p_blocking_codes: [],
     p_unacknowledged_codes: [],

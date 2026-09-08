@@ -92,13 +92,19 @@ export type PublicationReviewPayload = {
   /** How this draft differs from what is published. Null when nothing is. */
   difference: StructuralDifference | null;
   history: readonly PublicationHistoryEntry[];
-  /**
-   * True when a publication could succeed with every required acknowledgement
-   * ticked. The screen still disables the control until they ARE ticked, and the
-   * server and the database each refuse independently.
-   */
-  publishable: boolean;
 };
+
+/**
+ * WHAT THIS PAYLOAD DELIBERATELY DOES NOT CARRY, AND WHY IT LOST A FIELD.
+ *
+ * It had a `publishable: boolean` — "no blockers" — and the review screen never
+ * read it: the screen derives the same fact from `blockers.length` because it
+ * also has to derive «and every required acknowledgement is ticked», which the
+ * server cannot know. Two sources of truth for one thing is one source of truth
+ * and one thing that can disagree with it, and the one that disagrees is always
+ * the one nobody is looking at. The screen computes it; the server and the
+ * database each refuse independently.
+ */
 
 export type PublicationReview =
   | { ok: true; payload: PublicationReviewPayload }
