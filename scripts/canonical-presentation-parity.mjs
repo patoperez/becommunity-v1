@@ -260,6 +260,44 @@ check(
 const population = blocks.find((block) => block.id === "portada-poblacion");
 eq("la población del estudio", population.payload.value?.value, 60);
 
+/*
+ * THE SIX COMPARABLE PERIODS, and both rates of each.
+ *
+ * The retention block had no assertion here at all, which is the other half of
+ * why it could be bound to a drawing that rendered nothing and stay that way:
+ * the offline gate did not draw it, and this gate — the one that reads the real
+ * study — did not look at it.
+ *
+ * Six is a fact about Cuicuilco, so it belongs in the gate that holds the real
+ * workbooks rather than in the synthetic one.
+ */
+const retentionBlock = blocks.find((block) => block.id === "retencion-serie");
+check(retentionBlock !== undefined, "el plano aprobado publica la serie de retención");
+eq("y la dibuja como tarjetas por periodo", retentionBlock?.chartVariant, "period_cards");
+const periods = retentionBlock?.payload.shape === "series" ? retentionBlock.payload.points : [];
+eq("los periodos comparables del estudio real", periods.length, 6);
+check(
+  periods.every((point) => point.measures.length === 2),
+  "cada periodo trae sus DOS mediciones, retención y deserción, resueltas juntas",
+);
+check(
+  periods.every((point) => point.measures[0].label === "Retención" && point.measures[1].label === "Deserción"),
+  "cada una bajo su propio nombre",
+);
+const retentionFigures = periods.flatMap((point) => point.measures.map((measure) => measure.value?.formatted));
+eq("las doce cifras llegan formateadas", retentionFigures.filter(Boolean).length, 12);
+check(
+  retentionFigures.every((formatted) => /^\d+(\.\d+)?$/.test(formatted ?? "")),
+  `y ninguna se escribe con un símbolo o un separador que el contrato no puso: ${retentionFigures.join(", ")}`,
+);
+// Each period is read on its own, so nothing here may be a running total: the
+// two rates of one period are its own, and the pair is what the section shows.
+check(
+  periods.every((point) => point.base !== null),
+  "y cada periodo declara la base sobre la que se leyó",
+);
+
+
 /* -------------------------------------------------------------------------- */
 
 console.log("\n[5] El contenido editorial sigue pendiente, y la Esfera sigue prohibida");
