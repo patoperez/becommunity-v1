@@ -942,6 +942,21 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `0023`'s own event table already does — and its own immutability trigger refuses
   DELETE only while the parent study exists, so a snapshot cannot be removed from
   under a published report and a whole study can still be deleted.
+- ⓘ **SUITE D REPORTS FIFTEEN, NOT FIVE, AND THREE OF THEM ARE UNIT 6B.4A'S.**
+  Seven blocking advisories (`next` critical; `@opennextjs/cloudflare`,
+  `browserslist`, `js-yaml`, `miniflare`, `sharp`, `wrangler` high), seven
+  `assigned-secret-env` blobs and the consequent secret-leak exit. The count grew
+  with published advisories, so the older note that it "reports its documented
+  five" is stale rather than wrong-when-written. **The three new ones are a FALSE
+  POSITIVE of a pattern whose own description says otherwise:**
+  `assigned-secret-env` is meant to catch a secret bound to a LITERAL, and it
+  matches `SUPABASE_SERVICE_ROLE_KEY: stack.serviceKey` — an identifier sixteen
+  characters long, holding a key minted at runtime for a throwaway PostgREST.
+  `canonical-presentation-draft-qa.mjs` has contributed the same finding from the
+  same line since 6B.3A. Narrowing the pattern would be the right fix and
+  `scripts/lib/secret-patterns.mjs` is security configuration, a declared
+  human-review zone — so it is RECOMMENDED SEPARATELY and was not changed here.
+  Do not "fix" this by renaming the local until it stops matching.
 - ⓘ **`0030` IS APPLIED TO NO DATABASE, and the hosted fingerprint pins that.**
   `npm run test:canonical-presentation-hosted-fingerprint` asserts that the three
   publication tables are ABSENT and the three functions not callable on the hosted

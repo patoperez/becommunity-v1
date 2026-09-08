@@ -4133,6 +4133,99 @@ import_job 1, import_job_record 3 559).
   `canonical-presentation-parity`: **59 checks, 59 passed**. Neither number moved.
   Source digests: `8d7afdb4…` and `bd0e70d7…`.
 
+#### Verification, gate by gate
+
+| gate | result |
+|---|---|
+| `typecheck` | clean |
+| `lint` | **0 errors, 54 warnings** — the recorded baseline. One error was introduced and fixed: a `useMemo`'d `Map` was being mutated, which `react-hooks/immutability` correctly refuses; it is a `useRef` now, because the mutation is the point |
+| `npm test` | the whole offline chain, green up to the documented known-red, and **every one of the 30 gates after it run individually and green** so a single red gate could not hide them |
+| `build` | exit 0 |
+| `cf:build` | exit 0, `.open-next/worker.js` written |
+| `test:canonical-results-parity` | 534 offered, **531 executed, 531 passed**, 0 failed, 0 skipped, 2 not-applicable, 1 configuration-required |
+| `test:canonical-presentation-parity` | **59 checks, 59 passed** |
+| `test:canonical-publication` | 167 checks |
+| `test:canonical-publication-live` | 188 assertions, 0 skipped |
+| `test:canonical-publication-audit` | 60 assertions |
+| `qa:canonical-publication` | 111 checks |
+| `test:canonical-presentation-hosted-fingerprint` | 45/45 before, **48/48 after** — the three extra are the API-description control and its two companions |
+
+**Known-red, and it was re-measured rather than assumed.**
+`test:hosted-target-guard` fails on exactly one assertion — *«the refusal names
+the main-repository rule, so the worktree rule did not answer for it»* — with 174
+checks passing. The SAME single assertion fails identically on the baseline
+commit `ebc2c3e`, with the same 174: the verifier is a plain clone rather than a
+worktree, which is a property of the environment and not of this unit.
+
+**Suite D: 16 passed, 15 failed, and three of those failures are this unit's.**
+Reporting it as unchanged would have been the easy and wrong answer. The counts
+on `ebc2c3e` and on this branch are identical — but only because the verifier's
+object store already contains this unit's commits, and Suite D scans every
+reachable blob rather than the checked-out tree. The honest breakdown is:
+
+- **seven blocking advisories** (`next` critical; `@opennextjs/cloudflare`,
+  `browserslist`, `js-yaml`, `miniflare`, `sharp`, `wrangler` high) — none
+  introduced here, no dependency was added, changed or pinned differently;
+- **seven `assigned-secret-env` blobs**, of which **three are
+  `scripts/canonical-publication-qa.mjs`** — one per commit of that file;
+- **one** consequent `secret-leak gate failed (exit 2)`.
+
+ⓘ **The three are a FALSE POSITIVE of a pattern whose own description says
+otherwise, and the pattern was deliberately NOT changed.** The rule is *"a
+secret-bearing environment variable bound to a LITERAL value"*, and it matches
+`SUPABASE_SERVICE_ROLE_KEY: stack.serviceKey` — an identifier reference sixteen
+characters long, holding a key minted at runtime for a throwaway PostgREST that
+dies with the run. The sibling file `canonical-presentation-draft-qa.mjs`
+contributes the same finding from the same line and has since Unit 6B.3A, and
+`canonical-shadow-runtime-rehearsal.mjs` since earlier still.
+
+Two fixes were available and both were refused. Renaming the local so the match
+does not fire would be writing worse code to satisfy a pattern, which this
+repository has explicitly declined to do before. Narrowing the pattern to require
+an actual literal would be the RIGHT fix — it is what the description already
+claims — but `scripts/lib/secret-patterns.mjs` is security configuration, a
+declared human-review zone, and narrowing a secret detector is not a change to
+make unilaterally inside a publication unit. **It is recommended as a separate,
+human-reviewed item**, and until then the three findings stand and are named
+here rather than absorbed into a total.
+
+⚠️ **The claim "Suite D reports its documented five" is stale** and was true when
+written. The count has grown with published advisories; the real figure at the
+end of this unit is fifteen, broken down above.
+
+#### Discrimination: eleven mutations, eleven failures, every file restored
+
+A gate that passes is not evidence until it has been made to fail for the reason
+it claims to guard. Each mutation below broke exactly one property, ran the gate
+that owns it, and required a FAILURE line to name that property. Every file was
+digested before and after and restored with git; the worktree was clean at the
+end.
+
+| # | the mutation | the gate that caught it |
+|---|---|---|
+| 1 | the snapshot loses its family discriminator | `migration-chain` |
+| 2 | the snapshot column admits a RANGE of schema versions | `migration-chain` |
+| 3 | the immutability trigger stops covering DELETE | `migration-chain` |
+| 4 | the publication tables get every privilege instead of SELECT | `migration-chain` |
+| 5 | «espera contenido» becomes a blocker instead of a warning | `canonical-publication` |
+| 6 | a blocker can be acknowledged away | `canonical-publication` |
+| 7 | a threshold appears in the preflight | `canonical-publication` |
+| 8 | the publish control stops depending on the blockers | `canonical-publication` |
+| 9 | the review payload grows a field for a digest | `canonical-publication` |
+| 10 | the publication module takes its own DIRECT canonical import | `shadow-boundary` |
+| 11 | a legacy experience table is named on the publication route | `canonical-publication` |
+
+**Two of the discrimination tests were wrong first, and both taught something.**
+Mutation 2 matched a PASSING assertion about a different migration, so the gate
+failed for the right reason and the test said so for the wrong one — the matcher
+now looks only at failure lines. And mutation 10 originally imported
+`@/lib/viewer` into the publication module and the door check did NOT fire:
+that module reaches the canonical layer two hops down while the declared loader
+reaches it in one, so a breadth-first walk still finds the loader's path first.
+**The comment claiming a second import would flip the door was corrected rather
+than the test weakened**, and the mutation now takes a DIRECT canonical import,
+which is what the rule is actually about and which the door row refuses by name.
+
 #### Defects this unit found in its own work, before and during review
 
 1. **The audit's own three assertions were wrong first.** PostgreSQL normalises
