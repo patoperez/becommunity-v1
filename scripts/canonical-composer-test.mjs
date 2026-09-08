@@ -1201,10 +1201,28 @@ check(
   "pero la nota que alguien redactó para el lector sí sobrevive",
 );
 
-// A filter panel is internal-only in this unit and must not reach a client page.
-check(/todavía no filtran/i.test(internalHtml), "el preview interno dice en voz alta que los filtros aún no filtran");
-check(!/todavía no filtran/i.test(clientHtml), "y el cliente no ve un control muerto");
+// A FILTER PANEL THAT CANNOT FILTER SAYS SO, AND A CLIENT NEVER SEES ONE.
+//
+// Unit 6B.1 disabled every control and said "live filtering arrives in 6B.2".
+// It arrived, and the rule did not change: a control is drawn operable only on
+// a surface that hands the renderer viewer controls. These two renders hand it
+// none — they are the authoring canvas's mounting — so the panel must still be
+// genuinely `disabled`, must still say where filtering does work, and must
+// still be absent from a client page, because a dead control on a finished
+// deliverable is the unfinished edge C11 removes.
+check(
+  /Aquí los filtros no se aplican/i.test(internalHtml),
+  "el preview interno dice en voz alta dónde sí se filtra",
+);
+check(
+  !/Aquí los filtros no se aplican/i.test(clientHtml),
+  "y el cliente no ve un control muerto ni la explicación de por qué lo está",
+);
 check(/disabled/.test(internalHtml), "los controles de filtro se dibujan deshabilitados de verdad");
+check(
+  !/6B\.2/.test(internalHtml) && !/6B\.2/.test(clientHtml),
+  "y ninguna de las dos superficies sigue prometiendo una unidad futura",
+);
 // AN INELIGIBLE BLOCK NEVER WEARS THE FILTER SECTION.
 //
 // The first version of this check searched the whole page for the section after
@@ -1279,26 +1297,67 @@ check(componentTransports.length === 0, `ningún componente alcanza un transport
 // gate that renders to a string has no focus to observe. The browser QA run
 // drives it for real: it works in the LAST journey of the page and asserts the
 // focused node is still inside that block.
-// THE PREVIEW IS DRAWN, NOT OPERABLE, AND THAT HAS TO STAY TRUE.
+// TWO MOUNTINGS OF ONE MODEL, AND THEY ARE OPPOSITE ON PURPOSE.
 //
-// The canvas wraps every rendered block in an `inert` container so a click
-// inside a chart selects the BLOCK rather than operating the chart: a preview
-// a person can accidentally operate lies about what a client will experience.
+// The CANVAS wraps every rendered block in an `inert` container so a click
+// inside a chart selects the BLOCK rather than operating the chart: an
+// authoring preview a person can accidentally operate lies about what a client
+// will experience. It therefore also hands the renderer NO viewer controls, so
+// every filter control there is genuinely disabled.
 //
-// It is asserted here because it is easy to lose. A browser run cannot be
+// The READING view is the other half of the same argument. It mounts the same
+// model the way a reader will get it — no `inert` wrapper, the client audience,
+// and viewer controls — which is what makes a filter real. Unit 6B.2 could have
+// been built by making the canvas operable instead, and that would have made
+// every chart, link and control inside every block operable with it.
+//
+// It is asserted here because it is easy to lose, and a browser run cannot be
 // trusted to notice: a programmatic `.click()` runs listeners inside an inert
 // subtree even though a person's click and keystrokes do not, so a QA script
 // that drives the preview with `.click()` reports a capability the product
 // deliberately does not have. That happened once in this unit.
 {
-  const canvas = readFileSync(join("src", "components", "studio", "composer", "ComposerWorkspace.tsx"), "utf8");
-  const rendererUse = stripComments(canvas).indexOf("<PresentationRenderer");
-  check(rendererUse > 0, "el lienzo dibuja los bloques con la biblioteca de sólo dibujo");
-  const before = stripComments(canvas).slice(0, rendererUse);
-  const openTag = before.lastIndexOf("<div");
+  const canvas = stripComments(
+    readFileSync(join("src", "components", "studio", "composer", "ComposerWorkspace.tsx"), "utf8"),
+  );
+  const mountings = [];
+  let at = canvas.indexOf("<PresentationRenderer");
+  while (at >= 0) {
+    const tagEnd = canvas.indexOf("/>", at);
+    mountings.push({
+      at,
+      tag: canvas.slice(at, tagEnd < 0 ? at + 400 : tagEnd),
+      before: canvas.slice(0, at),
+    });
+    at = canvas.indexOf("<PresentationRenderer", at + 1);
+  }
+  check(mountings.length === 2, `el compositor monta el modelo exactamente dos veces (${mountings.length})`);
+
+  const inertWrapped = (mounting) => {
+    const openTag = mounting.before.lastIndexOf("<div");
+    return openTag > 0 && mounting.before.slice(openTag).includes(" inert");
+  };
+  const canvasMounting = mountings.find((mounting) => inertWrapped(mounting));
+  const readingMounting = mountings.find((mounting) => !inertWrapped(mounting));
+
+  check(Boolean(canvasMounting), "una de las dos va dentro de un contenedor inerte: es el lienzo");
   check(
-    openTag > 0 && before.slice(openTag).includes(" inert"),
-    "y el dibujo va dentro de un contenedor inerte, así que el lienzo no se opera",
+    Boolean(canvasMounting) && !/viewer=/.test(canvasMounting.tag),
+    "y el lienzo no recibe controles de lectura, así que sus filtros están muertos a propósito",
+  );
+  check(
+    Boolean(canvasMounting) && /audience="internal"/.test(canvasMounting.tag),
+    "y dibuja para la revisión interna",
+  );
+
+  check(Boolean(readingMounting), "la otra no es inerte: es la vista de lectura");
+  check(
+    Boolean(readingMounting) && /viewer=/.test(readingMounting.tag),
+    "y sí recibe controles de lectura, que es lo que hace que un filtro filtre",
+  );
+  check(
+    Boolean(readingMounting) && /audience="client"/.test(readingMounting.tag),
+    "y dibuja lo que un lector recibirá, no lo que un revisor ve de más",
   );
 }
 const journey = componentFiles.find(({ path }) => path.endsWith("Journey.tsx"));
@@ -1390,11 +1449,41 @@ check(/tenant_id/.test(actionCode), "y recupera el inquilino de la fila, nunca d
 check(/JSON\.parse\(documentJson\)/.test(actionCode) && /catch/.test(actionCode), "trata el documento como hostil: lo parsea dentro de un try/catch");
 
 // BINDING IS AN ACT, AND IT HAPPENS BEFORE RESOLUTION, ON THE SERVER.
+//
+// Unit 6B.2 moved the resolution itself into `src/lib/viewer/`, which is pure
+// and which an offline gate therefore drives for real. The rule this check
+// protects did not move, and it is now asserted in a STRICTER form: the loader
+// binds and never resolves, the viewer module resolves and never binds. Before,
+// one file could have done both in either order as long as the text came out
+// in the right sequence; now neither file can do the other's half at all.
 const loaderCode = stripComments(loaderSource);
+const viewerSource = readFileSync(join("src", "lib", "viewer", "index.ts"), "utf8");
+const viewerCode = stripComments(viewerSource);
 const bindAt = loaderCode.indexOf("bindPresentationDocument(");
-const resolveAt = loaderCode.indexOf("resolvePresentation(");
-check(bindAt >= 0 && resolveAt >= 0, "el cargador enlaza y resuelve");
-check(bindAt < resolveAt, "y enlaza ANTES de resolver, nunca al vuelo dentro de la lectura");
+const delegateAt = loaderCode.indexOf("resolveUnderSelection(");
+check(bindAt >= 0, "el cargador enlaza el documento");
+check(delegateAt >= 0, "y delega la resolución en la capa de lectura");
+check(bindAt < delegateAt, "y enlaza ANTES de resolver, nunca al vuelo dentro de la lectura");
+check(
+  !/resolvePresentation\(/.test(loaderCode),
+  "el cargador no resuelve por su cuenta: hay una sola ruta de resolución",
+);
+check(
+  /resolvePresentation\(/.test(viewerCode),
+  "la capa de lectura sí resuelve",
+);
+check(
+  !/bindPresentationDocument\(/.test(viewerCode),
+  "y no enlaza nada: un enlace hecho en la ruta de lectura coincidiría siempre y no probaría nada",
+);
+check(
+  !/["']server-only["']/.test(viewerCode),
+  "la capa de lectura no lleva la marca server-only, así que una compuerta puede ejecutarla de verdad",
+);
+check(
+  !/@supabase|createClient\(|\.rpc\(|\bfetch\(/.test(viewerCode),
+  "y no alcanza ningún transporte",
+);
 check(/["']server-only["']/.test(loaderCode), "el cargador lleva la marca server-only");
 check(!/@\/lib\/dashboard|lib\/dashboard/.test(loaderCode), "y no cae al cálculo heredado cuando no hay paquete canónico");
 check(/validatePresentationDocument\(/.test(loaderCode), "valida el documento del navegador contra el esquema estricto antes de mirarlo");
