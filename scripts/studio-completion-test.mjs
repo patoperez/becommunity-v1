@@ -31,7 +31,7 @@
  * no longer exists".
  */
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 
 import {
   attentionForStudy,
@@ -108,43 +108,149 @@ const readRaw = async (path) =>
 
 console.log("\n[1] Studio routes authorize before reading, and the old addresses still answer");
 
-const STUDIO_ROUTES = [
-  "src/app/studio/page.tsx",
-  "src/app/studio/clientes/page.tsx",
-  "src/app/studio/clientes/[tenantId]/page.tsx",
-  "src/app/studio/estudios/page.tsx",
-  "src/app/studio/plantillas/page.tsx",
-  "src/app/studio/e/[studyId]/page.tsx",
-  "src/app/studio/e/[studyId]/datos/page.tsx",
-  "src/app/studio/e/[studyId]/indicadores/page.tsx",
-  "src/app/studio/e/[studyId]/cualitativo/page.tsx",
-  // Unit 6B.1.
-  //
-  // NOTE FOR WHOEVER READS THIS NEXT. This list is hand-maintained and has
-  // already fallen behind: `src/app/studio/e/[studyId]/interpretacion/page.tsx`
-  // is missing from it, so the authorization ORDER of the route with the most
-  // authored content in Studio is checked by nothing. Adding it here was tried
-  // and reverted, because the same list drives a second rule — no route may
-  // render a serialized object — and that page uses `JSON.stringify`. Closing
-  // the hole therefore means changing that page, which is not this unit's
-  // change to make. It is recorded rather than quietly left.
+/**
+ * EVERY STUDIO PAGE ON DISK, FOUND RATHER THAN LISTED.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THIS IS A WALK AND NOT AN ARRAY.
+ *
+ * It used to be a hand-maintained array, and it had already fallen behind:
+ * `src/app/studio/e/[studyId]/interpretacion/page.tsx` was missing, so the
+ * authorization ORDER of the Studio route with the most authored content was
+ * checked by nothing at all. The page was in fact correct — it awaits
+ * `requireInternal()` before it reads anything — but nothing was asserting that,
+ * and "correct today" is not what a gate is for.
+ *
+ * The reason it stayed missing is worth keeping, because it is the real lesson:
+ * ONE list was driving TWO unrelated rules. Adding the page to it turned the
+ * authorization rule green and the no-serialized-object rule red, because that
+ * page carries `value={JSON.stringify(item)}` on a checkbox — a form-encoded
+ * value, not a serialized object rendered to a reader. Sharing the list made
+ * closing a hole in one rule look like a violation of another.
+ *
+ * So the two rules now have two lists. This one is DERIVED, so a new Studio page
+ * is covered the day it is created and cannot be forgotten. The other stays
+ * explicit, because "which surfaces must never print a structure" is a judgement
+ * about each file rather than a fact about the filesystem.
+ */
+async function studioPagesOnDisk() {
+  const root = new URL("../src/app/studio/", import.meta.url);
+  const found = [];
+  const walk = async (dir, prefix) => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isDirectory()) {
+        await walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`);
+      } else if (entry.name === "page.tsx") {
+        found.push(`src/app/studio/${prefix}page.tsx`);
+      }
+    }
+  };
+  await walk(root, "");
+  return found;
+}
+
+const STUDIO_ROUTES = await studioPagesOnDisk();
+assert.ok(STUDIO_ROUTES.length >= 13, `the Studio route walk found only ${STUDIO_ROUTES.length} pages`);
+for (const required of [
+  // Named individually as well as walked: a walk that silently found NOTHING
+  // would otherwise pass every rule below it. These are the two the unit cares
+  // about most — the one that was missing, and the one Unit 6B.1 added.
+  "src/app/studio/e/[studyId]/interpretacion/page.tsx",
   "src/app/studio/e/[studyId]/construccion/page.tsx",
-  "src/app/studio/e/[studyId]/vista-cliente/page.tsx",
-  "src/app/studio/e/[studyId]/publicar/page.tsx",
+]) {
+  assert.ok(STUDIO_ROUTES.includes(required), `the Studio route walk must find ${required}`);
+}
+
+
+/**
+ * The reads this gate knows how to find. Kept explicit, because the ORDER
+ * assertion has to name a position in the source and a wildcard cannot.
+ */
+const KNOWN_READERS = [
+  "admin.from(",
+  "loadStudioStudy(",
+  "loadAttentionBoard(",
+  "loadPresentationComposerWorkspace(",
+  "loadStudyInterpretation(",
 ];
 
+/**
+ * ANYTHING THAT LOOKS LIKE A READ — the guard against a vacuous pass.
+ *
+ * A page containing none of the known readers passes the loop below without the
+ * order assertion ever binding, and "passed" then means "this gate did not
+ * understand the file". That is not hypothetical: `src/app/studio/page.tsx`
+ * matches none of the five, and `loadAttentionBoard(` — one of the five —
+ * appears in no Studio page at all, so the effective list had been four for
+ * some time without anyone noticing.
+ *
+ * So a page that matches no known reader must match no read AT ALL. If it reads
+ * through something this list has never heard of, the gate says so instead of
+ * reporting a passing route it never checked.
+ */
+const ANY_READ = /createAdminClient\(|\bawait\s+load[A-Z]\w*\(|\.from\(/;
+
+let bound = 0;
 for (const route of STUDIO_ROUTES) {
   const source = await readCode(route);
   assert.match(source, /await requireInternal\(\)/, `${route} must run the internal gate`);
   // Nothing may be read before the gate answers.
   const gate = source.indexOf("await requireInternal()");
-  for (const reader of ["admin.from(", "loadStudioStudy(", "loadAttentionBoard(", "loadPresentationComposerWorkspace("]) {
+  let matched = false;
+  for (const reader of KNOWN_READERS) {
     const at = source.indexOf(reader);
-    if (at >= 0) assert.ok(gate < at, `${route} must authorize before ${reader}`);
+    if (at >= 0) {
+      matched = true;
+      assert.ok(gate < at, `${route} must authorize before ${reader}`);
+    }
+  }
+  if (matched) bound += 1;
+  else {
+    assert.doesNotMatch(
+      source,
+      ANY_READ,
+      `${route} reads through something this gate does not know: add it to KNOWN_READERS rather than letting the order assertion pass vacuously`,
+    );
   }
   assert.doesNotMatch(source, /history\.back|router\.back/, `${route} must not use browser history`);
 }
-ok(`${STUDIO_ROUTES.length} Studio routes each authorize server-side before reading anything`);
+ok(
+  `${STUDIO_ROUTES.length} Studio routes each authorize server-side before reading anything ` +
+    `(${bound} bind the order assertion; the rest are proved to read nothing)`,
+);
+
+/**
+ * A COMPONENT MAY HOLD THE PRIVILEGED CLIENT, BUT ONLY BEHIND A GATE.
+ *
+ * `StudioHomeView` calls `createAdminClient()` itself and reads across tenants.
+ * Nothing was wrong with it — both of its callers authorize first — but nothing
+ * was asserting that either, and the route-scoped rules above cannot see it:
+ * `src/app/studio/page.tsx` delegates the read entirely, so it matches no reader
+ * token and the order assertion never binds for it.
+ *
+ * So the rule follows the component instead of the route: every surface that
+ * renders it must decide the role BEFORE it does, by whichever of the two means
+ * that surface uses.
+ */
+{
+  const view = await readCode("src/components/studio/StudioHomeView.tsx");
+  assert.match(view, /createAdminClient\(/, "StudioHomeView is the surface that holds the privileged client");
+  const callers = [
+    ["src/app/studio/page.tsx", /await requireInternal\(\)/],
+    ["src/app/dashboard/page.tsx", /role === "internal"/],
+  ];
+  for (const [caller, guardPattern] of callers) {
+    const source = await readCode(caller);
+    const mount = source.indexOf("<StudioHomeView");
+    assert.ok(mount >= 0, `${caller} must still render StudioHomeView, or this rule is watching nothing`);
+    const decided = source.search(guardPattern);
+    assert.ok(decided >= 0, `${caller} must decide the role before rendering StudioHomeView`);
+    assert.ok(decided < mount, `${caller} must decide the role BEFORE it renders StudioHomeView`);
+  }
+  ok(`${callers.length} callers of the privileged Studio home decide the role before rendering it`);
+}
+
 
 const guard = await readCode("src/lib/studio/guard.ts");
 assert.match(guard, /auth\.getUser\(\)/, "the gate verifies the JWT with the Auth server");
@@ -277,6 +383,45 @@ ok("the board is bounded, ordered by blocking-ness, and states how many it left 
 
 console.log("\n[3] No JSON, no canonical key and no stable identifier is ever typed");
 
+/**
+ * THE SURFACES THAT MAY NEVER PRINT A STRUCTURE — its own list, on purpose.
+ *
+ * This rule and the authorization-order rule above used to share one array, and
+ * that coupling is what kept a real hole open: the page missing from the
+ * authorization list could not be added without turning THIS rule red, so the
+ * hole was documented instead of closed.
+ *
+ * They are different questions. "Did this page authorize before it read
+ * anything?" is true of every Studio page without exception, so it is asked of
+ * a walk of the filesystem. "Should this surface ever print a serialized
+ * object?" is a judgement about a file, so it is asked of a list somebody wrote.
+ *
+ * ONE EXEMPTION, NAMED AND ARGUED.
+ *
+ * `interpretacion/page.tsx` carries `value={JSON.stringify(item)}` on a checkbox
+ * whose label is the human sentence. That is a FORM-ENCODED VALUE travelling to
+ * the page's own server action, not a structure shown to a reader — the reader
+ * sees «Evidencia que sostiene esta lectura» and a list of readable names. The
+ * rule this gate is really making is "no person is shown a structure", and a
+ * regex over the file cannot tell a rendered structure from an input value.
+ *
+ * So it is exempted BY NAME with the reason written down, and the exemption is
+ * kept honest by the three assertions below it: the page must still escape
+ * everything React escapes, must still not force a wide table, and its
+ * serialization must still be confined to a form control's `value`. If a future
+ * edit prints one to a reader, `NO_RENDERED_STRUCTURE` catches it.
+ */
+const SERIALIZATION_EXEMPT = new Map([
+  [
+    "src/components/studio/composer/ComposerWorkspace.tsx",
+    "JSON.stringify appears once, serializing the session-only document as the argument to the preview Server Action; nothing is rendered from it.",
+  ],
+  [
+    "src/app/studio/e/[studyId]/interpretacion/page.tsx",
+    "JSON.stringify appears only as a checkbox value carried to the page's own server action; the reader sees the item's label.",
+  ],
+]);
+
 const STUDIO_UI = [
   ...STUDIO_ROUTES,
   "src/components/studio/JourneyStagesFields.tsx",
@@ -288,16 +433,40 @@ const STUDIO_UI = [
   "src/components/studio/StudioHomeView.tsx",
   "src/components/studio/StudyTabs.tsx",
   "src/components/studio/StudyWorkSurface.tsx",
+  "src/components/studio/composer/ComposerWorkspace.tsx",
   "src/app/admin/studies/StudyConfigurator.tsx",
 ];
+
+/**
+ * A structure printed where a PERSON reads it, rather than posted in a form.
+ *
+ * The distinction is one character. In JSX an attribute is `name={expr}` and a
+ * rendered child is `>{expr}` or `}{expr}` — so the test is `{JSON.stringify`
+ * NOT preceded by an equals sign. A first attempt matched `[>{]s*JSON` and
+ * therefore matched `value={JSON.stringify(item)}` as well, which is exactly
+ * the case the exemption exists to allow: it failed the file it was written to
+ * let through.
+ */
+const NO_RENDERED_STRUCTURE = /(^|[^=])\{\s*JSON\.stringify/m;
+
 for (const file of STUDIO_UI) {
   const source = await readCode(file);
-  assert.doesNotMatch(source, /JSON\.stringify/, `${file} must not render a serialized object`);
+  const exemption = SERIALIZATION_EXEMPT.get(file);
+  if (exemption) {
+    assert.match(source, /JSON\.stringify/, `${file} is exempted from the serialization rule but no longer serializes anything — remove the exemption`);
+    assert.doesNotMatch(source, NO_RENDERED_STRUCTURE, `${file} may post a structure in a form value, never render one: ${exemption}`);
+  } else {
+    assert.doesNotMatch(source, /JSON\.stringify/, `${file} must not render a serialized object`);
+  }
   assert.doesNotMatch(source, /dangerouslySetInnerHTML/, `${file} must not bypass React escaping`);
   assert.doesNotMatch(source, /min-w-\[900px\]/, `${file} must reflow rather than force a wide table`);
   assert.doesNotMatch(source, /placeholder="metric_key"/, `${file} must not ask for a canonical metric key`);
 }
-ok(`${STUDIO_UI.length} Studio surfaces render no serialized object and force no wide table`);
+ok(
+  `${STUDIO_UI.length} Studio surfaces render no serialized object and force no wide table ` +
+    `(${SERIALIZATION_EXEMPT.size} exemption, named and argued)`,
+);
+
 
 const configurator = await readCode("src/app/admin/studies/StudyConfigurator.tsx");
 // The three raw stage inputs are gone: the identifier is hidden, the metric is

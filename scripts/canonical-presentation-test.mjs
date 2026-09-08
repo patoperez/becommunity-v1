@@ -2189,6 +2189,295 @@ check(
 
 
 
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[33] Cada bloque visible del plano aprobado DIBUJA algo");
+/*
+ * THE GATE THAT WOULD HAVE CAUGHT THE RETENTION BLOCK.
+ *
+ * The approved blueprint bound `retention_series` to `bar_vertical`. Every
+ * existing check passed: the variant is compatible, so the resolver accepted it;
+ * the payload is full, so the client-visibility rule let the block through; and
+ * a component for `bar_vertical` exists, so no internal placeholder fired. The
+ * only thing that failed was the part nobody was asserting — `BarVertical` reads
+ * category rows, a series has none, and it returned `null`. The client got a
+ * heading, a paragraph promising retention and desertion for each period, a
+ * methodology caption, and a blank.
+ *
+ * So this renders each block of the approved document ON ITS OWN and asserts
+ * that a block a reader is meant to SEE DATA IN produced some. Alone, because a
+ * whole-page render cannot tell which card the markup came from — the failure
+ * being caught here is precisely one block among twenty drawing nothing while
+ * the others draw normally.
+ *
+ * WHAT "SOMETHING" MEANS. Not "the markup is non-empty": the card's own chrome
+ * would satisfy that, which is the trap. It means the LEAF produced content, so
+ * each block is rendered twice — once whole, once with its copy stripped — and
+ * the second render is what must be non-empty.
+ *
+ * WHAT IS EXEMPT, AND WHY IT IS NAMED RATHER THAN SKIPPED. A block whose payload
+ * legitimately carries nothing yet — the editorial slots the contract classifies
+ * as pending review — must render NOTHING on a client, and C11 is the reason.
+ * Those are listed by handle, so a data block cannot join them by accident.
+ */
+{
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { PresentationRenderer } = await import("../src/components/presentation/PresentationRenderer.tsx");
+
+  const model = resolved.value;
+  const textOf = (markup) => markup.replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, " ").trim();
+
+  const drawOne = (block, audience) =>
+    renderToStaticMarkup(
+      createElement(PresentationRenderer, {
+        model: {
+          ...model,
+          pages: [
+            {
+              id: "solo",
+              title: "",
+              order: 0,
+              // Copy stripped: what survives is what the LEAF drew. A title and a
+              // description are exactly what the broken block still produced.
+              blocks: [{ ...block, copy: { title: null, description: null, annotation: null } }],
+            },
+          ],
+        },
+        audience,
+      }),
+    );
+
+  const allBlocks = model.pages.flatMap((page) => page.blocks);
+  check(allBlocks.length >= 15, `el plano aprobado resuelve ${allBlocks.length} bloques`);
+
+  /*
+   * WHAT IS EXEMPT FROM "MUST DRAW SOMETHING", AND WHY EACH ONE IS.
+   *
+   * An editorial slot the contract classifies as pending review carries a null
+   * body and must render NOTHING on a client — that is C11, not a drawing
+   * failure. An editorial block somebody DID write is not exempt: authored prose
+   * is content and has to appear. And a filter panel has no viewer behaviour in
+   * this unit at all, so it is internal-only by construction.
+   *
+   * A first version of this list exempted every editorial block, which would
+   * have let an authored paragraph silently stop rendering.
+   */
+  const isPendingSlot = (block) =>
+    (block.payload.shape === "editorial" && block.payload.body === null) ||
+    block.availability === "configuration_required";
+  const isInternalOnly = (block) => block.payload.shape === "filter_controls";
+  const EMPTY_ON_PURPOSE = new Set(
+    allBlocks.filter((block) => isPendingSlot(block) || isInternalOnly(block)).map((block) => block.id),
+  );
+
+  const blank = [];
+  for (const block of allBlocks) {
+    if (EMPTY_ON_PURPOSE.has(block.id)) continue;
+    const drawn = textOf(drawOne(block, "internal"));
+    if (drawn.length === 0) blank.push(`${block.id} (${block.chartVariant ?? "sin forma"} sobre ${block.payload.shape})`);
+  }
+  check(
+    blank.length === 0,
+    `ningún bloque de datos del plano aprobado dibuja un vacío${blank.length ? `: ${blank.join("; ")}` : ` (${allBlocks.length - EMPTY_ON_PURPOSE.size} comprobados)`}`,
+  );
+
+  // And the retention block specifically, by name and by content, because it is
+  // the one that was broken and a general rule can drift.
+  const retention = allBlocks.find((block) => block.payload.shape === "series");
+  check(Boolean(retention), "el plano aprobado publica una serie de periodos");
+  if (retention) {
+    eq("la serie se dibuja con la forma de tarjetas por periodo", retention.chartVariant, "period_cards");
+    const drawn = textOf(drawOne(retention, "internal"));
+    const periods = retention.payload.points;
+    // This fixture is SYNTHETIC and carries as many periods as it was written
+    // with. That the REAL study has six is a fact about Cuicuilco, and
+    // `canonical-presentation-parity` is where a real-workbook fact belongs.
+    check(periods.length >= 2, `la serie trae ${periods.length} periodos y cada uno se comprueba`);
+    const missing = periods.filter((point) => !drawn.includes(point.label));
+    check(missing.length === 0, `los ${periods.length} periodos aparecen dibujados${missing.length ? `; faltan ${missing.map((p) => p.label).join(", ")}` : ""}`);
+    // Both measures of every period, by their already-formatted text.
+    const figures = periods.flatMap((point) => point.measures.map((measure) => measure.value?.formatted).filter(Boolean));
+    const absent = figures.filter((formatted) => !drawn.includes(formatted));
+    check(
+      absent.length === 0 && figures.length >= periods.length * 2,
+      `las ${figures.length} cifras de retención y deserción se dibujan tal como llegaron${absent.length ? `; faltan ${absent.slice(0, 4).join(", ")}` : ""}`,
+    );
+    const labels = new Set(periods.flatMap((point) => point.measures.map((measure) => measure.label)));
+    check(
+      [...labels].every((label) => drawn.includes(label)),
+      `cada medición se dibuja bajo su propio nombre: ${[...labels].join(", ")}`,
+    );
+  }
+
+  /*
+   * A CLIENT IS NEVER LEFT A CARD WITH NOTHING IN IT.
+   *
+   * The test is the absence of a `<section>`, not the absence of markup.
+   * `PresentationRenderer` always emits its own wrapping `<div>`, so "the string
+   * is non-empty" is true even when every page and every card was correctly
+   * dropped — a first version of this check measured that wrapper and reported
+   * three panels that in fact render nothing at all. A card is a `<section>`,
+   * and a page is a `<section>`; if neither is in the markup, the reader was
+   * shown nothing, which is what C11 asks for.
+   */
+  const hasCard = (markup) => markup.includes("<section");
+  const clientBlank = [];
+  for (const block of allBlocks) {
+    const markup = drawOne(block, "client");
+    if (textOf(markup).length === 0 && hasCard(markup)) clientBlank.push(block.id);
+  }
+  check(clientBlank.length === 0, `ningún bloque deja al cliente una tarjeta vacía${clientBlank.length ? `: ${clientBlank.join(", ")}` : ` (${allBlocks.length} comprobados)`}`);
+
+  // The pending slots and the internal-only panels, conversely, must leave a
+  // client no card at all — not an empty one, and not a heading over it.
+  const leaked = [...EMPTY_ON_PURPOSE].filter((id) => {
+    const block = allBlocks.find((candidate) => candidate.id === id);
+    return block ? hasCard(drawOne(block, "client")) : false;
+  });
+  check(
+    leaked.length === 0,
+    `los ${EMPTY_ON_PURPOSE.size} bloques sin contenido para el cliente no le dejan ni una tarjeta${leaked.length ? `: ${leaked.join(", ")}` : ""}`,
+  );
+
+  // And in Studio the same blocks DO say something, because an internal reviewer
+  // is the person who has to know what is still missing.
+  const silentInStudio = [...EMPTY_ON_PURPOSE].filter((id) => {
+    const block = allBlocks.find((candidate) => candidate.id === id);
+    return block ? textOf(drawOne(block, "internal")).length === 0 : false;
+  });
+  check(
+    silentInStudio.length === 0,
+    `y en Studio los ${EMPTY_ON_PURPOSE.size} sí se nombran${silentInStudio.length ? `; callan ${silentInStudio.join(", ")}` : ""}`,
+  );
+}
+
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[34] El plano genérico elige una forma que de verdad dibuja ESA medición");
+/*
+ * THE SECOND HOME OF THE SAME DEFECT.
+ *
+ * The approved blueprint is hand-written, so its bad pairing was one line. The
+ * GENERIC starting layout picks its own, and it was picking with the wrong
+ * question: it intersected what the authority permits for a semantic with a
+ * flat list of everything this build draws for ANY semantic. `bar_vertical` is
+ * drawn — for a distribution — and is permitted for a retention series, so the
+ * intersection chose it, and every study without a registered blueprint opened
+ * with the identical blank card.
+ *
+ * Fixing the approved blueprint alone would have left that untouched, and no
+ * gate would have said so: reverting the per-semantic lookup turns nothing red
+ * unless the generic layout is actually built and drawn. So it is, here, with
+ * the real capability function the route passes rather than a stand-in.
+ */
+{
+  const { buildGenericStartingBlueprint } = await import("../src/lib/presentation/blueprints/generic-starting.ts");
+  const { offeredChartVariants } = await import("../src/lib/composer/renderer-capabilities.ts");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { PresentationRenderer } = await import("../src/components/presentation/PresentationRenderer.tsx");
+
+  const { JOURNEY_ROUTES_VARIANTS } = await import("../src/lib/composer/renderer-capabilities.ts");
+  const generic = buildGenericStartingBlueprint(registry, {
+    drawableFor: offeredChartVariants,
+    drawableForRoutes: JOURNEY_ROUTES_VARIANTS,
+    title: "Estudio sin plano registrado",
+  });
+  const genericValid = validatePresentationDocument(JSON.parse(JSON.stringify(generic)));
+  check(genericValid.ok, "el plano genérico valida contra el esquema versionado");
+
+  if (genericValid.ok) {
+    const genericBound = bindPresentationDocument(genericValid.value, registry);
+    const genericResolved = resolvePresentation({ document: genericBound, registry, results });
+    check(genericResolved.ok, "y resuelve entero sobre el mismo estudio");
+
+    if (genericResolved.ok) {
+      const blocks = genericResolved.value.pages.flatMap((page) => page.blocks);
+      check(blocks.length >= 8, `el plano genérico propone ${blocks.length} bloques`);
+
+      // EVERY CHOICE IS ONE THE BUILD ACTUALLY DRAWS FOR THAT SEMANTIC.
+      //
+      // A ROUTES BLOCK IS JUDGED AGAINST ITS OWN LIST, and writing this check
+      // the other way reproduced the very confusion it exists to catch: a
+      // `journey_routes` block carries the semantic of the group it draws from
+      // and the variant of the drawing it IS, so asking the group's implemented
+      // list about `journey_route_map` reports a correct block as wrong.
+      const wrong = blocks
+        .filter((block) => block.chartVariant !== null && block.semantic !== null)
+        .filter((block) =>
+          block.payload.shape === "routes"
+            ? !JOURNEY_ROUTES_VARIANTS.includes(block.chartVariant)
+            : !offeredChartVariants(block.semantic).includes(block.chartVariant),
+        )
+        .map((block) => `${block.id}: ${block.chartVariant} sobre ${block.payload.shape}`);
+      check(
+        wrong.length === 0,
+        `cada forma elegida está entre las que este build dibuja para esa medición${wrong.length ? `: ${wrong.join("; ")}` : ""}`,
+      );
+
+      // And the proof that matters: it draws.
+      const textOfGeneric = (markup) => markup.replace(/<[^>]*>/g, "").replace(/&[a-z]+;/g, " ").trim();
+      const blankGeneric = [];
+      for (const block of blocks) {
+        if (block.payload.shape === "editorial" || block.payload.shape === "filter_controls") continue;
+        if (block.availability === "configuration_required") continue;
+        const markup = renderToStaticMarkup(
+          createElement(PresentationRenderer, {
+            model: {
+              ...genericResolved.value,
+              pages: [
+                {
+                  id: "solo",
+                  title: "",
+                  order: 0,
+                  blocks: [{ ...block, copy: { title: null, description: null, annotation: null } }],
+                },
+              ],
+            },
+            audience: "internal",
+          }),
+        );
+        if (textOfGeneric(markup).length === 0) {
+          blankGeneric.push(`${block.id} (${block.chartVariant ?? "sin forma"} sobre ${block.payload.shape})`);
+        }
+      }
+      check(
+        blankGeneric.length === 0,
+        `ningún bloque del plano genérico dibuja un vacío${blankGeneric.length ? `: ${blankGeneric.join("; ")}` : ""}`,
+      );
+
+      /*
+       * NOTHING THE REGISTRY PUBLISHES MAY GO MISSING.
+       *
+       * Every check above asks whether the blocks that EXIST are right, and
+       * none of them can notice a block that stopped being proposed. Making
+       * the variant lookup per-semantic did exactly that: a `journey_routes`
+       * block is not a result bound to a group, the implemented list for
+       * `journey_group` is deliberately empty, and asking it for a routes
+       * block answered `null` — so every journey silently vanished from every
+       * generic layout and every assertion stayed green.
+       *
+       * So the counts are compared against the registry itself.
+       */
+      const groupsInRegistry = registry.entries.filter((entry) => entry.semantic === "journey_group").length;
+      const routeBlocks = blocks.filter((block) => block.payload.shape === "routes").length;
+      eq("propone un recorrido por cada grupo que el registro publica", routeBlocks, groupsInRegistry);
+      const termsInRegistry = registry.entries.filter((entry) => entry.semantic === "qualitative_terms").length;
+      const termBlocks = blocks.filter((block) => block.payload.shape === "terms").length;
+      eq("y una nube por cada conjunto de términos curados", termBlocks, termsInRegistry);
+      // The series is the case that was wrong, so it is named.
+      const genericSeries = blocks.find((block) => block.payload.shape === "series");
+      check(Boolean(genericSeries), "el plano genérico también propone la serie de periodos");
+      if (genericSeries) {
+        eq("y la propone como tarjetas por periodo", genericSeries.chartVariant, "period_cards");
+      }
+    }
+  }
+}
+
 console.log("\n" + "=".repeat(74));
 if (failures > 0) {
   console.error(`RESULTADO: ${failures} fallo(s). COMPUERTA BLOQUEADA.`);

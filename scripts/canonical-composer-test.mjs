@@ -58,6 +58,13 @@ import { PresentationRenderer } from "../src/components/presentation/Presentatio
 import { RENDERED_VARIANTS } from "../src/components/presentation/renderers.tsx";
 import { AbsenceNotice } from "../src/components/presentation/absence.tsx";
 import { COMPATIBLE_CHART_VARIANTS, PRESENTATION_SEMANTICS } from "../src/lib/presentation/capabilities.ts";
+import { METHODOLOGY_DISCLOSURE_LEVELS } from "../src/lib/presentation/capabilities.ts";
+import {
+  CHART_VARIANT_LABEL,
+  DISCLOSURE_LABEL,
+  SAMPLE_POLICY_MODE_LABEL,
+  SAMPLE_POLICY_MODE_STATE,
+} from "../src/lib/presentation/labels.ts";
 import {
   DEFAULT_SAMPLE_POLICY,
   GRID_COLUMNS,
@@ -1864,6 +1871,285 @@ function countConnections(document, panelId) {
     }
   }
   return total;
+}
+
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[27] La nube compone: horizontales y una vertical exacta, también con cuatro términos");
+/*
+ * THE FOUR-TERM CASE IS THE CASE, not an edge of it.
+ *
+ * The two renewal-reason clouds honestly have four categories each. The rule
+ * used to be `terms.length >= 5`, so those two — the only clouds this product
+ * publishes — rendered entirely horizontal: a list, not a composition. The
+ * approved dashboard turns the shortest label a clean quarter-turn and stacks
+ * the rest, and it does that at four terms precisely because four is what it
+ * has.
+ *
+ * Everything asserted here is a property of the OUTPUT, rendered, not of the
+ * source: the earlier version of this file rendered the cloud and asserted
+ * nothing about it.
+ */
+{
+  const cloudBlock = (terms) => ({
+    id: "nube",
+    copy: { title: null, description: null, annotation: null },
+    placement: { order: 0, span: { desktop: 12, tablet: 12, mobile: 12 }, responsive: "reflow" },
+    visible: true,
+    sampleDisplay: { state: "shown" },
+    connectedFilterPanelIds: [],
+    payload: { shape: "terms", terms, total: terms.reduce((sum, t) => sum + t.count, 0), excluded: [] },
+    semantic: "qualitative_terms",
+    chartVariant: "word_cloud",
+    availability: "available",
+    provenance: "source",
+    methodology: { level: "none", explanation: null, base: null },
+    sampleNote: null,
+  });
+  const drawCloud = (terms, audience = "internal") =>
+    renderToStaticMarkup(
+      createElement(PresentationRenderer, {
+        model: {
+          schemaVersion: 4,
+          contractVersion: "",
+          registryVersion: "",
+          title: "",
+          locale: "es-MX",
+          pages: [{ id: "p", title: "", order: 0, blocks: [cloudBlock(terms)] }],
+        },
+        audience,
+      }),
+    );
+
+  // The approved study's own shape: four terms, a long dominant phrase, a short
+  // quiet one. The COUNTS are invented; only the shape is borrowed.
+  const FOUR = [
+    { label: "Malos resultados financieros", count: 11, share: 57.9 },
+    { label: "No es lo que esperaba del grupo", count: 4, share: 21.1 },
+    { label: "Tiempo", count: 3, share: 15.8 },
+    { label: "Cambio de residencia", count: 1, share: 5.3 },
+  ];
+  const four = drawCloud(FOUR);
+
+  const verticals = (markup) => (markup.match(/writing-mode:\s*vertical-rl/g) ?? []).length;
+  const horizontals = (markup, terms) =>
+    terms.filter((term) => {
+      const at = markup.indexOf(`>${term.label}<`);
+      if (at < 0) return false;
+      const open = markup.lastIndexOf("<button", at);
+      return !markup.slice(open, at).includes("vertical-rl");
+    }).length;
+
+  check(verticals(four) >= 1, `con cuatro términos hay al menos una palabra vertical (${verticals(four)})`);
+  check(
+    horizontals(four, FOUR) >= 2,
+    `y al menos dos horizontales, así que es una composición y no una columna (${horizontals(four, FOUR)})`,
+  );
+  check(verticals(four) < FOUR.length, "nunca están todas de lado");
+
+  // EXACTLY -90 DEGREES, AND NO OTHER ANGLE. `vertical-rl` reads +90; the half
+  // turn beside it is what makes it -90. Any other rotation is a diagonal.
+  const rotations = four.match(/rotate\((-?[\d.]+)deg\)/g) ?? [];
+  check(
+    rotations.every((rotation) => rotation === "rotate(180deg)"),
+    `todo giro es el medio giro que convierte vertical-rl en -90°${rotations.length ? `: ${[...new Set(rotations)].join(", ")}` : " (ninguno)"}`,
+  );
+  check(!/rotate\(\s*-?(?!180)\d/.test(four), "no hay ningún ángulo diagonal");
+
+  // NOTHING IS DRAWN BETWEEN THE WORDS.
+  check(
+    !/<line|<path|<polyline|drop-shadow|box-shadow|filter:\s*blur/.test(four),
+    "no hay conectores, halos, sombras ni burbujas entre términos",
+  );
+
+  // SIZE RISES WITH COUNT, AND THE DIFFERENCE IS VISIBLE.
+  const sizes = [...four.matchAll(/font-size:\s*([\d.]+)em/g)].map((match) => Number(match[1]));
+  check(sizes.length === FOUR.length, `cada término lleva su propio tamaño (${sizes.length})`);
+  const sizeOf = (label) => {
+    const at = four.indexOf(`>${label}<`);
+    const open = four.lastIndexOf("<button", at);
+    const match = four.slice(open, at).match(/font-size:\s*([\d.]+)em/);
+    return match ? Number(match[1]) : 0;
+  };
+  const ordered = [...FOUR].sort((a, b) => b.count - a.count);
+  let monotone = true;
+  for (let i = 1; i < ordered.length; i += 1) {
+    if (sizeOf(ordered[i].label) > sizeOf(ordered[i - 1].label)) monotone = false;
+  }
+  check(monotone, "un término más mencionado nunca se dibuja más pequeño que uno menos mencionado");
+  const biggest = sizeOf(ordered[0].label);
+  const smallest = sizeOf(ordered[ordered.length - 1].label);
+  check(
+    biggest >= smallest * 2,
+    `y la diferencia se ve: ${biggest}em contra ${smallest}em, ${(biggest / smallest).toFixed(1)}x`,
+  );
+
+  // THE EXACT COUNT AND SHARE ARE REACHABLE, and by more than one route.
+  check(four.includes("aria-describedby"), "cada término apunta a la lectura exacta");
+  check(/aria-label="[^"]*11 menciones[^"]*57\.9 por ciento/.test(four), "y su nombre accesible lleva el conteo y la proporción exactos");
+  check(four.includes("aria-live=\"polite\""), "y la lectura se anuncia cuando cambia");
+  // The readout is ALWAYS rendered, so pointing at a term never moves the layout.
+  check(four.includes("Malos resultados financieros"), "la lectura está presente desde el primer dibujo");
+
+  // NO NUMBER IS RE-DERIVED. The share printed is the one that arrived.
+  check(four.includes("57.9"), "la proporción dibujada es la que llegó ya formateada");
+
+  // A CLOUD WITH NOTHING IN IT LEAVES A CLIENT NOTHING.
+  check(!drawCloud([], "client").includes("<section"), "una nube vacía no le deja al cliente ni una tarjeta");
+  check(drawCloud([], "internal").length > 0, "y en Studio sí dice que falta configurarla");
+
+  // TWO TERMS STILL COMPOSE; ONE DOES NOT NEED TO.
+  const two = drawCloud(FOUR.slice(0, 2));
+  check(verticals(two) === 1, "con dos términos uno se pone de lado y el otro no");
+  const one = drawCloud(FOUR.slice(0, 1));
+  check(verticals(one) === 0, "con uno solo no hay nada que componer y se queda horizontal");
+}
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[28] Ningún código interno se le ofrece a una persona como vocabulario");
+/*
+ * THE EDITOR STOPPED SPEAKING `snake_case`.
+ *
+ * The stored vocabulary is English `snake_case` on purpose and must not drift,
+ * so the fix is a label map rather than a rename — which means the raw value
+ * REMAINS in the markup, as an `<option value>`. The assertion therefore has to
+ * be about TEXT, not about the markup: `value="stacked_bar"` is correct and
+ * `>stacked_bar<` is the defect.
+ */
+{
+  const editorSurfaces = [
+    "src/components/studio/composer/ComposerWorkspace.tsx",
+    "src/app/studio/e/[studyId]/construccion/page.tsx",
+  ];
+  // Every closed vocabulary a person could have been shown.
+  const CODES = [
+    ...IMPLEMENTED_CHART_VARIANTS,
+    ...Object.keys(COMPATIBLE_CHART_VARIANTS),
+    "none", "base_only", "plain_language", "plain_language_with_base",
+    "show_all", "annotate_below", "hide_below",
+    "reflow", "stack", "scroll_x",
+    "canonical", "fixed_decimals",
+  ];
+  for (const path of editorSurfaces) {
+    const code = stripComments(readFileSync(path, "utf8"));
+    // JSX text is what sits between `>` and `<`, and what a template literal
+    // interpolates outside an attribute. Both are checked for a bare code.
+    const shown = CODES.filter((value) => {
+      const asText = new RegExp(`>\\s*${value}\\s*<`);
+      const asBrace = new RegExp(`>\\s*\\{\\s*["'\`]${value}["'\`]`);
+      return asText.test(code) || asBrace.test(code);
+    });
+    check(shown.length === 0, `${path} no muestra ningún código crudo como texto${shown.length ? `: ${shown.join(", ")}` : ""}`);
+
+    /*
+     * AN OPTION WHOSE TEXT IS ITS OWN VALUE.
+     *
+     * The scan above reads literals, and the defect was never a literal: it was
+     * `<option value={variant}>{variant}</option>`, which puts the STORED CODE
+     * on screen through a variable. No amount of searching for `stacked_bar`
+     * finds that — a probe that reintroduced it left the whole section green.
+     *
+     * The signature is structural instead, and it is exact: the same expression
+     * used as the value and as the child. A label map breaks it by
+     * construction, because the child is then `LABEL[variant]` and no longer
+     * the value.
+     */
+    const echoed = [...code.matchAll(/value=\{(\w+)\}[^>]*>\s*\{\s*\1\s*\}/g)].map((match) => match[1]);
+    /*
+     * ONE ECHO IS CORRECT, AND IT IS NAMED.
+     *
+     * The column-span picker maps over a numeric range, so its option reads
+     * `<option value={n}>{n}</option>` — and «4» IS what a person should read
+     * for the value 4. A number is not an internal code; it is the same symbol
+     * in both languages. The exemption is by identifier and is kept honest by
+     * asserting the range it comes from is still numeric.
+     */
+    const NUMERIC_ECHO = new Set(["n"]);
+    if (echoed.includes("n")) {
+      check(
+        code.includes("Array.from({ length: GRID_COLUMNS }"),
+        `${path}: la única opción que repite su valor es un número de columna`,
+      );
+    }
+    const codesEchoed = echoed.filter((name) => !NUMERIC_ECHO.has(name));
+    check(
+      codesEchoed.length === 0,
+      `${path} no ofrece ninguna opción cuyo texto sea su propio valor guardado${codesEchoed.length ? `: ${[...new Set(codesEchoed)].join(", ")}` : ""}`,
+    );
+  }
+
+  // And the maps that replaced them are EXHAUSTIVE, which is what makes a new
+  // vocabulary member a build error rather than a discovery on screen.
+  const missingVariant = IMPLEMENTED_CHART_VARIANTS.filter((variant) => !CHART_VARIANT_LABEL[variant]);
+  check(missingVariant.length === 0, `cada forma implementada tiene su nombre en español${missingVariant.length ? `: ${missingVariant.join(", ")}` : ""}`);
+  const everyCompatibleVariant = [...new Set(Object.values(COMPATIBLE_CHART_VARIANTS).flat())];
+  const missingCompatible = everyCompatibleVariant.filter((variant) => !CHART_VARIANT_LABEL[variant]);
+  check(missingCompatible.length === 0, `y también cada forma que la autoridad admite${missingCompatible.length ? `: ${missingCompatible.join(", ")}` : ""}`);
+  const missingLevel = METHODOLOGY_DISCLOSURE_LEVELS.filter((level) => !DISCLOSURE_LABEL[level]);
+  check(missingLevel.length === 0, "cada nivel de divulgación tiene su nombre en español");
+  for (const mode of ["show_all", "annotate_below", "hide_below"]) {
+    check(Boolean(SAMPLE_POLICY_MODE_LABEL[mode]) && Boolean(SAMPLE_POLICY_MODE_STATE[mode]), `«${mode}» se dice en español de dos maneras`);
+  }
+  // A label never becomes a value: nothing parses Spanish back into a code.
+  const labelSource = stripComments(readFileSync(join("src", "lib", "presentation", "labels.ts"), "utf8"));
+  check(!/JSON\.parse|Object\.entries\([A-Z_]+_LABEL\)|Object\.keys\([A-Z_]+_LABEL\)/.test(labelSource), "y ninguna etiqueta se vuelve a convertir en valor");
+}
+
+/* -------------------------------------------------------------------------- */
+
+console.log("\n[29] La política de muestra se puede escribir entera, y el umbral lo elige una persona");
+/*
+ * THE CEO'S RULE, MADE AUTHORABLE.
+ *
+ * Show everything by default; the software never suppresses on its own; an
+ * author may choose ANY valid threshold; and the same four choices exist for
+ * the document and for a single block. What was there before was two buttons
+ * reading «Anotar bajo 5» and «Ocultar bajo 5» — the number written into the
+ * source twice — and, per block, one button that could only give the decision
+ * back to the document.
+ */
+{
+  const editor = stripComments(readFileSync(join("src", "components", "studio", "composer", "ComposerWorkspace.tsx"), "utf8"));
+
+  // NO THRESHOLD IS WRITTEN INTO THE EDITOR. The number comes from a field.
+  check(!/threshold:\s*\d/.test(editor), "ningún umbral está escrito en el código del editor");
+  check(/type="number"/.test(editor) && /setThreshold/.test(editor), "el umbral se escribe en un campo numérico");
+
+  // THE FOUR CHOICES EXIST, and the block scope has the extra one.
+  check(/scope === "block"/.test(editor), "la ficha del bloque ofrece heredar además de las tres reglas");
+  for (const key of ["show_all", "annotate_below", "hide_below"]) {
+    check(editor.includes(`SAMPLE_POLICY_MODE_LABEL.${key}`), `«${key}» se ofrece por su nombre en español`);
+  }
+  check(/setBlockSamplePolicy\(s2, block\.id, policy\)/.test(editor), "y lo que se elige por bloque se aplica al bloque, no sólo null");
+  check(/setDocumentSamplePolicy\(s2, policy \?\? DEFAULT_SAMPLE_POLICY\)/.test(editor), "y lo que se elige en el documento se aplica al documento");
+
+  // THE TWO RESTRICTIVE MODES ASK FOR AN AUTHOR AND A REASON.
+  check(/Quién lo decide/.test(editor) && /Por qué/.test(editor), "las dos reglas restrictivas piden quién decide y por qué");
+  check(/publicNote/.test(editor), "y ocultar deja escribir lo único que el cliente leerá");
+
+  // THE ENGINE STILL REFUSES WHAT IT ALWAYS REFUSED — the UI did not soften it.
+  const refusedNoAuthor = setDocumentSamplePolicy(s, {
+    mode: "hide_below", threshold: 8, authoredBy: "  ", rationale: "  ", publicNote: null,
+  });
+  eq("ocultar sin autor sigue rechazándose", refusedNoAuthor.refusal?.code, "sample_policy_unauthored");
+  // AND ANY VALID THRESHOLD IS ACCEPTED, not only five.
+  for (const threshold of [1, 3, 8, 12, 250]) {
+    const accepted = setDocumentSamplePolicy(s, {
+      mode: "hide_below", threshold, authoredBy: "Dirección del estudio", rationale: "Una razón escrita.", publicNote: null,
+    });
+    check(accepted.refusal === null && accepted.document.samplePolicy.threshold === threshold, `el umbral ${threshold} se acepta tal cual`);
+  }
+  // The default is still to show everything, and nothing stamped a policy.
+  eq("y el documento sigue naciendo en mostrarlo todo", DEFAULT_SAMPLE_POLICY.mode, "show_all");
+  const perBlock = setBlockSamplePolicy(s, BLOCK_NPS, {
+    mode: "annotate_below", threshold: 9, note: "Base pequeña.", authoredBy: "Dirección", rationale: "Una razón.",
+  });
+  check(perBlock.refusal === null, "un bloque puede llevar su propia regla completa");
+  eq("con su propio umbral", findBlock(perBlock.document, BLOCK_NPS).block.samplePolicy.threshold, 9);
+  const backToInherit = setBlockSamplePolicy(perBlock, BLOCK_NPS, null);
+  eq("y puede volver a heredar la del estudio", findBlock(backToInherit.document, BLOCK_NPS).block.samplePolicy, null);
 }
 
 console.log("\n" + "=".repeat(74));
