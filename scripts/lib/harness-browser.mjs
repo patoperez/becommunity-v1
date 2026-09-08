@@ -287,6 +287,45 @@ export async function launchBrowser() {
 
       location: () => context.evaluate("location.pathname + location.search"),
 
+      /**
+       * A REAL KEY PRESS, dispatched by the browser.
+       *
+       * `element.click()` from inside the page proves a handler runs; it proves
+       * nothing about whether a person with a keyboard can reach the control at
+       * all. A native `disabled` button is skipped by Tab, a `div` with an
+       * `onClick` is not reachable by Tab, and a checkbox is toggled by Space —
+       * none of which a synthesised DOM event can tell apart, because a
+       * synthesised event lands wherever the script says it does.
+       *
+       * `Input.dispatchKeyEvent` goes through the browser's own input pipeline,
+       * so focus moves the way it moves for a person and an unreachable control
+       * stays unreached.
+       *
+       * The vocabulary is deliberately three keys. A harness that could type
+       * anything would be a harness somebody uses to fill a form, and filling a
+       * form is what `setField` is for.
+       */
+      async pressKey(name, { shift = false } = {}) {
+        const KEYS = {
+          Tab: { key: "Tab", code: "Tab", vk: 9, text: "\t" },
+          Space: { key: " ", code: "Space", vk: 32, text: " " },
+          Enter: { key: "Enter", code: "Enter", vk: 13, text: "\r" },
+        };
+        const spec = KEYS[name];
+        if (!spec) throw new Error(`this harness dispatches Tab, Space and Enter, not «${name}»`);
+        const modifiers = shift ? 8 : 0;
+        const base = {
+          key: spec.key,
+          code: spec.code,
+          windowsVirtualKeyCode: spec.vk,
+          nativeVirtualKeyCode: spec.vk,
+          modifiers,
+        };
+        await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...base }, sessionId);
+        await cdp.send("Input.dispatchKeyEvent", { type: "char", text: spec.text, ...base }, sessionId);
+        await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...base }, sessionId);
+      },
+
       /** Event-driven DOM wait; bounded in-page and by the CDP deadline. */
       waitForDom(predicateSource, timeoutMs = DOM_MS) {
         return context.evaluate(WAIT_FOR_DOM(predicateSource, timeoutMs), { awaitPromise: true });
