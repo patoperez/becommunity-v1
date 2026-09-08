@@ -18,6 +18,7 @@
 import type { ChartVariant } from "@/lib/presentation";
 import type { RenderBlock } from "@/lib/presentation";
 import type { PresentationAudience } from "./absence";
+import type { ViewerControls } from "./viewer";
 import { BarHorizontal, BarVertical, StackedBar, TableBlock } from "./Distribution";
 import { FilterControl } from "./FilterControls";
 import { JourneyRouteMap } from "./Journey";
@@ -28,6 +29,14 @@ import { TermRanking, WordCloud } from "./Terms";
 export type LeafRenderer = (props: {
   block: RenderBlock;
   audience: PresentationAudience;
+  /**
+   * Present only on a surface where a reader may actually operate a control.
+   *
+   * Every leaf but the filter panel ignores it, and that is deliberate: a chart
+   * is a drawing of a result, and a drawing that could change the result would
+   * be a second place where a selection is expressed.
+   */
+  viewer?: ViewerControls;
 }) => React.ReactNode;
 
 export const RENDERERS: Record<ChartVariant, LeafRenderer> | Partial<Record<ChartVariant, LeafRenderer>> = {

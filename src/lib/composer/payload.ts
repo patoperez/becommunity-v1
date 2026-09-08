@@ -32,6 +32,7 @@ import type {
   PresentationCatalog,
   PresentationDocument,
   PresentationRenderModel,
+  ViewerSelection,
 } from "../presentation";
 
 /** Which starting layout was chosen, and why. Internal chrome text. */
@@ -74,9 +75,23 @@ export type ComposerWorkspace =
   | { ok: true; payload: ComposerPayload }
   | { ok: false; unavailable: ComposerUnavailable };
 
-/** What the explicit preview refresh answers with. A model, or named issues. */
+/**
+ * What the explicit preview refresh answers with. A model, or named issues.
+ *
+ * `selection` is the viewer selection the model was ACTUALLY resolved under,
+ * normalized by the server. It is echoed rather than assumed so that a model
+ * and the controls beside it can be proved to describe the same population —
+ * the state this unit exists to keep honest — and so that a future link can be
+ * built from what the server accepted rather than from what the browser asked
+ * for.
+ */
 export type PreviewResult =
-  | { ok: true; model: PresentationRenderModel; document: PresentationDocument }
+  | {
+      ok: true;
+      model: PresentationRenderModel;
+      document: PresentationDocument;
+      selection: ViewerSelection;
+    }
   | { ok: false; unavailable: ComposerUnavailable };
 
 /**
@@ -85,5 +100,15 @@ export type PreviewResult =
  * The screen is handed a function and knows nothing about what is behind it.
  * That is what keeps the composer surface testable without a database and
  * unable to reach one by accident.
+ *
+ * `viewerJson` carries the reader's selection. It is a SEPARATE argument from
+ * the document on purpose: a selection is not configuration, it is never
+ * stored, and putting it inside the document would be the one mistake this
+ * unit's architecture exists to prevent — the strict v4 schema would refuse it
+ * anyway, which is the point.
  */
-export type RefreshPreview = (studyId: string, documentJson: string) => Promise<PreviewResult>;
+export type RefreshPreview = (
+  studyId: string,
+  documentJson: string,
+  viewerJson: string,
+) => Promise<PreviewResult>;

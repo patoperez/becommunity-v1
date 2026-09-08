@@ -97,3 +97,20 @@ export {
   offeredChartVariants,
 } from "./renderer-capabilities";
 export type { VariantRefusal } from "./renderer-capabilities";
+
+/**
+ * THE READING SESSION — a reader's own ephemeral state, kept out of the
+ * document and out of the edit history on purpose.
+ */
+export {
+  acceptViewerResponse,
+  dismissViewerMessage,
+  openViewerSession,
+  requestViewerCleared,
+  requestViewerOption,
+  requestViewerPanelCleared,
+  requestViewerSelection,
+  viewerSessionIsNeutral,
+  viewerSessionIsSettled,
+} from "./viewer-session";
+export type { ViewerResponse, ViewerSession, ViewerSessionStatus } from "./viewer-session";

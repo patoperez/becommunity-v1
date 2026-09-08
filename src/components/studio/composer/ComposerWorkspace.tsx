@@ -66,11 +66,17 @@ import {
   setEditorialBody,
   togglePanelDimension,
   undo,
+  acceptViewerResponse,
+  openViewerSession,
+  requestViewerCleared,
+  requestViewerOption,
+  requestViewerPanelCleared,
   type AddBlockRequest,
   type ComposerPayload,
   type ComposerState,
   type IneligibleReason,
   type RefreshPreview,
+  type ViewerSession,
 } from "@/lib/composer";
 import {
   CHART_VARIANT_LABEL,
@@ -82,13 +88,17 @@ import {
   SAMPLE_POLICY_MODE_LABEL,
   SAMPLE_POLICY_MODE_STATE,
   presentationErrorLabel,
+  viewerSelectionIsNeutral,
   type MethodologyDisclosureLevel,
   type PresentationBlock,
+  type PresentationDocument,
   type PresentationRenderModel,
   type RenderBlock,
   type SampleDisplayPolicy,
+  type ViewerSelection,
 } from "@/lib/presentation";
 import { PresentationRenderer } from "@/components/presentation/PresentationRenderer";
+import type { ViewerControls } from "@/components/presentation/viewer";
 import {
   CANVAS_WIDTH,
   DEFAULT_CHROME,
@@ -142,6 +152,16 @@ export function ComposerWorkspace({
   const [pending, setPending] = useState(false);
   const [issues, setIssues] = useState<{ code: string; path: string }[] | null>(null);
   const [drawer, setDrawer] = useState<"none" | "left" | "right">("none");
+  /**
+   * THE READING SESSION — a reader's selection, and never part of the document.
+   *
+   * It is React state rather than chrome, because chrome is written to
+   * `sessionStorage` and a viewer selection is ephemeral by contract: a reload
+   * returns to «Todas las personas». It is also outside the reducer, so
+   * narrowing a view never enters the undo history — sixty dropdown changes
+   * would otherwise flush a real edit out of it.
+   */
+  const [session, setSession] = useState<ViewerSession>(openViewerSession);
 
   /** The single choke point. Every control goes through it. */
   const act = useCallback((run: (s: ComposerState) => ComposerState) => dispatch({ run }), []);
@@ -155,6 +175,18 @@ export function ComposerWorkspace({
    * refresh below needs after its await.
    */
   const seenDocument = useRef(payload.document);
+  /**
+   * The session as the callbacks see it.
+   *
+   * Written in an effect, which is where a ref may be written. The control
+   * handlers are recreated on every render and would otherwise close over the
+   * session of the render that made them — which is the shape of bug that lets
+   * two quick clicks each start from the same "before" state and lose one.
+   */
+  const sessionRef = useRef(session);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
   useEffect(() => {
     if (state.document === seenDocument.current) return;
     seenDocument.current = state.document;
@@ -203,6 +235,38 @@ export function ComposerWorkspace({
     return () => window.removeEventListener("keydown", onKey);
   }, [drawer]);
 
+  /**
+   * ONE ROUND TRIP, TWO CALLERS.
+   *
+   * "Resolve this document under this selection" is one question, so there is
+   * one place that asks it. The author's explicit refresh asks it with the
+   * selection already in force; a reader moving a control asks it with theirs.
+   * Two functions here would eventually be two slightly different validations.
+   */
+  const send = useCallback(
+    (sent: PresentationDocument, selection: ViewerSelection) =>
+      refresh(studyId, JSON.stringify(sent), JSON.stringify(selection)),
+    [refresh, studyId],
+  );
+
+  /**
+   * THE NEWEST REQUEST OF ANY KIND, so a slower earlier one cannot land on top.
+   *
+   * ONE counter for BOTH callers, and that is the point. A reader ticking three
+   * boxes sends three requests and the second may come back after the third —
+   * but an explicit «Actualizar vista previa» races the same way, and a
+   * neutral refresh landing after a filter would replace filtered figures with
+   * everybody's while the controls still read «Generación X». Two counters
+   * would have made each caller safe against itself and neither safe against
+   * the other.
+   *
+   * A ticket is taken when a request is issued and compared after the await;
+   * anything that is not the newest is dropped whole. The session's own pure
+   * `acceptViewerResponse` applies the same rule to its own number, which is
+   * what lets an offline gate prove the behaviour without a browser.
+   */
+  const inFlight = useRef(0);
+
   const onRefresh = useCallback(async () => {
     setPending(true);
     setRefreshNotice(null);
@@ -213,8 +277,14 @@ export function ComposerWorkspace({
     // back, so a preview resolved from the OLD document was labelled up to date
     // over a newer one — the single most misleading state this screen can be in.
     const sent = seenDocument.current;
+    // The selection ALREADY IN FORCE, not the pending one: an explicit refresh
+    // re-resolves what is on screen, and adopting a selection the reader had
+    // not finished asking for would make one button do two things.
+    const selection = sessionRef.current.applied;
+    const ticket = (inFlight.current += 1);
     try {
-      const result = await refresh(studyId, JSON.stringify(sent));
+      const result = await send(sent, selection);
+      if (ticket !== inFlight.current) return;
       if (result.ok) {
         const current = seenDocument.current;
         setPreview({ model: result.model, stale: current !== sent });
@@ -233,7 +303,90 @@ export function ComposerWorkspace({
     } finally {
       setPending(false);
     }
-  }, [refresh, studyId]);
+  }, [send]);
+
+  /**
+   * A READER CHANGED SOMETHING.
+   *
+   * The controls move immediately — that is `pending` — and the FIGURES do not
+   * move until the server has recomputed them. Nothing is computed here: the
+   * browser sends positions and receives a finished render model.
+   *
+   * A refusal puts the controls back to the selection the figures were actually
+   * computed under, and says so. Leaving the reader's choice standing over
+   * unchanged numbers would be the one state this whole unit exists to prevent.
+   */
+  const runViewer = useCallback(
+    async (next: { session: ViewerSession; request: number | null }) => {
+      setSession(next.session);
+      if (next.request === null) return;
+      const request = next.request;
+      const ticket = (inFlight.current += 1);
+      const sent = seenDocument.current;
+      const selection = next.session.pending;
+      try {
+        const result = await send(sent, selection);
+        if (ticket !== inFlight.current) return;
+        if (result.ok) {
+          const now = seenDocument.current;
+          setPreview({ model: result.model, stale: now !== sent });
+          setIssues(null);
+          setSession((live) => acceptViewerResponse(live, request, { ok: true }));
+        } else {
+          setIssues(result.unavailable.issues ?? null);
+          setSession((live) =>
+            acceptViewerResponse(live, request, { ok: false, message: result.unavailable.detail }),
+          );
+        }
+      } catch {
+        if (ticket !== inFlight.current) return;
+        setSession((live) =>
+          acceptViewerResponse(live, request, {
+            ok: false,
+            message:
+              "No se pudieron aplicar los filtros. Se mantiene la selección con la que se calcularon las cifras.",
+          }),
+        );
+      }
+    },
+    [send],
+  );
+
+  const viewer: ViewerControls = {
+    pending: session.pending,
+    status: session.status,
+    message: session.message,
+    onToggle: (panelId, handle, token, on) =>
+      void runViewer(requestViewerOption(sessionRef.current, panelId, handle, token, on)),
+    onClearPanel: (panelId) => void runViewer(requestViewerPanelCleared(sessionRef.current, panelId)),
+  };
+  const onClearAllFilters = useCallback(
+    () => void runViewer(requestViewerCleared(sessionRef.current)),
+    [runViewer],
+  );
+
+  /**
+   * LEAVING THE READING VIEW CLEARS THE FILTERS.
+   *
+   * The canvas is where somebody AUTHORS: they choose a chart, they write a
+   * sample-policy threshold against the base they can see. Letting a reader's
+   * selection stand while they do that would show them one population's figures
+   * under an editor, and the threshold they wrote would be a threshold against
+   * a base nobody outside that selection has.
+   *
+   * So the rule is one sentence: the authoring canvas always shows the whole
+   * study. Switching back clears the selection and re-resolves; the banner in
+   * the canvas covers the moment before that lands.
+   */
+  const onSurface = useCallback(
+    (surface: "compose" | "read") => {
+      setChrome({ surface });
+      if (surface === "compose" && !viewerSelectionIsNeutral(sessionRef.current.applied)) {
+        void runViewer(requestViewerCleared(sessionRef.current));
+      }
+    },
+    [runViewer],
+  );
 
   // THE ZOOM IS RESOLVED ONCE, WHERE BOTH THE CONTROL AND THE CANVAS CAN SEE IT.
   //
@@ -275,9 +428,13 @@ export function ComposerWorkspace({
         canRedo={state.future.length > 0}
         effectiveZoom={effectiveZoom}
         zoomIsAutomatic={zoomIsAutomatic}
+        filtering={session.status === "loading"}
+        filtersActive={!viewerSelectionIsNeutral(session.applied)}
         onUndo={() => act(undo)}
         onRedo={() => act(redo)}
         onRefresh={onRefresh}
+        onClearAllFilters={onClearAllFilters}
+        onSurface={onSurface}
         onDrawer={setDrawer}
       />
 
@@ -323,21 +480,44 @@ export function ComposerWorkspace({
           <RestoreTab side="left" onRestore={() => setChrome({ left: true, focus: false, right: panels.right })} />
         )}
 
-        {/* CENTRE — the canvas, and it is the dominant area at every width. */}
+        {/*
+          CENTRE — the dominant area at every width, and one of two surfaces.
+
+          Composing draws the authoring canvas, where every block drawing is
+          `inert` so a click selects the block. Reading mounts the same resolved
+          model the way a reader will get it: the client audience, no `inert`
+          wrapper, and the filter controls live. They are two mountings of one
+          model rather than two renderers, so what a reviewer reads is what a
+          reader will read.
+        */}
         <div className="min-w-0 flex-1">
-          <Canvas
-            chrome={chrome}
-            page={page}
-            state={state}
-            act={act}
-            resolvedById={resolvedById}
-            stale={preview.stale}
-            model={preview.model}
-            frameRef={canvasFrame}
-            room={room}
-            effectiveZoom={effectiveZoom}
-            zoomIsAutomatic={zoomIsAutomatic}
-          />
+          {chrome.surface === "read" ? (
+            <ReadingView
+              chrome={chrome}
+              model={preview.model}
+              stale={preview.stale}
+              viewer={viewer}
+              frameRef={canvasFrame}
+              room={room}
+              effectiveZoom={effectiveZoom}
+              zoomIsAutomatic={zoomIsAutomatic}
+            />
+          ) : (
+            <Canvas
+              chrome={chrome}
+              page={page}
+              state={state}
+              act={act}
+              resolvedById={resolvedById}
+              stale={preview.stale}
+              filtered={!viewerSelectionIsNeutral(session.applied)}
+              model={preview.model}
+              frameRef={canvasFrame}
+              room={room}
+              effectiveZoom={effectiveZoom}
+              zoomIsAutomatic={zoomIsAutomatic}
+            />
+          )}
         </div>
 
         {panels.right ? null : (
@@ -389,9 +569,13 @@ function Toolbar({
   canRedo,
   effectiveZoom,
   zoomIsAutomatic,
+  filtering,
+  filtersActive,
   onUndo,
   onRedo,
   onRefresh,
+  onClearAllFilters,
+  onSurface,
   onDrawer,
 }: {
   chrome: typeof DEFAULT_CHROME;
@@ -402,9 +586,13 @@ function Toolbar({
   canRedo: boolean;
   effectiveZoom: CanvasZoom;
   zoomIsAutomatic: boolean;
+  filtering: boolean;
+  filtersActive: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onRefresh: () => void;
+  onClearAllFilters: () => void;
+  onSurface: (surface: "compose" | "read") => void;
   onDrawer: (drawer: "none" | "left" | "right") => void;
 }) {
   return (
@@ -493,6 +681,34 @@ function Toolbar({
       >
         {chrome.focus ? "Salir de foco" : "Modo foco"}
       </button>
+
+      {/*
+        THE TWO SURFACES, and switching is the only way to make a filter work.
+
+        It is a toggle rather than a checkbox on the canvas because the canvas
+        wraps every drawing in an `inert` container: making one control operable
+        there would make every chart, link and control in every block operable
+        with it.
+      */}
+      <span className="mx-1 hidden h-6 w-px bg-line sm:block" aria-hidden="true" />
+      <button
+        type="button"
+        className={chrome.surface === "read" ? btnActive : btn}
+        aria-pressed={chrome.surface === "read"}
+        onClick={() => onSurface(chrome.surface === "read" ? "compose" : "read")}
+      >
+        {chrome.surface === "read" ? "Volver a componer" : "Vista de lectura"}
+      </button>
+      {chrome.surface === "read" ? (
+        <button
+          type="button"
+          className={btn}
+          disabled={!filtersActive || filtering}
+          onClick={onClearAllFilters}
+        >
+          Limpiar filtros de toda la vista
+        </button>
+      ) : null}
 
       {/* Drawer openers, for widths where the panels are not docked. */}
       <button type="button" className={`${btn} lg:hidden`} onClick={() => onDrawer("left")}>
@@ -793,6 +1009,102 @@ function PagesPanel({
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * THE READING VIEW — the same model, mounted the way a reader will get it.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT MAKES IT A READING VIEW AND NOT A PREVIEW OF ONE.
+ *
+ * Three things, and all three are the real thing rather than an imitation:
+ *
+ *   1. the CLIENT audience, so C11 applies — a block a client would see nothing
+ *      of is not drawn, and neither is a page whose blocks are all like that;
+ *   2. NO `inert` wrapper, so a control is a control, focus lands where a
+ *      person would put it, and the keyboard works;
+ *   3. LIVE viewer controls, so a filter recomputes the study on the server and
+ *      returns a new render model.
+ *
+ * Every page is drawn, one after another, because a reader gets the whole
+ * presentation rather than the page an author happens to have open.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT DRAWS AT THE SAME THREE WIDTHS.
+ *
+ * Desktop, tablet and phone are the canvas widths the toolbar already offers,
+ * and a reading view that could only be checked at one of them would leave the
+ * responsive behaviour of the finished thing unverified.
+ */
+function ReadingView({
+  chrome,
+  model,
+  stale,
+  viewer,
+  frameRef,
+  room,
+  effectiveZoom,
+  zoomIsAutomatic,
+}: {
+  chrome: typeof DEFAULT_CHROME;
+  model: PresentationRenderModel;
+  stale: boolean;
+  viewer: ViewerControls;
+  frameRef: React.RefObject<HTMLDivElement | null>;
+  room: number;
+  effectiveZoom: CanvasZoom;
+  zoomIsAutomatic: boolean;
+}) {
+  const width = CANVAS_WIDTH[chrome.mode];
+  const scale =
+    effectiveZoom === "fit" ? (room === 0 ? 1 : Math.max(0.4, Math.min(1, room / width))) : effectiveZoom;
+
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-lg font-semibold text-strong">{model.title}</h2>
+        <p className="text-xs text-muted">
+          Vista de lectura · {ZOOM_LABEL[String(effectiveZoom)]}
+          {zoomIsAutomatic ? " (automática)" : ""} · {model.pages.length}{" "}
+          {model.pages.length === 1 ? "página resuelta" : "páginas resueltas"}
+        </p>
+      </div>
+
+      <p className="mt-2 rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm text-muted">
+        Así lo lee quien recibe el estudio. Los filtros de esta vista sí funcionan: cada cambio vuelve a
+        calcular en el servidor y sólo se mueven los bloques conectados a ese panel.
+      </p>
+
+      {stale ? (
+        <p className="mt-2 rounded-lg border border-caution-line bg-caution-surface px-3 py-2 text-sm text-caution">
+          El documento cambió después de la última resolución, así que estas cifras son las de la
+          resolución anterior. Pulsa «Actualizar vista previa» antes de leer esta vista como definitiva.
+        </p>
+      ) : null}
+
+      {/*
+        The same two nested boxes the canvas uses: `transform: scale()` does not
+        change layout, so the outer box carries the scaled size and the inner one
+        is the true width being previewed.
+      */}
+      <div ref={frameRef} className="mt-3 min-w-0 overflow-x-auto">
+        <div style={{ width: width * scale }}>
+          <div
+            style={{
+              width,
+              transform: `scale(${scale})`,
+              transformOrigin: "top left",
+              ["--canvas-scale" as string]: String(scale),
+            }}
+          >
+            <div className="rounded-2xl border border-line bg-surface-page p-4">
+              <PresentationRenderer model={model} audience="client" viewer={viewer} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Canvas({
   chrome,
   page,
@@ -800,6 +1112,7 @@ function Canvas({
   act,
   resolvedById,
   stale,
+  filtered,
   model,
   frameRef,
   room,
@@ -812,6 +1125,8 @@ function Canvas({
   act: (run: (s: ComposerState) => ComposerState) => void;
   resolvedById: Map<string, RenderBlock>;
   stale: boolean;
+  /** A reader's selection is still in force. It is being cleared; say so. */
+  filtered: boolean;
   model: PresentationRenderModel;
   frameRef: React.RefObject<HTMLDivElement | null>;
   room: number;
@@ -855,6 +1170,24 @@ function Canvas({
         <p className="mt-2 rounded-lg border border-caution-line bg-caution-surface px-3 py-2 text-sm text-caution">
           Las cifras que se ven abajo son las de la última resolución. La estructura sí está al día. Pulsa
           «Actualizar vista previa» para volver a resolver contra los resultados del estudio.
+        </p>
+      ) : null}
+
+      {/*
+        THE CANVAS SHOWS THE WHOLE STUDY, and while it does not, it says so.
+
+        Leaving the reading view clears the selection, but the clearing is a
+        round trip. For the moment it takes, the figures on the canvas belong to
+        somebody's selection, and an author choosing a threshold against them
+        would be choosing it against the wrong base.
+      */}
+      {filtered ? (
+        <p
+          role="status"
+          className="mt-2 rounded-lg border border-caution-line bg-caution-surface px-3 py-2 text-sm text-caution"
+        >
+          Estas cifras son todavía las de una selección de lectura. Se están quitando: el lienzo de
+          composición siempre muestra el estudio completo.
         </p>
       ) : null}
 

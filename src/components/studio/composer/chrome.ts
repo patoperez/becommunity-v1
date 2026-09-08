@@ -31,6 +31,22 @@
  */
 
 export type CanvasMode = "desktop" | "tablet" | "mobile";
+
+/**
+ * WHICH SURFACE IS ON SCREEN, and the two are not the same kind of thing.
+ *
+ * `compose` is the authoring canvas: every drawing is wrapped in an `inert`
+ * container so a click inside a chart selects the BLOCK, which is what makes
+ * the canvas an editor rather than a dashboard. Filters cannot work there and
+ * are drawn genuinely disabled.
+ *
+ * `read` mounts the same render model the way a reader will get it — no `inert`
+ * wrapper, the client audience, and the filter controls live. It is the only
+ * place a selection does anything, which is why it is a mode and not a
+ * checkbox on the canvas: making the canvas operable would make every chart,
+ * link and control inside every block operable with it.
+ */
+export type ComposerSurface = "compose" | "read";
 export type CanvasZoom = "fit" | 1 | 0.75 | 0.5;
 
 export type ChromeState = {
@@ -49,6 +65,16 @@ export type ChromeState = {
   focus: boolean;
   mode: CanvasMode;
   zoom: CanvasZoom;
+  /**
+   * Composing or reading. NOT restored, for the same reason focus is not.
+   *
+   * The document is session-only: a reload returns the study to its starting
+   * layout, and reopening into a reading view over a layout the person never
+   * saw being built would look like a different product rather than like a
+   * preference. A reader's SELECTION is likewise dropped on reload — it is
+   * ephemeral by contract, and this is the surface that makes that visible.
+   */
+  surface: ComposerSurface;
   /**
    * Has a person chosen a zoom?
    *
@@ -70,6 +96,7 @@ export const DEFAULT_CHROME: ChromeState = {
   // target. Fitting is offered, and is automatic only until somebody chooses.
   zoom: 1,
   zoomChosen: false,
+  surface: "compose",
 };
 
 const KEY = "becommunity.composer.chrome";
@@ -99,6 +126,8 @@ function read(): ChromeState {
           ? parsed.zoom
           : DEFAULT_CHROME.zoom,
       zoomChosen: typeof parsed.zoomChosen === "boolean" ? parsed.zoomChosen : DEFAULT_CHROME.zoomChosen,
+      // Deliberately not restored. See the field's own note.
+      surface: DEFAULT_CHROME.surface,
     };
   } catch {
     return DEFAULT_CHROME;

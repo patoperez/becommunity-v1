@@ -35,10 +35,13 @@
 import { chartVariantLabel } from "@/lib/presentation";
 import type { PresentationRenderModel, RenderBlock, RenderPage } from "@/lib/presentation";
 import { AbsenceNotice, InternalPlaceholder, visibleNote, type PresentationAudience } from "./absence";
+import { filterPanelIsOperable } from "./FilterControls";
 import { RENDERERS } from "./renderers";
+import type { ViewerControls } from "./viewer";
 import { DESKTOP_SPAN, TABLET_SPAN } from "./vocabulary";
 
 export type { PresentationAudience };
+export type { ViewerControls };
 
 function byOrderThenId<T extends { order: number; id: string }>(a: T, b: T): number {
   if (a.order !== b.order) return a.order - b.order;
@@ -54,7 +57,7 @@ function byOrderThenId<T extends { order: number; id: string }>(a: T, b: T): num
  * null still leaves a bordered box with a title over an empty space, and an
  * empty box is exactly the shape of a gap C11 removes.
  */
-function clientHasContent(block: RenderBlock): boolean {
+function clientHasContent(block: RenderBlock, live: boolean): boolean {
   const payload = block.payload;
   // AN ABSENCE THE CONTRACT STATES IS NOT A GAP WE MADE.
   //
@@ -99,9 +102,18 @@ function clientHasContent(block: RenderBlock): boolean {
       return payload.routes.some((route) => route.points.length > 0);
     case "editorial":
       return payload.body !== null;
-    // A filter panel has no viewer behaviour in this unit, so it is internal-only.
+    // A FILTER PANEL IS CONTENT WHEN IT WORKS, AND AN UNFINISHED EDGE WHEN IT
+    // DOES NOT.
+    //
+    // Unit 6B.1 answered `false` unconditionally, and that was right while the
+    // controls were dead: a client's page must not carry a control that will
+    // work later. A LIVE panel is the opposite — it is a finished part of the
+    // deliverable, and hiding it would take a reader's own instrument away.
+    //
+    // The question is asked by the component that draws the panel, so the card
+    // and its contents can never disagree about whether there is anything here.
     case "filter_controls":
-      return false;
+      return filterPanelIsOperable(block, live);
     default:
       return false;
   }
@@ -116,12 +128,12 @@ function clientHasContent(block: RenderBlock): boolean {
  * sentence either — so on a client surface it is a titled card over nothing,
  * which is the exact shape C11 removes.
  */
-function clientSeesBlock(block: RenderBlock): boolean {
+function clientSeesBlock(block: RenderBlock, live: boolean): boolean {
   if (!block.visible) return false;
   if (block.sampleDisplay.state === "withheld_by_policy") {
     return visibleNote(block.sampleDisplay) !== null;
   }
-  return clientHasContent(block);
+  return clientHasContent(block, live);
 }
 
 /**
@@ -132,13 +144,21 @@ function clientSeesBlock(block: RenderBlock): boolean {
  * block is withheld or configuration-required still printed its title and its
  * spacing on a client surface — an absence with a name on it.
  */
-function clientSeesPage(page: RenderPage): boolean {
-  return page.blocks.some(clientSeesBlock);
+function clientSeesPage(page: RenderPage, live: boolean): boolean {
+  return page.blocks.some((block) => clientSeesBlock(block, live));
 }
 
-function BlockCard({ block, audience }: { block: RenderBlock; audience: PresentationAudience }) {
+function BlockCard({
+  block,
+  audience,
+  viewer,
+}: {
+  block: RenderBlock;
+  audience: PresentationAudience;
+  viewer?: ViewerControls;
+}) {
   if (!block.visible) return null;
-  if (audience === "client" && !clientSeesBlock(block)) return null;
+  if (audience === "client" && !clientSeesBlock(block, viewer !== undefined)) return null;
 
   const Leaf = block.chartVariant ? RENDERERS[block.chartVariant] : undefined;
   const note = visibleNote(block.sampleDisplay);
@@ -161,7 +181,7 @@ function BlockCard({ block, audience }: { block: RenderBlock; audience: Presenta
         {withheld ? (
           <AbsenceNotice absence={{ state: "withheld_by_policy" }} audience={audience} />
         ) : Leaf ? (
-          <Leaf block={block} audience={audience} />
+          <Leaf block={block} audience={audience} viewer={viewer} />
         ) : audience === "internal" ? (
           <InternalPlaceholder
             title="Esta versión no dibuja esta forma"
@@ -179,11 +199,28 @@ function BlockCard({ block, audience }: { block: RenderBlock; audience: Presenta
         <p className="mt-2 text-xs text-muted [overflow-wrap:anywhere]">{block.methodology.explanation}</p>
       ) : null}
 
-      {audience === "internal" && block.connectedFilterPanelIds.length > 0 ? (
+      {/*
+        WHAT A READER'S SELECTION DID TO THIS BLOCK.
+
+        The sentence is the server's — it names the characteristics and the
+        values a person chose, in the study's own words — and it is shown to
+        EVERYONE, because a figure computed over part of a population and
+        presented without saying so is the most quietly misleading thing a
+        dashboard can print.
+
+        The connection COUNT beside it stays internal: which panels an author
+        wired to which block is authoring information, and a reader has no use
+        for it.
+      */}
+      {block.activeFilterSummary ? (
         <p className="mt-3 border-t border-line pt-2 text-xs text-muted">
+          Filtrado por {block.activeFilterSummary}.
+        </p>
+      ) : null}
+      {audience === "internal" && block.connectedFilterPanelIds.length > 0 ? (
+        <p className="mt-1 text-xs text-muted">
           Sólo interno · Qué filtros lo mueven: {block.connectedFilterPanelIds.length}{" "}
-          {block.connectedFilterPanelIds.length === 1 ? "panel conectado" : "paneles conectados"}. El filtrado en
-          vivo llega en la Unidad 6B.2.
+          {block.connectedFilterPanelIds.length === 1 ? "panel conectado" : "paneles conectados"}.
         </p>
       ) : null}
     </section>
@@ -193,9 +230,11 @@ function BlockCard({ block, audience }: { block: RenderBlock; audience: Presenta
 export function PresentationPageView({
   page,
   audience,
+  viewer,
 }: {
   page: RenderPage;
   audience: PresentationAudience;
+  viewer?: ViewerControls;
 }) {
   const blocks = [...page.blocks].sort((a, b) => byOrderThenId(
     { order: a.placement.order, id: a.id },
@@ -205,7 +244,7 @@ export function PresentationPageView({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-12 lg:grid-cols-12">
       {blocks.map((block) => {
         if (!block.visible) return null;
-        if (audience === "client" && !clientSeesBlock(block)) return null;
+        if (audience === "client" && !clientSeesBlock(block, viewer !== undefined)) return null;
         const desktop = DESKTOP_SPAN[block.placement.span.desktop] ?? DESKTOP_SPAN[12];
         const tablet = TABLET_SPAN[block.placement.span.tablet] ?? TABLET_SPAN[12];
         // Mobile is always the full width the contract fixes it at, which is
@@ -213,7 +252,7 @@ export function PresentationPageView({
         // no mobile span decision.
         return (
           <div key={block.id} className={`min-w-0 ${tablet} ${desktop}`}>
-            <BlockCard block={block} audience={audience} />
+            <BlockCard block={block} audience={audience} viewer={viewer} />
           </div>
         );
       })}
@@ -225,18 +264,29 @@ export function PresentationRenderer({
   model,
   audience,
   pageId,
+  viewer,
 }: {
   model: PresentationRenderModel;
   audience: PresentationAudience;
   /** Draw one page. Omitted, every page is drawn in order. */
   pageId?: string;
+  /**
+   * Present only on a surface where a reader may operate a filter.
+   *
+   * Its absence is what makes the authoring canvas honest: the controls are
+   * drawn, they are genuinely `disabled`, and they say where filtering works.
+   */
+  viewer?: ViewerControls;
 }) {
   const pages = [...model.pages].sort(byOrderThenId);
   const selected = pageId === undefined ? pages : pages.filter((page) => page.id === pageId);
   // A page a client would see nothing on is not drawn at all — not its section,
   // not its heading, not its margin. Studio still draws every page, because a
   // reviewer's whole job is to see the ones a client will not.
-  const shown = audience === "client" ? selected.filter(clientSeesPage) : selected;
+  const shown =
+    audience === "client"
+      ? selected.filter((page) => clientSeesPage(page, viewer !== undefined))
+      : selected;
   return (
     <div className="w-full min-w-0">
       {shown.map((page) => (
@@ -244,7 +294,7 @@ export function PresentationRenderer({
           {pageId === undefined && shown.length > 1 ? (
             <h2 className="mb-3 font-display text-xl font-semibold text-strong">{page.title}</h2>
           ) : null}
-          <PresentationPageView page={page} audience={audience} />
+          <PresentationPageView page={page} audience={audience} viewer={viewer} />
         </section>
       ))}
     </div>
