@@ -102,6 +102,17 @@ export type ChartVariant =
   | "bar_horizontal"
   | "line"
   | "area"
+  /**
+   * One card per period, each measure of that period drawn as a labelled rate
+   * with its own meter.
+   *
+   * It exists because a `series` payload is not a `categories` payload wearing
+   * a different name. A period carries SEVERAL measures — retention and
+   * attrition are two results of the same period — and every drawing that
+   * takes one value per bar has to pick one of them and drop the rest. The
+   * approved dashboard reads a period as a unit, so this variant does too.
+   */
+  | "period_cards"
   | "table"
   | "word_cloud"
   | "term_ranking"
@@ -191,7 +202,11 @@ export const COMPATIBLE_CHART_VARIANTS: Readonly<Record<PresentationSemantic, re
   renewal_distribution: ["stacked_bar", "bar_horizontal", "bar_vertical", "donut", "table"],
   retention_rate: ["kpi_value", "kpi_with_base", "callout"],
   attrition_rate: ["kpi_value", "kpi_with_base", "callout"],
-  retention_series: ["line", "area", "bar_vertical", "table"],
+  // `period_cards` leads because it is the only drawing here that reads a
+  // period as a UNIT. The rest take one value per mark, so on a payload whose
+  // points carry retention AND attrition they would have to choose one and
+  // silently drop the other.
+  retention_series: ["period_cards", "line", "area", "bar_vertical", "table"],
   population_total: ["kpi_value", "callout"],
   population_measured: ["kpi_value", "callout"],
   population_cohorts: ["bar_horizontal", "donut", "table"],
@@ -202,7 +217,7 @@ export const COMPATIBLE_CHART_VARIANTS: Readonly<Record<PresentationSemantic, re
   journey_group: ["journey_route_map", "touchpoint_matrix", "table"],
   journey_touchpoint: ["touchpoint_matrix", "table", "callout"],
   qualitative_terms: ["word_cloud", "term_ranking", "table"],
-  performance_series: ["line", "area", "bar_vertical", "table"],
+  performance_series: ["period_cards", "line", "area", "bar_vertical", "table"],
   filter_dimension: ["filter_control"],
   editorial_slot: ["narrative", "callout"],
 } as const;

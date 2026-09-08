@@ -111,6 +111,7 @@ const CHART_VARIANTS: readonly string[] = [
   "bar_horizontal",
   "line",
   "area",
+  "period_cards",
   "table",
   "word_cloud",
   "term_ranking",

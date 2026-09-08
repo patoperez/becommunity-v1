@@ -21,6 +21,7 @@ import type { PresentationAudience } from "./absence";
 import { BarHorizontal, BarVertical, StackedBar, TableBlock } from "./Distribution";
 import { FilterControl } from "./FilterControls";
 import { JourneyRouteMap } from "./Journey";
+import { PeriodCards } from "./Periods";
 import { Callout, Gauge, KpiValue, Narrative } from "./Simple";
 import { TermRanking, WordCloud } from "./Terms";
 
@@ -39,6 +40,7 @@ export const RENDERERS: Record<ChartVariant, LeafRenderer> | Partial<Record<Char
   kpi_value: (props) => KpiValue(props),
   kpi_with_base: (props) => KpiValue({ ...props, withBase: true }),
   narrative: Narrative,
+  period_cards: PeriodCards,
   stacked_bar: StackedBar,
   table: TableBlock,
   term_ranking: TermRanking,

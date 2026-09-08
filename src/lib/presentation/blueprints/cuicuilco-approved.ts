@@ -364,7 +364,13 @@ export function buildApprovedCuicuilcoBlueprint(
         responsive: "scroll_x",
       },
       H.retentionSeries,
-      "bar_vertical",
+      // The approved dashboard draws this as a GRID OF PERIOD CARDS, each
+      // carrying that period's retention and its attrition with their own
+      // meters. `bar_vertical` was bound here and drew nothing: it reads
+      // category rows, a series has none, and the block rendered as a heading
+      // over a blank. A series is the one payload where the choice of drawing
+      // is not cosmetic — a one-value-per-mark picture has to drop a measure.
+      "period_cards",
     ),
     editorial(
       {

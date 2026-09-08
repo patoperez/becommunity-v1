@@ -78,8 +78,13 @@ export const IMPLEMENTED_BY_SEMANTIC: Readonly<Record<PresentationSemantic, read
   attrition_rate: Object.freeze(["kpi_value", "kpi_with_base", "callout"] as const),
   // `bar_vertical` is compatible and is NOT offered: it draws a categories
   // payload, and a series is periods of measures, which it has no row for.
-  retention_series: Object.freeze(["table"] as const),
-  performance_series: Object.freeze(["table"] as const),
+  // `period_cards` reads a period as a unit: several measures, each with its
+  // own figure and meter. It leads because a series point carries retention AND
+  // attrition, and every drawing that puts one value on one mark must drop one
+  // of them. `bar_vertical` and `line` stay compatible-but-undrawn: honest
+  // about the gap rather than substituting a picture nobody chose.
+  retention_series: Object.freeze(["period_cards", "table"] as const),
+  performance_series: Object.freeze(["period_cards", "table"] as const),
   population_total: Object.freeze(["kpi_value", "callout"] as const),
   population_measured: Object.freeze(["kpi_value", "callout"] as const),
   population_cohorts: Object.freeze(["bar_horizontal", "table"] as const),

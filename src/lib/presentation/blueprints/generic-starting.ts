@@ -25,9 +25,18 @@
  * fact about the React library, and this layer must not know facts about the
  * React library or the dependency runs the wrong way and cycles.
  *
- * So the caller passes the variants it can actually draw, and this file picks
- * the authority's first choice among them. A starting document therefore never
+ * So the caller passes what it can actually draw, and this file picks the
+ * authority's first choice among them. A starting document therefore never
  * opens with a block the composer would immediately have to refuse.
+ *
+ * It passes a FUNCTION OF THE SEMANTIC, not one flat list, and that distinction
+ * was bought the expensive way. A flat list is the union of everything the
+ * build draws for ANY semantic, so intersecting it with what the authority
+ * permits for a PARTICULAR semantic answers the wrong question: `bar_vertical`
+ * is drawn — for a distribution — and is compatible with a retention series, so
+ * the intersection chose it for one, and a series has no category rows, so the
+ * block opened as a heading over a blank. Drawability belongs to the PAIR
+ * (variant, payload shape) and cannot be flattened into a set of variants.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -52,8 +61,35 @@ import type { PresentationHandle } from "../handles";
 import type { CanonicalPresentationRegistry } from "../registry";
 
 export type GenericBlueprintOptions = {
-  /** The variants the calling surface has a component for. */
-  drawableVariants: readonly ChartVariant[];
+  /**
+   * Which variants the calling surface genuinely draws FOR A GIVEN SEMANTIC.
+   *
+   * It is a function of the semantic and not one flat list, and that is the
+   * whole correction. A flat list was the union of everything this build draws
+   * for ANY semantic, so intersecting it with what the authority permits for a
+   * PARTICULAR one let `bar_vertical` — drawn for a distribution, drawn for
+   * nothing series-shaped — be chosen for a retention series, which then
+   * rendered as a heading over a blank.
+   *
+   * Drawability is a property of the PAIR (variant, payload shape). The caller
+   * owns that table because it owns the components; this module only asks.
+   */
+  drawableFor: (semantic: PresentationSemantic) => readonly ChartVariant[];
+  /**
+   * What a ROUTES block may be drawn as — a separate list, deliberately.
+   *
+   * A `journey_routes` block is not a result bound to a journey group. Its
+   * payload is `routes` — the touchpoints somebody decided each route draws —
+   * while a RESULT bound to the same group resolves to a label and a count.
+   * The route map draws the first and cannot draw the second, which is why
+   * the implemented list for `journey_group` is deliberately EMPTY.
+   *
+   * Asking that list for a routes block therefore answers `null`, and the
+   * journey silently disappeared from every generic layout. It is the exact
+   * confusion the editor already had to correct in `addBlock`, arriving here
+   * by a different door.
+   */
+  drawableForRoutes: readonly ChartVariant[];
   /** The title the page carries. Display text the caller already has. */
   title: string;
 };
@@ -99,12 +135,20 @@ const SECTION_SPAN: Partial<Record<PresentationSemantic, number>> = {
   editorial_slot: 12,
 };
 
+/**
+ * The first drawing that is BOTH permitted for this semantic and drawn for it.
+ *
+ * The authority's order is the preference order — `COMPATIBLE_CHART_VARIANTS`
+ * lists the most faithful drawing first — so the first survivor of the
+ * intersection is the one to start from.
+ */
 function firstDrawable(
   semantic: PresentationSemantic,
-  drawable: readonly ChartVariant[],
+  drawableFor: (semantic: PresentationSemantic) => readonly ChartVariant[],
 ): ChartVariant | null {
   const compatible = COMPATIBLE_CHART_VARIANTS[semantic] ?? [];
-  for (const variant of compatible) if (drawable.includes(variant)) return variant;
+  const drawn = drawableFor(semantic);
+  for (const variant of compatible) if (drawn.includes(variant)) return variant;
   return null;
 }
 
@@ -173,7 +217,7 @@ export function buildGenericStartingBlueprint(
       }
 
       if (semantic === "journey_group") {
-        const variant = firstDrawable("journey_group", options.drawableVariants);
+        const variant = options.drawableForRoutes[0] ?? null;
         if (variant === null) continue;
         blocks.push({
           ...common(blocks.length, span),
@@ -199,7 +243,7 @@ export function buildGenericStartingBlueprint(
         continue;
       }
 
-      const variant = firstDrawable(semantic, options.drawableVariants);
+      const variant = firstDrawable(semantic, options.drawableFor);
       if (variant === null) continue;
       blocks.push({
         ...common(blocks.length, span),

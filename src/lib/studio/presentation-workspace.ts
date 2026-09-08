@@ -63,7 +63,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CanonicalReadError } from "@/lib/canonical-source";
 import { loadCanonicalStudyResults } from "@/lib/canonical-source/server";
-import { IMPLEMENTED_CHART_VARIANTS } from "@/lib/composer";
+import { JOURNEY_ROUTES_VARIANTS, offeredChartVariants } from "@/lib/composer";
 // The payload types are declared on the CLIENT-SAFE side and imported here, not
 // declared here and imported there. A `"use client"` composer surface has to
 // name the shape it receives, and importing it from this module would give that
@@ -157,7 +157,12 @@ function chooseBlueprint(
   }
   return {
     document: buildGenericStartingBlueprint(registry, {
-      drawableVariants: IMPLEMENTED_CHART_VARIANTS,
+      // Per SEMANTIC, not a global union. `offeredChartVariants` already is
+      // the intersection of what the authority permits for a semantic with what
+      // this build genuinely draws FOR IT, which is the only list a starting
+      // document may choose from.
+      drawableFor: offeredChartVariants,
+      drawableForRoutes: JOURNEY_ROUTES_VARIANTS,
       title: studyName,
     }),
     choice: {
