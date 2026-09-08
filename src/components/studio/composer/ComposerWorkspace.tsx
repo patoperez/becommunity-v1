@@ -71,11 +71,27 @@ import {
   requestViewerCleared,
   requestViewerOption,
   requestViewerPanelCleared,
+  SAVE_STATE_LABEL,
+  acceptSaveResponse,
+  adoptDocument,
+  autosaveIsDue,
+  beginSave,
+  canSave,
+  dismissSaveFailure,
+  documentChanged,
+  hasUnsavedChanges,
+  openSaveSession,
+  retryAttempt,
   type AddBlockRequest,
   type ComposerPayload,
   type ComposerState,
   type IneligibleReason,
+  type LoadDraft,
+  type PersistenceState,
   type RefreshPreview,
+  type SaveDraft,
+  type SaveResult,
+  type SaveSession,
   type ViewerSession,
 } from "@/lib/composer";
 import {
@@ -112,6 +128,15 @@ import {
   type CanvasZoom,
 } from "./chrome";
 
+/**
+ * How long the composer waits after the last edit before saving by itself.
+ *
+ * Long enough that typing a sentence is one save rather than forty, short
+ * enough that a person who walks away mid-thought has their work stored. The
+ * explicit «Guardar ahora» exists for everyone who does not want to wait.
+ */
+const AUTOSAVE_DELAY_MS = 2_500;
+
 const btn =
   "min-h-11 rounded-lg border border-line bg-surface px-3 text-sm font-medium text-body transition-colors duration-[var(--motion-state)] ease-brand hover:border-line-strong motion-reduce:transition-none";
 const btnActive = "min-h-11 rounded-lg border border-evidence bg-evidence px-3 text-sm font-medium text-on-inverse";
@@ -122,10 +147,17 @@ export function ComposerWorkspace({
   payload,
   studyId,
   refresh,
+  persistence,
+  save,
+  load,
 }: {
   payload: ComposerPayload;
   studyId: string;
   refresh: RefreshPreview;
+  /** What the STORE holds, decided by the server. Never inferred here. */
+  persistence: PersistenceState;
+  save: SaveDraft;
+  load: LoadDraft;
 }) {
   const chrome = useSyncExternalStore(subscribeChrome, readChrome, serverChrome);
   const panels = visiblePanels(chrome);
@@ -163,8 +195,38 @@ export function ComposerWorkspace({
    */
   const [session, setSession] = useState<ViewerSession>(openViewerSession);
 
+  /**
+   * The save state lives in a PURE session object, not in a handful of
+   * booleans. Every rule that matters — an older answer must not mark newer
+   * work saved, a conflict must not resolve itself by writing, a failure must
+   * not read «Guardado» — is a rule about a transition, and transitions that
+   * live in a pure module can be proved by an offline gate rather than by
+   * driving a browser and hoping.
+   */
+  const [saveSession, setSaveSession] = useState<SaveSession>(() =>
+    openSaveSession({
+      document: payload.document,
+      revision: persistence.revision,
+      restored: persistence.restored,
+    }),
+  );
+  /**
+   * The session as the async callbacks see it.
+   *
+   * Written OUTSIDE render — in effects and in callbacks, both of which are
+   * legal — so a save started twice in one tick cannot start from the same
+   * "before" state twice and mint two attempts with one sequence number.
+   */
+  const saveSessionRef = useRef(saveSession);
+  useEffect(() => {
+    saveSessionRef.current = saveSession;
+  }, [saveSession]);
+
+
   /** The single choke point. Every control goes through it. */
   const act = useCallback((run: (s: ComposerState) => ComposerState) => dispatch({ run }), []);
+
+
 
   /**
    * An edit makes the preview stale — derived from the document, not remembered
@@ -193,7 +255,229 @@ export function ComposerWorkspace({
     setPreview((previous) => (previous.stale ? previous : { ...previous, stale: true }));
     setIssues(null);
     setRefreshNotice(null);
+    // AN EDIT MAKES THE DOCUMENT UNSAVED — Unit 6B.3A.
+    //
+    // It rides in THIS effect rather than one of its own because this is
+    // already the place that knows an edit happened, and its guard above is
+    // what keeps the transition from running on a render that changed nothing.
+    // `documentChanged` is a no-op against the document already known to be
+    // stored, so «Guardado» cannot be walked out of by a re-render either.
+    setSaveSession((current) => documentChanged(current, state.document));
   }, [state.document]);
+  /**
+   * THE NEWEST REQUEST OF ANY KIND, so a slower earlier one cannot land on top.
+   *
+   * ONE counter for BOTH callers, and that is the point. A reader ticking three
+   * boxes sends three requests and the second may come back after the third —
+   * but an explicit «Actualizar vista previa» races the same way, and a
+   * neutral refresh landing after a filter would replace filtered figures with
+   * everybody's while the controls still read «Generación X». Two counters
+   * would have made each caller safe against itself and neither safe against
+   * the other.
+   *
+   * A ticket is taken when a request is issued and compared after the await;
+   * anything that is not the newest is dropped whole. The session's own pure
+   * `acceptViewerResponse` applies the same rule to its own number, which is
+   * what lets an offline gate prove the behaviour without a browser.
+   */
+  const inFlight = useRef(0);
+
+  /* ---------------------------------------------------------------------- */
+  /* DURABLE DRAFT — Unit 6B.3A                                              */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * Run one save attempt.
+   *
+   * `idempotencyKey` is passed in rather than minted inside, because a RETRY
+   * must reuse the previous attempt's key: migration 0029 records the key and
+   * answers a replay with the revision the first attempt produced, so a retry
+   * after a lost response cannot create a second revision.
+   */
+  const runSave = useCallback(
+    async (idempotencyKey: string) => {
+      const before = saveSessionRef.current;
+      const started = beginSave(before, seenDocument.current, idempotencyKey);
+      // A REFUSAL IS THE SAME SESSION, BY IDENTITY. `beginSave` returns the
+      // session untouched when one is already in flight, and that session's
+      // `inFlight` is NOT null — it is the FIRST attempt's. Testing `inFlight`
+      // alone would therefore read a refusal as a start, and this function would
+      // go on to send a second write carrying the first attempt's sequence
+      // number and expected revision. Identity is the only test that separates
+      // "refused" from "started" here.
+      if (started === before) return;
+      saveSessionRef.current = started;
+      setSaveSession(started);
+      if (started.inFlight === null) return;
+
+      const { sequence, expectedRevision, document: sent } = started.inFlight;
+      let result: SaveResult;
+      try {
+        result = await save(studyId, JSON.stringify(sent), expectedRevision, idempotencyKey);
+      } catch {
+        // A THROW IS NOT A REFUSAL. The request may still have been applied, so
+        // this is `transport_failed` and the attempt stays retryable under the
+        // SAME key rather than being reported as a refusal that never happened.
+        result = {
+          ok: false,
+          reason: "transport_failed",
+          detail:
+            "No pudimos completar el guardado. Tus cambios siguen en esta pestaña; puedes volver a " +
+            "intentarlo con seguridad.",
+        };
+      }
+      // THE DOCUMENT AS IT IS NOW, not as it was when the request left. This is
+      // what decides whether «Guardado» is true, and it is read here rather
+      // than captured above precisely because the author may have kept typing.
+      setSaveSession((current) => acceptSaveResponse(current, sequence, result, seenDocument.current));
+    },
+    [save, studyId],
+  );
+
+  /**
+   * A fresh key per NEW attempt.
+   *
+   * `crypto.randomUUID` is hex and hyphens, which is inside the character class
+   * migration 0029's CHECK constraint admits, and the prefix keeps a key
+   * readable in the event log.
+   */
+  const onSaveNow = useCallback(() => {
+    void runSave(`save-${crypto.randomUUID()}`);
+  }, [runSave]);
+
+  /**
+   * A retry repeats the previous key ONLY while it is repeating the previous
+   * document.
+   *
+   * `retryAttempt` returns null once the author has edited since the failed
+   * attempt, because replaying that key would answer for the OLD content and
+   * the screen would then call the NEW content saved. A fresh key starts a real
+   * attempt instead — which may take a conflict against the author's own
+   * unacknowledged save, and a conflict is the honest answer to that.
+   */
+  const onRetrySave = useCallback(() => {
+    const attempt = retryAttempt(saveSessionRef.current, seenDocument.current);
+    void runSave(attempt ? attempt.idempotencyKey : `save-${crypto.randomUUID()}`);
+  }, [runSave]);
+
+  /**
+   * DEBOUNCED AUTOSAVE.
+   *
+   * The timer restarts on every edit, so a person typing a paragraph produces
+   * one save and not one per keystroke. `autosaveIsDue` is what decides, and it
+   * is false while a save is in flight, false in a conflict — where writing is
+   * the one thing that must not happen — and false after a failure, where the
+   * retry belongs to the operator rather than to a timer that would repeat it
+   * every few seconds without being asked.
+   */
+  useEffect(() => {
+    if (!autosaveIsDue(saveSession, state.document)) return;
+    const timer = window.setTimeout(() => {
+      void runSave(`auto-${crypto.randomUUID()}`);
+    }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [saveSession, state.document, runSave]);
+
+  /**
+   * THE NAVIGATION WARNING.
+   *
+   * Registered only while there is something to lose, so a person who has saved
+   * is never asked to confirm leaving. The browser decides the wording; all a
+   * page may do is say that there is a reason to ask.
+   */
+  useEffect(() => {
+    if (!hasUnsavedChanges(saveSession, state.document)) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [saveSession, state.document]);
+
+  const [reloading, setReloading] = useState(false);
+
+  /**
+   * ADOPT THE STORED VERSION — the only way out of a conflict, and deliberate.
+   *
+   * Nothing calls this on the operator's behalf. It replaces the document
+   * through `adoptDocument`, which pushes the local one onto the undo stack, so
+   * an operator who adopts and immediately regrets it presses undo and has
+   * their work back.
+   */
+  const onLoadStored = useCallback(async () => {
+    setReloading(true);
+    // A TICKET, so a preview refresh still in flight cannot land on top of the
+    // model this load is about to install. `onRefresh` takes one from the same
+    // counter; a third writer of `preview` that did not would be the one path
+    // where a stale model could overwrite a fresh one.
+    const ticket = (inFlight.current += 1);
+    try {
+      const result = await load(studyId);
+      if (!result.ok) {
+        setSaveSession((current) => ({
+          ...current,
+          message: result.unavailable.detail,
+        }));
+        return;
+      }
+      if (!result.present) {
+        setSaveSession((current) => ({
+          ...current,
+          message:
+            "Ya no hay ningún borrador almacenado para este estudio, así que no hay nada que cargar.",
+        }));
+        return;
+      }
+      if (ticket !== inFlight.current) return;
+      const loaded = result.document;
+      const revision = result.revision;
+      // THE PREVIEW THAT CAME BACK IS FRESH, AND MUST NOT BE MARKED STALE.
+      //
+      // The document-changed effect marks the preview stale on every real edit,
+      // which is right for an edit and wrong here: this model was resolved by
+      // the server FROM the document being adopted. Moving the ref forward now
+      // makes that effect's own guard short-circuit, so it neither restales a
+      // fresh preview nor re-runs `documentChanged` over a session this handler
+      // is about to set explicitly.
+      seenDocument.current = loaded;
+      act((current) => adoptDocument(current, loaded));
+      setPreview({ model: result.model, stale: false });
+      setIssues(null);
+      setSaveSession((current) => ({
+        ...current,
+        state: "sin_cambios",
+        revision,
+        savedDocument: loaded,
+        inFlight: null,
+        message: null,
+        storedRevision: null,
+        refusal: null,
+        issues: null,
+        retryable: null,
+      }));
+    } catch {
+      // A THROWN LOAD IS STILL AN ANSWER THE OPERATOR NEEDS.
+      //
+      // There was no `catch` here, so a rejected action left an unhandled
+      // rejection, no message, and a spinner that had already stopped — the
+      // operator would press the only button on screen and watch nothing
+      // happen, twice. The conflict state is kept, because it is still true.
+      setSaveSession((current) => ({
+        ...current,
+        message:
+          "No pudimos cargar la versión almacenada. Tus cambios siguen aquí; puedes volver a " +
+          "intentarlo.",
+      }));
+    } finally {
+      setReloading(false);
+    }
+  }, [act, load, studyId]);
+
+  // NOT memoized: its whole body is a state setter, so there is nothing to
+  // memoize and a `useCallback` here only gives the compiler a dependency list
+  // to disagree with.
+  const onDismissSaveFailure = () => setSaveSession(dismissSaveFailure);
 
   // The refusal IS the notice; there is nothing to remember. A message from the
   // refresh fills in when no refusal stands.
@@ -249,23 +533,6 @@ export function ComposerWorkspace({
     [refresh, studyId],
   );
 
-  /**
-   * THE NEWEST REQUEST OF ANY KIND, so a slower earlier one cannot land on top.
-   *
-   * ONE counter for BOTH callers, and that is the point. A reader ticking three
-   * boxes sends three requests and the second may come back after the third —
-   * but an explicit «Actualizar vista previa» races the same way, and a
-   * neutral refresh landing after a filter would replace filtered figures with
-   * everybody's while the controls still read «Generación X». Two counters
-   * would have made each caller safe against itself and neither safe against
-   * the other.
-   *
-   * A ticket is taken when a request is issued and compared after the await;
-   * anything that is not the newest is dropped whole. The session's own pure
-   * `acceptViewerResponse` applies the same rule to its own number, which is
-   * what lets an offline gate prove the behaviour without a browser.
-   */
-  const inFlight = useRef(0);
 
   const onRefresh = useCallback(async () => {
     setPending(true);
@@ -424,7 +691,15 @@ export function ComposerWorkspace({
 
   return (
     <div className="w-full min-w-0">
-      <SessionBanner />
+      <SaveBanner
+        session={saveSession}
+        document={state.document}
+        reloading={reloading}
+        onSaveNow={onSaveNow}
+        onRetry={onRetrySave}
+        onLoadStored={() => void onLoadStored()}
+        onDismiss={onDismissSaveFailure}
+      />
 
       <Toolbar
         chrome={chrome}
@@ -549,18 +824,131 @@ export function ComposerWorkspace({
 
 /* -------------------------------------------------------------------------- */
 
-function SessionBanner() {
+/**
+ * THE SAVE BANNER — one state, one sentence, and only the controls that state
+ * actually permits.
+ *
+ * It replaces Unit 6B.1's «Nada de lo que hagas aquí se guarda», which was true
+ * then and would be the most dangerous sentence on the screen now.
+ *
+ * The CONFLICT state is drawn differently from the failure state on purpose.
+ * A failure offers «Reintentar», because retrying is safe — the same
+ * idempotency key replays rather than writing again. A conflict offers no
+ * retry at all, because there is no safe retry: the newer document would be
+ * overwritten. Its only action loads the stored version, and the sentence says
+ * what that costs before the button does it.
+ */
+function SaveBanner({
+  session,
+  document: current,
+  reloading,
+  onSaveNow,
+  onRetry,
+  onLoadStored,
+  onDismiss,
+}: {
+  session: SaveSession;
+  document: PresentationDocument;
+  reloading: boolean;
+  onSaveNow: () => void;
+  onRetry: () => void;
+  onLoadStored: () => void;
+  onDismiss: () => void;
+}) {
+  const label = SAVE_STATE_LABEL[session.state];
+  const conflict = session.state === "version_mas_reciente";
+  const failed = session.state === "no_pudimos_guardar";
+  const alarming = conflict || failed;
+  const saving = session.state === "guardando";
+
   return (
-    <div className="rounded-xl border-2 border-caution-line bg-caution-surface p-4">
-      <p className="font-display text-base font-bold text-caution">
-        Nada de lo que hagas aquí se guarda.
+    <div
+      className={
+        alarming
+          ? "rounded-xl border-2 border-caution-line bg-caution-surface p-4"
+          : "rounded-xl border border-line bg-surface p-4"
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p
+            className={
+              alarming
+                ? "font-display text-base font-bold text-caution"
+                : "font-display text-base font-semibold text-strong"
+            }
+          >
+            {/*
+              THE STATE IS ANNOUNCED. A person using a screen reader must learn
+              that a save failed without watching for a colour change, and
+              `polite` is right because a save is not an interruption.
+            */}
+            <span aria-live="polite">{label}</span>
+            {session.revision !== null && !conflict ? (
+              <span className="ml-2 text-sm font-normal text-muted">
+                Revisión {session.revision}
+              </span>
+            ) : null}
+          </p>
+          {session.message ? (
+            <p className={alarming ? "mt-1 max-w-prose text-sm text-caution" : "mt-1 max-w-prose text-sm text-body"}>
+              {session.message}
+            </p>
+          ) : null}
+          {conflict ? (
+            <p className="mt-1 max-w-prose text-sm text-caution">
+              Tu documento sigue aquí y no se ha sobrescrito nada. Si cargas la versión almacenada,
+              lo que tienes en pantalla se reemplaza — podrás recuperarlo con «Deshacer», pero
+              revísalo antes de guardar encima.
+            </p>
+          ) : null}
+          {session.issues && session.issues.length > 0 ? (
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-sm text-caution">
+              {session.issues.map((issue, index) => (
+                <li key={index}>
+                  {presentationErrorLabel(issue.code)}{" "}
+                  <span className="text-xs text-muted">
+                    (<code>{issue.code}</code> en <code>{issue.path}</code>)
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {conflict ? (
+            <button type="button" className={btn} onClick={onLoadStored} disabled={reloading}>
+              {reloading ? "Cargando…" : "Cargar la versión almacenada"}
+            </button>
+          ) : null}
+          {failed ? (
+            <>
+              <button type="button" className={btnActive} onClick={onRetry}>
+                Reintentar
+              </button>
+              <button type="button" className={btn} onClick={onDismiss}>
+                Descartar el aviso
+              </button>
+            </>
+          ) : null}
+          {!conflict && !failed ? (
+            <button
+              type="button"
+              className={btnActive}
+              onClick={onSaveNow}
+              disabled={saving || !canSave(session, current)}
+            >
+              {saving ? "Guardando…" : "Guardar ahora"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <p className="mt-2 text-xs text-muted">
+        El cliente no ve nada de esto y no se publica nada. El borrador heredado de este estudio no
+        se toca.
       </p>
-      <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-sm text-caution">
-        <li>Los cambios viven sólo en esta pestaña, en memoria.</li>
-        <li>Si recargas o sales, se pierden por completo.</li>
-        <li>El cliente no ve nada de esto, y no se publica nada.</li>
-        <li>No se toca el borrador guardado que ya existe para este estudio.</li>
-      </ul>
     </div>
   );
 }

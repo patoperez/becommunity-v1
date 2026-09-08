@@ -357,6 +357,27 @@ export function undo(state: ComposerState): ComposerState {
   };
 }
 
+/**
+ * Replace the document with one that came from somewhere else — Unit 6B.3A.
+ *
+ * The ONE caller is the conflict flow, after a person has been told what
+ * adopting the stored version costs and has chosen it anyway.
+ *
+ * It goes through `commit`, so the document being replaced is pushed onto the
+ * undo stack. That is deliberate and it is the difference between a reload and
+ * a loss: an operator who adopts the stored version and immediately realises
+ * their own hour was the better one presses undo and gets it back. Clearing the
+ * history here — which "load the stored version" sounds like it should do —
+ * would make the button the most destructive control on the screen and the only
+ * one with no way back.
+ *
+ * A commit whose document is reference-identical is a no-op, so adopting a
+ * stored version identical to the one on screen spends no undo step.
+ */
+export function adoptDocument(state: ComposerState, document: PresentationDocument): ComposerState {
+  return commit(state, document, { selectedBlockId: null });
+}
+
 export function redo(state: ComposerState): ComposerState {
   const next = state.future[0];
   if (next === undefined) return refuse(state, "nothing_to_redo", "No hay nada que rehacer.");

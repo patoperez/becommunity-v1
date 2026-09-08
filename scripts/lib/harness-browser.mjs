@@ -381,6 +381,26 @@ export async function launchBrowser() {
         }
       },
 
+      /**
+       * Emulate a device viewport for THIS context only.
+       *
+       * A method rather than an exposed `cdp` handle, so a caller that wants a
+       * phone gets a phone and not the whole protocol. `clearViewport` returns
+       * the context to the browser's own size; a run that emulates and forgets
+       * to clear would measure every later assertion at 390 px.
+       */
+      async setViewport(width, height, { mobile = width < 500 } = {}) {
+        await cdp.send(
+          "Emulation.setDeviceMetricsOverride",
+          { width, height, deviceScaleFactor: 1, mobile },
+          sessionId,
+        );
+      },
+
+      async clearViewport() {
+        await cdp.send("Emulation.clearDeviceMetricsOverride", {}, sessionId);
+      },
+
       async dispose() {
         await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
         await cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});

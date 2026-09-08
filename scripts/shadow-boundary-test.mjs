@@ -997,9 +997,23 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     // does not perform — that is the clearest way to say so to the next reader —
     // and a scan that could not tell a promise from a call would forbid the
     // promise. This gate has made that mistake before and records it here.
+    // WHAT THIS STILL GUARANTEES, AFTER UNIT 6B.3A — narrower than it was, and
+    // said out loud rather than left to be inferred.
+    //
+    // Until 6B.3A the approved action wrote nothing at all, anywhere. It now
+    // has a save, so the guarantee is no longer "no write happens because of
+    // this file". What it IS, and what this asserts, is that the action itself
+    // performs NO write DIRECTLY: no table call, no RPC, no revalidation. Every
+    // write it causes goes through the one server-only loader, which
+    // `canonical-composer-test.mjs` §[22] holds to a stricter rule than this
+    // one — the only RPC it may name is the canonical draft save, and it may
+    // not name a legacy experience table at all.
+    //
+    // A gate that kept certifying the wider claim would be certifying something
+    // nobody checks any more, which is worse than checking less on purpose.
     const source = stripComments(readFileSync(APPROVED_ACTION.file, "utf8"));
     for (const writer of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath"]) {
-      assert.ok(!source.includes(writer), `the approved action performs ${writer}`);
+      assert.ok(!source.includes(writer), `the approved action performs ${writer} directly`);
     }
   });
 

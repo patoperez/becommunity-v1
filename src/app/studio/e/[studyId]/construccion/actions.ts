@@ -55,19 +55,36 @@
  *      positions, and the server looks the values up.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * AND IT WRITES NOTHING.
+ * AND `refreshPresentationPreview` STILL WRITES NOTHING.
  *
- * No insert, update, upsert, delete, RPC, `revalidatePath` or draft. There is no
- * storage path in Unit 6B.1 at all; the existing legacy draft row is not read
- * and not touched. This action is a read that ends in a value.
+ * No insert, update, upsert, delete, RPC, `revalidatePath` or draft. That action
+ * is a read that ends in a value, exactly as it was.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE FILE, HOWEVER, NO LONGER DOES.
+ *
+ * Unit 6B.3A adds `saveCanonicalPresentationDraft` and
+ * `loadCanonicalPresentationDraft` below. The save calls exactly one RPC —
+ * `save_canonical_presentation_draft`, from migration 0029, applied to no hosted
+ * project — and writes one row in `canonical_presentation_draft`.
+ *
+ * It cannot reach `study_experience_draft`, which holds the two LEGACY
+ * experience definitions: Cuicuilco at schema version 2 revision 72 and P6E at
+ * 3 revision 14. That table is a different table, it is not named in this file,
+ * and it is not named in the body of the function this file calls. Those rows
+ * are not read, not migrated, not reinterpreted and not overwritten.
  */
 
 import { z } from "zod";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { resolveEditedPresentation } from "@/lib/studio/presentation-workspace";
-import type { PreviewResult } from "@/lib/composer";
+import {
+  loadStoredPresentation,
+  resolveEditedPresentation,
+  storeEditedPresentation,
+} from "@/lib/studio/presentation-workspace";
+import type { LoadResult, PreviewResult, SaveResult } from "@/lib/composer";
 
 const uuid = z.string().uuid();
 /**
@@ -177,4 +194,181 @@ export async function refreshPresentationPreview(
     candidate,
     viewerCandidate,
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* PERSISTENCE — Unit 6B.3A                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * THE TWO WRITES-ADJACENT ACTIONS, AND THE ORDER THEY DO THINGS IN.
+ *
+ * Both repeat the whole authorization dance rather than inheriting it, for the
+ * same reason `refreshPresentationPreview` does: an action is a public HTTP
+ * endpoint that happens to be written in TypeScript, and a page's gate has
+ * never run for it.
+ *
+ * AUTHORIZATION HAPPENS BEFORE THE PRIVILEGED CLIENT EXISTS. `createAdminClient()`
+ * builds a client that bypasses every RLS policy in the database, so it is not
+ * constructed until the session has been fetched with `getUser()`, the role has
+ * been read from the database and found to be `internal`, and the study id has
+ * parsed as a uuid. A privileged client built before that check is a privileged
+ * client that exists during the moment the answer might be "no".
+ *
+ * AND NEITHER RETURNS A REDIRECT. Unit 6B.1's note applies unchanged: the
+ * document being composed lives in browser memory, and a redirect would remount
+ * the page and throw it away. A save that failed must leave the author exactly
+ * where they were, with their work.
+ */
+
+/**
+ * A ceiling on the idempotency key, checked before it is used.
+ *
+ * The database's own CHECK admits `^[A-Za-z0-9_.:-]{8,120}$`, and this repeats
+ * it rather than trusting the round trip: a malformed key would be refused by
+ * the database as a generic storage failure, and the screen would tell an
+ * author their save failed when in fact the browser sent nonsense.
+ */
+const IDEMPOTENCY_KEY = z.string().regex(/^[A-Za-z0-9_.:-]{8,120}$/);
+
+/**
+ * The expected revision, or null for a first save.
+ *
+ * `safeParse` on a bounded integer, because this number is compared against a
+ * stored one under a lock and decides whether an overwrite happens. A float, a
+ * negative, or `Number.MAX_SAFE_INTEGER + 1` is not a revision anything wrote.
+ */
+const EXPECTED_REVISION = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable();
+
+/** Authorize, then — and only then — build the privileged client and the scope. */
+async function authorizedStudioScope(
+  studyId: string,
+): Promise<
+  | { ok: true; admin: ReturnType<typeof createAdminClient>; userId: string; scope: { tenantId: string; studyId: string; studyName: string } }
+  | { ok: false; reason: "not_authorized" | "invalid_scope"; detail: string }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, reason: "not_authorized", detail: "Acceso denegado." };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("user_id", user.id)
+    .maybeSingle<{ role: string }>();
+  if (profile?.role !== "internal") {
+    return { ok: false, reason: "not_authorized", detail: "Acceso denegado." };
+  }
+
+  if (!uuid.safeParse(studyId).success) {
+    return { ok: false, reason: "invalid_scope", detail: "Estudio inválido." };
+  }
+
+  // ONLY NOW. Everything above used the REQUEST-scoped client, which is subject
+  // to RLS; the line below is the first privileged thing that exists.
+  const admin = createAdminClient();
+  const { data: study, error } = await admin
+    .from("study")
+    .select("id, tenant_id, name")
+    .eq("id", studyId)
+    .maybeSingle<{ id: string; tenant_id: string; name: string }>();
+  if (error || !study) {
+    return { ok: false, reason: "invalid_scope", detail: "Estudio inválido." };
+  }
+
+  // THE TENANT IS READ, NEVER RECEIVED. A caller does not get to name a tenant,
+  // so a caller cannot name somebody else's.
+  return {
+    ok: true,
+    admin,
+    userId: user.id,
+    scope: { tenantId: study.tenant_id, studyId: study.id, studyName: study.name },
+  };
+}
+
+/**
+ * Save the composed document, or refuse for a named reason.
+ *
+ * Every refusal leaves the author's work exactly where it is. There is no path
+ * through this function that discards a document, and no path that reports a
+ * save it did not get an answer for.
+ */
+export async function saveCanonicalPresentationDraft(
+  studyId: string,
+  documentJson: string,
+  expectedRevision: number | null,
+  idempotencyKey: string,
+): Promise<SaveResult> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return { ok: false, reason: authorized.reason, detail: authorized.detail };
+  }
+
+  if (typeof documentJson !== "string" || documentJson.length > MAX_DOCUMENT_BYTES) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "El documento enviado excede el tamaño que esta capa admite, así que no se guarda.",
+    };
+  }
+  if (!IDEMPOTENCY_KEY.safeParse(idempotencyKey).success) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "La clave de reintento enviada no tiene la forma que esta capa admite.",
+    };
+  }
+  const revision = EXPECTED_REVISION.safeParse(expectedRevision);
+  if (!revision.success) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "La revisión esperada no es un número de revisión.",
+    };
+  }
+
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(documentJson);
+  } catch {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "El documento enviado no es JSON válido, así que no se guarda.",
+    };
+  }
+
+  return storeEditedPresentation(
+    authorized.admin,
+    authorized.scope,
+    authorized.userId,
+    candidate,
+    revision.data,
+    idempotencyKey,
+  );
+}
+
+/**
+ * Load the stored document deliberately.
+ *
+ * This is what the conflict flow calls, and what a fresh visit calls when the
+ * page decides to restore rather than start from a blueprint. It is a read that
+ * ends in a value: it writes nothing and it discards nothing — the CALLER
+ * decides whether to adopt what comes back, after telling a person what
+ * adopting it costs.
+ */
+export async function loadCanonicalPresentationDraft(studyId: string): Promise<LoadResult> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return {
+      ok: false,
+      unavailable: {
+        reason: "presentation_unresolved",
+        detail: authorized.detail,
+      },
+    };
+  }
+  return loadStoredPresentation(authorized.admin, authorized.scope);
 }

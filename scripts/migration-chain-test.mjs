@@ -257,11 +257,36 @@ console.log("\n[3] The canonical migrations are a contiguous run above every app
 
 // The order is the DEPENDENCY order: the analysis model depends on the
 // ingestion foundation, and the commit/rollback migration depends on both.
-const CANONICAL_ORDER = ["canonical_ingestion_foundation", "canonical_analysis_model", "canonical_commit_and_rollback"];
+const CANONICAL_ORDER = [
+  "canonical_ingestion_foundation",
+  "canonical_analysis_model",
+  "canonical_commit_and_rollback",
+  // Unit 6B.3A. Durable canonical presentation drafts, in their OWN table, so a
+  // canonical v4 document can never be written into the row a legacy experience
+  // draft occupies. It is last because it is the only one that presupposes the
+  // other three: a canonical presentation is a presentation OF canonical
+  // results, and there are none until the commit migration exists.
+  "canonical_presentation_draft",
+];
+
+/**
+ * The migration that owns the canonical COMMIT, named rather than positioned.
+ *
+ * This used to be `canonical[canonical.length - 1]`, which was the same thing
+ * for exactly as long as the commit migration happened to be last. Unit 6B.3A
+ * appended a fourth, and "last" silently became the presentation migration — so
+ * the catalogue-baseline rule below would have demanded `prepare(28)` instead
+ * of `prepare(27)` and a passing gate would have started asking for the wrong
+ * schema. A rule about a specific migration names that migration.
+ */
+const COMMIT_SLUG = "canonical_commit_and_rollback";
 const canonical = parsed.filter((e) => e.slug.startsWith("canonical_"));
 
 {
-  check(canonical.length === 3, `exactly three canonical migrations exist (${canonical.length})`);
+  check(
+    canonical.length === CANONICAL_ORDER.length,
+    `exactly ${CANONICAL_ORDER.length} canonical migrations exist (${canonical.length})`,
+  );
   check(
     JSON.stringify(canonical.map((e) => e.slug)) === JSON.stringify(CANONICAL_ORDER),
     `and they appear in dependency order: ${canonical.map((e) => e.prefix).join(", ")} = ${canonical.map((e) => e.slug).join(", ")}`,
@@ -336,8 +361,17 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
     );
   }
 
-  // The REST transport verifies rather than applies, and refuses any bound but
-  // the complete one. Both numbers must track the same final migration.
+  // THE TWO TRANSPORTS ANSWER DIFFERENT QUESTIONS, AND THIS RULE USED TO CONFLATE
+  // THEM.
+  //
+  // It read "both numbers must track the same final migration", which was the
+  // same thing only while every migration was applied everywhere. The psql
+  // transport APPLIES, so its bound tracks the newest migration on disk. The
+  // REST transport VERIFIES a hosted target, so its bound is a FACT about that
+  // target — and the hosted project stops at the canonical COMMIT migration.
+  // Unit 6B.3A's presentation migration is applied to no project by design, so
+  // demanding it over REST would demand of the hosted project the one thing
+  // this phase forbids. The rule now names each bound for what it is.
   const restDefault = /async prepare\(upTo = (\d+)\)/.exec(rest);
   const restGuard = /if \(upTo !== (\d+)\)/.exec(rest);
   check(restDefault !== null && restGuard !== null, "the REST transport declares a default bound and a refusal bound");
@@ -346,9 +380,17 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
       restDefault[1] === restGuard[1],
       `and they agree with each other (${restDefault[1]} / ${restGuard[1]})`,
     );
+    const commitEntry = canonical.find((e) => e.slug === COMMIT_SLUG);
     check(
-      Number(restDefault[1]) === last.number,
-      `and both name the last migration (${restDefault[1]} vs ${last.prefix})`,
+      commitEntry !== undefined && Number(restDefault[1]) === commitEntry.number,
+      `and both name the last migration APPLIED to the hosted project — the canonical commit ` +
+        `migration ${commitEntry?.prefix ?? "?"} — rather than the last one on disk (${restDefault[1]})`,
+    );
+    // And the transport must actively refuse a target that carries a migration
+    // nobody applied, or "0029 is applied nowhere" would be a claim with no check.
+    check(
+      /canonical_presentation_draft/.test(rest),
+      "and it refuses a hosted target that carries the unapplied presentation migration",
     );
   }
 
@@ -358,7 +400,8 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
   const explicit = [...suite.matchAll(/\bt\.prepare\((\d+)\)/g)].map((m) => Number(m[1]));
   const unknown = explicit.filter((n) => !parsed.some((e) => e.number === n));
   check(unknown.length === 0, `every explicit prepare(N) in the suite names a real migration${unknown.length ? `: ${unknown.join(", ")}` : ` (${explicit.join(", ") || "none"})`}`);
-  const commitMigration = canonical[canonical.length - 1];
+  const commitMigration = canonical.find((e) => e.slug === COMMIT_SLUG);
+  check(commitMigration !== undefined, `the canonical commit migration is present by slug (${COMMIT_SLUG})`);
   if (commitMigration && explicit.length > 0) {
     check(
       explicit.every((n) => n === commitMigration.number - 1),
@@ -417,6 +460,9 @@ const ANALYSIS_TABLES = [
   "pain_point_performance_dimension", "pain_point_culture_dimension",
 ];
 const COMMIT_TABLES = ["import_job_record", "retention_period"];
+/** Unit 6B.3A. The draft and its append-only event log. */
+const PRESENTATION_SLUG = "canonical_presentation_draft";
+const PRESENTATION_TABLES = ["canonical_presentation_draft", "canonical_presentation_draft_event"];
 const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "commit_canonical_package", "rollback_canonical_package"];
 
 {
@@ -456,18 +502,91 @@ const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "c
   // THE OBJECT INVENTORY AND THE TRANSACTION CONTRACT. A rename must not have
   // dropped a table, a function, a grant, or the transaction that makes the
   // whole migration atomic.
-  const [foundation, analysis, commit] = canonical.map((e) => read(MIGRATIONS + e.name));
-  const [foundationBack, analysisBack, commitBack] = canonical.map((e) => {
-    const name = rollbackFiles.find((r) => r.startsWith(`${e.prefix}_`));
+  // BY SLUG, not by position. The three data migrations are what this section's
+  // table inventories describe; the presentation migration is checked separately
+  // below because it creates different objects and locks them down more tightly.
+  const bySlug = (slug) => {
+    const entry = canonical.find((e) => e.slug === slug);
+    return entry ? read(MIGRATIONS + entry.name) : "";
+  };
+  const backBySlug = (slug) => {
+    const entry = canonical.find((e) => e.slug === slug);
+    if (!entry) return "";
+    const name = rollbackFiles.find((r) => r.startsWith(`${entry.prefix}_`));
     return name ? read(ROLLBACKS + name) : "";
-  });
+  };
+  const foundation = bySlug("canonical_ingestion_foundation");
+  const analysis = bySlug("canonical_analysis_model");
+  const commit = bySlug(COMMIT_SLUG);
+  const foundationBack = backBySlug("canonical_ingestion_foundation");
+  const analysisBack = backBySlug("canonical_analysis_model");
+  const commitBack = backBySlug(COMMIT_SLUG);
 
-  check(sameMembers(createdTables(foundation), FOUNDATION_TABLES), `${canonical[0].prefix} still creates the 18 declared ingestion tables (${createdTables(foundation).length})`);
-  check(sameMembers(createdTables(analysis), ANALYSIS_TABLES), `${canonical[1].prefix} still creates the 16 declared analysis tables (${createdTables(analysis).length})`);
-  check(sameMembers(createdTables(commit), COMMIT_TABLES), `${canonical[2].prefix} still creates the 2 declared commit tables (${createdTables(commit).length})`);
+  check(sameMembers(createdTables(foundation), FOUNDATION_TABLES), `the ingestion migration still creates the 18 declared tables (${createdTables(foundation).length})`);
+  check(sameMembers(createdTables(analysis), ANALYSIS_TABLES), `the analysis migration still creates the 16 declared tables (${createdTables(analysis).length})`);
+  check(sameMembers(createdTables(commit), COMMIT_TABLES), `the commit migration still creates the 2 declared tables (${createdTables(commit).length})`);
+
+  {
+    const presentation = bySlug(PRESENTATION_SLUG);
+    check(
+      sameMembers(createdTables(presentation), PRESENTATION_TABLES),
+      `the presentation migration still creates exactly its two tables (${createdTables(presentation).length})`,
+    );
+    const presentationFunctions = [...presentation.matchAll(/create or replace function public\.([a-z_]+)\(/g)].map((m) => m[1]);
+    check(
+      sameMembers(presentationFunctions, ["refuse_canonical_presentation_event_update", "save_canonical_presentation_draft"]),
+      `and exactly its two functions (${presentationFunctions.join(", ") || "none"})`,
+    );
+    // THE SAVE FUNCTION MUST NOT BE ABLE TO NAME THE LEGACY DRAFT TABLE. This is
+    // the whole coexistence guarantee reduced to something a gate can read: the
+    // canonical write path addresses a different table, so there is no argument
+    // by which it reaches the two hosted legacy rows.
+    check(
+      !/study_experience/.test(executableSql(presentation).join("\n")),
+      "and its executable SQL never names a legacy experience table",
+    );
+    // SCOPED TO THE SAVE FUNCTION'S OWN DEFINITION, not to the file.
+    //
+    // This migration declares TWO functions, and a file-wide test is satisfied
+    // when ANY of them is SECURITY DEFINER and ANY of them pins an empty
+    // search_path — which the trigger function does. So the save function could
+    // have lost either property and this would still have passed, on the
+    // strength of its neighbour. The declaration block is extracted and the two
+    // properties are required of THAT text.
+    const saveDeclaration = /create or replace function public\.save_canonical_presentation_draft\([\s\S]*?\bas \$save\$/.exec(presentation);
+    check(saveDeclaration !== null, "the save function's declaration is readable");
+    if (saveDeclaration) {
+      check(
+        /security definer/i.test(saveDeclaration[0]),
+        "its save function is SECURITY DEFINER — asserted of that function, not of the file",
+      );
+      check(
+        /set search_path = ''/.test(saveDeclaration[0]),
+        "and pins an EMPTY search_path in the same declaration",
+      );
+    }
+    check(
+      /revoke execute on function public\.save_canonical_presentation_draft\([^)]*\)\s*\n?\s*from public, anon, authenticated/i.test(presentation),
+      "revoked from public, anon and authenticated",
+    );
+    check(
+      /grant execute on function public\.save_canonical_presentation_draft\([^)]*\)\s*\n?\s*to service_role/i.test(presentation),
+      "and granted to service_role and nothing else",
+    );
+    // SCHEMA VERSION FOUR, BY EQUALITY. A range is what let a canonical document
+    // overwrite a legacy row on the other path.
+    check(
+      /schema_version\s+integer not null check \(schema_version = 4\)/.test(presentation),
+      "the draft column admits schema version four by EQUALITY, never a range",
+    );
+    check(
+      /pg_advisory_xact_lock/.test(presentation),
+      "and the save serialises on an advisory lock, which a row-level FOR UPDATE cannot do before the row exists",
+    );
+  }
 
   const functions = [...commit.matchAll(/create or replace function public\.([a-z_]+)\(/g)].map((m) => m[1]);
-  check(sameMembers(functions, COMMIT_FUNCTIONS), `${canonical[2].prefix} still creates exactly the four canonical RPCs (${functions.length})`);
+  check(sameMembers(functions, COMMIT_FUNCTIONS), `the commit migration still creates exactly the four canonical RPCs (${functions.length})`);
   const definer = commit.match(/language plpgsql\s*\n\s*security definer\s*\n\s*set search_path = ''/g) ?? [];
   check(definer.length === COMMIT_FUNCTIONS.length, `and all ${COMMIT_FUNCTIONS.length} remain SECURITY DEFINER with an EMPTY search_path (${definer.length})`);
   for (const fn of COMMIT_FUNCTIONS) {
@@ -481,33 +600,53 @@ const COMMIT_FUNCTIONS = ["record_canonical_rows", "stage_canonical_package", "c
     );
   }
 
-  for (const [label, sql] of [[canonical[0].prefix, foundation], [canonical[1].prefix, analysis], [canonical[2].prefix, commit]]) {
+  for (const [label, sql] of [["ingestion", foundation], ["analysis", analysis], ["commit", commit], ["presentation", bySlug(PRESENTATION_SLUG)]]) {
     const statements = executableSql(sql);
     check(statements[0] === "begin;", `${label} still opens its transaction on the first executable statement`);
     check(statements[statements.length - 1] === "commit;", `and still closes it on the last`);
     check(!/\b(rollback|savepoint|set transaction)\b/i.test(statements.join("\n")), `and declares no other transaction control`);
   }
-  for (const [label, sql] of [[canonical[0].prefix, foundationBack], [canonical[1].prefix, analysisBack], [canonical[2].prefix, commitBack]]) {
+  for (const [label, sql] of [["ingestion", foundationBack], ["analysis", analysisBack], ["commit", commitBack], ["presentation", backBySlug(PRESENTATION_SLUG)]]) {
     const statements = executableSql(sql);
     check(statements[0] === "begin;" && statements[statements.length - 1] === "commit;", `${label}'s rollback is a single transaction too`);
   }
 
-  check(sameMembers(droppedTables(foundationBack), FOUNDATION_TABLES), `${canonical[0].prefix}'s rollback still drops all 18 foundation tables`);
-  check(sameMembers(droppedTables(analysisBack), ANALYSIS_TABLES), `${canonical[1].prefix}'s rollback still drops all 16 analysis tables`);
-  check(sameMembers(droppedTables(commitBack), COMMIT_TABLES), `${canonical[2].prefix}'s rollback still drops both commit tables`);
+  check(sameMembers(droppedTables(foundationBack), FOUNDATION_TABLES), "the ingestion rollback still drops all 18 foundation tables");
+  check(sameMembers(droppedTables(analysisBack), ANALYSIS_TABLES), "the analysis rollback still drops all 16 analysis tables");
+  check(sameMembers(droppedTables(commitBack), COMMIT_TABLES), "the commit rollback still drops both commit tables");
+  check(
+    sameMembers(droppedTables(backBySlug(PRESENTATION_SLUG)), PRESENTATION_TABLES),
+    "the presentation rollback still drops both draft tables",
+  );
 
-  const LOCKDOWN = [
+  const SHARED_LOCKDOWN = [
     [/enable row level security/i, "RLS enabled"],
     [/force row level security/i, "FORCE RLS"],
     [/create policy "deny_browser_roles"[\s\S]*?to anon, authenticated using \(false\) with check \(false\)/i, "a deny-everything policy for anon and authenticated"],
     [/revoke all privileges on table[\s\S]*?from anon, authenticated/i, "table privileges revoked from anon and authenticated"],
-    [/grant all privileges on table[\s\S]*?to service_role/i, "table privileges granted to service_role"],
   ];
-  for (const [label, sql, tables] of [
-    [canonical[0].prefix, foundation, FOUNDATION_TABLES],
-    [canonical[1].prefix, analysis, ANALYSIS_TABLES],
-    [canonical[2].prefix, commit, COMMIT_TABLES],
+  // THE SERVICE-ROLE GRANT IS NOT THE SAME EVERYWHERE, AND IT SHOULD NOT BE.
+  //
+  // The three data migrations grant ALL privileges because their tables are
+  // bulk-written by `commit_canonical_package` through the client. The
+  // presentation draft has exactly one legitimate writer — its SECURITY DEFINER
+  // save function — so service_role gets SELECT and nothing else. A service_role
+  // that could UPDATE the draft directly could move a revision with no event,
+  // no expected-revision check and no lock, which is every property this unit
+  // exists to guarantee. Asserting one grant shape for both would either weaken
+  // the draft table or forbid the bulk write.
+  const GRANT_ALL = [/grant all privileges on table[\s\S]*?to service_role/i, "all table privileges granted to service_role"];
+  const GRANT_SELECT_ONLY = [
+    [/revoke all privileges on table[\s\S]*?from service_role/i, "table privileges revoked from service_role first"],
+    [/grant select on table[\s\S]*?to service_role/i, "and only SELECT granted back to service_role"],
+  ];
+  for (const [label, sql, tables, extra] of [
+    ["ingestion", foundation, FOUNDATION_TABLES, [GRANT_ALL]],
+    ["analysis", analysis, ANALYSIS_TABLES, [GRANT_ALL]],
+    ["commit", commit, COMMIT_TABLES, [GRANT_ALL]],
+    ["presentation", bySlug(PRESENTATION_SLUG), PRESENTATION_TABLES, GRANT_SELECT_ONLY],
   ]) {
+    const LOCKDOWN = [...SHARED_LOCKDOWN, ...extra];
     const loops = securityLoops(sql);
     check(loops.length === 1, `${label} locks its new tables in exactly one security block (${loops.length})`);
     if (loops.length !== 1) continue;

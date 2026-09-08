@@ -3023,3 +3023,369 @@ and could not fail. One of the five was also measuring the connection list while
 claiming to measure the offered-characteristics list, because both headings live
 in one card and it scoped by `parentElement`. The helper now refuses a
 non-string label outright, so the mistake fails loudly instead of reading green.
+
+---
+
+### Unit 6B.3A — the draft becomes durable (2026-09-08)
+
+**Canonical schema-v4 presentation drafts can now be loaded, saved explicitly,
+autosaved, reloaded, and refused on a revision conflict — proved against a
+disposable PostgreSQL 17 and a real PostgREST, and against no hosted project.**
+No formula changed, no canonical value changed, no source mapping changed, no
+hosted row was written. Results parity stays **531/531** and presentation parity
+**59/59**.
+
+#### The storage audit came first, and it changed the design
+
+The brief asked whether the existing schema safely supports a canonical v4 draft
+coexisting with the two legacy experience drafts — Cuicuilco at schema version 2
+revision 72, P6E at 3 revision 14. **The question was put to a real PostgreSQL
+before it was answered**, on a disposable database carrying the whole chain with
+a legacy row planted exactly as the project holds one. Three things came back:
+
+1. **`study_experience_draft`'s primary key is `study_id` ALONE.** A second
+   draft row for one study is refused with SQLSTATE 23505. There is no "beside"
+   in that table.
+2. **`save_study_experience_draft` ACCEPTED a canonical v4 document against the
+   legacy row.** It moved revision 72 to 73, changed `schema_version` from 2 to
+   4, and replaced the definition bytes. It refuses nothing about the FAMILY of
+   a document: its only version rule is that the JSON's own `schemaVersion`
+   agrees with the argument, and its column admits anything from 1 to 1000. The
+   legacy draft was destroyed by a function doing exactly what it was written to
+   do.
+3. **There is no idempotency of any kind on that draft path.** Replaying an
+   identical save — the ordinary consequence of a lost response — is refused as
+   a conflict, indistinguishable from somebody else's edit.
+
+**So the answer is: the existing schema does NOT support safe coexistence, and
+this unit implements the smallest additive migration that does.** Widening that
+primary key would not have been additive — it alters a constraint on a table
+holding rows this project must not disturb, and every existing reader of it
+assumes one draft per study.
+
+#### `0029_canonical_presentation_draft.sql` — additive, and applied nowhere
+
+Two tables and one function. It alters no existing table, drops nothing,
+rewrites no row, and changes no policy or grant outside its own objects.
+
+- `canonical_presentation_draft` — one mutable v4 draft per study. `schema_version`
+  admits **4 by equality**, not a range, because a range is what let a canonical
+  document overwrite a legacy row on the other path. The family, the registry
+  build and the binding are columns as well as JSON fields, so a question like
+  "which registry build was this authored against" is answerable without parsing
+  half a megabyte — and a column that disagrees with the document it describes is
+  refused on read.
+- `canonical_presentation_draft_event` — append-only, and **the idempotency
+  ledger**. A save carrying a key already recorded for a study is a REPLAY: the
+  function returns the revision the first attempt produced and writes nothing.
+- `save_canonical_presentation_draft` — the only write path. It authorizes the
+  actor before reading anything, derives the tenant from the study row (a caller
+  never names a tenant), refuses a document of another family, version, study or
+  client, and writes the row and its event in one transaction.
+
+**`service_role` gets SELECT and nothing else** — stricter than `0026`-`0028`,
+which grant all privileges because their tables are bulk-written by the commit
+function. The draft's only legitimate writer is its `SECURITY DEFINER` function;
+a `service_role` that could `UPDATE` it directly could move a revision with no
+event, no expected-revision check and no lock.
+
+**And it takes an advisory lock, which is not a detail.** `select … for update`
+locks a row that exists; when none does it locks nothing, so two concurrent
+first saves both insert and the loser gets a primary-key violation — an untyped
+error arriving where a conflict was expected. **The legacy draft function has
+exactly that hole, and this one does not.** `pg_advisory_xact_lock` on the study
+is taken before the first read a decision depends on, which also serialises the
+idempotency lookup with the write it guards.
+
+The migration and its rollback are in git and are applied to no project.
+
+#### What the product does now
+
+- The composer opens with the **stored draft when there is one**, and with a
+  blueprint only when there is not. Opening the blueprint over saved work would
+  put a fresh layout under the same heading as somebody's hour, and the first
+  autosave would write it over the top. A stored draft that will not decode or
+  resolve does NOT fall back to a blueprint: the refusal is shown.
+- Six states, in the product's own Spanish: «Sin cambios», «Guardando…»,
+  «Guardado», «Cambios sin guardar», «No pudimos guardar», «Hay una versión más
+  reciente». They live in `src/lib/composer/save-session.ts`, which is **pure** —
+  no clock, no randomness, no transport — so an offline gate proves the
+  transitions rather than a browser suggesting them.
+- **«Guardado» means the stored document IS the document on screen**, by
+  reference identity. A save that succeeded while the author kept typing records
+  the new revision and still reads «Cambios sin guardar», because the newest
+  paragraph is not stored.
+- Explicit «Guardar ahora», debounced autosave at 2 500 ms, a navigation warning
+  while changes remain unsaved, and a **safe retry that repeats the previous
+  idempotency key** — which is what makes it a replay instead of a second
+  revision. Autosave never fires in a conflict, during a save, or after a
+  failure: a timer that retries a failed save turns one refusal into a hundred.
+- **A conflict cannot resolve itself by writing.** It preserves the local
+  document, offers no retry, and its only action loads the stored version
+  deliberately — through `adoptDocument`, which pushes the local document onto
+  the undo stack, so an operator who adopts and immediately regrets it presses
+  «Deshacer» and has their work back.
+- **A save never re-binds; the preview always does.** Re-binding on the way to
+  storage would take a layout authored against one package and file it as though
+  it had been authored against another — the exact retargeting the binding
+  fingerprint exists to prevent, made permanent.
+- Undo/redo history stays session-local. Only the current document is persisted.
+
+Authorization is redone in the action rather than inherited, with `getUser()` and
+a role read from the database, and **the privileged client is not constructed
+until that check has passed**. The operation stays behind the existing Studio
+workspace/action boundary: no third canonical-data door was added.
+
+#### Gates
+
+- `npm run test:canonical-presentation-persistence` — **NEW, 148 checks, in
+  `npm test`.** The encoding and the save session: a v4 document through jsonb
+  and back with every key reordered, a column that contradicts its document, the
+  legacy-family refusal by name for v1/v2/v3, «Guardado» only of what is on
+  screen, an older answer that cannot mark newer work saved, four kinds of
+  failure that never read «Guardado», a conflict that cannot write, the retry
+  that repeats its key, and that nothing this unit added reaches the canonical
+  layer, a credential or a respondent.
+- `npm run test:canonical-presentation-draft-live` — **NEW, 93 assertions,
+  outside `npm test`** because it needs a cluster. Executed against a disposable
+  PostgreSQL 17.11: exact revision increment, idempotent replay, typed stale
+  conflict, wrong tenant/study/family/binding/actor refused, a canonical draft
+  coexisting with a legacy one, a failure leaving neither row nor event, an
+  append-only log, least privilege, and the two legacy rows byte-identical
+  before and after — including after the rollback. **Two genuinely concurrent
+  races** in separate processes prove no lost update, a typed conflict for every
+  loser, and a concurrent replay that produces no second revision. **And the same
+  contract a second time over a real PostgREST 16.2 with `supabase-js`**, which
+  is what proves `55000` reaches the client as `error.code` verbatim — the string
+  the product switches on to tell a conflict from a failure.
+- `test:migration-chain` gained the fourth canonical migration, and one of its
+  rules was corrected while doing it: it identified "the commit migration" as
+  `canonical[canonical.length - 1]`, which was the same thing only while the
+  commit migration happened to be last. Appending a fourth silently redefined it,
+  so the catalogue-baseline rule would have demanded the wrong schema. It now
+  names that migration by slug.
+- `test:canonical-composer`'s section [22] was re-aimed rather than deleted. It
+  asserted "the page, the action and the loader write nothing", which was true of
+  Unit 6B.1. It now asserts the **tighter** rule: the page still writes nothing at
+  all; the action and the loader may not touch a table directly; the only RPC the
+  route may name is the canonical draft save; and none of the three may name any
+  legacy experience table.
+- Unchanged and green: `canonical-presentation` 314, `canonical-viewer-filters`
+  319, `canonical-composer` 383, `canonical-results` 235,
+  `canonical-database-source` 74, `shadow-boundary` 96, `studio-completion` 49.
+- **Both parity gates were RE-RUN against the real workbooks, not asserted.**
+  `canonical-results-parity`: 534 offered, **531 executed, 531 passed**, 0
+  failed, 0 skipped, 0 unresolved, 2 not-applicable, 1 configuration-required.
+  `canonical-presentation-parity`: **59 checks, 59 passed** — the approved
+  blueprint still expresses itself entirely through opaque handles, splits the
+  source's four categories across the five approved routes without repeating a
+  touchpoint, and reproduces the approved dashboard's figures without
+  recalculating one. Neither number moved.
+- `tsc --noEmit` clean. Lint at the **54-warning baseline**, zero errors, zero
+  warnings from any file this unit added or changed. `npm run build` and
+  `npm run cf:build` both exit 0. Every gate in `npm test` was run ONE AT A TIME
+  — 50 passed, and the single failure is the documented known-red below.
+
+**Known-red, unchanged:** `test:hosted-target-guard` fails on exactly the
+assertion `24c640e` records — the verifier is a plain clone rather than a
+worktree — and Suite D reports its documented five. Neither is called passed.
+
+#### Real-route browser QA: PASSED, 58/58 — against a DISPOSABLE target
+
+Every previous unit drove a production build against the hosted project and
+proved at the end that nothing had been written. **This unit could not**, because
+the thing under test IS a write: pointing it at the hosted project would have
+created canonical drafts there, which the phase forbids.
+
+So the whole target is disposable — a throwaway PostgreSQL on a unix socket, a
+real PostgREST 16.2 in front of it, a **minimal authentication substitute** so
+the product's own `/login` works, a synthetic canonical package committed
+through the product's own commit flow, and a production build of the app pointed
+at all of it. `resolveDisposableTarget` refuses to start if a Supabase
+environment variable is in scope, so this cannot reach a hosted project.
+
+What the run drives, rather than photographs:
+
+- **Authorization precedes everything.** Without a session the composer answers
+  `/login`, and no save control is rendered to a stranger.
+- **A fresh blueprint opens as «Cambios sin guardar»** with no revision, and the
+  screen no longer says nothing is saved — because that is no longer true.
+- **«Guardar ahora» stores it**: «Guardado», revision 1, and the database agrees.
+- **An edit says «Cambios sin guardar», and the debounced autosave stores it
+  with nobody pressing anything** — revision 2, and the database agrees.
+- **A reload restores the STORED document**, at «Sin cambios» revision 2, with
+  the edit made before the reload on screen and the page saying the stored draft
+  was restored.
+- **Undo is disabled on a restored document** (there is no history behind it),
+  an edit makes it dirty again, and undo/redo both work after saving.
+- **A conflict, made by another editor saving through the same RPC behind the
+  app's back**: «Hay una versión más reciente», the local document still on
+  screen untouched, the store still at the other person's revision, **no retry
+  offered**, no «Guardar ahora», and nothing offering to force a save.
+- **Recovery**: «Cargar la versión almacenada» adopts it at «Sin cambios», and
+  «Deshacer» gets the local work back and marks it unsaved again.
+- **The navigation warning** cancels a `beforeunload` while work is unsaved.
+- **Tablet (768) and phone (390)**: the document does not overflow horizontally
+  and all **72 chrome controls** measure at least 44 **layout** pixels at both.
+- **Nothing a person owns crossed**: no service key, no password, no
+  `person_private`, `quant_response`, `qual_observation`, `survey_response` or
+  `participant_attribute_value`, and not even the names of the tables involved.
+- **The legacy draft is byte-identical** before and after, and its event log
+  gained nothing.
+
+**Two controls inside the RENDERED PRESENTATION measure under 44 px at tablet
+and six at phone.** They are reported as an observation and NOT asserted: they
+are word-cloud terms in the drawing, not this application's chrome, and they are
+unchanged by this unit. Holding a drawing to the chrome's target size would
+either fail a product nobody changed or let a test redesign the cloud.
+
+**Three faults were found, and all three were in the harness.** A previous run's
+`next-server` outlived the `npm` that spawned it, so the next run's health check
+succeeded against a STALE server built for a database that had already been
+dropped — the app now starts in its own process group, the whole group is
+signalled at the end, and a busy port is a refusal rather than a silent
+substitution. The page-rename helper picked "the first text input with a value"
+and hit something else entirely, reporting success while the document never
+changed; it now finds the control by its own label. And the run's stand-in for
+"somebody else saved" wrote a fabricated digest, which
+`decodePresentationFromStorage` then correctly refused — the digest is now
+computed the way the product computes one.
+
+#### Hosted access: ONE read-only pass, 24/24
+
+The only hosted contact this unit made. Every request was a `select`; the script
+contains no insert, update, upsert, delete or RPC.
+
+- **«La voz de las y los Nets de Cuicuilco»** (`cd4d6acd…`) is at **schema
+  version 2, revision 72**.
+- **The P6E synthetic acceptance study** (`ad275928…`) is at **schema version 3,
+  revision 14**.
+- **Neither is schema version 4** — no canonical document was written into a
+  legacy row.
+- **`study_experience_event` holds 86 rows**, exactly as the previous unit left
+  it; `study_experience_revision` and `study_experience_publication` are empty.
+- **`canonical_presentation_draft` and its event table DO NOT EXIST there**
+  (`PGRST205`), which is the proof that migration `0029` is applied to no
+  project.
+- Eleven protected tables were counted: study 5, respondent 82, quant_response
+  3 364, qual_observation 33, study_participant 60, survey_response 1 685,
+  performance_observation 252, metric_definition 116, pain_point 50, import_job
+  1, import_job_record 3 559.
+
+Each definition was **hashed and never printed**, and the digests are now
+COMPARED rather than merely recorded: `9a08dacb…` for Cuicuilco and `a1fe3298…`
+for P6E are pinned in the script, so a definition edited under the SAME revision
+— the one way a legacy row can change without moving a number this pass would
+otherwise read — fails the run. The full digests and the counts go to evidence
+written outside every git repository.
+
+#### A harness fault worth recording
+
+Seventeen assertions in `test:canonical-commit` failed for a reason that had
+nothing to do with the code: the Windows clone has `core.autocrlf=true`, and
+copying the worktree into the WSL verifier carried CRLF into
+`disposable-postgres-provision.sh`. A shell script with CRLF fails as
+`env: 'bash\r': No such file or directory`, and its `--check-root` refusals
+returned 0 instead of 2 — so a script whose entire job is to refuse dangerous
+paths silently stopped refusing them. It surfaced as seventeen unrelated
+failures and not as a syntax error. The sync now normalises line endings the way
+`git checkout` does. **Prefer the rule in CLAUDE.md — push the commit, fetch it
+in WSL — over copying files.**
+
+#### An adversarial review of this unit's own diff, and what it found
+
+Six independent reviewers, one per lens — the migration as PostgreSQL executes
+it, concurrency and idempotency, authorization and the client boundary, the pure
+state machine, the React wiring, and whether any gate could pass for the wrong
+reason. Every finding was then handed to a separate verifier told to REFUTE it.
+**Thirty findings; sixteen refuted, fourteen survived.** The eleven that were
+real are fixed below; the rest were narrower than claimed and are recorded in
+the verifiers' own words rather than acted on.
+
+The three the review found that this unit had not:
+
+1. **The idempotency replay answered without saying where the row is now.** A
+   replay reports the revision that key produced — it does NOT report that the
+   draft still IS that save. Between the original attempt and the replay,
+   somebody else may have saved twice: the key's revision is still N and the row
+   is at N+2 holding a different document. A caller reading only `revision`
+   would see a success, find its own document unchanged on screen, and report it
+   stored while the store held somebody else's. `0029` now returns
+   `currentRevision` beside `revision`, and a replay whose two numbers differ is
+   a CONFLICT rather than a success.
+2. **Bumping the REST transport's schema bound to 0029 was a regression.** The
+   psql transport APPLIES, so its bound tracks the newest migration on disk; the
+   REST transport VERIFIES a hosted target, so its bound is a FACT about that
+   target — and the hosted project stops at 0028. They were bumped in lockstep
+   without noticing the asymmetry, which would have demanded of the hosted
+   project the one migration this phase forbids applying to it. Reverted, and it
+   now actively REFUSES a target that carries `canonical_presentation_draft`.
+   The migration-chain rule that conflated the two bounds was corrected with it.
+3. **`runSave` could not tell a refused `beginSave` from a started one.**
+   `beginSave` returns the session untouched when a save is already in flight,
+   and that session's `inFlight` is not null — it is the FIRST attempt's. Testing
+   `inFlight` alone therefore read a refusal as a start and would have sent a
+   second write carrying the first attempt's sequence number and expected
+   revision. Identity is the only test that separates them.
+
+Five smaller ones, all real: the RPC compared `#>>` rendered text, so a document
+declaring the STRING `"4"` passed the schema-version gate and stored a row
+nothing could read back (it now checks `jsonb_typeof` first); the migration-chain
+gate's SECURITY DEFINER check was file-scoped and the trigger function could
+satisfy it on the save function's behalf; `onLoadStored` had a `try/finally` with
+no `catch`, so a rejected load left an unhandled rejection and no message;
+undoing back to the stored document left the banner reading «Cambios sin
+guardar» over a document that WAS saved, and the next autosave would have written
+a needless revision; and the encoder's 512 KiB ceiling and the column's measured
+different renderings of the same value, so a document the encoder accepted could
+have been refused by the column forever — the encoder now keeps a stated
+kibibyte of headroom.
+
+And four gates could have passed for the wrong reason: the live gate's
+«a replay is not an overwrite» resent an IDENTICAL body, so it held whether the
+body was ignored or written; its browser-role probes accepted any failure rather
+than requiring `42501`; the composer gate's authorization-ordering check used
+`indexOf` and so inspected only the pre-existing action, never the new save and
+load guard; and the persistence gate's privacy scan ran over a document with
+zero blocks — bytes with no reference to a result cannot leak the key of one.
+All four now assert what they claim.
+
+#### Three defects found in this unit's own work before the review, all before it shipped
+
+1. **The migration inherited the legacy function's create-path race.** The first
+   draft of `0029` copied `select … for update` and would have given the loser of
+   two concurrent first saves an untyped 23505. Found by an adversarial review of
+   the audit, fixed with the advisory lock, and now proved by a race the gate
+   runs every time.
+2. **A privilege assertion passed for the wrong reason.** `set local role anon`
+   outside an explicit transaction applies to the implicit single-statement
+   transaction it is in and is gone before the next statement runs, so the SELECT
+   executed as the table's OWNER and succeeded. It failed loudly only because it
+   was written to expect a refusal; written the other way round it would have
+   read green forever. It is now inside `begin; … rollback;` and covers reads,
+   the event log and the function.
+3. **The RETRY could have reported «Guardado» over unsaved work** — the exact
+   failure this unit exists to prevent, arriving through the mechanism built to
+   prevent it. `retryAttempt` returned the failed attempt unconditionally and the
+   screen resent that attempt's idempotency key with the document CURRENTLY on
+   screen. So: a save of document A times out but WAS applied; the author keeps
+   working and the screen holds B; «Reintentar» resends key K with B; the database
+   finds K recorded and correctly REPLAYS, answering with the revision that stored
+   A; the session sees a success whose document is the one on screen and says
+   «Guardado». The store holds A, the screen says B is saved, and B is not.
+   `retryAttempt` now takes the current document and returns the attempt only
+   while it is repeating the SAME one. Once the document has moved, a retry
+   starts a NEW attempt with a fresh key — which may take a conflict against the
+   author's own unacknowledged save, and a conflict is the honest answer to that.
+   The gate asserts both halves, including what the dishonest path WOULD have
+   said.
+
+#### Still deferred
+
+Publication, review, immutable snapshots, restore, conversion of the legacy v2/v3
+drafts, production client-route switching, wiring the URL codec to a route,
+PDF/print export, AI or category suggestions, authentication changes, hosted
+migration application, dependencies, deployment, shadow activation, journey
+route/stage authoring, and the legacy `QualitativeCloud.tsx` repair.
+
+**Unit 6B.3B and the publication unit have not begun.**

@@ -71,12 +71,12 @@ export const POSTGREST_PORT = 3000;
  * token cannot outlive the run that made it. No dependency: `node:crypto` and
  * base64url are all a JWT is.
  */
-export function mintJwt(secret, role, ttlSeconds = 3600) {
+export function mintJwt(secret, role, ttlSeconds = 3600, claims = {}) {
   const b64u = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const signingInput =
     `${b64u({ alg: "HS256", typ: "JWT" })}.` +
-    b64u({ role, iss: "becommunity-local", iat: now, exp: now + ttlSeconds });
+    b64u({ ...claims, role, iss: "becommunity-local", iat: now, exp: now + ttlSeconds });
   return `${signingInput}.${createHmac("sha256", secret).update(signingInput, "utf8").digest("base64url")}`;
 }
 
@@ -100,8 +100,12 @@ async function waitFor(label, check, timeoutMs = 30_000, diagnose = null) {
  * forwarded unchanged, so the request PostgREST sees is the request the product
  * built.
  */
-function startShim(port, upstreamPort) {
+function startShim(port, upstreamPort, auth = null) {
   const server = createServer((incoming, outgoing) => {
+    if (auth && incoming.url.startsWith("/auth/v1")) {
+      serveAuth(auth, incoming, outgoing);
+      return;
+    }
     const path = incoming.url.startsWith("/rest/v1") ? incoming.url.slice("/rest/v1".length) || "/" : incoming.url;
     const headers = { ...incoming.headers };
     delete headers.host;
@@ -122,6 +126,147 @@ function startShim(port, upstreamPort) {
   return server;
 }
 
+/* -------------------------------------------------------------------------- */
+/* THE AUTHENTICATION SUBSTITUTE — opt-in, and deliberately minimal            */
+/* -------------------------------------------------------------------------- */
+/**
+ * WHAT THIS IS, AND WHY IT IS NOT A SECURITY HOLE.
+ *
+ * Browser QA of anything behind a login needs a login. `supabase start` would
+ * bring GoTrue; this machine has no container runtime, so level-3 QA of the
+ * durable draft had a choice between running against the HOSTED project — which
+ * for this unit would mean writing canonical drafts into it, which is exactly
+ * what the phase forbids — and standing up the smallest believable substitute
+ * for GoTrue in front of the disposable cluster. This is that substitute.
+ *
+ * It is safe for four reasons, and every one of them is asserted rather than
+ * asserted-to-be:
+ *
+ *   IT IS OFF UNLESS ASKED. `startLocalStack` builds it only when a caller
+ *   passes `authUsers`. Every existing caller passes nothing and gets exactly
+ *   the stack it had before.
+ *
+ *   IT ONLY EVER SITS IN FRONT OF A DISPOSABLE UNIX-SOCKET CLUSTER. The stack
+ *   refuses any other target, and `resolveDisposableTarget` refuses to produce
+ *   one at all if a Supabase environment variable is in scope.
+ *
+ *   IT MINTS NOTHING IT WAS NOT GIVEN. The identities are passed in by the
+ *   caller and signed with the per-run random secret this module already
+ *   generates for PostgREST. There is no user store, no registration, no
+ *   password reset and no way to become a user nobody named.
+ *
+ *   IT LISTENS ON LOOPBACK ONLY, on the shim this module already starts.
+ *
+ * It is NOT GoTrue and must never be described as one: no refresh rotation, no
+ * email confirmation, no MFA, no session revocation, no rate limiting.
+ */
+function serveAuth(auth, incoming, outgoing) {
+  const send = (status, body) => {
+    const text = JSON.stringify(body ?? {});
+    outgoing.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(text) });
+    outgoing.end(text);
+  };
+  const url = new URL(incoming.url, "http://127.0.0.1");
+  const path = url.pathname.slice("/auth/v1".length) || "/";
+
+  if (path === "/health" || path === "/settings") return send(200, { version: "becommunity-local" });
+
+  const sessionFor = (user) => {
+    const accessToken = mintJwt(auth.secret, "authenticated", 3600, {
+      sub: user.id,
+      email: user.email,
+      aud: "authenticated",
+      // GoTrue puts the role here too; supabase-js reads `user.role` from the
+      // user object rather than the claim, so both are supplied.
+      user_metadata: {},
+      app_metadata: { provider: "email" },
+    });
+    return {
+      access_token: accessToken,
+      token_type: "bearer",
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      refresh_token: `local-refresh-${user.id}`,
+      user: publicUser(user),
+    };
+  };
+
+  const publicUser = (user) => ({
+    id: user.id,
+    aud: "authenticated",
+    role: "authenticated",
+    email: user.email,
+    email_confirmed_at: "2020-01-01T00:00:00.000Z",
+    phone: "",
+    confirmed_at: "2020-01-01T00:00:00.000Z",
+    last_sign_in_at: "2020-01-01T00:00:00.000Z",
+    app_metadata: { provider: "email", providers: ["email"] },
+    user_metadata: {},
+    identities: [],
+    created_at: "2020-01-01T00:00:00.000Z",
+    updated_at: "2020-01-01T00:00:00.000Z",
+    is_anonymous: false,
+  });
+
+  const bearerUser = () => {
+    const header = incoming.headers.authorization ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    // VERIFY THE SIGNATURE. A shim that accepted any well-shaped token would
+    // make the QA it supports meaningless: the product's own `getUser()` is the
+    // thing under test on every authorized route.
+    const expected = createHmac("sha256", auth.secret)
+      .update(`${parts[0]}.${parts[1]}`, "utf8")
+      .digest("base64url");
+    if (expected !== parts[2]) return null;
+    let claims;
+    try {
+      claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    } catch {
+      return null;
+    }
+    if (typeof claims.exp === "number" && claims.exp < Math.floor(Date.now() / 1000)) return null;
+    return auth.users.find((candidate) => candidate.id === claims.sub) ?? null;
+  };
+
+  if (path === "/user" && incoming.method === "GET") {
+    const user = bearerUser();
+    return user ? send(200, publicUser(user)) : send(401, { code: 401, message: "invalid claim" });
+  }
+
+  if (path === "/logout") return send(204, null);
+
+  if (path === "/token" && incoming.method === "POST") {
+    let raw = "";
+    incoming.on("data", (chunk) => (raw += chunk));
+    incoming.on("end", () => {
+      let body = {};
+      try {
+        body = JSON.parse(raw || "{}");
+      } catch {
+        return send(400, { error: "invalid_request" });
+      }
+      const grant = url.searchParams.get("grant_type");
+      if (grant === "refresh_token") {
+        const user = auth.users.find((candidate) => `local-refresh-${candidate.id}` === body.refresh_token);
+        return user
+          ? send(200, sessionFor(user))
+          : send(400, { error: "invalid_grant", error_description: "Invalid Refresh Token" });
+      }
+      const user = auth.users.find(
+        (candidate) => candidate.email === body.email && candidate.password === body.password,
+      );
+      return user
+        ? send(200, sessionFor(user))
+        : send(400, { error: "invalid_grant", error_description: "Invalid login credentials" });
+    });
+    return;
+  }
+
+  return send(404, { message: "not found" });
+}
+
 /**
  * Start PostgREST and the shim in front of one disposable database.
  *
@@ -129,7 +274,7 @@ function startShim(port, upstreamPort) {
  * and every migration; this adds only the login role PostgREST needs, which
  * Supabase calls `authenticator`.
  */
-export async function startLocalStack(db, { binary, target }) {
+export async function startLocalStack(db, { binary, target, authUsers = null }) {
   if (!existsSync(binary)) {
     refuse(
       `no PostgREST binary at ${binary}. Fetch the official static release first; ` +
@@ -189,7 +334,11 @@ export async function startLocalStack(db, { binary, target }) {
   child.stderr.on("data", (chunk) => (stderr += chunk));
   child.stdout.on("data", (chunk) => (stderr += chunk));
 
-  const shim = startShim(SHIM_PORT, POSTGREST_PORT);
+  const shim = startShim(
+    SHIM_PORT,
+    POSTGREST_PORT,
+    authUsers ? { secret, users: authUsers } : null,
+  );
   const serviceKey = mintJwt(secret, "service_role");
 
   const reachable = async () => {

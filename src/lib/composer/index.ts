@@ -22,6 +22,7 @@ export {
   COMPOSER_LIMITS,
   addBlock,
   addPage,
+  adoptDocument,
   blockIsFilterable,
   catalogEntry,
   connectBlockToPanel,
@@ -84,9 +85,35 @@ export type {
   ComposerUnavailable,
   ComposerUnavailableReason,
   ComposerWorkspace,
+  LoadDraft,
+  LoadResult,
+  PersistenceState,
   PreviewResult,
   RefreshPreview,
+  SaveDraft,
+  SaveRefusalReason,
+  SaveResult,
 } from "./payload";
+
+/**
+ * THE SAVE SESSION — durable-draft state, and the transitions that keep it
+ * honest. Pure: no timer, no transport, no clock.
+ */
+export {
+  IDEMPOTENCY_KEY_PATTERN,
+  SAVE_STATE_LABEL,
+  acceptSaveResponse,
+  adoptStoredVersion,
+  autosaveIsDue,
+  beginSave,
+  canSave,
+  dismissSaveFailure,
+  documentChanged,
+  hasUnsavedChanges,
+  openSaveSession,
+  retryAttempt,
+} from "./save-session";
+export type { SaveAttempt, SaveSession, SaveState } from "./save-session";
 
 export {
   IMPLEMENTED_BY_SEMANTIC,

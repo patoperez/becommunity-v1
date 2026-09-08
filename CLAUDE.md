@@ -121,7 +121,7 @@ npm run suite:a      # Suite A — tenant isolation, data scope, least privilege
 npm run suite:b      # Suite B — behavioral server-side authorization (B1-B7)
 npm run suite:c      # Suite C — hostile input, imports, pivot boundary, injection (C1-C5)
 npm run test:migration-chain # migration numbering contract: no duplicate number, applied
-                             #   slots 0022-0025 pinned by SHA-256, canonical 0026-0028
+                             #   slots 0022-0025 pinned by SHA-256, canonical 0026-0029
                              #   contiguous above them, rollbacks matched, runners omit
                              #   nothing, no number in executable SQL, docs not lying
 npm run test:isolation    # the legacy isolation gate alone; Suite A executes it as A1.5
@@ -137,12 +137,38 @@ npm run test:canonical-viewer-filters # Unit 6B.2: interactive filter semantics 
 npm run test:canonical-presentation # Unit 6A: opaque-handle registry, versioned presentation
                                     #   document, pure resolver, approved blueprint. Synthetic,
                                     #   offline, in `npm test`.
+npm run test:canonical-presentation-persistence # Unit 6B.3A: the durable draft's ENCODING and
+                                    #   its SAVE SESSION — a v4 document through jsonb and back,
+                                    #   a column that contradicts the document, the legacy-family
+                                    #   refusal, «Guardado» only of what is on screen, an older
+                                    #   answer that must not mark newer work saved, a failure that
+                                    #   preserves the work, a conflict that cannot resolve itself
+                                    #   by writing, and the retry that repeats its key. 148 checks,
+                                    #   synthetic, offline, in `npm test`.
+npm run test:canonical-presentation-draft-live # Unit 6B.3A level 2/3: the SAME contract executed
+                                    #   against a disposable PostgreSQL 17 — exact revision
+                                    #   increment, idempotent replay, typed stale conflict, two
+                                    #   genuinely concurrent races, atomic rollback, least
+                                    #   privilege, and the two legacy rows byte-identical after.
+                                    #   With BECOMMUNITY_POSTGREST_BIN it runs the contract a
+                                    #   second time over a real PostgREST with supabase-js. 93
+                                    #   assertions. Outside `npm test` (needs a cluster).
 npm run test:canonical-presentation-parity <clean.xlsx> <curated.xlsx>
                                     # the approved blueprint against the REAL study, compared
                                     #   with the APPROVED DASHBOARD as the oracle (the CRI must
                                     #   render "33.0", not "33"). Outside `npm test`
                                     #   (machine-specific inputs); reports SKIPPED without the
                                     #   workbooks, never a pass.
+npm run qa:canonical-presentation-draft # Unit 6B.3A real-route QA against a DISPOSABLE
+                                    #   target: a throwaway PostgreSQL, a real PostgREST, a
+                                    #   minimal authentication substitute so `/login` works, a
+                                    #   synthetic canonical package, and a production build of
+                                    #   the app pointed at all of it. 58 checks. It CANNOT run
+                                    #   against the hosted project, and must not be made to.
+npm run test:canonical-presentation-hosted-fingerprint # READ-ONLY. Proves the two legacy
+                                    #   experience drafts are still v2/72 and v3/14, that neither
+                                    #   is v4, that the experience log is unchanged, and that
+                                    #   0029's tables do not exist on the hosted project.
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
@@ -538,6 +564,46 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   **Do not add a third door.** If a surface needs canonical data, it goes
   through one of the two loaders above or a new one is argued for in the gate
   first, not registered afterwards.
+- ⓘ **A CANONICAL DRAFT AND A LEGACY DRAFT LIVE IN DIFFERENT TABLES, and that
+  is the whole coexistence answer.** The question was put to a real PostgreSQL
+  before it was answered. `study_experience_draft`'s primary key is `study_id`
+  ALONE — one draft per study, so there is no "beside" in that table — and
+  `save_study_experience_draft` ACCEPTED a canonical v4 document against a
+  planted legacy row at revision 72, moving it to 73, changing `schema_version`
+  from 2 to 4 and replacing the definition bytes. The existing schema therefore
+  does NOT support coexistence, and the table accepting JSON is not a licence to
+  put canonical JSON in it. Migration `0029_canonical_presentation_draft.sql`
+  adds a SEPARATE table so the two hosted legacy rows are structurally
+  unreachable from the canonical path rather than merely unvisited by it, and it
+  is applied to no project. Never write a v4 document through the legacy RPC,
+  and never widen that table's primary key: it is not additive, and every
+  existing reader of it assumes one draft per study.
+- ⓘ **`0029` grants `service_role` SELECT and nothing else**, which is stricter
+  than `0026`-`0028` and deliberately so. Its only legitimate writer is the
+  `SECURITY DEFINER` save function; a `service_role` that could `UPDATE` the
+  draft directly could move a revision with no event, no expected-revision check
+  and no lock. It also takes `pg_advisory_xact_lock` on the study before the
+  first read a decision depends on — `select … for update` locks NOTHING when no
+  row exists yet, which is a hole the legacy draft function still has: two
+  concurrent first saves both insert and the loser gets an untyped primary-key
+  violation where a conflict was expected.
+- ⓘ **A SAVE NEVER RE-BINDS, AND THE PREVIEW ALWAYS DOES.** The preview re-binds
+  so a browser cannot pin a document to a registry it was not authored against.
+  Doing that on the way to STORAGE would take a layout authored against one
+  package and file it as though it had been authored against another — the exact
+  retargeting the binding fingerprint exists to prevent, made permanent. A save
+  therefore resolves the document as it arrived, and a binding that no longer
+  matches is `binding_fingerprint_mismatch` with nothing written.
+- ⓘ **«Guardado» means the stored document IS the document on screen**, by
+  reference identity, and never anything weaker. `src/lib/composer/save-session.ts`
+  owns all six states and every transition; it is pure — no clock, no randomness,
+  no transport — which is what lets an offline gate prove that an older answer
+  cannot mark newer edits saved, that a failed or timed-out save never reads
+  «Guardado», and that a conflict cannot resolve itself by writing. Undo/redo
+  history stays session-local: only the current document is persisted. A retry
+  repeats the previous idempotency key, which is what makes it a replay instead
+  of a second revision; autosave never fires in a conflict, during a save, or
+  after a failure.
 - ⓘ **`docs/LEGACY_CANONICAL_COMPATIBILITY.md` is the compatibility evidence.**
   Read it before proposing a read-path switch. Three totals live there and must
   never be added together or substituted for one another: **golden parity

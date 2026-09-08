@@ -4,7 +4,7 @@
 -- The tracked migrations are written for a Supabase database and reference two
 -- things a bare PostgreSQL cluster does not have: the three API roles, and the
 -- `auth` schema that owns the authentication identity. This file supplies the
--- SMALLEST believable stand-in for each, so migrations 0000-0028 can be applied
+-- SMALLEST believable stand-in for each, so migrations 0000-0029 can be applied
 -- VERBATIM to a disposable database.
 --
 -- It is test scaffolding and nothing else. It is never applied to any hosted
@@ -19,9 +19,12 @@
 --   * `anon` and `authenticated` are created with NOLOGIN and no privileges of
 --     their own, exactly as the product relies on. The gate reaches them with
 --     SET ROLE, which applies their privileges without needing a password.
---   * `auth.uid()` returns the JWT subject claim, as it does on Supabase. No
---     test in this gate depends on its value: the canonical tables deny browser
---     roles outright rather than filtering by user.
+--   * `auth.uid()` returns the JWT subject claim, as it does on Supabase, and
+--     reads BOTH the per-claim GUC and the JSON claim set — see the function
+--     below for why that is not a detail. The canonical gates do not depend on
+--     its value, because those tables deny browser roles outright rather than
+--     filtering by user; the browser QA of the durable draft DOES, because it
+--     signs a real person in and the product reads their profile under RLS.
 -- =============================================================================
 
 -- Roles are CLUSTER-wide, not per-database, and this file is applied once per
@@ -51,16 +54,34 @@ create table auth.users (
   created_at timestamptz not null default now()
 );
 
+-- BOTH SPELLINGS, because PostgREST changed which one it sets.
+--
+-- Up to PostgREST 8 each claim was its own GUC — `request.jwt.claim.sub`. From
+-- 9 onwards there is ONE GUC holding the whole claim set as JSON,
+-- `request.jwt.claims`, and the per-claim form is not set at all. Supabase's own
+-- `auth.uid()` reads both for exactly this reason, and so does this stand-in.
+--
+-- It was the per-claim form alone, and under the PostgREST this harness runs
+-- (16.2) that made `auth.uid()` NULL for every request. Nothing in the canonical
+-- gates noticed, because those tables deny browser roles outright rather than
+-- filtering by user — but a policy of the form `user_id = auth.uid()` denied a
+-- signed-in person their own `profiles` row, and the product correctly concluded
+-- the account belonged to no tenant. A stand-in that silently answers NULL is
+-- worse than one that is absent: it makes an authorization test pass for the
+-- wrong reason in one direction and fail inexplicably in the other.
 create function auth.uid() returns uuid
 language sql stable
 as $$
-  select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+  select coalesce(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    nullif(nullif(current_setting('request.jwt.claims', true), '')::json ->> 'sub', '')
+  )::uuid;
 $$;
 
 create function auth.role() returns text
 language sql stable
 as $$
-  select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), current_user::text);
+  select coalesce(nullif(coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), nullif(current_setting('request.jwt.claims', true), '')::json ->> 'role'), ''), current_user::text);
 $$;
 
 grant usage on schema auth to anon, authenticated, service_role;

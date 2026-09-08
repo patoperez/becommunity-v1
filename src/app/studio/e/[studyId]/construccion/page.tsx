@@ -7,7 +7,11 @@ import { loadStudioStudy } from "@/lib/studio/study-workspace";
 import { loadPresentationComposerWorkspace } from "@/lib/studio/presentation-workspace";
 import { StudyWorkSurface } from "@/components/studio/StudyWorkSurface";
 import { ComposerWorkspace } from "@/components/studio/composer/ComposerWorkspace";
-import { refreshPresentationPreview } from "./actions";
+import {
+  loadCanonicalPresentationDraft,
+  refreshPresentationPreview,
+  saveCanonicalPresentationDraft,
+} from "./actions";
 
 export const metadata = { title: "Construcción · Be Community" };
 
@@ -47,12 +51,20 @@ type Search = Promise<{ ok?: string; error?: string }>;
  * strangely — and a comment is not worth weakening it for.)
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * AND NOTHING IS WRITTEN, HERE OR ANYWHERE BELOW.
+ * WHAT IS WRITTEN, AND WHAT STILL IS NOT.
  *
- * No insert, update, RPC, draft, revision, publication or `revalidatePath`. The
- * legacy v2 draft this study already has is not read, not migrated, not
- * reinterpreted and not overwritten — nothing on this page knows the table it
- * lives in.
+ * This paragraph used to read "AND NOTHING IS WRITTEN, HERE OR ANYWHERE BELOW",
+ * which was true of Unit 6B.1 and is not true now. Unit 6B.3A hands the screen
+ * two more actions: one saves the composed document into
+ * `canonical_presentation_draft`, and one loads it back. Nothing else is
+ * written — no revision, no publication, no `revalidatePath` — and this page
+ * function itself still only reads.
+ *
+ * THE LEGACY DRAFT IS STILL NOT TOUCHED. `study_experience_draft` holds this
+ * study's legacy v2 definition at revision 72, and the canonical path writes a
+ * DIFFERENT table. It is not read, not migrated, not reinterpreted and not
+ * overwritten, and nothing on this page or below it names the table it lives
+ * in.
  */
 export default async function StudioStudyConstructionPage({
   params,
@@ -69,11 +81,17 @@ export default async function StudioStudyConstructionPage({
   const query = await searchParams;
   const { study } = workspace;
 
-  const composer = await loadPresentationComposerWorkspace(admin, {
-    tenantId: study.tenantId,
-    studyId: study.id,
-    studyName: study.name,
-  });
+  // RESTORE BEFORE BLUEPRINT — Unit 6B.3A.
+  //
+  // When this study has a stored canonical draft, THAT is what the composer
+  // opens with. Opening the blueprint instead would show a fresh layout under
+  // the same heading as an hour of somebody's saved work, and the first
+  // autosave would write it over the top.
+  const composer = await loadPresentationComposerWorkspace(
+    admin,
+    { tenantId: study.tenantId, studyId: study.id, studyName: study.name },
+    { restoreStoredDraft: true },
+  );
 
   return (
     <StudyWorkSurface
@@ -81,12 +99,19 @@ export default async function StudioStudyConstructionPage({
       current="construccion"
       userEmail={user.email ?? ""}
       title="Construcción"
-      lead="Compón la presentación de este estudio sobre sus resultados canónicos. En esta fase nada se guarda."
+      lead="Compón la presentación de este estudio sobre sus resultados canónicos. El borrador se guarda; el cliente todavía no ve nada."
       ok={query.ok}
       error={query.error}
     >
       {composer.ok ? (
-        <ComposerWorkspace payload={composer.payload} studyId={study.id} refresh={refreshPresentationPreview} />
+        <ComposerWorkspace
+          payload={composer.payload}
+          studyId={study.id}
+          refresh={refreshPresentationPreview}
+          persistence={composer.persistence}
+          save={saveCanonicalPresentationDraft}
+          load={loadCanonicalPresentationDraft}
+        />
       ) : (
         <section className="rounded-xl border border-caution-line bg-caution-surface p-5">
           <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-caution">

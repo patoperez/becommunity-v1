@@ -298,6 +298,16 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
      * database.
      */
     async prepare(upTo = 28) {
+      // TWENTY-EIGHT, AND NOT THE LAST MIGRATION ON DISK — the two transports
+      // answer different questions and must be allowed to disagree.
+      //
+      // The psql transport APPLIES, so its bound tracks the newest migration in
+      // the repository. This one VERIFIES a target that is already migrated, so
+      // its bound is a FACT about that target: the hosted project is at 0028.
+      // Unit 6B.3A added 0029, which is applied to no project by design — and a
+      // bump here would have demanded, on the hosted target, a migration this
+      // phase forbids applying to it. It was bumped in lockstep with the psql
+      // transport and reverted when that asymmetry was noticed.
       if (upTo !== 28) {
         refuse(
           `this transport cannot roll the schema back to ${upTo}: it applies no migration and reverses none.`,
@@ -306,6 +316,18 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
       for (const table of ["import_job_record", "retention_period"]) {
         const { error } = await service.from(table).select("*", { count: "exact", head: true });
         if (error) refuse(`public.${table} is not reachable, so migration 0028 is not applied to this target.`);
+      }
+      // AND 0029 MUST NOT BE THERE. A hosted target carrying it would mean this
+      // phase's central promise had been broken, and a suite that ran happily
+      // against it would be the last place anyone looked.
+      const { error: unexpected } = await service
+        .from("canonical_presentation_draft")
+        .select("study_id", { count: "exact", head: true });
+      if (!unexpected) {
+        refuse(
+          "public.canonical_presentation_draft EXISTS on this target, so a migration that is " +
+            "applied to no project has been applied to it. Stop and investigate.",
+        );
       }
     },
 

@@ -6,6 +6,7 @@
 
 ---
 
+
 ## 1. Why this layer exists
 
 `src/lib/results/` answers *what is true about the study*. A dashboard needs a
@@ -557,3 +558,73 @@ The legacy dashboard is untouched and still broken in the three documented ways.
 Unit 6B is **selective Studio composer integration against this binding layer** —
 not a wholesale merge of the old experience branch. See
 `docs/CANONICAL_EXPERIENCE_INTEGRATION_PLAN.md`.
+
+## 14. Persistence — Unit 6B.3A
+
+A presentation document authors **configuration and nothing else**. Unit 6A.1
+established that and this unit does not weaken it: a tenant and a study uuid are
+database identifiers, and they live in the STORAGE ENVELOPE
+(`src/lib/presentation/persistence.ts`), stamped immediately before a write and
+stripped immediately after a read.
+
+**Only `PresentationDocument` schema version 4 may use the canonical persistence
+path.** `validatePresentationDocument` refuses versions 1-3 by name as the legacy
+experience family, and the storage column admits `schema_version = 4` by
+equality rather than by range.
+
+### The row, and the two halves that must agree
+
+`canonical_presentation_draft` (migration `0029`, applied to no project) holds
+the definition as `jsonb` and repeats three identity facts as columns —
+`document_kind`, `registry_version`, `binding_fingerprint` — so they can be
+answered without parsing the document. A repeated fact can disagree with itself,
+and the disagreement would be silent because the JSON alone still validates, so
+`decodePresentationFromStorage` **refuses a row whose columns contradict the
+document they describe**.
+
+`definition_sha256` is the AUTHOR'S digest over the canonical, key-sorted
+serialization `serializeDeterministic` produces. The database cannot recompute
+it — `jsonb::text` is PostgreSQL's own rendering, not that serialization — so it
+is an **end-to-end checksum** a reader verifies, and deliberately not an
+authentication: a caller who can execute the save function can supply both
+halves. That the digest survives at all is a property of sorting keys at every
+depth, and it is asserted against a real `jsonb` round trip with every key
+reordered.
+
+### What a save checks before it writes
+
+In order, and the order is the argument:
+
+1. the document validates as a canonical presentation, version four;
+2. it **resolves against this study's results** — which is where binding,
+   registry version, calculation version, package identity and study identity
+   are all compared, seven checks inside `resolvePresentation`, each with its own
+   code;
+3. the envelope is sealed, and only then is the RPC called.
+
+**A save does not re-bind.** `resolveEditedPresentation` re-binds for a PREVIEW,
+so a browser cannot pin a document to a registry it was not authored against.
+Doing the same on the way to storage would take a layout authored against one
+package and file it as though it had been authored against another — the exact
+retargeting the binding fingerprint exists to prevent, performed by the one
+operation that makes it permanent. A binding that no longer matches is
+`binding_fingerprint_mismatch`, and nothing is written.
+
+### Concurrency, idempotency and the conflict
+
+Optimistic, with an expected revision compared under an advisory lock on the
+study. A stale expectation raises SQLSTATE **55000** — not 40001, which PostgREST
+retries transparently and which therefore never reaches a caller; migration
+`0024` learned that on the legacy path and the lesson is not relearned here. The
+code reaching `supabase-js` as `error.code` verbatim is asserted over a real
+PostgREST, because that string is what the product switches on to tell a conflict
+from a failure.
+
+An idempotency key already recorded for a study is a **replay**: the function
+returns the revision the first attempt produced and writes nothing, which is what
+makes a retry after a lost response safe.
+
+**A conflict is never resolved by writing.** The local document is preserved, the
+stored revision is reported but not adopted, and the only way forward is a person
+choosing to load the stored version — an act that pushes their own document onto
+the undo stack rather than discarding it.

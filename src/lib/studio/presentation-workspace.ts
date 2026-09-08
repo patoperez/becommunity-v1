@@ -51,12 +51,25 @@ import "server-only";
  * a named reason with a sentence a person can act on.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * AND IT WRITES NOTHING.
+ * IT WRITES EXACTLY ONE THING, AND NOT THE ONE IT USED TO REFUSE.
  *
- * There is no insert, update, upsert, delete, RPC or `revalidatePath` in this
- * file, and Unit 6B.1 has no storage path at all. The existing Cuicuilco legacy
- * v2 draft is never read, migrated, reinterpreted or overwritten — this module
- * does not know the table it lives in.
+ * This paragraph used to read "AND IT WRITES NOTHING", and that was true of
+ * Unit 6B.1, which had no storage path at all. Unit 6B.3A gives it one, so the
+ * claim is corrected rather than left standing — a header that describes the
+ * file's previous life is worse than no header.
+ *
+ * What it may now write is ONE row in ONE table: `canonical_presentation_draft`,
+ * through `save_canonical_presentation_draft`, both created by migration 0029
+ * and applied to no hosted project. There is no other insert, update, upsert,
+ * delete or `revalidatePath` anywhere in this file.
+ *
+ * WHAT IT STILL CANNOT WRITE IS THE LEGACY DRAFT. `study_experience_draft`
+ * holds the two legacy experience definitions — Cuicuilco at schema version 2
+ * revision 72 and P6E at 3 revision 14 — and it is not named in this file, not
+ * named in the save function's body, and not reachable from either. Those rows
+ * are never read, migrated, reinterpreted or overwritten. That is now a
+ * structural fact rather than an abstention: the canonical path addresses a
+ * different table, so there is no argument by which it could reach them.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -78,7 +91,9 @@ import type {
   ComposerPayload,
   ComposerUnavailable,
   ComposerWorkspace,
+  LoadResult,
   PreviewResult,
+  SaveResult,
 } from "@/lib/composer";
 import {
   EMPTY_VIEWER_SELECTION,
@@ -90,6 +105,8 @@ import {
   bindPresentationDocument,
   buildApprovedCuicuilcoBlueprint,
   buildGenericStartingBlueprint,
+  decodePresentationFromStorage,
+  encodePresentationForStorage,
   projectPresentationCatalog,
   type CanonicalPresentationRegistry,
 } from "@/lib/presentation/server";
@@ -182,7 +199,7 @@ function chooseBlueprint(
 /* what crosses, and what does not                                             */
 /* -------------------------------------------------------------------------- */
 
-export type { ComposerPayload, ComposerUnavailable, ComposerWorkspace, PreviewResult };
+export type { ComposerPayload, ComposerUnavailable, ComposerWorkspace, LoadResult, PreviewResult, SaveResult };
 
 const READ_REFUSALS: Record<string, ComposerUnavailable> = {
   NO_COMMITTED_PACKAGE: {
@@ -260,6 +277,21 @@ function refusalFor(error: unknown): ComposerUnavailable {
 export async function loadPresentationComposerWorkspace(
   client: SupabaseClient,
   scope: ComposerScope,
+  /**
+   * Unit 6B.3A. When true, a STORED draft is preferred over the blueprint.
+   *
+   * It is an option on this function rather than a second loader because of the
+   * "one read, many builds" rule directly above: a separate loader would do its
+   * own `readAndBuild`, and the page would pay twenty-six paged queries twice
+   * to answer one question. The stored document is resolved against the SAME
+   * `built` the blueprint would have been.
+   *
+   * A stored draft that cannot be decoded or resolved does NOT fall back to the
+   * blueprint. Falling back would put a fresh layout on screen under the same
+   * heading as an hour of somebody's saved work, and the first autosave would
+   * write it over the top. The refusal is shown instead.
+   */
+  options: { restoreStoredDraft?: boolean } = {},
 ): Promise<ComposerWorkspace> {
   let built;
   try {
@@ -268,6 +300,34 @@ export async function loadPresentationComposerWorkspace(
     return { ok: false, unavailable: refusalFor(error) };
   }
   const { registry } = built;
+
+  if (options.restoreStoredDraft) {
+    const stored = await readStoredDraftRow(client, scope);
+    if (!stored.ok) return { ok: false, unavailable: stored.unavailable };
+    if (stored.row) {
+      const restored = decodeStoredDraft(stored.row, scope);
+      if (!restored.ok) return { ok: false, unavailable: unresolved(restored.errors) };
+      const resolved = resolveUnderSelection(built, restored.value, EMPTY_VIEWER_SELECTION);
+      if (!resolved.ok) return { ok: false, unavailable: unresolvedIssues(resolved.issues) };
+      return {
+        ok: true,
+        payload: {
+          document: restored.value,
+          catalog: projectPresentationCatalog(registry),
+          model: resolved.model,
+          blueprint: {
+            id: "borrador-almacenado",
+            label: "Borrador guardado",
+            because:
+              "Se restauró el borrador que ya estaba guardado para este estudio, en la revisión " +
+              `${stored.row.revision}. No se partió de un plano nuevo: hacerlo habría puesto una ` +
+              "presentación en blanco encima de trabajo que alguien ya hizo.",
+          },
+        },
+        persistence: { revision: stored.row.revision, restored: true },
+      };
+    }
+  }
 
   let chosen;
   try {
@@ -310,6 +370,10 @@ export async function loadPresentationComposerWorkspace(
   return {
     ok: true,
     payload: { document: bound, catalog: projectPresentationCatalog(registry), model: resolved.model, blueprint: chosen.choice },
+    // NOTHING IS STORED, and the screen is told so rather than left to infer it
+    // from a null. `restored: false` is what opens the save session in «Cambios
+    // sin guardar»: a freshly built blueprint nobody has saved IS unsaved work.
+    persistence: { revision: null, restored: false },
   };
 }
 
@@ -370,4 +434,307 @@ export async function resolveEditedPresentation(
   const resolved = resolveUnderSelection(built, bound, viewerCandidate);
   if (!resolved.ok) return { ok: false, unavailable: unresolvedIssues(resolved.issues) };
   return { ok: true, model: resolved.model, document: bound, selection: resolved.selection };
+}
+
+/* -------------------------------------------------------------------------- */
+/* PERSISTENCE — Unit 6B.3A                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * THE DURABLE DRAFT, THROUGH THE DOOR THAT ALREADY EXISTS.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THIS IS IN THIS FILE AND NOT IN A NEW ONE.
+ *
+ * There are exactly TWO doors from the application to the canonical layer, and
+ * a table in `shadow-boundary-test.mjs` names them rather than counting them.
+ * A `src/lib/studio/presentation-persistence.ts` holding its own
+ * `SupabaseClient` would be a third, and "it is only a draft table" is exactly
+ * the argument that turns two doors into five. So the load and the save live
+ * behind the loader that already reads this study's canonical results — which
+ * is also the only place that can build the registry a stored document has to
+ * be checked against.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE TABLE THESE FUNCTIONS TOUCH, AND THE ONE THEY CANNOT.
+ *
+ * `canonical_presentation_draft`, created by migration 0029 and applied to no
+ * hosted project. It is a DIFFERENT table from `study_experience_draft`, which
+ * holds the two legacy experience drafts — Cuicuilco at schema version 2
+ * revision 72 and P6E at 3 revision 14. Neither of those rows is read, written,
+ * migrated or named here, and the save function's own body does not name that
+ * table either, so this path cannot reach them even by mistake.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THE SAVE DOES NOT RE-BIND, AND THE PREVIEW DOES.
+ *
+ * `resolveEditedPresentation` re-binds because a preview answers "what do this
+ * study's numbers say about this layout, now" — and re-binding is how it stops
+ * a browser pinning a document to a registry it was not authored against.
+ *
+ * A SAVE is the opposite. Re-binding on the way to storage would take a layout
+ * authored against one package and silently file it as though it had been
+ * authored against another — which is precisely the retargeting the binding
+ * fingerprint exists to prevent, performed by the one operation that makes it
+ * permanent. So the save resolves the document AS IT ARRIVED. A binding that no
+ * longer matches is `binding_fingerprint_mismatch`, the author is told the
+ * ground moved under them, and nothing is written.
+ */
+
+const DRAFT_TABLE = "canonical_presentation_draft";
+
+/** The row shape read back. Every column is named; none is a respondent's. */
+type DraftRow = {
+  schema_version: number;
+  document_kind: string;
+  registry_version: string;
+  binding_fingerprint: string;
+  revision: number;
+  definition: unknown;
+  definition_sha256: string;
+};
+
+/**
+ * Absence is not a failure — most studies have never been saved, and inventing
+ * an empty document for them would be a blank page that overwrites a real one
+ * the first time somebody presses save. So "no row" is a success carrying null,
+ * and only a transport refusal is `ok: false`.
+ */
+type StoredDraftRead =
+  | { ok: true; row: DraftRow | null }
+  | { ok: false; unavailable: ComposerUnavailable };
+
+/** The transport half: one row, or none, or a named refusal. Decodes nothing. */
+async function readStoredDraftRow(
+  client: SupabaseClient,
+  scope: ComposerScope,
+): Promise<StoredDraftRead> {
+  const { data, error } = await client
+    .from(DRAFT_TABLE)
+    .select(
+      "schema_version, document_kind, registry_version, binding_fingerprint, revision, definition, definition_sha256",
+    )
+    .eq("study_id", scope.studyId)
+    // TENANT AS WELL AS STUDY. The study id is a primary key and is already
+    // enough to identify the row; the tenant is added because every read in
+    // this codebase is scoped by both, and a read that relies on one of two
+    // available scopes is a read that stops being safe the day the other one
+    // is the only one that was checked.
+    .eq("tenant_id", scope.tenantId)
+    .maybeSingle<DraftRow>();
+
+  if (error) {
+    return {
+      ok: false,
+      unavailable: {
+        reason: "canonical_read_refused",
+        detail:
+          "No se pudo leer el borrador almacenado de este estudio. No se parte de un documento en " +
+          "blanco, porque un documento en blanco guardado encima del almacenado sería una pérdida " +
+          "de trabajo disfrazada de comienzo.",
+      },
+    };
+  }
+  return { ok: true, row: data ?? null };
+}
+
+/** The decoding half: pure over a row, so both callers refuse identically. */
+function decodeStoredDraft(row: DraftRow, scope: ComposerScope) {
+  return decodePresentationFromStorage(
+    {
+      schemaVersion: row.schema_version,
+      definition: row.definition,
+      definitionSha256: row.definition_sha256,
+      documentKind: row.document_kind,
+      registryVersion: row.registry_version,
+      binding: row.binding_fingerprint,
+    },
+    { tenantId: scope.tenantId, studyId: scope.studyId },
+  );
+}
+
+/**
+ * Read the stored draft, decode it, and resolve it against THIS study.
+ *
+ * This is the DELIBERATE reload — what the conflict flow calls. It does its own
+ * canonical read, because it runs long after the page's, and resolving a stored
+ * document against a registry built minutes ago would be resolving it against
+ * results that may no longer be the study's.
+ */
+export async function loadStoredPresentation(
+  client: SupabaseClient,
+  scope: ComposerScope,
+): Promise<LoadResult> {
+  const stored = await readStoredDraftRow(client, scope);
+  if (!stored.ok) return { ok: false, unavailable: stored.unavailable };
+  if (!stored.row) return { ok: true, present: false };
+  const data = stored.row;
+
+  const decoded = decodeStoredDraft(data, scope);
+  if (!decoded.ok) return { ok: false, unavailable: unresolved(decoded.errors) };
+
+  let built;
+  try {
+    built = await readAndBuild(client, scope);
+  } catch (caught) {
+    return { ok: false, unavailable: refusalFor(caught) };
+  }
+
+  // AS STORED, NOT RE-BOUND. If the package changed since this draft was
+  // written, the binding no longer matches and the resolver says so. That is a
+  // fact the author has to see, not one to paper over on the way to the screen.
+  const resolved = resolveUnderSelection(built, decoded.value, EMPTY_VIEWER_SELECTION);
+  if (!resolved.ok) return { ok: false, unavailable: unresolvedIssues(resolved.issues) };
+
+  return {
+    ok: true,
+    present: true,
+    document: decoded.value,
+    revision: data.revision,
+    model: resolved.model,
+  };
+}
+
+/**
+ * Store a document the browser edited, or refuse for a named reason.
+ *
+ * The order is the argument. Nothing is written until the document has proved
+ * it is a canonical presentation of THIS study, authored against THIS registry,
+ * that resolves against THESE results — because a row that cannot be read back
+ * is a row that turns an author's next visit into an error page.
+ */
+export async function storeEditedPresentation(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  actorUserId: string,
+  candidate: unknown,
+  expectedRevision: number | null,
+  idempotencyKey: string,
+): Promise<SaveResult> {
+  // [1] IS IT A CANONICAL PRESENTATION AT ALL? A legacy v1-v3 blob is refused
+  //     here, by name, before anything else looks at it.
+  const validated = validatePresentationDocument(candidate);
+  if (!validated.ok) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail:
+        "El documento no es una presentación canónica válida, así que no se guarda. Tus cambios " +
+        "siguen en esta pestaña.",
+      issues: validated.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+
+  // [2] DOES IT DESCRIBE THIS STUDY'S RESULTS? This is where binding, registry
+  //     version, calculation version, package identity and study identity are
+  //     all checked — seven comparisons inside `resolvePresentation`, each with
+  //     its own code, none of them repeated here in a weaker form.
+  let built;
+  try {
+    built = await readAndBuild(client, scope);
+  } catch (caught) {
+    const unavailable = refusalFor(caught);
+    return { ok: false, reason: "storage_refused", detail: unavailable.detail };
+  }
+  const resolved = resolveUnderSelection(built, validated.value, EMPTY_VIEWER_SELECTION);
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail:
+        "El documento ya no corresponde a los resultados de este estudio, así que no se guarda. " +
+        "Tus cambios siguen en esta pestaña.",
+      issues: resolved.issues,
+    };
+  }
+
+  // [3] THE ENVELOPE. The scope is stamped here and only here, and the digest is
+  //     computed over the finished bytes rather than over the object.
+  const encoded = encodePresentationForStorage(validated.value, {
+    tenantId: scope.tenantId,
+    studyId: scope.studyId,
+  });
+  if (!encoded.ok) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "El documento no se puede almacenar en la forma que exige la columna.",
+      issues: encoded.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+
+  const { data, error } = await client.rpc("save_canonical_presentation_draft", {
+    p_study_id: scope.studyId,
+    p_actor: actorUserId,
+    p_definition: encoded.value.definition,
+    p_registry_version: encoded.value.registryVersion,
+    p_binding_fingerprint: encoded.value.binding,
+    p_definition_sha256: encoded.value.definitionSha256,
+    p_expected_revision: expectedRevision,
+    p_idempotency_key: idempotencyKey,
+    p_note: null,
+  });
+
+  if (error) {
+    // 55000 IS THE CONFLICT, AND ONLY THE CONFLICT. Migration 0024 established
+    // the code and its reason: PostgREST retries 40001 transparently, so a
+    // serialization failure never reaches a caller and cannot be the code a
+    // conflict travels under. Anything else is a refusal the operator may retry.
+    if (error.code === "55000") {
+      // WHICH REVISION, so the screen can say how far behind the operator is.
+      //
+      // A `raise` cannot carry data, so the number is read back — a plain SELECT
+      // on a row this caller may already read, taken only on the conflict path.
+      // A failure to read it is not a failure to report the conflict: the
+      // conflict is the answer either way and the number is an refinement.
+      const { data: latest } = await client
+        .from(DRAFT_TABLE)
+        .select("revision")
+        .eq("study_id", scope.studyId)
+        .eq("tenant_id", scope.tenantId)
+        .maybeSingle<{ revision: number }>();
+      return {
+        ok: false,
+        reason: "conflict",
+        detail:
+          "Alguien guardó una versión más reciente de este documento. No se sobrescribe: tus " +
+          "cambios siguen aquí y puedes cargar la versión almacenada cuando decidas hacerlo.",
+        storedRevision: latest?.revision ?? undefined,
+      };
+    }
+    return {
+      ok: false,
+      reason: "storage_refused",
+      // The database's own message is NOT forwarded. A constraint violation
+      // quotes the values that violated it, and those values are the document.
+      detail: "No pudimos guardar. Tus cambios siguen en esta pestaña; puedes volver a intentarlo.",
+    };
+  }
+
+  const answer = data as {
+    revision?: unknown;
+    currentRevision?: unknown;
+    created?: unknown;
+    replayed?: unknown;
+  } | null;
+  if (!answer || typeof answer.revision !== "number") {
+    return {
+      ok: false,
+      reason: "storage_refused",
+      detail: "El guardado no devolvió una revisión, así que no se da por guardado.",
+    };
+  }
+
+  return {
+    ok: true,
+    revision: answer.revision,
+    // A function that did not report where the row is now is one this build does
+    // not know. Falling back to `revision` would silently restore the very
+    // assumption the field exists to remove, so the absence is treated as
+    // "the same", which is true of every write and of a replay nobody superseded.
+    currentRevision:
+      typeof answer.currentRevision === "number" ? answer.currentRevision : answer.revision,
+    created: answer.created === true,
+    replayed: answer.replayed === true,
+  };
 }

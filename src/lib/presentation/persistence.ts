@@ -80,13 +80,47 @@ export type PresentationPublicationState = {
 /** A row as it is written: the scope, the version, and the JSON definition. */
 export type StoredPresentation = {
   scope: PresentationScope;
-  /** Mirrors `study_experience_draft.schema_version`, which is NOT NULL. */
+  /** Mirrors `canonical_presentation_draft.schema_version`, which is NOT NULL. */
   schemaVersion: number;
+  /**
+   * The document's own `documentKind`, lifted into the envelope.
+   *
+   * The column of the same name is CHECK-constrained to this one literal, so a
+   * row of another family cannot be written even by a caller holding the
+   * table's privileges. Lifting it here means the writer passes what the
+   * document says rather than a constant it decided for itself.
+   */
+  documentKind: string;
+  /**
+   * The presentation-registry build the document was authored against.
+   *
+   * A column rather than only a jsonb field because "which registry build was
+   * this authored against" must be answerable without parsing half a megabyte.
+   */
+  registryVersion: string;
+  /**
+   * The registry fingerprint the document is bound to.
+   *
+   * Never null here: `encodePresentationForStorage` refuses an unbound
+   * document, and the column is NOT NULL, so the two refusals agree.
+   */
+  binding: string;
   /** The stored `definition` jsonb, with its persistence metadata stamped in. */
   definition: Record<string, unknown>;
   /** SHA-256 over the stored definition, computed OUTSIDE it. */
   definitionSha256: string;
 };
+
+/**
+ * How much smaller than the column's ceiling this layer's own ceiling is.
+ *
+ * One kibibyte, against a limit of five hundred and twelve. It buys nothing but
+ * certainty about WHICH end refuses an enormous document, and certainty is the
+ * whole value: the two ends measure different renderings of the same value, and
+ * the version that gets past this function and is then refused by the column is
+ * a document its author can never save and is never told why.
+ */
+const STORAGE_HEADROOM_BYTES = 1024;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Same class the document schema refuses in authored text. */
@@ -153,17 +187,27 @@ export function encodePresentationForStorage(
     metadata: { studyId: scope.studyId, tenantId: scope.tenantId, subtitle },
   };
 
-  // The ceiling the COLUMN enforces (`0023…sql`, 512 KiB). `withinSizeLimit`
-  // existed and nothing called it; this is the one function whose entire output
-  // is the value that column holds, so it is the place to check.
+  // The ceiling the COLUMN enforces (512 KiB). `withinSizeLimit` existed and
+  // nothing called it; this is the one function whose entire output is the value
+  // that column holds, so it is the place to check.
+  //
+  // WITH HEADROOM, because the two ends do not measure the same bytes. This
+  // counts UTF-8 bytes of the canonical, key-sorted serialization; the column
+  // counts `octet_length(jsonb::text)`, which is PostgreSQL's own rendering of
+  // the same value. They agree closely and are not guaranteed to agree exactly,
+  // and the failure is asymmetric: a document this function accepts and the
+  // column then refuses is one the author can never save, whose only symptom is
+  // «No pudimos guardar» forever. A document refused here is refused with a
+  // sentence naming the size. So the tighter limit is deliberately this one.
   const bytes = serializedBytes(definition);
-  if (bytes > SERIALIZED_BYTE_LIMIT) {
+  if (bytes > SERIALIZED_BYTE_LIMIT - STORAGE_HEADROOM_BYTES) {
     return failure([
       issue(
         "persistence_too_large",
         "$",
-        `la definición ocupa ${bytes} bytes y la columna admite ${SERIALIZED_BYTE_LIMIT}: se rechaza aquí ` +
-          "en lugar de dejar que la base la rechace a mitad de una escritura.",
+        `la definición ocupa ${bytes} bytes y la columna admite ${SERIALIZED_BYTE_LIMIT}, menos un ` +
+          `margen de ${STORAGE_HEADROOM_BYTES} porque los dos extremos no miden los mismos bytes: ` +
+          "se rechaza aquí en lugar de dejar que la base la rechace a mitad de una escritura.",
       ),
     ]);
   }
@@ -171,6 +215,12 @@ export function encodePresentationForStorage(
   return success({
     scope,
     schemaVersion: PRESENTATION_DOCUMENT_SCHEMA_VERSION,
+    documentKind: validated.value.documentKind,
+    registryVersion: validated.value.registryVersion,
+    // Narrowed by the refusal above, which returns before this point when the
+    // binding is null. The assertion is the type system catching up with a
+    // check that has already run, not a claim made without one.
+    binding: validated.value.binding as string,
     definition,
     definitionSha256: sha256Hex(serializeDeterministic(definition)),
   });
@@ -188,7 +238,23 @@ export function encodePresentationForStorage(
  * including the legacy-family refusal, so nothing is ever reinterpreted.
  */
 export function decodePresentationFromStorage(
-  stored: { schemaVersion: number; definition: unknown; definitionSha256?: string },
+  stored: {
+    schemaVersion: number;
+    definition: unknown;
+    definitionSha256?: string;
+    /**
+     * The identity columns migration 0029 keeps BESIDE the jsonb.
+     *
+     * They are optional because a caller may have read only the definition —
+     * and are checked whenever they are supplied, for the same reason the
+     * digest is: a column that nobody compares against the document is a column
+     * that can drift from it silently, and the drift would be invisible exactly
+     * where it matters, because the JSON alone still validates.
+     */
+    documentKind?: string;
+    registryVersion?: string;
+    binding?: string;
+  },
   expectedScope: PresentationScope,
 ): PresentationOutcome<PresentationDocument> {
   // The scope the CALLER asserts is checked before it is trusted. Without this,
@@ -254,5 +320,37 @@ export function decodePresentationFromStorage(
   // Strip the persistence metadata; what comes back is authorable and nothing else.
   const authorable: Record<string, unknown> = { ...record };
   delete authorable.metadata;
-  return validatePresentationDocument(authorable);
+  const document = validatePresentationDocument(authorable);
+  if (!document.ok) return document;
+
+  // THE COLUMNS MUST STILL AGREE WITH THE DOCUMENT THEY DESCRIBE.
+  //
+  // `canonical_presentation_draft` repeats the family, the registry build and
+  // the binding as columns so those questions can be answered without parsing
+  // the jsonb. A repeated fact is a fact that can disagree with itself, and the
+  // disagreement would be silent: the JSON alone validates perfectly, and every
+  // surface that trusted the column would then be describing a different
+  // document from the one it rendered. The save function writes both halves in
+  // one statement, so a disagreement here means something wrote around it.
+  const columnMismatch = (
+    [
+      ["documentKind", stored.documentKind, document.value.documentKind],
+      ["registryVersion", stored.registryVersion, document.value.registryVersion],
+      ["binding", stored.binding, document.value.binding],
+    ] as const
+  ).find(([, column, inDocument]) => column !== undefined && column !== inDocument);
+
+  if (columnMismatch) {
+    return failure([
+      issue(
+        "persistence_scope_invalid",
+        `$.${columnMismatch[0]}`,
+        `la columna almacena «${String(columnMismatch[1])}» y el documento declara ` +
+          `«${String(columnMismatch[2])}». La función de guardado escribe ambas mitades en una sola ` +
+          "instrucción, así que una discrepancia significa que algo escribió sin pasar por ella.",
+      ),
+    ]);
+  }
+
+  return document;
 }

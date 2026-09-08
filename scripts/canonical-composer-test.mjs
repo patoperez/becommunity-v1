@@ -1409,7 +1409,7 @@ check(
 
 /* -------------------------------------------------------------------------- */
 
-console.log("\n[22] La ruta autoriza antes de leer, enlaza en el servidor y no escribe nada");
+console.log("\n[22] La ruta autoriza antes de leer, enlaza en el servidor y sólo escribe el borrador canónico");
 const PAGE = "src/app/studio/e/[studyId]/construccion/page.tsx";
 const ACTION = "src/app/studio/e/[studyId]/construccion/actions.ts";
 const LOADER = "src/lib/studio/presentation-workspace.ts";
@@ -1463,7 +1463,29 @@ const bindAt = loaderCode.indexOf("bindPresentationDocument(");
 const delegateAt = loaderCode.indexOf("resolveUnderSelection(");
 check(bindAt >= 0, "el cargador enlaza el documento");
 check(delegateAt >= 0, "y delega la resolución en la capa de lectura");
-check(bindAt < delegateAt, "y enlaza ANTES de resolver, nunca al vuelo dentro de la lectura");
+// EL ENLACE NUNCA OCURRE DENTRO DE UNA RESOLUCIÓN.
+//
+// Esta comprobación era posicional — «enlaza antes de resolver» — y era la misma
+// cosa mientras el cargador tuviera un solo camino. La unidad 6B.3A añadió el
+// camino que RESTAURA un borrador almacenado, y ese camino no enlaza a
+// propósito: un documento guardado ya trae su enlace, y volver a enlazarlo al
+// leerlo haría que la huella coincidiera siempre y no probara nada. Así que la
+// regla se afirma por lo que dice, y no por el orden en que aparece: ninguna
+// llamada a la resolución recibe un enlace hecho al vuelo.
+check(
+  !/resolveUnderSelection\(\s*[^)]*bindPresentationDocument\(/.test(loaderCode),
+  "y ninguna resolución recibe un enlace hecho al vuelo dentro de la propia llamada",
+);
+// Y el camino que restaura un borrador almacenado resuelve lo que leyó, tal cual.
+check(
+  /decodeStoredDraft\(/.test(loaderCode),
+  "el cargador decodifica el borrador almacenado por una función propia",
+);
+check(
+  /resolveUnderSelection\(built, restored\.value/.test(loaderCode) ||
+    /resolveUnderSelection\(built, decoded\.value/.test(loaderCode),
+  "y resuelve el documento restaurado TAL CUAL, sin volver a enlazarlo",
+);
 check(
   !/resolvePresentation\(/.test(loaderCode),
   "el cargador no resuelve por su cuenta: hay una sola ruta de resolución",
@@ -1488,24 +1510,124 @@ check(/["']server-only["']/.test(loaderCode), "el cargador lleva la marca server
 check(!/@\/lib\/dashboard|lib\/dashboard/.test(loaderCode), "y no cae al cálculo heredado cuando no hay paquete canónico");
 check(/validatePresentationDocument\(/.test(loaderCode), "valida el documento del navegador contra el esquema estricto antes de mirarlo");
 
-// NOTHING WRITES. Comments are stripped: these files DISCUSS the writes they do
-// not perform, and a scan that could not tell a promise from a call would
-// forbid the promise.
-for (const [label, source] of [["la página", pageSource], ["la acción", actionSource], ["el cargador", loaderSource]]) {
+// LO QUE PUEDE ESCRIBIRSE, Y LO QUE NO. Los comentarios se retiran: estos
+// archivos DISCUTEN las escrituras que no hacen, y un escaneo incapaz de
+// distinguir una promesa de una llamada prohibiría la promesa.
+//
+// La unidad 6B.1 no escribía nada y esta comprobación decía exactamente eso. La
+// 6B.3A hace durable el borrador canónico, así que la regla no se borra: se
+// APRIETA. La página sigue sin escribir una sola cosa; la acción y el cargador
+// pueden escribir el borrador canónico y NADA MÁS, y el único RPC que pueden
+// nombrar es el que lo guarda.
+check(
+  ![".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath"].some((writer) =>
+    stripComments(pageSource).includes(writer),
+  ),
+  "la página no escribe nada en absoluto",
+);
+
+for (const [label, source] of [["la acción", actionSource], ["el cargador", loaderSource]]) {
   const code = stripComments(source);
-  const writers = [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath", "encodePresentationForStorage"].filter((writer) =>
+  // Estas cuatro nunca: una escritura directa a la tabla saltaría la función que
+  // reautoriza, deriva el inquilino, compara la revisión esperada bajo cerrojo y
+  // escribe el evento en la misma transacción.
+  const forbidden = [".insert(", ".update(", ".upsert(", ".delete(", "revalidatePath"].filter((writer) =>
     code.includes(writer),
   );
-  check(writers.length === 0, `${label} no escribe nada${writers.length ? `: ${writers.join(", ")}` : ""}`);
+  check(forbidden.length === 0, `${label} no escribe directamente en ninguna tabla${forbidden.length ? `: ${forbidden.join(", ")}` : ""}`);
 }
-// And the legacy draft is never named, let alone read.
+
+// EL ÚNICO RPC QUE ESTA RUTA PUEDE NOMBRAR.
+const rpcNames = new Set();
+for (const source of [pageSource, actionSource, loaderSource]) {
+  for (const match of stripComments(source).matchAll(/\.rpc\(\s*["'`]([a-z_]+)["'`]/g)) {
+    rpcNames.add(match[1]);
+  }
+}
+check(
+  rpcNames.size <= 1 && [...rpcNames].every((name) => name === "save_canonical_presentation_draft"),
+  `el único RPC que la ruta nombra es el guardado del borrador canónico (${[...rpcNames].join(", ") || "ninguno"})`,
+);
+// Y CADA `.rpc(` LLEVA UN NOMBRE LITERAL. Una lista de permitidos que sólo mira
+// literales se burla escribiendo `client.rpc(name, …)`: el nombre deja de estar
+// en el archivo y la comprobación de arriba encuentra cero, que es «ninguno» y
+// pasa. Contar las llamadas y compararlas con las que sí llevan literal cierra
+// esa puerta.
+{
+  let calls = 0;
+  let literal = 0;
+  for (const source of [pageSource, actionSource, loaderSource]) {
+    const code = stripComments(source);
+    calls += [...code.matchAll(/\.rpc\(/g)].length;
+    literal += [...code.matchAll(/\.rpc\(\s*["'`][a-z_]+["'`]/g)].length;
+  }
+  check(
+    calls === literal,
+    `cada llamada a .rpc( nombra su función con un literal (${literal} de ${calls})`,
+  );
+}
+// Y el sobre se sella exactamente donde se escribe, no antes ni en dos sitios.
+check(
+  stripComments(loaderSource).includes("encodePresentationForStorage"),
+  "el cargador sella el sobre de almacenamiento justo antes de escribir",
+);
+check(
+  !stripComments(pageSource).includes("encodePresentationForStorage") &&
+    !stripComments(actionSource).includes("encodePresentationForStorage"),
+  "y ni la página ni la acción lo hacen por su cuenta",
+);
+// LA AUTORIZACIÓN OCURRE ANTES DE QUE EXISTA EL CLIENTE PRIVILEGIADO, EN CADA
+// CAMINO QUE LO CONSTRUYE.
+//
+// Una versión anterior usaba `indexOf`, que encuentra la PRIMERA aparición —
+// la de `refreshPresentationPreview`, que ya existía. El camino nuevo de
+// guardado y carga vive en `authorizedStudioScope`, más abajo en el mismo
+// archivo, y no se comprobaba en absoluto: la afirmación era cierta y no era
+// sobre el código que la unidad añadió. Ahora se comprueba CADA construcción de
+// un cliente privilegiado, en la región que la contiene.
+{
+  const code = stripComments(actionSource);
+  const adminSites = [...code.matchAll(/createAdminClient\(\)/g)].map((m) => m.index ?? -1);
+  check(adminSites.length > 0, `el archivo construye un cliente privilegiado (${adminSites.length} sitio(s))`);
+  for (const [index, at] of adminSites.entries()) {
+    // La región es todo lo que precede a esta construcción desde la anterior,
+    // así que una comprobación de otra función no puede responder por ésta.
+    const from = index === 0 ? 0 : adminSites[index - 1];
+    const region = code.slice(from, at);
+    check(
+      /auth\.getUser\(\)/.test(region),
+      `el sitio ${index + 1} obtiene el usuario con getUser() ANTES de construir el cliente privilegiado`,
+    );
+    check(
+      /from\("profiles"\)/.test(region) && /role/.test(region),
+      `y comprueba el rol contra la base de datos antes de construirlo`,
+    );
+    check(
+      /uuid\.safeParse|z\.string\(\)\.uuid\(\)/.test(region),
+      `y valida el identificador del estudio antes de construirlo`,
+    );
+  }
+}
+// Y EL BORRADOR HEREDADO NO SE NOMBRA, MENOS AÚN SE LEE. Esta es la garantía de
+// coexistencia reducida a algo que una compuerta puede leer: el camino canónico
+// direcciona otra tabla, así que no hay argumento por el que alcance las dos
+// filas heredadas — Cuicuilco en versión 2 revisión 72 y P6E en 3 revisión 14.
 for (const [label, source] of [["la página", pageSource], ["la acción", actionSource], ["el cargador", loaderSource]]) {
   const code = stripComments(source);
   check(
-    !/study_experience_draft|study_experience_revision/.test(code),
-    `${label} no nombra el borrador heredado`,
+    !/study_experience_draft|study_experience_revision|study_experience_event|study_experience_publication/.test(code),
+    `${label} no nombra ninguna tabla de la experiencia heredada`,
   );
 }
+// Y la tabla que SÍ nombra es la canónica, escrita una sola vez y en el cargador.
+check(
+  /canonical_presentation_draft/.test(stripComments(loaderSource)),
+  "el cargador nombra la tabla del borrador canónico",
+);
+check(
+  !/canonical_presentation_draft/.test(stripComments(pageSource)),
+  "y la página no nombra ninguna tabla",
+);
 
 /* -------------------------------------------------------------------------- */
 
@@ -1523,13 +1645,59 @@ check(
   "ni el módulo de la acción — la acción le llega como propiedad desde la página",
 );
 check(/refresh/.test(uiSource), "y recibe la actualización como una función que no sabe qué hay detrás");
+const saveSessionSource = read("src/lib/composer/save-session.ts");
+check(saveSessionSource.length > 0, "el módulo puro de la sesión de guardado existe");
+// Y ES PURO: sin reloj, sin azar, sin transporte. Todo lo que decide si
+// «Guardado» es verdad vive aquí, y por eso una compuerta puede probarlo sin
+// navegador y sin base de datos.
+for (const impurity of ["fetch(", "Date.now(", "Math.random(", "setTimeout(", "crypto.", "supabase"]) {
+  check(
+    !stripComments(saveSessionSource).includes(impurity),
+    `y no alcanza «${impurity}» — la sesión de guardado es pura`,
+  );
+}
 check(
   !/canonical-source|lib\/results\/(?!contract)|lib\/calc/.test(uiSource),
   "no alcanza el canónico, los resultados ni el cálculo",
 );
-// SESSION-ONLY, and the screen says so in words rather than in a tooltip.
-check(/nada[\s\S]{0,60}se guarda/i.test(uiSource), "dice que nada se guarda");
-check(/recargas|sales/i.test(uiSource), "que recargar o salir lo pierde");
+// LOS SEIS ESTADOS DE GUARDADO, EN LAS PALABRAS DEL PRODUCTO.
+//
+// Esta comprobación exigía antes que la pantalla dijera «nada se guarda», que
+// era verdad en la 6B.1 y sería hoy la frase más peligrosa de la superficie. Se
+// sustituye por lo que ahora debe ser cierto: los seis estados existen, se
+// llaman por su nombre y la pantalla los toma de un módulo puro en vez de
+// escribirlos a mano en cada sitio.
+check(/SAVE_STATE_LABEL/.test(uiSource), "la superficie toma los estados de guardado del módulo puro");
+for (const state of [
+  "sin_cambios",
+  "guardando",
+  "guardado",
+  "cambios_sin_guardar",
+  "no_pudimos_guardar",
+  "version_mas_reciente",
+]) {
+  check(new RegExp(`\\b${state}\\b`).test(saveSessionSource), `el módulo puro declara el estado «${state}»`);
+}
+for (const label of [
+  "Sin cambios",
+  "Guardando…",
+  "Guardado",
+  "Cambios sin guardar",
+  "No pudimos guardar",
+  "Hay una versión más reciente",
+]) {
+  check(saveSessionSource.includes(label), `y su texto en español: «${label}»`);
+}
+// UN GUARDADO EXPLÍCITO, UN AUTOGUARDADO CON ESPERA, Y UN AVISO AL SALIR.
+check(/Guardar ahora/.test(uiSource), "la superficie ofrece «Guardar ahora»");
+check(/AUTOSAVE_DELAY_MS/.test(uiSource) && /setTimeout/.test(uiSource), "y un autoguardado con espera");
+check(/beforeunload/.test(uiSource), "y avisa al salir mientras haya cambios sin guardar");
+// Y EL CONFLICTO NO SE RESUELVE ESCRIBIENDO.
+check(/Cargar la versión almacenada/.test(uiSource), "el conflicto ofrece cargar la versión almacenada");
+check(
+  !/forzar|sobrescribir|force/i.test(stripComments(uiSource)),
+  "y no ofrece forzar el guardado por encima de una versión más reciente",
+);
 check(/cliente no ve/i.test(uiSource), "que el cliente no ve nada de esto");
 check(/no se publica/i.test(uiSource), "y que no se publica nada");
 check(

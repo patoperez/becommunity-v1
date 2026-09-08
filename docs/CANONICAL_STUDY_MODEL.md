@@ -184,6 +184,46 @@ The model does not encode color thresholds as universal constants. A band scheme
 owns its rules. For the Cuicuilco performance source, the importer will seed the
 confirmed ranges gray 0–29, red 30–49, yellow 50–69 and green 70–100.
 
+## Migration 0029: the durable canonical presentation draft
+
+`0029_canonical_presentation_draft.sql` is the fourth canonical migration and
+the only one that is not about ingesting or calculating. It exists because the
+question "can a canonical schema-v4 presentation draft coexist with the two
+legacy experience drafts" was put to a real PostgreSQL and came back **no**:
+
+- `study_experience_draft`'s primary key is `study_id` **alone**, so one study
+  has exactly one draft row and there is no "beside" in that table;
+- `save_study_experience_draft` **accepted** a canonical v4 document against a
+  planted legacy row at revision 72 — moving it to 73, changing
+  `schema_version` from 2 to 4, and replacing the definition bytes;
+- there is no idempotency of any kind on that draft path, so a replayed save
+  after a lost response is indistinguishable from somebody else's conflict.
+
+So `0029` adds a **separate** table rather than widening the legacy one, which
+would not have been additive and which every existing reader of that table
+would have contradicted. It creates:
+
+| object | what it is |
+|---|---|
+| `canonical_presentation_draft` | one mutable v4 draft per study; `schema_version` admits **4 by equality**, not a range |
+| `canonical_presentation_draft_event` | the append-only log, and the **idempotency ledger** |
+| `save_canonical_presentation_draft` | the only write path: authorizes, derives the tenant from the study row, takes an advisory lock on the study, replays a recorded key, compares the expected revision, and writes the row and its event in one transaction |
+| `refuse_canonical_presentation_event_update` | the trigger that makes the log append-only |
+
+**It is applied to no project.** Like `0026`-`0028` before their application, it
+is proved against a disposable cluster and nowhere else.
+`npm run test:canonical-presentation-draft-live` executes it — 93 assertions,
+including two genuinely concurrent races and the same contract a second time
+over a real PostgREST with `supabase-js`.
+
+**Why an advisory lock and not only `FOR UPDATE`.** `select … for update` locks
+a row that exists. When none does it locks nothing, so two concurrent first
+saves both find no row, both insert, and the loser gets a primary-key violation
+— an untyped error arriving where a conflict was expected. The legacy draft
+function has exactly that hole. `0029` takes `pg_advisory_xact_lock` on the
+study before the first read a decision depends on, which also serialises the
+idempotency lookup with the write it guards.
+
 ## Security boundary
 
 All 36 new tables — 18 in `0026`, 16 in `0027` and 2 in `0028` — are
@@ -193,6 +233,14 @@ internal-only:
 - `anon` and `authenticated` have an explicit deny policy and no table
   privileges;
 - only `service_role` receives table privileges.
+
+`0029`'s two tables are locked down the same way with one deliberate
+difference, **stricter** rather than looser: `service_role` receives `SELECT`
+and nothing else. Its only legitimate writer is the `SECURITY DEFINER` save
+function, and a `service_role` that could `UPDATE` the draft directly could move
+a revision with no event, no expected-revision check and no lock — which is
+every property that migration exists to guarantee. The migration-chain gate
+asserts both shapes separately so neither can drift into the other.
 
 Nothing in these migrations publishes raw names, attributes, observations or
 responses to client-facing routes. Publication must continue through reviewed,

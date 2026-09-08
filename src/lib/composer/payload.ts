@@ -72,7 +72,19 @@ export type ComposerUnavailable = {
 };
 
 export type ComposerWorkspace =
-  | { ok: true; payload: ComposerPayload }
+  | {
+      ok: true;
+      payload: ComposerPayload;
+      /**
+       * Unit 6B.3A. What the store holds for this study, decided by the SERVER.
+       *
+       * The screen must not infer "is this saved" from the document it was
+       * handed: a restored draft and a freshly built blueprint are the same
+       * shape, and guessing wrong in the safe-looking direction is what lets an
+       * author close a tab on an hour of work.
+       */
+      persistence: PersistenceState;
+    }
   | { ok: false; unavailable: ComposerUnavailable };
 
 /**
@@ -112,3 +124,115 @@ export type RefreshPreview = (
   documentJson: string,
   viewerJson: string,
 ) => Promise<PreviewResult>;
+
+/* -------------------------------------------------------------------------- */
+/* PERSISTENCE — Unit 6B.3A                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Why a save did not happen, in a CLOSED vocabulary the screen switches on.
+ *
+ * `conflict` is separate from every other refusal and always will be. It is the
+ * only one where the operator's document is still good and the STORED one has
+ * moved on — so it is the only one that offers to load the stored version, and
+ * the only one that must never resolve itself by writing. Folding it into a
+ * general "no pudimos guardar" would put a retry button in front of a person
+ * whose retry would destroy somebody else's work.
+ *
+ * `transport_failed` is separate from `storage_refused` for the opposite
+ * reason: a refusal is an answer and a timeout is not. A request that never
+ * completed may still have been applied, which is exactly why the save carries
+ * an idempotency key and why a retry under the same key is safe.
+ */
+export type SaveRefusalReason =
+  /** No session, not an internal role, or not this study's tenant. */
+  | "not_authorized"
+  /** The study id is not a uuid, or names no study. */
+  | "invalid_scope"
+  /** The document did not validate as a canonical presentation, version four. */
+  | "document_refused"
+  /** A newer revision is stored. The local document is untouched. */
+  | "conflict"
+  /** The database refused for a reason it named. */
+  | "storage_refused"
+  /** The round trip did not complete, so whether it was applied is unknown. */
+  | "transport_failed";
+
+/**
+ * What a save answers with.
+ *
+ * `revision` on success is the revision the STORE now holds, which the next
+ * save must present as its expected revision. `replayed` says the idempotency
+ * key had already been recorded — the save was a no-op and the revision is the
+ * one the first attempt produced.
+ *
+ * On a conflict, `storedRevision` is what the store holds now. It is offered so
+ * the screen can say how far behind the operator is; it is NOT enough to save
+ * with, because saving against it would overwrite the newer document.
+ */
+export type SaveResult =
+  | {
+      ok: true;
+      /** The revision THIS save produced — or, on a replay, the one it produced originally. */
+      revision: number;
+      /**
+       * Where the row is NOW.
+       *
+       * Equal to `revision` on a real write. On a REPLAY it can be higher:
+       * the key's save was applied, and somebody has saved over it since. A
+       * caller that ignored this would report a document stored while the store
+       * held somebody else's.
+       */
+      currentRevision: number;
+      created: boolean;
+      replayed: boolean;
+    }
+  | {
+      ok: false;
+      reason: SaveRefusalReason;
+      /** One sentence in Spanish for an internal operator. Never a stack, never a key. */
+      detail: string;
+      /** Typed document issues only — code and path — when the reason is `document_refused`. */
+      issues?: { code: string; path: string }[];
+      /** Present only on `conflict`. */
+      storedRevision?: number;
+    };
+
+/**
+ * What a deliberate reload answers with.
+ *
+ * There is no stored draft for most studies, and that is not a failure — it is
+ * the ordinary first visit. `absent` says so without inventing an empty
+ * document, because an empty document saved over a real one is data loss
+ * wearing the clothes of a fresh start.
+ */
+export type LoadResult =
+  | { ok: true; present: true; document: PresentationDocument; revision: number; model: PresentationRenderModel }
+  | { ok: true; present: false }
+  | { ok: false; unavailable: ComposerUnavailable };
+
+/** The save, as the SCREEN sees it. The screen knows nothing about what is behind it. */
+export type SaveDraft = (
+  studyId: string,
+  documentJson: string,
+  expectedRevision: number | null,
+  idempotencyKey: string,
+) => Promise<SaveResult>;
+
+/** The deliberate reload, as the SCREEN sees it. */
+export type LoadDraft = (studyId: string) => Promise<LoadResult>;
+
+/**
+ * What the composer screen is told about storage when it first renders.
+ *
+ * `revision` is null when no draft is stored yet, which is what the first save
+ * must present as its expected revision. `document` being the STORED one rather
+ * than the blueprint is what makes a reload restore work instead of discarding
+ * it — the page decides which to hand over, and the screen does not guess.
+ */
+export type PersistenceState = {
+  /** The revision the store holds, or null when nothing is stored. */
+  revision: number | null;
+  /** Whether the document the screen opened with came from the store. */
+  restored: boolean;
+};
