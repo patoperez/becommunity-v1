@@ -298,17 +298,40 @@ for (const table of [
     `${table} does NOT exist on the hosted project${error ? ` (${error.code})` : " — IT IS THERE, AND MIGRATION 0030 WAS APPLIED TO NO PROJECT. Stop and investigate."}`,
   );
 }
-for (const fn of ["publish_canonical_presentation", "restore_canonical_presentation", "read_canonical_publication"]) {
-  // A function is probed by CALLING it with arguments PostgREST cannot even
-  // match, so a project that has it answers about its arguments and a project
-  // that does not answers that the function is unknown. Nothing is written
-  // either way: an unmatched call never reaches a body.
-  const { error } = await client.rpc(fn, {});
-  record.present[fn] = error ? `absent (${error.code})` : "PRESENT";
+// THE FUNCTIONS ARE READ OUT OF THE API DESCRIPTION, NOT CALLED.
+//
+// The obvious probe is `client.rpc(name, {})` — an unmatched call never reaches
+// a body, so it cannot write. It was written that way first, and an offline gate
+// correctly failed it: this file's whole promise is that it contains no
+// `.insert(`, `.upsert(`, `.delete(` or `.rpc(` at all, and that promise is
+// worth more than the convenience of the probe. A rule that can be argued around
+// once can be argued around again.
+//
+// PostgREST publishes its own OpenAPI document at the API root, and every
+// function it exposes appears there as an `/rpc/<name>` path. Reading it is a
+// GET, it is the same read the CLI uses to report a project's REST version, and
+// it answers the same question without calling anything.
+{
+  const description = await fetch(target.restUrl, {
+    headers: { apikey: target.serviceKey, Authorization: `Bearer ${target.serviceKey}` },
+  });
+  check(description.ok, `the API description reads (${description.status})`);
+  const paths = description.ok ? Object.keys((await description.json())?.paths ?? {}) : [];
+  check(paths.length > 0, `and lists ${paths.length} paths, so an absence below is not an empty answer`);
+  // A CONTROL, so "not listed" is known to mean something: a function that IS
+  // there must appear, or every assertion under this one passes vacuously.
   check(
-    error !== null,
-    `${fn} is not callable on the hosted project${error ? ` (${error.code})` : " — IT IS THERE. Stop and investigate."}`,
+    paths.includes("/rpc/save_canonical_presentation_draft"),
+    "the canonical DRAFT save appears there, which is what makes the absences below meaningful",
   );
+  for (const fn of ["publish_canonical_presentation", "restore_canonical_presentation", "read_canonical_publication"]) {
+    const present = paths.includes(`/rpc/${fn}`);
+    record.present[fn] = present ? "PRESENT" : "absent";
+    check(
+      !present,
+      `${fn} is not exposed by the hosted project${present ? " — IT IS THERE. Stop and investigate." : ""}`,
+    );
+  }
 }
 
 /* -------------------------------------------------------------------------- */
