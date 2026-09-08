@@ -2771,12 +2771,115 @@ refused — which is defence in depth working — so the gate now also drives th
 validator directly, and the probe hits its own assertion instead of the other
 one's. The remaining two probes were badly written and were rewritten.
 
+#### The offline chain, executed in the WSL verifier
+
+Fetched and checked out at the pushed commit, clean worktree. `npm run
+typecheck`, `npm run lint`, `npm run build` and `npm run cf:build` all exit 0.
+`npm test` runs green up to `test:hosted-target-guard`, which is the documented
+known-red; because the chain is a single `&&` sequence it stops there, so the
+thirty gates after it were RUN ONE AT A TIME and every one of them exits 0.
+
 #### Known-red gates, unchanged
 
-`hosted-target-guard`'s worktree-versus-main rule and Suite D's five, exactly as
-`24c640e` reports them. Neither is called passed. `tsc --noEmit` is clean and
-lint is at the **54-warning baseline** with zero errors and zero warnings from
-any file this unit added or changed.
+`hosted-target-guard` fails on exactly the assertion `24c640e` records — "the
+refusal names the main-repository rule, so the worktree rule did not answer for
+it", a property of the verifier being a plain clone rather than a worktree.
+Suite D reports the same five: the browserslist advisory, three secret-class
+blobs already in reachable history, and the secret-leak gate. Neither is called
+passed. `tsc --noEmit` is clean and lint is at the **54-warning baseline** with
+zero errors and zero warnings from any file this unit added or changed.
+
+#### Real-route browser QA: PASSED, 87/87
+
+Driven against a PRODUCTION build of the pushed commit (`next build` +
+`next start`) over raw CDP, through the product's own `/login` form, against the
+real Cuicuilco study. No console error, no page exception, no failed request.
+The `.env.local` already on this workstation was sourced IN PLACE — never
+copied, never printed — which is also why the run is a script rather than a
+sequence of tool calls: the actor's password is typed into the form and appears
+nowhere else.
+
+What the route proves, each by driving it rather than photographing it:
+
+- **Authorization precedes everything.** Without a session the composer route
+  answers `/login`, and neither a figure nor a block title of the study appears
+  in that response.
+- **The canvas is dead on purpose.** 326 filter controls drawn, 326 genuinely
+  `disabled`, under the sentence «Aquí los filtros no se aplican». No surface
+  says «6B.2» any more.
+- **The reading view is alive.** The same 326 controls, 326 enabled, and NOT ONE
+  inside an `inert` container.
+- **A filter recomputes on the server.** «Índice de riesgo de abandono» moved
+  **33.0 → 31.3** and its base **28 → 4 respuestas utilizables** under one
+  selected value.
+- **A qualitative cloud is genuinely filtered**, and it is the cloud rather than
+  the block that shares its name — see the finding below.
+- **An unconnected block does not move.** «Razones declaradas de riesgo» shares
+  every dimension with the risk panel and is byte-identical before and after;
+  so is the recommendation block, which another panel moves.
+- **A moved block says so** («Filtrado por …») and the panel prints «Con esta
+  selección quedan N personas de M».
+- **Two characteristics combine as AND**, and the combination the run happened
+  to choose matched nobody — which produced «Ninguna persona del estudio combina
+  estas características.» rather than a zero.
+- **«Limpiar filtros» restores exactly**: the index, the cloud and the unmoved
+  block all return to the strings they had before, and no block says «Filtrado
+  por» any more.
+- **Leaving the reading view clears the selection** on its own.
+- **A reload discards both**: the surface returns to the canvas and no selection
+  survives.
+- **Tablet and phone are real.** At 768 and at 390 the panel composes inside the
+  device width (734 px and 356 px), every one of 106 controls measures 44 px in
+  LAYOUT pixels, and the document never overflows horizontally.
+- **Keyboard and screen readers.** Sixteen characteristics, sixteen
+  `fieldset`/`legend` pairs, the summary in an `aria-live="polite"` region,
+  every checkbox inside its own label, and the space bar genuinely operates a
+  control — the figure changed.
+- **Nothing raw reaches a reader.** Inside the reading view's own subtree there
+  is no `perfil_cliente`, no `csat_`, no `"active"`, no `"deserter"`, no
+  `dimension:`, `value:`, `qualitative:` or `journey-touchpoint:` handle, no
+  `"at":`, no `authoredBy` and no `rationale` — while «Generación», «Esfera» and
+  «Miembros activos» are all present, so the absences mean something.
+
+**Twelve element-level screenshots, twelve distinct SHA-256 hashes**, clipped to
+each element's own box at desktop, tablet and phone. The inventory with
+dimensions and hashes is `screenshots\INVENTORY.md`. Evidence lives outside git
+at `C:\dev\becommunity-qa\unit-6b2\`.
+
+**No application data was written.** The hosted fingerprint before and after the
+run is byte-identical: the same ten table counts, and both experience drafts
+still at schema_version 3 revision 14 and schema_version 2 revision 72 with 86
+experience events. A single save would have moved a revision. Two read-only
+hosted requests were made in this pass and no insert, update, upsert, delete,
+RPC or migration was issued.
+
+**Three faults were found, and all three were in the QA harness**, which is
+worth recording because a harness that fails quietly is how a green run lies.
+It selected a block by walking up from its DRAWING, which lives inside the
+`inert` container where a person's press dispatches nothing — it now presses the
+block's own chrome strip, found from the drag handle's accessible name. It
+clicked the first «Limpiar filtros» in the document, which belongs to another
+panel — it now clicks the risk panel's own. And it measured 44 px targets in
+SCREEN pixels while the composer was showing the preview scaled to fit, so a
+44 px control measured 17 px and the product was reported failing; targets are
+now measured in layout pixels, which the transform does not touch.
+
+#### Two findings about the approved study, recorded rather than changed
+
+Neither is a defect in this unit's code, and both are things a reader would
+meet.
+
+1. **Two blocks in the approved blueprint are titled «Miembros activos»** — the
+   recommendation comparison cell and the qualitative cloud. The editor's
+   «Qué mueve» list shows both under the same name, so an author connecting one
+   cannot tell which they picked. The QA harness hit this and reported a
+   filtered cloud that was an NPS figure until it was corrected.
+
+2. **Two filter dimensions carry the same label**, «¿Cuánto tiempo tiene tu
+   empresa?», so the active-filter summary can read «X: 1 a 3 años · X: 1 a 3
+   años». The handles differ — `uniqueSegment` disambiguates with an ordinal —
+   but the LABEL a reader sees does not. It is a property of the study's own
+   source columns, and the honest fix is editorial rather than mechanical.
 
 #### Deferred, and still deferred
 
