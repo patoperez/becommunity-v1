@@ -2514,18 +2514,55 @@ is back at the 54-warning baseline and `npm test` reports the same single
 known-red
 `hosted-target-guard` failure as `b2506e9`.
 
-**Authenticated real-route browser QA is DEFERRED, not passed.**
-Status: `AUTHENTICATED_ROUTE_QA_DEFERRED`. The three configured synthetic actors
-are refused by the hosted project with `invalid_credentials` while its auth
-service answers health 200, and rotating, resetting or creating a credential was
-out of scope. What WAS proved of the route: it answers 307 to `/login` with no
-session, and the study uuid, the composer banner and the retention heading each
-appear zero times in that response. What was NOT proved: hydration, the explicit
-preview refresh, an edit updating the preview, and a reload discarding it.
+**Authenticated real-route browser QA: PASSED, 55/55.**
+Status: `AUTHENTICATED_ROUTE_QA_PASSED` (2026-09-07). It had been deferred while
+the configured actor returned `invalid_credentials`; an existing internal
+account was supplied locally, nothing was rotated, reset or created, and the run
+then went through the product's own `/login` form.
 
-**No screenshot is claimed as real-route evidence.** None was captured for that
-route, deliberately — a substitute image renamed would be worse than an absence.
-Evidence lives outside git at `C:\dev\becommunity-qa\unit-6b1-acceptance\`.
+What the real route proves, each by driving it rather than photographing it.
+Authorization precedes the canonical read: without a session the route answers
+`/login`, and neither a figure, a block title nor the study's identifier appears
+in that response. The composer opens over the real study with 24 blocks; React
+hydrates, shown by a client-only control changing `aria-pressed` when pressed.
+Each side panel collapses and restores independently while the other stays put.
+The explicit «Actualizar vista previa» resolves on the server and the CRI is
+still 33.0 afterwards. A session-only title edit appears on the canvas and marks
+the preview stale; refreshing returns the edited title with the study's figures
+unchanged; a reload discards the edit and the block returns with its original
+title. The document does not overflow horizontally at 1440×900, 768×1024 or
+390×844. No console error, no page exception, no failed request.
+
+The real figures, read off the page: CRI **33.0**; NPS **30.8 / 46.4 / −9.1**;
+retention as **six period cards, twelve figures and twelve meters**; **five**
+journey routes; and «Salida» TDP **133.3**, unclamped, read from the detail
+panel after selecting that point. Both term clouds carry four terms with one and
+two words turned to exactly −90°, no connector or halo, and every rendered size
+equal to what its own count dictates — the counts read from each term's
+accessible name (11/4/3/1 and 7/2/1/1).
+
+**Seventeen element-level screenshots, seventeen distinct SHA-256 hashes**, at
+desktop, tablet and phone, clipped to each element's own box. The inventory with
+dimensions and hashes is `screenshots\INVENTORY.md`. Evidence lives outside git
+at `C:\dev\becommunity-qa\unit-6b1-route\`.
+
+**No application data was written.** The hosted fingerprint before and after the
+run is byte-identical: 60 / 3 282 / 31, both experience drafts still at
+schema_version 3 revision 14 and schema_version 2 revision 72, and 86 experience
+events. A single save would have moved a revision.
+
+**Two faults were found, and both were in the QA harness rather than the
+product**, which is worth recording because a harness that fails quietly is how
+a green run lies. The first version measured a default 800px window, where both
+side panels are drawers and neither is docked, and reported the panels missing.
+It also guessed at block labels — «Índice de riesgo de renovación» for a block
+the product calls «Índice de riesgo de abandono» — and photographed the viewport
+rather than the element, because `Page.captureScreenshot`'s clip takes page
+coordinates. The second version still could not commit an edit: the title field
+commits on blur, deliberately, so typing does not fill the sixty-step history,
+and calling `blur()` on a field that was never focused dispatches nothing at
+all. Each was diagnosed from the DOM rather than assumed, and no product code
+changed as a result.
 
 **Recorded, not fixed:** `src/components/evidence/QualitativeCloud.tsx` places
 terms at nine hard-coded positions and silently DROPS any beyond the ninth
