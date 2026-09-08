@@ -53,6 +53,10 @@ import { bindPresentationDocument } from "../src/lib/presentation/registry.ts";
 import { validatePresentationDocument } from "../src/lib/presentation/document.ts";
 import { serializeDeterministic, serializedBytes } from "../src/lib/presentation/serialize.ts";
 import { encodePresentationForStorage } from "../src/lib/presentation/persistence.ts";
+import { buildGenericStartingBlueprint } from "../src/lib/presentation/blueprints/generic-starting.ts";
+import { resolveUnderSelection } from "../src/lib/viewer/index.ts";
+import { EMPTY_VIEWER_SELECTION } from "../src/lib/presentation/viewer.ts";
+import { JOURNEY_ROUTES_VARIANTS, offeredChartVariants } from "../src/lib/composer/renderer-capabilities.ts";
 import { composerFixtureSource } from "./lib/composer-fixture.mjs";
 
 let failures = 0;
@@ -86,6 +90,8 @@ const BOTH_STUDY = "33333333-3333-4333-8333-333333333333";
 const LEGACY_V3_STUDY = "44444444-4444-4444-8444-444444444444";
 /** Sacrificial: the destructive probe runs here so no fingerprint is disturbed. */
 const SACRIFICE_STUDY = "55555555-5555-4555-8555-555555555555";
+/** Its legacy draft is deliberately MOVED, to show what that does to a publication. */
+const DRIFT_STUDY = "66666666-6666-4666-8666-666666666666";
 
 const q = (value) =>
   value === null || value === undefined ? "null" : `'${String(value).replace(/'/g, "''")}'`;
@@ -151,7 +157,8 @@ await withDisposableDatabase(target, "pubaudit", async (db) => {
     insert into public.study (id, tenant_id, name) values
       (${q(BOTH_STUDY)}, ${q(TENANT)}, 'Estudio con las dos familias'),
       (${q(LEGACY_V3_STUDY)}, ${q(TENANT)}, 'Estudio con borrador heredado v3'),
-      (${q(SACRIFICE_STUDY)}, ${q(TENANT)}, 'Estudio de sacrificio');
+      (${q(SACRIFICE_STUDY)}, ${q(TENANT)}, 'Estudio de sacrificio'),
+      (${q(DRIFT_STUDY)}, ${q(TENANT)}, 'Estudio cuyo borrador se mueve');
   `);
 
   /** The two hosted legacy rows, planted exactly as the project holds them. */
@@ -169,6 +176,7 @@ await withDisposableDatabase(target, "pubaudit", async (db) => {
   plantLegacy(BOTH_STUDY, 2, 72, "Heredado v2");
   plantLegacy(LEGACY_V3_STUDY, 3, 14, "Heredado v3");
   plantLegacy(SACRIFICE_STUDY, 2, 72, "Heredado v2 sacrificable");
+  plantLegacy(DRIFT_STUDY, 2, 72, "Heredado v2 que se moverá");
 
   const legacyFingerprint = (studies) =>
     db.json(`
@@ -319,8 +327,12 @@ await withDisposableDatabase(target, "pubaudit", async (db) => {
      where nsp.nspname = 'public' and rel.relname = 'study_experience_revision'
        and con.contype = 'c' and pg_get_constraintdef(con.oid) like '%schema_version%';
   `).trim();
+  // PostgreSQL normalises `between 1 and 1000` into two comparisons before it
+  // stores the constraint, so the pattern has to be the STORED form. The first
+  // draft of this assertion looked for the word `between` and failed against a
+  // database that was doing exactly what the migration asked.
   check(
-    /between 1 AND 1000/i.test(versionConstraint),
+    /schema_version >= 1/.test(versionConstraint) && /schema_version <= 1000/.test(versionConstraint),
     `the revision column admits a RANGE rather than one version (${versionConstraint || "no constraint"})`,
   );
 
@@ -503,26 +515,43 @@ await withDisposableDatabase(target, "pubaudit", async (db) => {
   /* ====================================================================== */
   console.log("\n[F] Whether a legacy publication DEPENDS on the legacy draft after the fact");
 
-  // Publication (not restoration) re-checks that the snapshot IS still the
-  // saved draft. Move the legacy draft and watch a publication of an existing
-  // revision become impossible.
+  // Publication (not restoration) re-checks that the snapshot IS still the saved
+  // draft. This runs on its own study, whose legacy draft is MOVED on purpose,
+  // so no fingerprint the audit guards is disturbed.
+  const driftDefinition = db.json(
+    `select definition::text from public.study_experience_draft where study_id = ${q(DRIFT_STUDY)};`,
+  );
+  const driftRevision = prepare({
+    studyId: DRIFT_STUDY,
+    definitionJson: JSON.stringify(driftDefinition),
+    schemaVersion: 2,
+    sourceDraftRevision: 72,
+    key: "audit-prepare-drift1",
+  });
+  check(driftRevision.ok, "a revision is prepared from that study's legacy draft at revision 72");
+  const driftRevisionId = driftRevision.ok ? driftRevision.value.revisionId : null;
+
   db.run(`
     select public.save_study_experience_draft(
-      ${q(LEGACY_V3_STUDY)}, ${q(ACTOR)},
-      jsonb_build_object('schemaVersion', 3, 'metadata',
-        jsonb_build_object('studyId', ${q(LEGACY_V3_STUDY)}, 'tenantId', ${q(TENANT)}),
-        'pages', jsonb_build_array(jsonb_build_object('id','p1','title','Heredado v3 editado'))),
-      3, 14, null
+      ${q(DRIFT_STUDY)}, ${q(ACTOR)},
+      jsonb_build_object('schemaVersion', 2, 'metadata',
+        jsonb_build_object('studyId', ${q(DRIFT_STUDY)}, 'tenantId', ${q(TENANT)}),
+        'pages', jsonb_build_array(jsonb_build_object('id','p1','title','Heredado v2 editado'))),
+      2, 72, null
     );
   `);
   eq(
-    "the legacy v3 draft is now at revision",
-    Number(db.run(`select revision from public.study_experience_draft where study_id = ${q(LEGACY_V3_STUDY)};`).trim()),
-    15,
+    "then the legacy draft is edited and moves to revision",
+    Number(db.run(`select revision from public.study_experience_draft where study_id = ${q(DRIFT_STUDY)};`).trim()),
+    73,
   );
-  const stalePublish = publish({ studyId: BOTH_STUDY, revisionId: legacyRevisionId, expectedActive: secondId, key: "audit-publish-stale" });
-  check(!stalePublish.ok, "and re-publishing an older revision of the OTHER study is refused as stale");
+  const stalePublish = publish({ studyId: DRIFT_STUDY, revisionId: driftRevisionId, key: "audit-publish-drift1" });
+  check(!stalePublish.ok, "and publishing the prepared revision is now refused");
   eq("under the precondition code", stalePublish.sqlstate, "55000");
+  check(
+    /draft changed after this revision was prepared/.test(stalePublish.message),
+    `because the LEGACY draft moved («${stalePublish.message}»)`,
+  );
 
   finding(
     "F",
@@ -617,10 +646,38 @@ await withDisposableDatabase(target, "pubaudit", async (db) => {
   /* ====================================================================== */
   console.log("\n[I] What a publication would have to store to be reproducible");
 
-  const renderBytes = serializedBytes(built.registry);
+  // A REALISTIC DOCUMENT, not the empty one the rest of this audit stores. The
+  // generic starting blueprint names everything this registry publishes, so its
+  // resolved model is the honest scale of what a reproducible publication has
+  // to keep — and it is measured rather than guessed, because it decides a
+  // column's ceiling.
+  const generic = buildGenericStartingBlueprint(built.registry, {
+    drawableFor: offeredChartVariants,
+    drawableForRoutes: JOURNEY_ROUTES_VARIANTS,
+    title: "Medición de escala",
+  });
+  const genericValidated = validatePresentationDocument(JSON.parse(serializeDeterministic(generic)));
+  check(genericValidated.ok, "the generic starting blueprint validates");
+  const genericBound = genericValidated.ok
+    ? bindPresentationDocument(genericValidated.value, built.registry)
+    : null;
+  const resolvedGeneric = genericBound
+    ? resolveUnderSelection(built, genericBound, EMPTY_VIEWER_SELECTION)
+    : { ok: false };
+  check(resolvedGeneric.ok, "and resolves into a render model");
+
   const definitionBytes = serializedBytes(canonicalEnvelope.definition);
-  check(definitionBytes > 0, `the canonical definition serializes to ${definitionBytes} bytes`);
-  check(renderBytes > 0, `and the registry this fixture builds to ${renderBytes} bytes (for scale only)`);
+  const genericDocumentBytes = genericBound ? serializedBytes(genericBound) : 0;
+  const modelBytes = resolvedGeneric.ok ? serializedBytes(resolvedGeneric.model) : 0;
+  const blockCount = resolvedGeneric.ok
+    ? resolvedGeneric.model.pages.reduce((total, page) => total + page.blocks.length, 0)
+    : 0;
+  check(definitionBytes > 0, `the empty audit definition serializes to ${definitionBytes} bytes`);
+  check(
+    genericDocumentBytes > 0 && modelBytes > 0,
+    `a ${blockCount}-block document is ${genericDocumentBytes} bytes and its RESOLVED MODEL ` +
+      `${modelBytes} bytes — about ${Math.round(modelBytes / Math.max(blockCount, 1))} bytes per block`,
+  );
   check(
     !revisionColumns.includes("render_model"),
     "the legacy revision stores no resolved output at all, by its own stated design",
