@@ -157,7 +157,13 @@ export function PublicationReviewView({
   };
 
   return (
-    <div className="space-y-6">
+    // A NAMED ROOT, so a boundary check can be scoped to what THIS unit renders.
+    // A whole-document scan for a uuid can never pass on a Studio page: the study
+    // id is in the address bar and in every tab's href, and the client's own link
+    // carries the tenant. Scanning everything would therefore have to be deleted
+    // the first time it ran — and a check that gets deleted proves less than one
+    // that is aimed correctly. This subtree is what the publication layer emits.
+    <div className="space-y-6" data-testid="revision-publicacion">
       {/* 1 ─ WHICH revision. -------------------------------------------------- */}
       <section className={CARD} aria-labelledby="revision-en-revision">
         <h2 id="revision-en-revision" className="text-base font-semibold text-strong">

@@ -299,6 +299,39 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
       return last;
     };
 
+    /**
+     * Tick every required confirmation, and keep going until the screen agrees.
+     *
+     * A CLICK BEFORE HYDRATION IS A CLICK THAT LANDS NOWHERE USEFUL. The review
+     * is server-rendered, so its checkboxes are in the first HTML and a
+     * programmatic click toggles the DOM immediately — while React's own handler
+     * has not been attached yet, so no state changes, and the next render puts
+     * the box back. Section [6] never saw this because a real keyboard press per
+     * checkbox, with a focus round trip each, is slow enough to land after
+     * hydration; a tight loop straight after a navigation is not.
+     *
+     * So this asks for the OUTCOME rather than performing the gesture: it clicks
+     * what is still unticked, waits, and looks again, until the publish control
+     * is usable or the deadline passes. It reports what it ended up doing, so a
+     * failure says whether the clicks never landed or the rule never allowed it.
+     */
+    const giveEveryConfirmation = async (timeoutMs = 20000) => {
+      const deadline = Date.now() + timeoutMs;
+      let rounds = 0;
+      let last = await reviewState();
+      while (Date.now() < deadline) {
+        if (last.publishDisabled === false) return { ok: true, rounds, last };
+        rounds += 1;
+        for (const entry of last.acknowledgements) {
+          if (!entry.checked) await clickTestId(entry.id);
+        }
+        if (last.finalConfirmed === false) await clickTestId("confirmacion-final");
+        await sleep(400);
+        last = await reviewState();
+      }
+      return { ok: last.publishDisabled === false, rounds, last };
+    };
+
     const publishedVersions = () =>
       db.run(`select coalesce(string_agg(version::text, ',' order by version), 'none') from public.canonical_presentation_revision where study_id = ${q(STUDY)};`).trim();
     const servedModel = () =>
@@ -573,11 +606,13 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
       /se llamaba|se añadió|se quitó|no es igual/.test(state.difference ?? ""),
       `naming the change in words («${(state.difference ?? "").slice(0, 120)}»)`,
     );
-    for (const entry of state.acknowledgements) await clickTestId(entry.id);
-    await clickTestId("confirmacion-final");
-    await sleep(200);
-    state = await reviewState();
-    eq("the publish control is usable again", state.publishDisabled, false);
+    const confirmed = await giveEveryConfirmation();
+    check(confirmed.ok, `the publish control is usable again after ${confirmed.rounds} round(s) of confirmation`);
+    state = confirmed.last;
+    check(
+      state.acknowledgements.every((entry) => entry.checked) && state.finalConfirmed === true,
+      "with every acknowledgement and the final confirmation ticked",
+    );
     await clickTestId("publicar");
     state = await waitFor((s) => /Publicada la versión 2/.test(s.outcome ?? ""), 30000);
     check(/Publicada la versión 2/.test(state.outcome ?? ""), "the second publication is reported");
@@ -667,9 +702,8 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
       String(Number(reviewing) + 1),
     );
 
-    for (const entry of state.acknowledgements) await clickTestId(entry.id);
-    await clickTestId("confirmacion-final");
-    await sleep(200);
+    const confirmedAgain = await giveEveryConfirmation();
+    check(confirmedAgain.ok, "the publish control is usable, so the refusal below comes from the SERVER");
     await clickTestId("publicar");
     state = await waitFor((s) => s.outcome !== null, 30000);
     check(
@@ -688,20 +722,39 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
       const measured = await page.evaluate(`JSON.stringify((() => {
         // LAYOUT pixels, never screen pixels: a transform: scale() reports a
         // 44 px control as 17 px and fails a product nobody changed.
-        const visible = [...document.querySelectorAll("button, input[type='checkbox'], input[type='text'], a[href]")]
-          .filter((el) => el.offsetParent !== null && el.offsetHeight > 0);
+        //
+        // AND THE TARGET IS WHAT A PERSON HITS, NOT THE WIDGET INSIDE IT. A
+        // checkbox is 16 px tall in every browser; what a person taps is the
+        // LABEL wrapped around it, which this product sizes at 44. Measuring the
+        // input reported three 16 px controls and would have been "fixed" by
+        // making a checkbox 44 px tall, which no design does and which would
+        // have been a test redesigning a product.
+        const target = (el) =>
+          el.matches("input[type='checkbox']") ? (el.closest("label") ?? el) : el;
+        const visible = [...document.querySelectorAll("button, input[type='checkbox'], input[type='text']")]
+          .filter((el) => el.offsetParent !== null && el.offsetHeight > 0)
+          .map(target);
         // THE CHROME AND THE DRAWING ARE DIFFERENT THINGS. The 44 px rule is this
         // application's rule for ITS OWN controls; the client preview contains a
         // RENDERED PRESENTATION whose typography is sized by the design.
         const inPreview = (el) => el.closest('[data-testid="vista-cliente"]') !== null;
         const name = (el) => ((el.getAttribute("aria-label") || el.getAttribute("data-testid") || el.textContent || "?").trim().slice(0, 40));
         const chrome = visible.filter((el) => !inPreview(el));
+        // INLINE LINKS ARE OBSERVED, NEVER ASSERTED. Two of them live in the
+        // shared Studio shell — the skip link and the client's name inside a
+        // sentence — and neither is a tap target in the sense the 44 px rule is
+        // about: one is keyboard-only by design and the other is a word in a
+        // paragraph. This unit changed neither, and holding prose to a touch
+        // target would be unrelated visual debt dressed as a finding.
+        const links = [...document.querySelectorAll("a[href]")]
+          .filter((el) => el.offsetParent !== null && el.offsetHeight > 0 && !inPreview(el));
         return {
           doc: document.documentElement.scrollWidth,
           inner: window.innerWidth,
           chromeCount: chrome.length,
           chromeSmall: chrome.filter((el) => el.offsetHeight < 44).map((el) => name(el) + ":" + el.offsetHeight),
           drawingSmall: visible.filter(inPreview).filter((el) => el.offsetHeight < 44).length,
+          smallLinks: links.filter((el) => el.offsetHeight < 44).map((el) => name(el) + ":" + el.offsetHeight),
         };
       })())`).then(JSON.parse);
       check(
@@ -718,6 +771,13 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
         console.log(
           `  — OBSERVED, not asserted: ${measured.drawingSmall} control(s) inside the client preview ` +
             `measure under 44 px at ${label}. They are the drawing, not this application's chrome.`,
+        );
+      }
+      if (measured.smallLinks.length > 0) {
+        console.log(
+          `  — OBSERVED, not asserted: ${measured.smallLinks.length} inline link(s) under 44 px at ` +
+            `${label} — ${JSON.stringify(measured.smallLinks)}. They are in the shared Studio shell, ` +
+            "unchanged by this unit, and inline prose is not a touch target.",
         );
       }
     }
@@ -748,10 +808,30 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     }
     check(!dom.includes(stack.serviceKey), "and no service key");
     check(!dom.includes(INTERNAL_PASSWORD), "and no password");
-    check(!dom.includes(TENANT), "and no tenant identifier");
     // A 64-hex digest anywhere in the DOM would be a binding or a definition
-    // hash, and neither belongs in a browser.
+    // hash, and neither belongs in a browser. This one IS asked of the whole
+    // document, because no part of a Studio page has any business carrying one.
     check(!/[0-9a-f]{64}/.test(dom), "and no 64-character digest of any kind");
+
+    // AND THE IDENTIFIER SCAN IS AIMED AT WHAT THIS UNIT RENDERS.
+    //
+    // A whole-document uuid scan can never pass on a Studio page: the study id is
+    // in the address bar and in every process tab's href, and the shared shell
+    // links the client by tenant id. Those are the application's own navigation
+    // and predate this unit. What has to be true is that the REVIEW ITSELF —
+    // every sentence, count, inventory row, difference line and history entry
+    // this unit emits — carries no identifier at all.
+    const reviewSubtree = await page.evaluate(`(() => {
+      const root = document.querySelector('[data-testid="revision-publicacion"]');
+      return root ? root.outerHTML : "";
+    })()`);
+    check(reviewSubtree.length > 2000, `the review subtree is present and substantial (${reviewSubtree.length} bytes)`);
+    check(!reviewSubtree.includes(TENANT), "the review itself carries no tenant identifier");
+    check(!reviewSubtree.includes(STUDY), "nor the study identifier");
+    check(
+      !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.test(reviewSubtree),
+      "nor any uuid at all — not a publication's, not a revision's, not a person's",
+    );
 
     writeFileSync(join(EVIDENCE, "dom-final.html"), dom, "utf8");
     console.log(`  (the final DOM is written to ${join(EVIDENCE, "dom-final.html")} for review)`);
