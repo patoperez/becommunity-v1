@@ -121,45 +121,16 @@ if (!resolved.ok) {
 }
 const REAL_MODEL = resolved.model;
 
-/** A subject that passes every stage, so a single field can be varied at a time. */
-const healthy = (over = {}) => ({
-  authorized: true,
-  readRefusal: null,
-  stored: {
-    revision: 7,
-    definitionSha256: "a".repeat(64),
-    registryVersion: identity.registryVersion,
-    bindingFingerprint: identity.bindingFingerprint,
-  },
-  reviewedRevision: 7,
-  decodeIssues: null,
-  bound: true,
-  resolutionIssues: null,
-  model: REAL_MODEL,
-  reproducible: true,
-  current: identity,
-  authored: {
-    registryVersion: identity.registryVersion,
-    bindingFingerprint: identity.bindingFingerprint,
-  },
-  lastPublished: null,
-  qualitative: [],
-  expectedActiveVersion: null,
-  actualActiveVersion: null,
-  structureChanged: false,
-  acknowledged: [],
-  ...over,
-});
-
-const codes = (findings) => findings.map((entry) => entry.code).sort();
-const has = (findings, code) => findings.some((entry) => entry.code === code);
-
 /** A hand-built block, so one outcome at a time can be produced exactly. */
 const blockOf = (id, over = {}) => ({
   id,
   semantic: null,
   chartVariant: null,
-  copy: { title: over.title ?? `Bloque ${id}`, description: null, annotation: null },
+  // `??` WOULD DEFEAT THE ONE CASE THIS HELPER EXISTS TO BUILD. `title: null`
+  // means "this block has no title", and a default applied with `??` turns that
+  // into "Bloque x" — so the assertion about an untitled block was made against
+  // a titled one and passed for the wrong reason.
+  copy: { title: "title" in over ? over.title : `Bloque ${id}`, description: null, annotation: null },
   placement: { order: 0, span: { desktop: 12, tablet: 12, mobile: 12 }, responsive: "reflow" },
   visible: over.visible ?? true,
   availability: over.availability ?? "available",
@@ -179,6 +150,44 @@ const modelOf = (blocks, pageTitleText = "Primera") => ({
   locale: "es-MX",
   pages: [{ id: "p1", title: pageTitleText, order: 0, blocks }],
 });
+
+/** A subject that passes every stage, so a single field can be varied at a time. */
+const healthy = (over = {}) => ({
+  authorized: true,
+  readRefusal: null,
+  stored: {
+    revision: 7,
+    definitionSha256: "a".repeat(64),
+    registryVersion: identity.registryVersion,
+    bindingFingerprint: identity.bindingFingerprint,
+  },
+  reviewedRevision: 7,
+  decodeIssues: null,
+  bound: true,
+  resolutionIssues: null,
+  // A CLEAN MODEL, and deliberately not the real one. The generic blueprint over
+  // this fixture declares an editorial slot nobody has filled, so the REAL model
+  // legitimately raises `configuration_required_blocks` — which is the documented
+  // behaviour and the subject of its own section. A baseline that carried it
+  // would make every "no warnings" assertion below mean something else.
+  model: modelOf([blockOf("b1")]),
+  reproducible: true,
+  current: identity,
+  authored: {
+    registryVersion: identity.registryVersion,
+    bindingFingerprint: identity.bindingFingerprint,
+  },
+  lastPublished: null,
+  qualitative: [],
+  expectedActiveVersion: null,
+  actualActiveVersion: null,
+  structureChanged: false,
+  acknowledged: [],
+  ...over,
+});
+
+const codes = (findings) => findings.map((entry) => entry.code).sort();
+const has = (findings, code) => findings.some((entry) => entry.code === code);
 
 /* -------------------------------------------------------------------------- */
 console.log("\n[1] Un documento sano no tiene bloqueos, y publicar es posible");
@@ -303,11 +312,20 @@ console.log("\n[4] NINGÚN UMBRAL: la muestra pequeña no se oculta sola");
 // The document's policy is `show_all` — the system default — so neither sample
 // warning may appear, whatever the numbers are. This is the assertion that would
 // fail the day somebody put a threshold in the preflight.
-const realPreflight = runPublicationPreflight(healthy());
+const realPreflight = runPublicationPreflight(healthy({ model: REAL_MODEL }));
 check(
   !has(realPreflight.warnings, "withheld_by_sample_policy"),
   "sobre el modelo real, con bases mínimas, no se reserva nada por muestra",
 );
+// AND THE REAL MODEL IS NOT AN EASY CASE. The generic blueprint names everything
+// this registry publishes, so it exercises every payload shape the inspection
+// classifies — including the editorial slot nobody filled, which is the warning
+// section [5] is about.
+check(
+  has(realPreflight.warnings, "configuration_required_blocks"),
+  "y el plano genérico sí trae su ranura editorial vacía, que es un aviso y no un bloqueo",
+);
+eq("bloqueos sobre el modelo real", realPreflight.blockers.length, 0);
 check(
   !has(realPreflight.warnings, "annotated_by_sample_policy"),
   "y no se anota nada por muestra",
