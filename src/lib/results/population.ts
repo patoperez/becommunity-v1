@@ -67,7 +67,15 @@ export function buildPopulation(
   for (const cohortKey of [...declaredCohortKeys, ...extraCohortKeys]) {
     const declared = spec.cohorts.find((cohort) => cohort.key === cohortKey);
     const participants = scopeParticipants(lookup, scope, [cohortKey]);
-    if (participants.length === 0 && !declared) continue;
+    // WHICH COHORTS EXIST IS A PROPERTY OF THE SOURCE, NOT OF A SELECTION.
+    //
+    // This used to drop an undeclared cohort whose scoped count fell to zero.
+    // Unfiltered that never fired — `extraCohortKeys` is read off the source's
+    // own participant index, so an undeclared cohort always has somebody — but
+    // under a FILTER it removed the row entirely, and a participation table
+    // that silently loses a row reads as a study with fewer cohorts rather than
+    // as a selection that excluded one. A cohort the source has keeps its row
+    // and reports `total: 0`, which is the true statement about this selection.
 
     let responded = 0;
     let notParticipated = 0;

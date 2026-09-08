@@ -67,11 +67,26 @@ export function buildFilterDimensions(source: CanonicalResultSource, spec: Study
   for (const participant of source.participants) {
     cohortCounts.set(participant.cohortKey, (cohortCounts.get(participant.cohortKey) ?? 0) + 1);
   }
+  // THE LABEL IS THE STUDY'S OWN WORD, AND THE VALUE IS THE ENUM.
+  //
+  // A cohort's value is `active` or `deserter`. Those are storage vocabulary,
+  // and a control that offered them would print an implementation detail to a
+  // reader — the specification has always carried «Miembros activos» and
+  // «Desertores» and this boundary was discarding them. A cohort the
+  // specification does not declare has no word but its own, so it is labelled
+  // with its key rather than with an invented sentence; `population.cohorts`
+  // has always resolved it the same way.
   const cohortValues: FilterValue[] = spec.cohorts
     .filter((cohort) => cohortCounts.has(cohort.key))
-    .map((cohort) => ({ value: cohort.key, participants: cohortCounts.get(cohort.key) ?? 0 }));
+    .map((cohort) => ({
+      value: cohort.key,
+      label: cohort.label,
+      participants: cohortCounts.get(cohort.key) ?? 0,
+    }));
   for (const [key, participants] of [...cohortCounts.entries()].sort((a, b) => codepointCompare(a[0], b[0]))) {
-    if (!cohortValues.some((value) => value.value === key)) cohortValues.push({ value: key, participants });
+    if (!cohortValues.some((value) => value.value === key)) {
+      cohortValues.push({ value: key, label: key, participants });
+    }
   }
   dimensions.push({
     key: COHORT_DIMENSION_KEY,
@@ -118,9 +133,12 @@ export function buildFilterDimensions(source: CanonicalResultSource, spec: Study
       key: definition.key,
       label: definition.label,
       dataType: definition.dataType,
+      // An attribute's answer text IS what a reader is shown, so the value and
+      // the label are the same string here. They are still two fields, because
+      // a surface must never have to know which dimension is the exception.
       values: [...counts.entries()]
         .sort((a, b) => codepointCompare(a[0], b[0]))
-        .map(([value, participants]) => ({ value, participants })),
+        .map(([value, participants]) => ({ value, label: value, participants })),
       absent: [...absent.entries()]
         .sort((a, b) => codepointCompare(a[0], b[0]))
         .map(([status, participants]) => ({ status, participants })),

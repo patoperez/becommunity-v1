@@ -94,11 +94,33 @@ export function buildPerformance(
         scope.participantIds.has(observation.participantId),
       );
 
+      // WHICH PERIODS EXIST IS A PROPERTY OF THE SOURCE, NOT OF A SELECTION.
+      //
+      // The buckets used to be built from the FILTERED rows, so a month in
+      // which nobody in the selection was observed did not become an empty
+      // month — it disappeared from the series, and the months after it moved
+      // up. A reader comparing a filtered chart with an unfiltered one would
+      // have read a missing month as a fact about the study rather than as the
+      // absence of anybody to measure, and nothing anywhere would have said so.
+      //
+      // The buckets are therefore seeded from every observation the dimension
+      // has, in the source's own period order, and only the CONTENTS are taken
+      // inside the selection. A month with nobody in scope keeps its place and
+      // its label and reports `empty_filtered_population`, which is the honest
+      // answer and the one the contract already has a word for.
       const byPeriod = new Map<string, typeof observations>();
+      const periodLabels = new Map<string, string>();
+      for (const observation of allObservations) {
+        if (!byPeriod.has(observation.periodStart)) byPeriod.set(observation.periodStart, []);
+        // The label likewise comes from the source rather than from whoever
+        // happens to be in scope: reading it off the first surviving row made a
+        // filter able to replace «noviembre» with a date string.
+        if (!periodLabels.has(observation.periodStart)) {
+          periodLabels.set(observation.periodStart, observation.periodLabel);
+        }
+      }
       for (const observation of observations) {
-        const list = byPeriod.get(observation.periodStart);
-        if (list) list.push(observation);
-        else byPeriod.set(observation.periodStart, [observation]);
+        byPeriod.get(observation.periodStart)!.push(observation);
       }
 
       const schemeKey = dimension.bandSchemeKey ?? spec.bandSchemeKeys.performance;
@@ -128,7 +150,7 @@ export function buildPerformance(
 
           const envelope = {
             key: `performance_${dimension.key}_${periodStart}`,
-            label: rows[0]?.periodLabel ?? periodStart,
+            label: periodLabels.get(periodStart) ?? periodStart,
             base,
             provenance: makeProvenance({
               calculationVersion: spec.calculationVersion,
@@ -148,7 +170,7 @@ export function buildPerformance(
           return {
             dimensionKey: dimension.key,
             periodStart,
-            label: rows[0]?.periodLabel ?? periodStart,
+            label: periodLabels.get(periodStart) ?? periodStart,
             mean:
               average === null
                 ? unavailableMetric(

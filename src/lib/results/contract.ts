@@ -48,8 +48,16 @@
  * is now `tdp` (the ratio over the valid base) with the auxiliary proportion
  * beside it under an explicit name, and the journey's stage-evidence result is
  * a settled contract rule rather than an open question. Breaking, so major.
+ *
+ * 2.1.0 — `FilterValue` gained `label`. A filter value is the only place this
+ * contract published a string a reader would be shown WITHOUT the study's own
+ * words for it: the cohort dimension's values are `active` and `deserter`, and
+ * the Spanish the study actually uses for them — «Miembros activos»,
+ * «Desertores» — sat unused in the specification. A surface offering those
+ * values as controls would print the enum. Additive, so minor: nothing moved,
+ * nothing was re-typed, and no number changed.
  */
-export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.0.0";
+export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.1.0";
 
 /**
  * The unit a number lives in. Presentation may style it; it may not change it.
@@ -333,7 +341,22 @@ export type PopulationResult = {
 /* -------------------------------------------------------------------------- */
 
 export type FilterValue = {
+  /**
+   * The value as the SOURCE states it. Never shown to a reader on its own.
+   *
+   * For an attribute it is the answer text; for the cohort dimension it is the
+   * cohort key, which is an internal enum. A surface must render `label`.
+   */
   value: string;
+  /**
+   * The study's own words for this value.
+   *
+   * Equal to `value` for an attribute — the answer text IS what a reader is
+   * shown — and the specification's declared label for a cohort. It exists so
+   * that a control can be built without a surface having to know which
+   * dimension is which, and so that `active` never reaches a screen.
+   */
+  label: string;
   /** How many people in the unfiltered population carry it. */
   participants: number;
 };
