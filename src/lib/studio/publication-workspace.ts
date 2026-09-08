@@ -585,6 +585,28 @@ export async function publishStoredPresentation(
   acknowledged: readonly string[],
   idempotencyKey: string,
 ): Promise<PublishResult> {
+  // [0] A RETRY IS ANSWERED BEFORE ANYTHING IS RE-JUDGED, and this is not an
+  //     optimisation.
+  //
+  // A retry after a lost response arrives at a world the FIRST attempt already
+  // changed: the pointer has moved to the version that attempt created. So a
+  // preflight run on the retry sees `expectedActiveVersion: null` against an
+  // actual version 1 and raises `publication_pointer_moved` — a conflict — and
+  // the operator is told to reload and look again after a publication that
+  // succeeded. The database's own replay branch, which exists precisely for
+  // this, was unreachable from the product: nothing ever got as far as the RPC.
+  //
+  // Found by the browser QA pressing publish twice, which is what a person does
+  // when a response does not come back.
+  //
+  // THE LEDGER IS THE AUTHORITY, NOT THIS READ. It is not taken under the
+  // study's advisory lock, so two simultaneous retries could both miss it — and
+  // the RPC's own replay branch, which IS under that lock, catches that. This
+  // read exists so a retry gets the honest answer instead of a conflict, not so
+  // the database can stop checking.
+  const alreadyPublished = await readReplayedPublication(client, scope, idempotencyKey);
+  if (alreadyPublished) return alreadyPublished;
+
   const assembled = await assemble(client, scope, {
     reviewedRevision: reviewedDraftRevision,
     expectedActiveVersion: expectedCurrentVersion,
@@ -717,6 +739,51 @@ export async function publishStoredPresentation(
     currentVersion,
     replacedVersion: assembled.current?.version ?? null,
     replayed,
+  };
+}
+
+/**
+ * Has a publication already been recorded for this study under this key?
+ *
+ * Answers with the outcome the first attempt produced — the version it created,
+ * where the pointer is NOW, and what it replaced — or null when this key names
+ * nothing. A replay's `version` and `currentVersion` differ when somebody has
+ * published again since, and a caller that ignored the second would report its
+ * own work live while a different version was being served.
+ */
+async function readReplayedPublication(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  idempotencyKey: string,
+): Promise<PublishResult | null> {
+  const { data, error } = await client
+    .from(EVENT_TABLE)
+    .select("action, version, replaced_revision_id")
+    .eq("study_id", scope.studyId)
+    .eq("tenant_id", scope.tenantId)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle<{ action: string; version: number; replaced_revision_id: string | null }>();
+  if (error || !data || data.action !== "published") return null;
+
+  const current = await readCurrentPublication(client, scope);
+  let replacedVersion: number | null = null;
+  if (data.replaced_revision_id !== null) {
+    const previous = await client
+      .from(REVISION_TABLE)
+      .select("version")
+      .eq("id", data.replaced_revision_id)
+      .eq("study_id", scope.studyId)
+      .eq("tenant_id", scope.tenantId)
+      .maybeSingle<{ version: number }>();
+    replacedVersion = previous.data?.version ?? null;
+  }
+
+  return {
+    ok: true,
+    version: data.version,
+    currentVersion: current.ok && current.row ? current.row.version : data.version,
+    replacedVersion,
+    replayed: true,
   };
 }
 

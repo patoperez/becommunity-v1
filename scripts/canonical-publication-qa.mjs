@@ -177,9 +177,16 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     `).trim();
   const legacyBefore = legacyFingerprint();
 
-  console.log("[setup] committing a synthetic canonical package for two studies");
+  // EVERY STUDY THIS RUN LOOKS AT GETS A PACKAGE, INCLUDING THE EMPTY ONE.
+  //
+  // «Nothing saved» and «no canonical package» are different states with
+  // different sentences, and the first draft of this run gave the empty study no
+  // package at all — so the assertion about the no-draft sentence was made
+  // against the no-package one and could only ever fail. The state under test
+  // has to be built, not assumed.
+  console.log("[setup] committing a synthetic canonical package for three studies");
   const pkg = await buildSyntheticPackage();
-  for (const study of [STUDY, DRIFT_STUDY]) {
+  for (const study of [STUDY, DRIFT_STUDY, EMPTY_STUDY]) {
     const committed = await runCanonicalCommit(transport, {
       tenantId: TENANT,
       studyId: study,
@@ -375,6 +382,10 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     await page.navigate(`${ORIGIN}/studio/e/${EMPTY_STUDY}/revision`);
     const emptyBody = await page.evaluate("document.body.innerText");
     check(/Todavía no hay nada que revisar/.test(emptyBody), "the review says there is nothing to review");
+    check(
+      /todavía no tiene una presentación guardada/.test(emptyBody),
+      "and says WHY — no presentation has been saved, which is not the same as having no results",
+    );
     check(/Compón una en Construcción/.test(emptyBody), "and says where to make one");
     check(
       !/Publicar para el cliente/.test(emptyBody),
