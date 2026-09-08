@@ -267,6 +267,51 @@ if (canonicalEvents) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+console.log("\n[3b] Migration 0030 is applied to NO project, and its storage is absent here");
+
+// THE MIRROR OF THE SECTION ABOVE, AIMED THE OTHER WAY.
+//
+// Unit 6B.4A designed and proved the canonical publication lifecycle against
+// disposable targets and applied its migration nowhere. So the finding worth
+// catching is a publication table that has APPEARED — because the only ways
+// that happens are an application nobody recorded, or a project that is not the
+// one this gate believes it is contacting.
+//
+// It is written now, in the same run that records its absence, rather than
+// after somebody applies it: a check added at activation time has never once
+// been seen to fail, and a check that has never failed is a check nobody has
+// tested. This one fails today if the table exists, which is a claim with a
+// consequence.
+//
+// WHEN THE HOSTED ACTIVATION HAPPENS, INVERT THIS, DO NOT DELETE IT — exactly as
+// 6B.3B inverted the section above rather than removing it.
+for (const table of [
+  "canonical_presentation_revision",
+  "canonical_presentation_publication",
+  "canonical_presentation_publication_event",
+]) {
+  const { error } = await client.from(table).select("study_id").limit(1);
+  record.present[table] = error ? `absent (${error.code})` : "PRESENT";
+  check(
+    error !== null,
+    `${table} does NOT exist on the hosted project${error ? ` (${error.code})` : " — IT IS THERE, AND MIGRATION 0030 WAS APPLIED TO NO PROJECT. Stop and investigate."}`,
+  );
+}
+for (const fn of ["publish_canonical_presentation", "restore_canonical_presentation", "read_canonical_publication"]) {
+  // A function is probed by CALLING it with arguments PostgREST cannot even
+  // match, so a project that has it answers about its arguments and a project
+  // that does not answers that the function is unknown. Nothing is written
+  // either way: an unmatched call never reaches a body.
+  const { error } = await client.rpc(fn, {});
+  record.present[fn] = error ? `absent (${error.code})` : "PRESENT";
+  check(
+    error !== null,
+    `${fn} is not callable on the hosted project${error ? ` (${error.code})` : " — IT IS THERE. Stop and investigate."}`,
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 console.log("\n[4] The canonical and legacy row counts");
 
 const COUNTED = [
