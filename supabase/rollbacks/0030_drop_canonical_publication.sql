@@ -32,13 +32,18 @@ drop index public.canonical_presentation_publication_event_idempotency_idx;
 drop index public.canonical_presentation_publication_tenant_idx;
 drop index public.canonical_presentation_revision_study_idx;
 
+-- ORDER, AND IT WAS WRONG THE FIRST TIME.
+--
 -- The pointer and the event log both reference the snapshot table, so they go
--- first. Each trigger goes with the table that owns it; the function they share
--- does not, so it is dropped explicitly and only after both are gone.
+-- first. Each trigger goes with the table that owns it — and TWO tables own one,
+-- so the shared function may only be dropped after BOTH are gone. The first
+-- draft of this file dropped it after the event log and before the snapshot
+-- table, and PostgreSQL refused with 2BP01: the snapshot table's trigger still
+-- depended on it. `drop … cascade` would have hidden that rather than fixing it.
 drop table public.canonical_presentation_publication;
 drop table public.canonical_presentation_publication_event;
-drop function public.refuse_canonical_publication_change();
-
 drop table public.canonical_presentation_revision;
+
+drop function public.refuse_canonical_publication_change();
 
 commit;

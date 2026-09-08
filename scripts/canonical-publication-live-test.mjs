@@ -87,6 +87,24 @@ const eq = (label, actual, expected) =>
     Object.is(actual, expected),
     `${label} = ${JSON.stringify(expected)}${Object.is(actual, expected) ? "" : ` (was ${JSON.stringify(actual)})`}`,
   );
+/**
+ * Equality of two large serialized values, WITHOUT printing either of them.
+ *
+ * `eq` prints its expected value on success, which is right for a version number
+ * and wrong for a seventeen-kilobyte render model: a passing run scrolled the
+ * whole document past the reader and buried every other line. The comparison is
+ * identical; only the reporting differs, and on a MISMATCH the first difference
+ * is located rather than the whole value dumped.
+ */
+const same = (label, actual, expected) => {
+  if (actual === expected) {
+    check(true, `${label} (${expected.length} bytes, identical)`);
+    return;
+  }
+  let at = 0;
+  while (at < actual.length && at < expected.length && actual[at] === expected[at]) at += 1;
+  check(false, `${label}: they differ at byte ${at} — «${actual.slice(at, at + 60)}» vs «${expected.slice(at, at + 60)}»`);
+};
 
 const ACTOR = "11111111-1111-4111-8111-111111111111";
 const CLIENT_ACTOR = "99999999-9999-4999-8999-999999999999";
@@ -327,7 +345,7 @@ await withDisposableDatabase(target, "publive", async (db) => {
   // for byte, digest for digest. `jsonb` reorders keys and does not keep the
   // original text, so this is what proves the canonical serialization is what
   // makes it stable across a round trip.
-  eq(
+  same(
     "the stored render model is byte-identical to the one that was approved",
     serializeDeterministic(stored.render_model),
     serializeDeterministic(clean.model),
@@ -918,7 +936,7 @@ await withDisposableDatabase(target, "publive", async (db) => {
   ]) {
     check(!(forbidden in clientView), `and no «${forbidden}»`);
   }
-  eq(
+  same(
     "the render model it serves is the one that was approved",
     serializeDeterministic(clientView.renderModel),
     serializeDeterministic(materialFor(CLEAN_STUDY, "Editado").model),
@@ -933,7 +951,7 @@ await withDisposableDatabase(target, "publive", async (db) => {
   // AND WHAT A CLIENT IS SERVED DOES NOT MOVE WHEN THE DRAFT DOES. This is the
   // reproducibility promise, executed rather than argued.
   saveDraft(CLEAN_STUDY, materialFor(CLEAN_STUDY, "Editado otra vez").envelope, 2, "clean-save-000003");
-  eq(
+  same(
     "after the draft is edited again, the served model is byte-identical to before",
     serializeDeterministic(
       db.json(`select public.read_canonical_publication(${q(CLEAN_STUDY)}, ${q(TENANT)})::text;`).renderModel,
@@ -1009,7 +1027,7 @@ await withDisposableDatabase(target, "publive", async (db) => {
     `).trim(),
     `restored|1|${draftBefore + 1}`,
   );
-  eq(
+  same(
     "what the client is served is still the same bytes",
     serializeDeterministic(
       db.json(`select public.read_canonical_publication(${q(CLEAN_STUDY)}, ${q(TENANT)})::text;`).renderModel,
@@ -1193,7 +1211,7 @@ await withDisposableDatabase(target, "publive", async (db) => {
         p_tenant_id: TENANT,
       });
       check(served.error === null, "the client-visible read answers over HTTP");
-      eq(
+      same(
         "and the model it serves is byte-identical to the one that was approved",
         serializeDeterministic(served.data?.renderModel),
         serializeDeterministic(httpMaterial.model),
