@@ -2984,7 +2984,42 @@ fix removed, and found the comment that quotes it; and its "nothing else
 separates them" fixture put the two blocks on different pages, so the page
 qualifier answered and the position branch was never reached.
 
-#### Real-route confirmation
+#### Real-route confirmation: 26/26
 
 Short and focused — the full 87-check acceptance ran at `9b05532` and is not
-repeated.
+repeated. Driven against a production build of the pushed commit in the WSL
+verifier, through the product's own login form, against the real study.
+
+- The connection list carries **29 connectable rows, 29 distinct names**, and
+  **12 unconnectable rows, 12 distinct names**. The two blocks the approved
+  layout calls «Miembros activos» read «Miembros activos · Cifra sola» and
+  «Miembros activos · Nube de términos». Every checkbox's accessible name is
+  that same string, all 29 unique, and none carries an identifier.
+- The panel offers **18 characteristics, 18 distinct names**, «Generación ·
+  Miembros activos» and «Generación · Desertores» among them.
+- In the reading view the **16 visible characteristics are 16 distinct
+  legends**, and none carries a canonical key.
+- Choosing «Boomer» on «Generación · Miembros activos» moved «Índice de riesgo
+  de abandono» from **33.0 over 28 respuestas utilizables to 41.7 over 3**, the
+  moved block named the corrected characteristic — «Filtrado por Generación ·
+  Miembros activos» — and «Razones declaradas de riesgo», which no panel names,
+  did not move.
+- No console error and no page exception.
+
+**Three element-level screenshots, three distinct hashes**; a fourth was
+captured, showed a one-line chrome strip and was removed rather than counted.
+The inventory is `screenshots/INVENTORY.md` and the evidence lives outside git
+at `C:\dev\becommunity-qa\unit-6b2-ux\`.
+
+**No application data was written.** The hosted fingerprint is byte-identical to
+the one taken at the end of Unit 6B.2: the same ten table counts, both
+experience drafts still at schema_version 3 revision 14 and schema_version 2
+revision 72, and 86 experience events.
+
+**And the confirmation script itself was wrong first.** Five of its assertions
+passed vacuously: the helper takes `(label, condition)` and those calls passed
+`(condition, label)`, so a non-empty message string was read as the condition
+and could not fail. One of the five was also measuring the connection list while
+claiming to measure the offered-characteristics list, because both headings live
+in one card and it scoped by `parentElement`. The helper now refuses a
+non-string label outright, so the mistake fails loudly instead of reading green.
