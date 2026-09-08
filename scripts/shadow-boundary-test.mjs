@@ -884,12 +884,12 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
      * satisfied by going through one of them. `publication-workspace.ts` holds
      * no canonical reader of its own; it imports everything that touches one
      * from `presentation-workspace.ts`, through a single import statement, so
-     * this page's path to the canonical layer runs through that file BY
-     * CONSTRUCTION rather than by which import happened to be written first.
+     * this page's path to the canonical layer runs through that file.
      *
-     * The `loader` field is what makes that a proof: this row fails the moment
-     * the publication module grows its own edge into the canonical graph, which
-     * is exactly the change that would make it a third loader.
+     * The `loader` field is what makes that a proof rather than a claim: a
+     * discrimination test adds a direct canonical import to that module and
+     * watches this row fail by name. It is exactly the change that would make it
+     * a third loader, and the row is what refuses it.
      */
     {
       page: "src/app/studio/e/[studyId]/revision/page.tsx",

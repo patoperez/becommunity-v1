@@ -76,14 +76,24 @@ import {
   type PresentationRenderModel,
 } from "@/lib/presentation";
 // EVERYTHING THAT REACHES THE CANONICAL LAYER COMES THROUGH ONE IMPORT, and the
-// four names below that look like they belong elsewhere are re-exported by that
+// names below that look like they belong elsewhere are re-exported by that
 // module on purpose. `resolveUnderSelection` lives in `@/lib/viewer`,
-// `encodePresentationForStorage` in `@/lib/presentation/server`, and both of
-// those reach the canonical layer by their own routes. Importing them directly
-// would give this module a second edge into that graph — and the boundary gate's
-// door table follows the FIRST path it finds from a page, so which edge it
-// followed would depend on the order two import statements happened to be
-// written in. One import, one path, one door.
+// `encodePresentationForStorage` in `@/lib/presentation/server`, and both reach
+// the canonical layer by their own routes.
+//
+// WHAT THAT ACTUALLY BUYS, MEASURED RATHER THAN ASSERTED. The boundary gate's
+// door table follows the FIRST path a breadth-first walk finds from a page to
+// the canonical layer, and requires it to pass through the declared loader. A
+// discrimination test tried both ways of breaking that: importing `@/lib/viewer`
+// here does NOT break it today, because that module reaches the canonical layer
+// two hops down and the loader reaches it in one; importing a canonical module
+// DIRECTLY does, immediately and by name.
+//
+// So the rule is not "an extra import would flip the door" — it would not,
+// today. It is that the shortest path from this module to the canonical layer
+// should be a FACT ABOUT ITS IMPORTS rather than an accident of how deep two
+// other modules happen to reach. One import, one path, one door, and the door
+// row fails the moment this file takes an edge of its own.
 import {
   decodeStoredDraft,
   encodePresentationForStorage,

@@ -517,10 +517,10 @@ export async function resolveEditedPresentation(
  *
  * That is not a style problem. The boundary gate's door table asserts that each
  * approved page reaches the canonical layer THROUGH ITS DECLARED LOADER, and it
- * follows the first path it finds. A publication module with its own direct edge
- * would sometimes be found by that path and sometimes by this one, depending on
- * the order two imports happen to be written in — a door that is approved on
- * Tuesday and unapproved on Wednesday because somebody sorted an import block.
+ * follows the first path a breadth-first walk finds. A publication module with a
+ * DIRECT edge into the canonical layer is found by that edge instead, and the
+ * door is then reported as skipping the loader it was approved for — which a
+ * discrimination test makes happen on purpose, so the rule is known to bite.
  *
  * So the publication workspace imports from HERE and from nothing else that
  * touches the canonical layer, and its route's path to that layer is this file,

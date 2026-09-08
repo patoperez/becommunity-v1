@@ -47,9 +47,10 @@ type Search = Promise<{ ok?: string; error?: string }>;
  * its own and imports everything that touches one from
  * `presentation-workspace.ts` — the composer's declared loader — through a
  * single import statement, so this page's path to the canonical layer runs
- * through that file by construction rather than by luck. The boundary gate's
- * door table names this page beside that loader, and refuses any page that is
- * not in it.
+ * through that file. The boundary gate's door table names this page beside that
+ * loader, refuses any page that is not in it, and a discrimination test proves
+ * the row bites: give the publication module a direct canonical import and this
+ * door is reported as skipping the loader it was approved for.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT REACHES THE BROWSER.
