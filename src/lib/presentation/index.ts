@@ -38,6 +38,22 @@ export type {
   ProvenanceCategory,
 } from "./capabilities";
 
+// The Spanish labels for the closed vocabulary. Client-safe by construction:
+// they carry no threshold, no number and no formula, and nothing is ever parsed
+// back out of them — the mapping runs one way, from a stored value to a
+// sentence a person reads.
+export {
+  BLOCK_KIND_LABEL,
+  CHART_VARIANT_LABEL,
+  DISCLOSURE_LABEL,
+  PRESENTATION_ERROR_LABEL,
+  RESPONSIVE_LABEL,
+  SAMPLE_POLICY_MODE_LABEL,
+  SAMPLE_POLICY_MODE_STATE,
+  chartVariantLabel,
+  presentationErrorLabel,
+} from "./labels";
+
 export {
   PRESENTATION_FACETS,
   compareHandles,

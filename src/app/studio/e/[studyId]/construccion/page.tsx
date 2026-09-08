@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { z } from "zod";
 
+import { presentationErrorLabel } from "@/lib/presentation";
 import { requireInternal } from "@/lib/studio/guard";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
 import { loadPresentationComposerWorkspace } from "@/lib/studio/presentation-workspace";
@@ -99,7 +100,10 @@ export default async function StudioStudyConstructionPage({
             <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm text-caution">
               {composer.unavailable.issues.map((issue, index) => (
                 <li key={index}>
-                  <code className="text-xs">{issue.code}</code> en <code className="text-xs">{issue.path}</code>
+                  {presentationErrorLabel(issue.code)}{" "}
+                  <span className="text-xs text-muted">
+                    (<code>{issue.code}</code> en <code>{issue.path}</code>)
+                  </span>
                 </li>
               ))}
             </ul>

@@ -32,6 +32,7 @@
  * two must not be read for each other.
  */
 
+import { chartVariantLabel } from "@/lib/presentation";
 import type { PresentationRenderModel, RenderBlock, RenderPage } from "@/lib/presentation";
 import { AbsenceNotice, InternalPlaceholder, visibleNote, type PresentationAudience } from "./absence";
 import { RENDERERS } from "./renderers";
@@ -164,7 +165,7 @@ function BlockCard({ block, audience }: { block: RenderBlock; audience: Presenta
         ) : audience === "internal" ? (
           <InternalPlaceholder
             title="Esta versión no dibuja esta forma"
-            detail={`El bloque pide «${block.chartVariant ?? "ninguna forma"}» y no hay componente para ella en esta versión. No se sustituye por otra: eso cambiaría lo que el documento dice sin que nadie lo decidiera.`}
+            detail={`El bloque pide «${chartVariantLabel(block.chartVariant)}» y no hay componente para ella en esta versión. No se sustituye por otra: eso cambiaría lo que el documento dice sin que nadie lo decidiera.`}
             action="Elige otra forma en la ficha del bloque."
           />
         ) : null}

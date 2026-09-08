@@ -69,15 +69,24 @@ import {
   type AddBlockRequest,
   type ComposerPayload,
   type ComposerState,
+  type IneligibleReason,
   type RefreshPreview,
 } from "@/lib/composer";
 import {
+  CHART_VARIANT_LABEL,
+  DEFAULT_SAMPLE_POLICY,
+  DISCLOSURE_LABEL,
   GRID_COLUMNS,
   METHODOLOGY_DISCLOSURE_LEVELS,
+  RESPONSIVE_LABEL,
+  SAMPLE_POLICY_MODE_LABEL,
+  SAMPLE_POLICY_MODE_STATE,
+  presentationErrorLabel,
   type MethodologyDisclosureLevel,
   type PresentationBlock,
   type PresentationRenderModel,
   type RenderBlock,
+  type SampleDisplayPolicy,
 } from "@/lib/presentation";
 import { PresentationRenderer } from "@/components/presentation/PresentationRenderer";
 import {
@@ -287,7 +296,10 @@ export function ComposerWorkspace({
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {issues.map((issue, index) => (
               <li key={index}>
-                <code className="text-xs">{issue.code}</code> en <code className="text-xs">{issue.path}</code>
+                {presentationErrorLabel(issue.code)}{" "}
+                <span className="text-xs text-muted">
+                  (<code>{issue.code}</code> en <code>{issue.path}</code>)
+                </span>
               </li>
             ))}
           </ul>
@@ -1058,6 +1070,219 @@ function BlockShell({
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * WHY A BLOCK CANNOT BE CONNECTED TO THIS PANEL, said to a person.
+ *
+ * `connectionCandidates` emits exactly these four reasons and no others, so the
+ * map is written over exactly those four. It replaced a chained ternary whose
+ * final `else` carried the sentence for `unknown_handle` — correct today, and
+ * correct only by position: a fifth reason added to the engine would have
+ * inherited "no está en el catálogo de este estudio", which would then be a
+ * confident false statement about why the software refused.
+ *
+ * Typed as a `Record` over the union of what that function returns, so the
+ * fifth reason is a build error instead.
+ */
+const INELIGIBLE_REASON: Readonly<Record<IneligibleReason, string>> = Object.freeze({
+  block_not_filterable: "es contenido fijo: no muestra ningún número que un filtro pueda cambiar.",
+  unknown_handle: "no está en el catálogo de este estudio.",
+  forbidden_filter_cross:
+    "una autoridad del estudio prohíbe cruzar esta característica con esa medición.",
+  unsupported_filter_dimension:
+    "esa medición no se puede desglosar por una de las características del panel.",
+});
+
+/**
+ * THE SAMPLE-POLICY EDITOR — one control, used for the document and for a block.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE RULE IT HAS TO MAKE AUTHORABLE.
+ *
+ * The default is to show everything, and the software never suppresses a small
+ * base on its own. An author may decide to annotate below some number, or to
+ * hide below it, and BOTH of those are decisions somebody signs: the schema
+ * refuses either without a name and a reason, which is what keeps "a person
+ * decided to hide this" a different fact from "the software hid it".
+ *
+ * X IS A NUMBER SOMEBODY CHOOSES. Two buttons reading «Anotar bajo 5» and
+ * «Ocultar bajo 5» stood here before, and five was written into the source in
+ * two places. The schema has always accepted 1..10000; only the editor was
+ * pretending otherwise, and an author who needed 8 had no way to say so.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY IT IS A DRAFT WITH AN APPLY, AND NOT LIVE ON EVERY KEYSTROKE.
+ *
+ * A restrictive mode is invalid until its author and reason are both written,
+ * so a live control would refuse on every character typed into the first field
+ * and bury the person in refusals for a document they were halfway through
+ * describing. The form holds a draft; one press submits it; a refusal then says
+ * something true about a decision that was actually finished.
+ *
+ * BLOCK MODE ADDS ONE OPTION AND CHANGES NOTHING ELSE. A block may inherit,
+ * which is `null`, and that is the only difference — the same four choices are
+ * on offer, so a per-block override is a real override rather than a button
+ * that can only give the decision back.
+ */
+type PolicyDraftMode = "inherit" | "show_all" | "annotate_below" | "hide_below";
+
+function SamplePolicyEditor({
+  scope,
+  current,
+  onApply,
+}: {
+  /** A block may inherit; the document is the thing that would be inherited. */
+  scope: "document" | "block";
+  current: SampleDisplayPolicy | null;
+  onApply: (policy: SampleDisplayPolicy | null) => void;
+}) {
+  const id = useId();
+  const [mode, setMode] = useState<PolicyDraftMode>(
+    current === null ? "inherit" : current.mode,
+  );
+  const [threshold, setThreshold] = useState(
+    current !== null && current.mode !== "show_all" ? String(current.threshold) : "",
+  );
+  const [note, setNote] = useState(current !== null && current.mode === "annotate_below" ? current.note : "");
+  const [publicNote, setPublicNote] = useState(
+    current !== null && current.mode === "hide_below" ? (current.publicNote ?? "") : "",
+  );
+  const [author, setAuthor] = useState(
+    current !== null && current.mode !== "show_all" ? current.authoredBy : "",
+  );
+  const [why, setWhy] = useState(current !== null && current.mode !== "show_all" ? current.rationale : "");
+
+  const restrictive = mode === "annotate_below" || mode === "hide_below";
+  const options: { value: PolicyDraftMode; label: string }[] = [
+    ...(scope === "block"
+      ? [{ value: "inherit" as const, label: "Heredar la regla del estudio" }]
+      : []),
+    { value: "show_all", label: SAMPLE_POLICY_MODE_LABEL.show_all },
+    { value: "annotate_below", label: SAMPLE_POLICY_MODE_LABEL.annotate_below },
+    { value: "hide_below", label: SAMPLE_POLICY_MODE_LABEL.hide_below },
+  ];
+
+  const apply = () => {
+    if (mode === "inherit") return onApply(null);
+    if (mode === "show_all") return onApply({ mode: "show_all" });
+    // The number is read as written and handed over as written. An empty or
+    // non-numeric box becomes 0, which the schema refuses by name rather than
+    // this control quietly choosing a threshold nobody typed.
+    const x = Number.parseInt(threshold, 10);
+    const chosen = Number.isFinite(x) ? x : 0;
+    if (mode === "annotate_below") {
+      return onApply({ mode: "annotate_below", threshold: chosen, note, authoredBy: author, rationale: why });
+    }
+    return onApply({
+      mode: "hide_below",
+      threshold: chosen,
+      authoredBy: author,
+      rationale: why,
+      publicNote: publicNote.trim() === "" ? null : publicNote,
+    });
+  };
+
+  return (
+    <fieldset className="mt-3">
+      <legend className="text-xs text-muted">
+        {scope === "document" ? "Regla de muestra del estudio" : "Regla de muestra de este bloque"}
+      </legend>
+      <p className="mt-1 text-xs text-muted">
+        Ahora:{" "}
+        <strong>
+          {current === null
+            ? "hereda la regla del estudio"
+            : SAMPLE_POLICY_MODE_STATE[current.mode]}
+          {current !== null && current.mode !== "show_all" ? ` (X = ${current.threshold})` : ""}
+        </strong>
+        . Anotar u ocultar por base pequeña exige quién lo decide y por qué; nunca ocurre solo.
+      </p>
+
+      <label className="mt-2 block text-xs text-muted" htmlFor={`${id}-mode`}>
+        Qué hacer con las bases pequeñas
+        <select
+          id={`${id}-mode`}
+          className={`${field} mt-1`}
+          value={mode}
+          onChange={(event) => setMode(event.target.value as PolicyDraftMode)}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {restrictive ? (
+        <>
+          <label className="mt-2 block text-xs text-muted" htmlFor={`${id}-x`}>
+            X — el número de personas por debajo del cual se aplica
+            <input
+              id={`${id}-x`}
+              className={`${field} mt-1`}
+              type="number"
+              min={1}
+              max={10000}
+              step={1}
+              inputMode="numeric"
+              value={threshold}
+              onChange={(event) => setThreshold(event.target.value)}
+            />
+          </label>
+          {mode === "annotate_below" ? (
+            <label className="mt-2 block text-xs text-muted" htmlFor={`${id}-note`}>
+              La anotación que acompaña a un resultado por debajo de X
+              <input
+                id={`${id}-note`}
+                className={`${field} mt-1`}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </label>
+          ) : (
+            <label className="mt-2 block text-xs text-muted" htmlFor={`${id}-public`}>
+              Lo único que el cliente leerá sobre lo oculto (opcional)
+              <input
+                id={`${id}-public`}
+                className={`${field} mt-1`}
+                value={publicNote}
+                onChange={(event) => setPublicNote(event.target.value)}
+              />
+            </label>
+          )}
+          <label className="mt-2 block text-xs text-muted" htmlFor={`${id}-author`}>
+            Quién lo decide
+            <input
+              id={`${id}-author`}
+              className={`${field} mt-1`}
+              value={author}
+              onChange={(event) => setAuthor(event.target.value)}
+            />
+          </label>
+          <label className="mt-2 block text-xs text-muted" htmlFor={`${id}-why`}>
+            Por qué
+            <input
+              id={`${id}-why`}
+              className={`${field} mt-1`}
+              value={why}
+              onChange={(event) => setWhy(event.target.value)}
+            />
+          </label>
+          <p className="mt-1 text-xs text-muted">
+            Ni el umbral ni estos dos campos llegan al cliente: son el registro de quién decidió y por qué.
+          </p>
+        </>
+      ) : null}
+
+      <button type="button" className={`${btn} mt-2 px-2 text-xs`} onClick={apply}>
+        Aplicar esta regla
+      </button>
+    </fieldset>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
 function Inspector({
   selected,
   state,
@@ -1071,9 +1296,6 @@ function Inspector({
   context: { catalog: ComposerPayload["catalog"] };
   payload: ComposerPayload;
 }) {
-  const authorId = useId();
-  const [author, setAuthor] = useState("");
-  const [rationale, setRationale] = useState("");
 
   if (!selected) {
     return (
@@ -1092,64 +1314,15 @@ function Inspector({
               onChange={(event) => act((s) => setDocumentDisclosure(s, event.target.value as MethodologyDisclosureLevel))}
             >
               {METHODOLOGY_DISCLOSURE_LEVELS.map((level) => (
-                <option key={level} value={level}>{level}</option>
+                <option key={level} value={level}>{DISCLOSURE_LABEL[level]}</option>
               ))}
             </select>
           </label>
-          <fieldset className="mt-3">
-            <legend className="text-xs text-muted">Política de muestra del documento</legend>
-            <p className="mt-1 text-xs text-muted">
-              Ahora: <strong>{state.document.samplePolicy.mode}</strong>. Ocultar o anotar por base pequeña
-              exige quién lo decide y por qué; nunca ocurre solo.
-            </p>
-            <label className="mt-2 block text-xs text-muted" htmlFor={`${authorId}-a`}>
-              Quién lo decide
-              <input id={`${authorId}-a`} className={`${field} mt-1`} value={author} onChange={(event) => setAuthor(event.target.value)} />
-            </label>
-            <label className="mt-2 block text-xs text-muted" htmlFor={`${authorId}-r`}>
-              Por qué
-              <input id={`${authorId}-r`} className={`${field} mt-1`} value={rationale} onChange={(event) => setRationale(event.target.value)} />
-            </label>
-            <div className="mt-2 flex flex-wrap gap-1">
-              <button type="button" className={`${btn} px-2 text-xs`} onClick={() => act((s) => setDocumentSamplePolicy(s, { mode: "show_all" }))}>
-                Mostrarlo todo
-              </button>
-              <button
-                type="button"
-                className={`${btn} px-2 text-xs`}
-                onClick={() =>
-                  act((s) =>
-                    setDocumentSamplePolicy(s, {
-                      mode: "annotate_below",
-                      threshold: 5,
-                      note: "Base pequeña.",
-                      authoredBy: author,
-                      rationale,
-                    }),
-                  )
-                }
-              >
-                Anotar bajo 5
-              </button>
-              <button
-                type="button"
-                className={`${btn} px-2 text-xs`}
-                onClick={() =>
-                  act((s) =>
-                    setDocumentSamplePolicy(s, {
-                      mode: "hide_below",
-                      threshold: 5,
-                      authoredBy: author,
-                      rationale,
-                      publicNote: null,
-                    }),
-                  )
-                }
-              >
-                Ocultar bajo 5
-              </button>
-            </div>
-          </fieldset>
+          <SamplePolicyEditor
+            scope="document"
+            current={state.document.samplePolicy}
+            onApply={(policy) => act((s2) => setDocumentSamplePolicy(s2, policy ?? DEFAULT_SAMPLE_POLICY))}
+          />
         </section>
       </div>
     );
@@ -1228,7 +1401,7 @@ function Inspector({
               onChange={(event) => act((s) => setChartVariant(s, context, block.id, event.target.value))}
             >
               {offered.map((variant) => (
-                <option key={variant} value={variant}>{variant}</option>
+                <option key={variant} value={variant}>{CHART_VARIANT_LABEL[variant]}</option>
               ))}
             </select>
           </label>
@@ -1280,9 +1453,9 @@ function Inspector({
             value={block.placement.responsive}
             onChange={(event) => act((s) => setBlockResponsive(s, block.id, event.target.value as "reflow" | "stack" | "scroll_x"))}
           >
-            <option value="reflow">Pasa a su propia fila</option>
-            <option value="stack">Apila sus partes</option>
-            <option value="scroll_x">Se desplaza dentro de su caja</option>
+            <option value="reflow">{RESPONSIVE_LABEL.reflow}</option>
+            <option value="stack">{RESPONSIVE_LABEL.stack}</option>
+            <option value="scroll_x">{RESPONSIVE_LABEL.scroll_x}</option>
           </select>
         </label>
         <label className="mt-2 block text-xs text-muted">
@@ -1327,17 +1500,16 @@ function Inspector({
           >
             <option value="">Heredar el del documento</option>
             {METHODOLOGY_DISCLOSURE_LEVELS.map((level) => (
-              <option key={level} value={level}>{level}</option>
+              <option key={level} value={level}>{DISCLOSURE_LABEL[level]}</option>
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          className={`${btn} mt-2 px-2 text-xs`}
-          onClick={() => act((s) => setBlockSamplePolicy(s, block.id, null))}
-        >
-          Heredar la política de muestra del documento
-        </button>
+        <SamplePolicyEditor
+          key={block.id}
+          scope="block"
+          current={block.samplePolicy}
+          onApply={(policy) => act((s2) => setBlockSamplePolicy(s2, block.id, policy))}
+        />
       </section>
     </div>
   );
@@ -1423,13 +1595,7 @@ function FilterPanelCard({
             {candidates.ineligible.map(({ block: target, reason }) => (
               <li key={target.id}>
                 <span className="[overflow-wrap:anywhere]">{target.copy.title ?? target.id}</span> —{" "}
-                {reason === "block_not_filterable"
-                  ? "es contenido fijo: no muestra ningún número que un filtro pueda cambiar."
-                  : reason === "forbidden_filter_cross"
-                    ? "una autoridad del estudio prohíbe cruzar esta característica con esa medición."
-                    : reason === "unsupported_filter_dimension"
-                      ? "esa medición no se puede desglosar por una de las características del panel."
-                      : "no está en el catálogo de este estudio."}
+                {INELIGIBLE_REASON[reason]}
               </li>
             ))}
           </ul>

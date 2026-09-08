@@ -66,6 +66,7 @@ export type {
   ComposerRefusalCode,
   ComposerState,
   CopyField,
+  IneligibleReason,
 } from "./editor";
 
 export {

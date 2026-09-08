@@ -1352,17 +1352,34 @@ export function panelsMoving(
  * interpretation" gets the answer next to the thing they could not tick,
  * rather than an absence to interpret.
  */
+/**
+ * WHY A BLOCK CANNOT JOIN A PANEL — the four answers this walk can give.
+ *
+ * It is deliberately NARROWER than `ComposerRefusalCode`. The surface that
+ * lists ineligible blocks has to write a sentence for every reason it can
+ * receive, and typing this as the whole refusal union made that impossible to
+ * do exhaustively: the editor listed three by name and let the remaining
+ * twenty-four fall onto one positional `else`. Narrowed, the map over these
+ * four is complete, and a fifth reason added below is a build error in the
+ * component rather than a confident false sentence on screen.
+ */
+export type IneligibleReason =
+  | "block_not_filterable"
+  | "unknown_handle"
+  | "forbidden_filter_cross"
+  | "unsupported_filter_dimension";
+
 export function connectionCandidates(
   document: PresentationDocument,
   context: ComposerContext,
   panelId: string,
 ): {
   eligible: { block: PresentationBlock; pageId: string; connected: boolean }[];
-  ineligible: { block: PresentationBlock; pageId: string; reason: ComposerRefusalCode }[];
+  ineligible: { block: PresentationBlock; pageId: string; reason: IneligibleReason }[];
 } {
   const panel = findBlock(document, panelId);
   const eligible: { block: PresentationBlock; pageId: string; connected: boolean }[] = [];
-  const ineligible: { block: PresentationBlock; pageId: string; reason: ComposerRefusalCode }[] = [];
+  const ineligible: { block: PresentationBlock; pageId: string; reason: IneligibleReason }[] = [];
   if (!panel || panel.block.kind !== "filter_panel") return { eligible, ineligible };
   const dimensions = panel.block.dimensions;
 
