@@ -167,8 +167,11 @@ npm run qa:canonical-presentation-draft # Unit 6B.3A real-route QA against a DIS
                                     #   against the hosted project, and must not be made to.
 npm run test:canonical-presentation-hosted-fingerprint # READ-ONLY. Proves the two legacy
                                     #   experience drafts are still v2/72 and v3/14, that neither
-                                    #   is v4, that the experience log is unchanged, and that
-                                    #   0029's tables do not exist on the hosted project.
+                                    #   is v4, that the experience log is unchanged, that 0029's
+                                    #   storage EXISTS on the hosted project, and that it holds
+                                    #   exactly one canonical draft — Cuicuilco's, at revision 1,
+                                    #   with its pinned binding and definition digest, under one
+                                    #   draft_created event — and that no other study has one.
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
@@ -262,8 +265,9 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   (`supabase_migrations.schema_migrations`) recorded 26 versions, 0000-0025,
   ending in `semantic_category_review`, `experience_definition_persistence`,
   `experience_draft_conflict_code` and `experience_publication` — none of which
-  is on `main`. It now records **29 versions, 0000-0028**: the canonical chain
-  was applied there on 2026-09-06. `study_experience_event` holds 86 rows written under numbers this
+  is on `main`. It now records **30 versions, 0000-0029**: the canonical chain
+  was applied there on 2026-09-06 and the presentation-draft migration on
+  2026-09-08. `study_experience_event` holds 86 rows written under numbers this
   branch also used, so the database made that numbering a fait accompli and the
   canonical branch was the cheap side to move. **This branch now carries those
   four migrations too**, so the repository describes the schema the project
@@ -370,7 +374,7 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   gate, not a surprise during a run against a live project.
 - ⓘ **The database gate must stay executable.** It creates disposable
   `becommunity_canonical_test_*` databases on a loopback host or a unix socket,
-  applies migrations 0000-0028 verbatim — including the four imported 0022-0025
+  applies migrations 0000-0029 verbatim — including the four imported 0022-0025
   files — and refuses to run if a remote host, a
   password, a Supabase host or a `SUPABASE_SERVICE_ROLE_KEY` is in scope. Those
   refusals are executed by `npm test`, so weakening one is a red offline gate.
@@ -574,10 +578,27 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   does NOT support coexistence, and the table accepting JSON is not a licence to
   put canonical JSON in it. Migration `0029_canonical_presentation_draft.sql`
   adds a SEPARATE table so the two hosted legacy rows are structurally
-  unreachable from the canonical path rather than merely unvisited by it, and it
-  is applied to no project. Never write a v4 document through the legacy RPC,
-  and never widen that table's primary key: it is not additive, and every
-  existing reader of it assumes one draft per study.
+  unreachable from the canonical path rather than merely unvisited by it.
+  **It IS APPLIED to the hosted project** — see the Unit 6B.3B bullet below.
+  Never write a v4 document through the legacy RPC, and never widen that table's
+  primary key: it is not additive, and every existing reader of it assumes one
+  draft per study.
+- ⓘ **UNIT 6B.3B: `0029` IS APPLIED to the hosted project, and Cuicuilco has a
+  canonical draft at revision 1.** Applied to `ontvqazsqiwisdddblif` on
+  **2026-09-08 19:14:40–19:14:45 UTC**, from commit `6f8bf76`, through
+  `supabase db push` (CLI 2.115.0) over the SESSION pooler — the dry run proposed
+  that one file and nothing else, and no ledger entry was hand-written. The
+  ledger is now **30 rows, 0000-0029, no duplicate**, and no recorded body of
+  `0000`-`0028` moved. A verified backup was taken and restore-rehearsed into a
+  disposable PostgreSQL 17.11 first, and it is **retained**.
+  Cuicuilco (`cd4d6acd…`) then got its first canonical v4 draft through the real
+  application: **revision 1**, one `draft_created` event, definition digest
+  `511d7f54…`, binding `cf63bdca…`, registry `1.0.0`, 1 page and 24 blocks. It is
+  the ONLY canonical draft that exists; **P6E deliberately has none**. Both
+  legacy drafts are byte-identical — Cuicuilco v2/72, P6E v3/14 — and
+  `study_experience_event` still holds 86 rows. Read `docs/CURRENT_STATE.md`
+  §"Unit 6B.3B" before touching any of it, and do not create a second revision
+  of that draft to test something a disposable target can answer.
 - ⓘ **`0029` grants `service_role` SELECT and nothing else**, which is stricter
   than `0026`-`0028` and deliberately so. Its only legitimate writer is the
   `SECURITY DEFINER` save function; a `service_role` that could `UPDATE` the

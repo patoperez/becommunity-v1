@@ -297,18 +297,20 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
      * silently ran against migrations 0000-0027 would be measuring the wrong
      * database.
      */
-    async prepare(upTo = 28) {
-      // TWENTY-EIGHT, AND NOT THE LAST MIGRATION ON DISK — the two transports
-      // answer different questions and must be allowed to disagree.
+    async prepare(upTo = 29) {
+      // THE BOUND IS A FACT ABOUT THE TARGET, NOT THE NEWEST FILE ON DISK — the
+      // two transports answer different questions and must be allowed to
+      // disagree.
       //
       // The psql transport APPLIES, so its bound tracks the newest migration in
       // the repository. This one VERIFIES a target that is already migrated, so
-      // its bound is a FACT about that target: the hosted project is at 0028.
-      // Unit 6B.3A added 0029, which is applied to no project by design — and a
-      // bump here would have demanded, on the hosted target, a migration this
-      // phase forbids applying to it. It was bumped in lockstep with the psql
-      // transport and reverted when that asymmetry was noticed.
-      if (upTo !== 28) {
+      // its bound says where that target actually is. It read 28 for as long as
+      // that was true and it now reads 29, because Unit 6B.3B applied
+      // `0029_canonical_presentation_draft.sql` to the hosted project on
+      // 2026-09-08. The two numbers agreeing again is a coincidence of this
+      // moment, not the rule: the moment a migration is written and not yet
+      // applied, they diverge, and this bound must follow the PROJECT.
+      if (upTo !== 29) {
         refuse(
           `this transport cannot roll the schema back to ${upTo}: it applies no migration and reverses none.`,
         );
@@ -317,16 +319,21 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
         const { error } = await service.from(table).select("*", { count: "exact", head: true });
         if (error) refuse(`public.${table} is not reachable, so migration 0028 is not applied to this target.`);
       }
-      // AND 0029 MUST NOT BE THERE. A hosted target carrying it would mean this
-      // phase's central promise had been broken, and a suite that ran happily
-      // against it would be the last place anyone looked.
-      const { error: unexpected } = await service
+      // AND 0029 MUST BE THERE. This assertion used to run the other way — it
+      // refused a target CARRYING the table, because the migration was applied
+      // to no project. Unit 6B.3B applied it deliberately, so the refusal is
+      // inverted rather than deleted: a hosted target that has lost the draft
+      // storage is as much a finding as one that gained it unexpectedly, and a
+      // suite running happily against a half-migrated project would be the last
+      // place anyone looked.
+      const { error: missing } = await service
         .from("canonical_presentation_draft")
         .select("study_id", { count: "exact", head: true });
-      if (!unexpected) {
+      if (missing) {
         refuse(
-          "public.canonical_presentation_draft EXISTS on this target, so a migration that is " +
-            "applied to no project has been applied to it. Stop and investigate.",
+          "public.canonical_presentation_draft is not reachable, so migration 0029 is not applied " +
+            "to this target. It was applied to the hosted project on 2026-09-08; a target without " +
+            "it is not the target this transport verifies. Stop and investigate.",
         );
       }
     },

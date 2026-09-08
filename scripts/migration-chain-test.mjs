@@ -280,6 +280,19 @@ const CANONICAL_ORDER = [
  * schema. A rule about a specific migration names that migration.
  */
 const COMMIT_SLUG = "canonical_commit_and_rollback";
+
+/**
+ * The last migration APPLIED to the hosted project, named rather than derived.
+ *
+ * It is deliberately its own constant and not `canonical[canonical.length - 1]`
+ * nor `COMMIT_SLUG`. Deriving it from the file list would make the next
+ * migration written — and not yet applied — silently redefine "what the hosted
+ * project has", which is exactly the failure the note above records for the
+ * commit migration. It moved from `canonical_commit_and_rollback` to
+ * `canonical_presentation_draft` on 2026-09-08, when Unit 6B.3B applied 0029,
+ * and it must be moved BY HAND again, after a migration is applied there.
+ */
+const HOSTED_APPLIED_SLUG = "canonical_presentation_draft";
 const canonical = parsed.filter((e) => e.slug.startsWith("canonical_"));
 
 {
@@ -368,10 +381,15 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
   // same thing only while every migration was applied everywhere. The psql
   // transport APPLIES, so its bound tracks the newest migration on disk. The
   // REST transport VERIFIES a hosted target, so its bound is a FACT about that
-  // target — and the hosted project stops at the canonical COMMIT migration.
-  // Unit 6B.3A's presentation migration is applied to no project by design, so
-  // demanding it over REST would demand of the hosted project the one thing
-  // this phase forbids. The rule now names each bound for what it is.
+  // target. The rule names each bound for what it is, and keeps naming them
+  // separately even when the two numbers agree.
+  //
+  // THEY AGREE AGAIN AS OF UNIT 6B.3B, AND THAT IS A COINCIDENCE OF THIS MOMENT.
+  // The hosted project stopped at the canonical COMMIT migration for as long as
+  // 0029 was applied to no project; 6B.3B applied it on 2026-09-08, so the
+  // hosted bound moved to the presentation migration. The next migration written
+  // and not yet applied will separate them again, and this rule must not be
+  // rewritten back into "the last file on disk" when it does.
   const restDefault = /async prepare\(upTo = (\d+)\)/.exec(rest);
   const restGuard = /if \(upTo !== (\d+)\)/.exec(rest);
   check(restDefault !== null && restGuard !== null, "the REST transport declares a default bound and a refusal bound");
@@ -380,17 +398,21 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
       restDefault[1] === restGuard[1],
       `and they agree with each other (${restDefault[1]} / ${restGuard[1]})`,
     );
-    const commitEntry = canonical.find((e) => e.slug === COMMIT_SLUG);
+    const draftEntry = canonical.find((e) => e.slug === HOSTED_APPLIED_SLUG);
     check(
-      commitEntry !== undefined && Number(restDefault[1]) === commitEntry.number,
-      `and both name the last migration APPLIED to the hosted project — the canonical commit ` +
-        `migration ${commitEntry?.prefix ?? "?"} — rather than the last one on disk (${restDefault[1]})`,
+      draftEntry !== undefined && Number(restDefault[1]) === draftEntry.number,
+      `and both name the last migration APPLIED to the hosted project — ` +
+        `${draftEntry?.prefix ?? "?"} ${HOSTED_APPLIED_SLUG} — which is a fact about the project, ` +
+        `not a restatement of the last file on disk (${restDefault[1]})`,
     );
-    // And the transport must actively refuse a target that carries a migration
-    // nobody applied, or "0029 is applied nowhere" would be a claim with no check.
+    // And the transport must actively check for that migration's own table, or
+    // "0029 is applied to the hosted project" would be a claim with no check.
+    // The assertion used to require the opposite and was INVERTED rather than
+    // deleted: a target that has lost the storage is as much a finding as one
+    // that gained it unexpectedly.
     check(
       /canonical_presentation_draft/.test(rest),
-      "and it refuses a hosted target that carries the unapplied presentation migration",
+      "and it refuses a hosted target that has lost the presentation migration's storage",
     );
   }
 
@@ -692,6 +714,21 @@ console.log("\n[7] The documentation does not claim an application that never ha
   const assertsApplied = (text) =>
     sentences(text).filter((s) => APPLIED_SUBJECT.test(s) && APPLIED_VERB.test(s) && !NEGATOR.test(s));
 
+  /**
+   * Sentences asserting the PRESENTATION migration is applied — now required.
+   *
+   * A second, separate requirement rather than a widening of the one above,
+   * because the two facts became true on different days and a document that
+   * records only the older one is out of date in a way the older rule cannot
+   * see: `0026`-`0028` were applied on 2026-09-06 and `0029` on 2026-09-08.
+   */
+  const PRESENTATION_APPLIED_SUBJECT =
+    /\b0029\b|\bcanonical_presentation_draft\b|\bpresentation migration\b|\bcanonical presentation draft\b/i;
+  const assertsPresentationApplied = (text) =>
+    sentences(text).filter(
+      (s) => PRESENTATION_APPLIED_SUBJECT.test(s) && APPLIED_VERB.test(s) && !NEGATOR.test(s),
+    );
+
   /** Sentences claiming a real workbook has been imported — still forbidden. */
   const IMPORT_SUBJECT = /\breal (?:workbook|package)s?\b|\bCuicuilco workbooks?\b/i;
   const IMPORT_VERB = /\b(?:has|have|was|were|is|are)\s+(?:been\s+)?(?:imported|loaded|uploaded)\b/i;
@@ -707,6 +744,16 @@ console.log("\n[7] The documentation does not claim an application that never ha
     [/never been contacted/i, "the hosted project HAS been contacted"],
     [/\bno hosted mutation (?:has )?(?:ever )?occurred/i, "one hosted mutation DID occur — the duplicate study was deleted"],
     [/nothing was applied, deployed, uploaded or mutated/i, "a hosted mutation did occur"],
+    // Withdrawn by Unit 6B.3B on 2026-09-08. Each was true while 0029 existed
+    // only in git; leaving one in place tells the next session that the hosted
+    // project has no canonical draft storage, which is the single fact this
+    // unit changed.
+    [/\b0029\b[^.]{0,120}\bapplied to no project\b/i, "0029 IS applied to the hosted project (2026-09-08)"],
+    [/\bpresentation migration is applied to no project\b/i, "the presentation migration IS applied"],
+    [/\bapplied to no project by design\b/i, "0029 was applied deliberately on 2026-09-08"],
+    [/\bcanonical_presentation_draft\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
+      "canonical_presentation_draft EXISTS on the hosted project"],
+    [/\bno study has a canonical (?:presentation )?draft\b/i, "Cuicuilco has one, at revision 1"],
   ];
 
   for (const doc of DOCS) {
@@ -716,6 +763,12 @@ console.log("\n[7] The documentation does not claim an application that never ha
     check(
       applied.length > 0,
       `${doc} records that the canonical migrations ARE applied to the hosted project${applied.length ? "" : " — it does not, and they are"}`,
+    );
+
+    const presentationApplied = assertsPresentationApplied(text);
+    check(
+      presentationApplied.length > 0,
+      `${doc} records that the PRESENTATION migration is applied too${presentationApplied.length ? "" : " — it does not, and it is, since 2026-09-08"}`,
     );
 
     const stillPending = sentences(text).filter((s) =>

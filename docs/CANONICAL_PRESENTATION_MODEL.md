@@ -574,7 +574,9 @@ equality rather than by range.
 
 ### The row, and the two halves that must agree
 
-`canonical_presentation_draft` (migration `0029`, applied to no project) holds
+`canonical_presentation_draft` (migration `0029`, **applied to the hosted
+project on 2026-09-08**, and holding exactly one row: Cuicuilco's draft at
+revision 1) holds
 the definition as `jsonb` and repeats three identity facts as columns —
 `document_kind`, `registry_version`, `binding_fingerprint` — so they can be
 answered without parsing the document. A repeated fact can disagree with itself,

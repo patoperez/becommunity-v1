@@ -1,5 +1,5 @@
 // =============================================================================
-// UNIT 6B.3A — READ-ONLY HOSTED FINGERPRINT
+// UNIT 6B.3A/6B.3B — READ-ONLY HOSTED FINGERPRINT
 // =============================================================================
 //   CANONICAL_HOSTED_TARGET_REF=<ref> \
 //   CANONICAL_HOSTED_ACKNOWLEDGE=I-AUTHORIZE-MUTATION-OF-<ref> \
@@ -18,9 +18,14 @@
 // prints them beside what `docs/CURRENT_STATE.md` recorded at the end of Unit
 // 6B.2.1, so a difference is visible rather than assumed.
 //
-// It also proves the ONE thing that would be a real failure of this unit:
-// migration 0029 is applied to no project, so `canonical_presentation_draft`
-// must NOT exist here.
+// IT ALSO PINS WHAT UNIT 6B.3B PUT THERE. Until 2026-09-08 this section proved
+// that `canonical_presentation_draft` did NOT exist, because migration 0029 was
+// applied to no project. 6B.3B applied it and created Cuicuilco's first
+// canonical draft, so the assertion is INVERTED rather than removed: the
+// storage must exist, it must hold exactly one draft, that draft must be
+// Cuicuilco's at revision 1 with the digest the encoder produced before the
+// write, exactly one `draft_created` event must describe it, and no other study
+// may have acquired one.
 //
 // -----------------------------------------------------------------------------
 // IT WRITES NOTHING, AND THAT IS STRUCTURAL
@@ -66,6 +71,21 @@ const EXPECTED = {
     "cd4d6acd-88b9-4804-829f-75b6d91a32b7": "9a08dacbc4d63c4e",
     "ad275928-dbd1-4acf-9de9-fa1623b32a60": "a1fe3298761e85c8",
   },
+  /**
+   * The canonical draft Unit 6B.3B created, on 2026-09-08.
+   *
+   * Every field is pinned, not merely counted. The digest in particular is the
+   * one `encodePresentationForStorage` computed BEFORE the write and the
+   * database has held unchanged since — the same reasoning that pins the two
+   * legacy digests above, applied to the row this phase created.
+   */
+  canonicalDraft: {
+    studyId: "cd4d6acd-88b9-4804-829f-75b6d91a32b7",
+    revision: 1,
+    registryVersion: "1.0.0",
+    binding: "cf63bdca71e842fb0f6af50665348567a7b5a0f14f21b62683d2b0d0b5ca2037",
+    definitionSha256: "511d7f54f3ec0a391b45db259f64d57f9d415a9b2f5711c6f5fc551cdb67809d",
+  },
 };
 
 let failures = 0;
@@ -99,14 +119,15 @@ const client = createClient(target.apiOrigin, target.serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-console.log("Be Community — Unit 6B.3A: READ-ONLY hosted fingerprint");
+console.log("Be Community — Units 6B.3A/6B.3B: READ-ONLY hosted fingerprint");
 console.log("=".repeat(78));
 console.log(`  project: ${target.ref}`);
 console.log("  every request below is a select; nothing is written.");
 
 const evidence = process.env.BECOMMUNITY_QA_EVIDENCE ?? "/tmp/becommunity-qa-6b3a";
 mkdirSync(evidence, { recursive: true });
-const record = { ref: target.ref, readAt: new Date().toISOString(), drafts: [], counts: {}, absent: {} };
+const record = { ref: target.ref, readAt: new Date().toISOString(), drafts: [], counts: {}, present: {},
+                 canonicalDrafts: [], canonicalEvents: null };
 
 /* -------------------------------------------------------------------------- */
 console.log("\n[1] The two legacy experience drafts");
@@ -178,15 +199,71 @@ for (const [table, expected] of [
 }
 
 /* -------------------------------------------------------------------------- */
-console.log("\n[3] Migration 0029 is applied to NO project, so its tables are absent here");
+console.log("\n[3] Migration 0029 IS applied here, and holds exactly one draft");
 
+// THIS SECTION USED TO ASSERT THE OPPOSITE, AND WAS INVERTED RATHER THAN
+// DELETED. While `0029` existed only in git, the finding worth catching was a
+// table that had appeared. Unit 6B.3B applied it on 2026-09-08 and created
+// Cuicuilco's first canonical draft, so the finding worth catching is now a
+// table that has gone, a revision that has moved, or a second study that has
+// quietly acquired a draft of its own. The direction changed; the job did not.
 for (const table of ["canonical_presentation_draft", "canonical_presentation_draft_event"]) {
   const { error } = await client.from(table).select("study_id").limit(1);
-  record.absent[table] = error?.code ?? "PRESENT";
+  record.present[table] = error ? `absent (${error.code})` : "present";
   check(
-    error !== null,
-    `${table} does not exist on the hosted project${error ? ` (${error.code})` : " — IT EXISTS, WHICH MEANS 0029 WAS APPLIED"}`,
+    error === null,
+    `${table} exists on the hosted project${error ? ` — IT IS GONE (${error.code}), WHICH MEANS 0029 WAS REVERSED` : ""}`,
   );
+}
+
+const { data: canonicalDrafts, error: canonicalError } = await client
+  .from("canonical_presentation_draft")
+  .select("study_id, tenant_id, document_kind, schema_version, registry_version, binding_fingerprint, revision, definition_sha256")
+  .order("study_id", { ascending: true });
+
+check(canonicalError === null, `the canonical draft table reads${canonicalError ? ` — ${canonicalError.code}` : ""}`);
+if (canonicalDrafts) {
+  record.canonicalDrafts = canonicalDrafts.map((row) => ({ ...row }));
+  check(canonicalDrafts.length === 1, `it holds exactly one draft (${canonicalDrafts.length})`);
+  const expected = EXPECTED.canonicalDraft;
+  const row = canonicalDrafts.find((candidate) => candidate.study_id === expected.studyId);
+  check(row !== undefined, `and it belongs to Cuicuilco (${expected.studyId})`);
+  if (row) {
+    check(row.revision === expected.revision, `at revision ${row.revision} — expected ${expected.revision}`);
+    check(row.schema_version === 4, `schema version ${row.schema_version} — the canonical family`);
+    check(row.document_kind === "canonical_presentation", `document kind ${row.document_kind}`);
+    check(row.registry_version === expected.registryVersion, `registry build ${row.registry_version}`);
+    check(row.binding_fingerprint === expected.binding, `bound to ${row.binding_fingerprint.slice(0, 16)}…`);
+    // The column, compared. A definition edited under the same revision moves
+    // no number this script would otherwise read — the same reasoning that put
+    // a digest on the two legacy rows.
+    check(
+      row.definition_sha256 === expected.definitionSha256,
+      `its definition still hashes to ${expected.definitionSha256.slice(0, 16)}…` +
+        `${row.definition_sha256 === expected.definitionSha256 ? "" : ` — IT IS NOW ${row.definition_sha256.slice(0, 16)}…`}`,
+    );
+  }
+  // NO STUDY BUT THIS ONE. A second canonical draft would mean something wrote
+  // where this phase authorized nothing.
+  const strangers = canonicalDrafts.filter((candidate) => candidate.study_id !== expected.studyId);
+  check(strangers.length === 0, `no other study has acquired a canonical draft (${strangers.length})`);
+}
+
+const { data: canonicalEvents, error: canonicalEventError } = await client
+  .from("canonical_presentation_draft_event")
+  .select("study_id, action, revision, idempotency_key, occurred_at")
+  .order("occurred_at", { ascending: true });
+
+check(canonicalEventError === null, `the canonical draft event log reads${canonicalEventError ? ` — ${canonicalEventError.code}` : ""}`);
+if (canonicalEvents) {
+  record.canonicalEvents = canonicalEvents.length;
+  check(canonicalEvents.length === 1, `it holds exactly one event (${canonicalEvents.length})`);
+  const first = canonicalEvents[0];
+  if (first) {
+    check(first.action === "draft_created", `and it is a ${first.action} at revision ${first.revision}`);
+    check(first.revision === 1, `the first and only revision (${first.revision})`);
+    check(first.study_id === EXPECTED.canonicalDraft.studyId, "for Cuicuilco and no one else");
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -224,6 +301,7 @@ if (failures > 0) {
 console.log(
   "RESULT: both legacy experience drafts are at the versions and revisions the previous unit\n" +
     "        recorded, neither is schema version 4, the experience log is unchanged, migration\n" +
-    "        0029's tables do not exist here, and every protected table was counted. Nothing was\n" +
-    "        written.",
+    "        0029's storage exists and holds exactly ONE canonical draft — Cuicuilco's, at\n" +
+    "        revision 1, under one draft_created event — no other study has acquired one, and\n" +
+    "        every protected table was counted. Nothing was written.",
 );

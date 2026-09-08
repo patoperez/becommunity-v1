@@ -210,8 +210,10 @@ would have contradicted. It creates:
 | `save_canonical_presentation_draft` | the only write path: authorizes, derives the tenant from the study row, takes an advisory lock on the study, replays a recorded key, compares the expected revision, and writes the row and its event in one transaction |
 | `refuse_canonical_presentation_event_update` | the trigger that makes the log append-only |
 
-**It is applied to no project.** Like `0026`-`0028` before their application, it
-is proved against a disposable cluster and nowhere else.
+**It was carried by no database when it was written**, and like `0026`-`0028`
+before their application it was proved against a disposable cluster and nowhere
+else. ⚠️ **It IS APPLIED to the hosted project as of 2026-09-08** — see
+"`0029` is applied too" below.
 `npm run test:canonical-presentation-draft-live` executes it — 93 assertions,
 including two genuinely concurrent races and the same contract a second time
 over a real PostgREST with `supabase-js`.
@@ -1007,6 +1009,24 @@ of 0022-0025, no history repair, no seed.
 | `0028_canonical_commit_and_rollback` | 8.26 s | `import_job_record` and `retention_period` exist with RLS + FORCE RLS; all four RPCs exist, every one `SECURITY DEFINER` with `search_path=""`; EXECUTE held only by `service_role` (and the owning `postgres` role); `anon` and `authenticated` cannot execute any of them; all 36 canonical tables present and **empty** |
 
 The ledger is now **29 rows, 0000-0028, no duplicate**.
+
+### `0029` is applied too, on 2026-09-08
+
+`0029_canonical_presentation_draft` **was applied** to the same project on
+**2026-09-08 19:14:40-19:14:45 UTC**, from commit `6f8bf76`, by the same
+`supabase db push` path and the same CLI version, over the same session
+connection. Its dry run proposed that one file and nothing else, and no ledger
+entry was hand-written.
+
+| migration | duration | verified immediately after |
+|---|---|---|
+| `0029_canonical_presentation_draft` | 5.92 s | two tables and two functions added and **nothing pre-existing altered**, proved by an object-by-object diff of a structural fingerprint taken before and after; RLS + FORCE RLS + `deny_browser_roles` on both; grants of exactly `service_role: SELECT`; `save_canonical_presentation_draft` `SECURITY DEFINER` with `search_path=""` and EXECUTE held by `service_role` and the owner alone; thirty executed role probes returning `42501` for every `anon` and `authenticated` read and write; the legacy draft table and its save RPC byte-identical by digest |
+
+**The ledger is now 30 rows, 0000-0029, no duplicate**, and the recorded body of
+every earlier migration digests to what it digested before. The full record — the
+backup and its digest, the restore rehearsal, the least-privilege probes, the one
+explicit save that created Cuicuilco's canonical draft at revision 1, and the
+57-check after-state proof — is `docs/CURRENT_STATE.md` §"Unit 6B.3B".
 
 ### Hosted synthetic acceptance
 

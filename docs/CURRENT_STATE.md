@@ -3063,7 +3063,12 @@ primary key would not have been additive — it alters a constraint on a table
 holding rows this project must not disturb, and every existing reader of it
 assumes one draft per study.
 
-#### `0029_canonical_presentation_draft.sql` — additive, and applied nowhere
+#### `0029_canonical_presentation_draft.sql` — additive, and carried by no database yet
+
+> ⚠️ **SUPERSEDED on 2026-09-08 by Unit 6B.3B**, which applied this migration to
+> the hosted project. Everything below describes the state at the end of Unit
+> 6B.3A and is kept as the record of that unit; the sentences about where the
+> migration lives are true of that moment only.
 
 Two tables and one function. It alters no existing table, drops nothing,
 rewrites no row, and changes no policy or grant outside its own objects.
@@ -3097,7 +3102,9 @@ exactly that hole, and this one does not.** `pg_advisory_xact_lock` on the study
 is taken before the first read a decision depends on, which also serialises the
 idempotency lookup with the write it guards.
 
-The migration and its rollback are in git and are applied to no project.
+The migration and its rollback are in git and, at the end of this unit, existed
+in no database at all. ⚠️ That stopped being true on 2026-09-08 — see §"Unit
+6B.3B".
 
 #### What the product does now
 
@@ -3264,9 +3271,10 @@ contains no insert, update, upsert, delete or RPC.
   legacy row.
 - **`study_experience_event` holds 86 rows**, exactly as the previous unit left
   it; `study_experience_revision` and `study_experience_publication` are empty.
-- **`canonical_presentation_draft` and its event table DO NOT EXIST there**
-  (`PGRST205`), which is the proof that migration `0029` is applied to no
-  project.
+- **`canonical_presentation_draft` and its event table DID NOT EXIST there**
+  (`PGRST205`) when this unit read the project, which was the proof that no
+  database carried migration `0029`. ⚠️ Unit 6B.3B applied it on 2026-09-08 and
+  both tables exist there now.
 - Eleven protected tables were counted: study 5, respondent 82, quant_response
   3 364, qual_observation 33, study_participant 60, survey_response 1 685,
   performance_observation 252, metric_definition 116, pain_point 50, import_job
@@ -3384,8 +3392,324 @@ All four now assert what they claim.
 
 Publication, review, immutable snapshots, restore, conversion of the legacy v2/v3
 drafts, production client-route switching, wiring the URL codec to a route,
-PDF/print export, AI or category suggestions, authentication changes, hosted
-migration application, dependencies, deployment, shadow activation, journey
-route/stage authoring, and the legacy `QualitativeCloud.tsx` repair.
+PDF/print export, AI or category suggestions, authentication changes,
+dependencies, deployment, shadow activation, journey route/stage authoring, and
+the legacy `QualitativeCloud.tsx` repair.
 
-**Unit 6B.3B and the publication unit have not begun.**
+⚠️ **The line above used to end "hosted migration application" and no longer
+does.** Unit 6B.3B applied `0029` to the hosted project on 2026-09-08; the
+section below is that record.
+
+---
+
+### Unit 6B.3B — the migration is applied to the hosted project, and Cuicuilco has a canonical draft (EXECUTED, 2026-09-08)
+
+**This is the first hosted mutation since the real Cuicuilco import.** Three
+things were authorized and exactly three happened: migration `0029` was applied,
+Cuicuilco's first canonical schema-v4 presentation draft was created through the
+real application, and the ledger row and draft event those two acts necessarily
+produce. Nothing else on the hosted project changed, and the after-state proof
+below is the evidence rather than the claim.
+
+#### The migration, exactly
+
+| | |
+|---|---|
+| project | `ontvqazsqiwisdddblif` (`be-community-dev`), PostgreSQL **17.6** |
+| connection | **session** pooler, port 5432 — never the transaction pooler |
+| commit applied from | `6f8bf76908778c63c4e355f3176babc885a62dd0` |
+| migration | `supabase/migrations/0029_canonical_presentation_draft.sql`, sha256 `7c49867a8cacab80ecf0c7c25e393d54dddcbf5d87c8ceb187d24c76e86b57f8`, 24 160 bytes |
+| rollback | `supabase/rollbacks/0029_drop_canonical_presentation_draft.sql`, sha256 `90e3c4d3e9facefc9730b14eee5535a9f7ca9839c7b620618798a420df874863`, 1 345 bytes |
+| tool | `supabase db push`, CLI **2.115.0** — the same version that applied `0026`-`0028` |
+| applied at | **2026-09-08 19:14:40 to 19:14:45 UTC** (5.92 s, exit 0) |
+
+**The bytes applied are the bytes Unit 6B.3A tested.** The working copy in the
+WSL verifier — the very file 6B.3A's live gate applied to a disposable
+PostgreSQL — digests to `7c49867a…`, and so does the blob in `6f8bf76`, and so
+does the Windows worktree. Three copies, one digest, no CR byte in any of them.
+
+**The dry run proposed exactly one file** and nothing else: no reapplication of
+`0000`-`0028`, no history repair, no seed. `supabase db push` wraps each
+migration in its own transaction and the file carries its own `begin;`/`commit;`,
+exactly as `0026`-`0028` do.
+
+#### Before anything: the pre-migration safety gate
+
+Every item was read-only and every one passed.
+
+- **The target was verified without printing a credential.** Three independent
+  configuration files — the Windows `.env.local` and both WSL copies — name the
+  same project host, and their anon and service keys are byte-identical by
+  digest. The direct connection resolves to the same ref, on port 5432.
+- **The ledger held 29 rows, `0000`-`0028`, no duplicate**, and a SHA-256 was
+  taken over each recorded body so a later run can prove none moved. ⓘ Two rows
+  (`0020` and `0022`) carry a NULL `statements` array and therefore have no
+  recorded body — a pre-existing property of how they were applied, recorded
+  here rather than repaired.
+- **Every `0029` object was absent**: both tables, both functions, all three
+  indexes, the trigger and the deny policies.
+- **The full inventory was recorded**: 59 public tables, all 59 RLS-enabled and
+  FORCE RLS, 54 policies, 28 functions, 194 indexes, and a row count for every
+  table. Cuicuilco's legacy draft at **v2 revision 72** (`updated_at`
+  2026-08-30T19:26:04Z, 27 051 bytes, `b7127081…`); P6E at **v3 revision 14**
+  (2026-08-31T08:08:47Z, 1 403 bytes, `8ea44dea…`); `study_experience_event`
+  86 rows; `study_experience_revision` and `_publication` empty.
+- The repository's own read-only gate,
+  `npm run test:canonical-presentation-hosted-fingerprint`, passed **24/24**
+  against the pinned digests before anything was applied.
+
+#### The backup, and its restore rehearsal
+
+```
+/home/patop/becommunity-backups/u6b3b-pre-0029-20260908T190837Z
+  database.dump  1 133 257 bytes  sha256=a73dad0f21d33e12f08cf0b740a01cc3979a16fd9698c7fea89cdd75631ce45f
+  schema.sql       351 569 bytes  sha256=7e6b86e96e716654475160d801a37c4441e5d52e8724a7ad6b64d77e789130a6
+```
+
+`pg_dump` **17.11** custom format, compress 9, `--no-owner` (GRANTs and POLICYs
+kept deliberately), schemas `public` and `supabase_migrations`, over the session
+pooler. Directory `0700`, files `0600`, outside every Git repository. TOC: 773
+entries — 60 TABLE definitions and 60 TABLE DATA blocks, 306 constraints, 80
+indexes, 54 policies, 59 row-security entries, 2 triggers, 1 view.
+
+**Restored into a disposable PostgreSQL 17.11 and compared against the source:
+59 tables, 0 row-count mismatches**, policies 54 = 54, functions 28 = 28,
+indexes 194 = 194, RLS 59/59 and FORCE RLS 59/59 on both sides, the ledger
+identical at 29 rows `0000`-`0028` with no duplicate, and both legacy drafts
+byte-identical by digest. The restore ran in three sections — pre-data, data,
+then post-data after the referenced identities were synthesised into the
+`auth.users` stand-in — so the 23 foreign keys to `auth.users` replayed too.
+
+ⓘ **`pg_restore` reported exactly one error and it is not data:**
+`schema "public" already exists`, because a fresh PostgreSQL database already
+has one. A restore into a real Supabase project does not hit it. **That restore
+has not been executed and must not be described as if it had.**
+
+#### The restore procedure
+
+1. Verify the artifact before trusting it: `sha256sum -c SHA256SUMS` in the
+   backup directory. A mismatch stops the restore.
+2. Provision a disposable PostgreSQL 17 —
+   `BECOMMUNITY_PG_VERSION=17 bash scripts/lib/disposable-postgres-provision.sh` —
+   and restore into it FIRST. A backup nobody has restored is a hope.
+3. Create the roles the dump's ACLs name (`anon`, `authenticated`,
+   `service_role`, `postgres`, `supabase_admin`) and apply
+   `scripts/lib/disposable-bootstrap.sql` for the `auth` and `storage`
+   stand-ins.
+4. `pg_restore --no-owner --section=pre-data --section=data`, populate
+   `auth.users` with the identities the restored rows reference, then
+   `--section=post-data`.
+5. Only a person may decide to restore over the hosted project, and only after
+   the rehearsal above. **`supabase/rollbacks/0029_drop_canonical_presentation_draft.sql`
+   is the reverse of the migration and is the right instrument for undoing THIS
+   unit** — it drops only `0029`'s own objects and touches no legacy table, no
+   legacy row and no policy outside them. It would also destroy the canonical
+   draft, which is the only copy of that authoring work.
+
+#### After the migration: what the database gained, and nothing else
+
+A full structural fingerprint of `public` was taken before and after and diffed
+object by object.
+
+- **Tables 59 to 61.** Added: `canonical_presentation_draft`,
+  `canonical_presentation_draft_event`. Removed: none. **Zero pre-existing
+  tables changed** in columns, constraints, indexes, policies, grants or
+  triggers.
+- **Functions 28 to 30.** Added: `save_canonical_presentation_draft(...)` and
+  `refuse_canonical_presentation_event_update()`. Removed: none. **Zero
+  pre-existing functions changed**, compared by a digest over
+  `pg_get_functiondef`.
+- **Policies 54 to 56, indexes 194 to 199.** RLS and FORCE RLS on **61 of 61**.
+  Schema grants unchanged.
+- Both new tables carry `deny_browser_roles` — `for all to anon, authenticated
+  using (false) with check (false)` — and grants of exactly
+  `service_role: SELECT` beside the owner's.
+- `save_canonical_presentation_draft` is `SECURITY DEFINER` with
+  `search_path=""`, returns `jsonb`, and its EXECUTE is held by `postgres` and
+  `service_role` only. `refuse_canonical_presentation_event_update` is NOT
+  security definer and its EXECUTE is held by the owner alone.
+- **The ledger is 30 rows, `0000`-`0029`, no duplicate**, and the recorded body
+  of every one of the 29 earlier migrations digests to what it digested before.
+
+#### Least privilege, executed rather than asserted
+
+Thirty probes ran on the hosted project inside a transaction that was rolled
+back, each one `set local role` then the operation, with the outcome recorded
+**after** `reset role`.
+
+- `anon` and `authenticated`: **42501 on every SELECT, INSERT, UPDATE and DELETE
+  of both tables**, and `permission denied for function` on both functions.
+- `service_role`: SELECT **allowed**; INSERT, UPDATE and DELETE **42501**. It
+  reaches the save function's body and is refused there by the function's own
+  first check — `42501 internal actor required` — which is what proves EXECUTE
+  was granted rather than the call being refused before it.
+- Over real HTTPS with the **anon** key: 401/`42501` on both tables' read and
+  write and on the RPC.
+- Over real HTTPS with a **genuine signed-in session** (the internal test
+  account, the most privileged browser identity this product has): 403/`42501`
+  on both tables' read and write, on the RPC, and on the real Cuicuilco draft
+  requested by its own id.
+- **The legacy surface is unchanged**: `save_study_experience_draft` still
+  executable by `service_role` only, `study_experience_draft` still
+  `service_role: SELECT` only, and both the RPC's definition digest and the
+  table's column-shape digest are identical to before.
+
+ⓘ **The dangerous legacy-v4 overwrite probe was NOT run against hosted data**,
+as the phase required. It remains a disposable-target result from 6B.3A.
+
+ⓘ **One probe passed for the wrong reason before it was corrected.** The first
+run recorded its outcome while the probe role was still set, so the harness's
+own scratch table became the thing that refused — and three `service_role`
+probes that had SUCCEEDED were written down as `42501`. Recording after
+`reset role` fixed it. It is the same defect 6B.3A found in the other direction,
+and it is why the outcomes above are reported with their messages and not only
+their SQLSTATEs.
+
+#### One explicit save, through the real application
+
+A production build of `6f8bf76` was built in WSL against the hosted origin —
+`NEXT_PUBLIC_*` is inlined at build time, so the build had to happen after the
+target was chosen — served on port 3200, and driven through the product's own
+`/login` with the internal test account.
+
+**Before the write**, the same server-side loader the page uses
+(`loadPresentationComposerWorkspace`, `restoreStoredDraft: true`) was run
+read-only against the hosted project and its document validated completely:
+`persistence.revision = null` and `restored = false`, so what was on offer was
+the BLUEPRINT; `documentKind: canonical_presentation`, `schemaVersion 4`,
+`registryVersion 1.0.0`, bound to `cf63bdca…`; **1 page, 24 blocks** (8
+editorial, 12 result, 3 filter panels, 1 journey-routes), **3 filter panels and
+5 explicit filter connections**, document sample policy `show_all`, 13 chart
+variants. `encodePresentationForStorage` produced 16 708 serialized bytes and
+the digest **`511d7f54f3ec0a391b45db259f64d57f9d415a9b2f5711c6f5fc551cdb67809d`**
+— computed before anything was written. 17/17.
+
+**The save itself was one click of «Guardar ahora».** ⚠️ It had to be, and the
+timing is worth recording: the composer's debounced autosave fires 2 500 ms
+after a dirty document mounts, and a freshly built blueprint IS dirty — so left
+alone, the first write to the hosted project would have been an AUTOSAVE rather
+than the deliberate act this phase authorizes. A script installed before the
+document loaded waited for the real control to become enabled and clicked it
+once, stopping as soon as the screen reported a save in flight. The database is
+what proves only one write happened.
+
+**What the database holds now:**
+
+| | |
+|---|---|
+| `canonical_presentation_draft` | **1 row** — study `cd4d6acd…`, tenant `e63b2092…`, **revision 1** |
+| identity columns | `document_kind = canonical_presentation`, `schema_version = 4`, `registry_version = 1.0.0`, `binding_fingerprint = cf63bdca…` |
+| `definition_sha256` | `511d7f54…` — **the digest computed before the write, unchanged** |
+| actor | `06e3b329-70b4-4a29-9649-6c1e2b069664`, as both `created_by` and `updated_by` |
+| written at | **2026-09-08 19:25:48.039969 UTC**, `created_at` = `updated_at` |
+| `canonical_presentation_draft_event` | **1 row** — `draft_created`, revision 1, idempotency key `save-6153faa8-8c26-46b2-9572-4dc6d85ca17d` |
+
+**The stored document is the expected document, byte-semantically.** It was read
+back out of the row, re-serialized canonically and compared with the document
+built before the write: identical canonical JSON, identical SHA-256, and every
+dimension the phase names survives — 1 page, 24 blocks and their kinds, the 3
+filter panels, all 5 explicit connections by block and by panel, the document
+sample policy, the 13 chart variants, the identity metadata, the binding and the
+registry version. The mirrored columns agree with the document they describe.
+
+**The reload restores it.** 14/14 in a second browser run: «Sin cambios»
+«Revisión 1», NOT «Cambios sin guardar», no failure and no conflict, 24 block
+cards on the canvas, the reading view opens and carries the study's own title,
+and the page's own words are *«Plano de partida: Borrador guardado. Se restauró
+el borrador que ya estaba guardado para este estudio, en la revisión 1.»*
+**«Guardar ahora» is rendered but DISABLED**, which is why opening that route
+again cannot write: a restored session's `savedDocument` is the object on
+screen, so `hasUnsavedChanges` is false and autosave never becomes due. Nothing
+a person owns reached the DOM — no protected table name, no password, no service
+key.
+
+**The idempotency replay wrote nothing.** The same key was sent again through
+the same RPC, every argument read from the rows the save itself produced. The
+answer was `replayed: true, revision: 1, currentRevision: 1, created: true`; the
+draft count, the event count and `updated_at` were all unchanged, and the
+transaction committed — it would have aborted if any of them had moved.
+
+**Screenshots**, outside every Git repository, in
+`/home/patop/becommunity-6b3b/evidence/`: the restored canvas at «Sin cambios
+Revisión 1», the same full-page, the reading preview, and the reading preview
+full-page.
+
+#### Mandatory after-state proof — 57/57
+
+Every item the phase named, compared against the snapshots taken before the
+migration: both legacy drafts byte-identical (Cuicuilco v2/72, P6E v3/14, same
+digests, same `updated_at`, same byte counts); the whole legacy experience
+surface unchanged including the save RPC's definition digest and the draft
+table's column shape; **exactly two table counts moved and both are the new
+tables**, with all 59 pre-existing tables holding exactly the counts they held;
+the ledger at 30 rows with no earlier body changed; exactly one canonical draft
+at revision 1 under exactly one `draft_created` event; **no other study acquired
+one**; the document and its mirrored columns agreeing; the replay writing
+nothing; and nothing moving between the migration and the final read.
+
+**Parity, re-run on the real workbooks** (`Datos limpio estudio Cuicuilco.xlsx`
+`8d7afdb4…`, `Puntos de dolor Journey BNI Cuicuilco.xlsx` `bd0e70d7…`):
+`canonical-results-parity` **534 offered, 531 executed, 531 passed**, 0 failed,
+0 skipped, 2 not-applicable, 1 configuration-required;
+`canonical-presentation-parity` **59 checks, 59 passed**, 0 failed. Neither
+number moved.
+
+#### Corrections this activation made necessary
+
+Three source rules asserted "0029 is applied nowhere". Each was **inverted
+rather than deleted**, because a target that has LOST the storage is as much a
+finding as one that gained it unexpectedly.
+
+1. `scripts/lib/canonical-rest-transport.mjs` — its bound is a fact about the
+   hosted target, so it moved 28 to 29, and it now refuses a target MISSING
+   `canonical_presentation_draft`. The two transports still answer different
+   questions; that their numbers agree again is a coincidence of this moment.
+2. `scripts/migration-chain-test.mjs` — the rule that tied the REST bound to the
+   commit migration now names `HOSTED_APPLIED_SLUG` explicitly, a constant that
+   must be moved by hand after a migration is applied. It also gained a
+   requirement that every governing document record the presentation migration
+   as applied, and five withdrawn-claim patterns so "applied to no project"
+   cannot return.
+3. `scripts/canonical-presentation-hosted-fingerprint.mjs` — section [3] now
+   asserts the storage EXISTS and pins what it holds: exactly one draft, at
+   revision 1, with the binding and definition digest above, under exactly one
+   `draft_created` event, and no other study carrying one.
+
+#### Known limitations, stated rather than implied
+
+1. ⚠️ **The «Guardado» state of the first save was not photographed.** The wait
+   predicate in the operator's own driver was malformed — the harness's
+   `waitForDom` expects a FUNCTION and it was handed an expression — so the run
+   timed out 30 s after a save that had already succeeded, before its screenshot
+   step. The save is fully evidenced in the database (revision 1, one
+   `draft_created` event, the pre-computed digest unchanged) and the reload
+   screenshot shows «Revisión 1» beside the product's own "borrador guardado"
+   sentence. It is **not** recoverable without a second save, and a second save
+   would be a second revision, which this phase forbids. The «Guardado»
+   transition itself stays proved by 6B.3A's 148 offline checks and its 58-check
+   disposable-target QA, not by a photograph taken here.
+2. **The signed-in HTTPS probe inside the browser did not execute** — this app
+   keeps its session in cookies through `@supabase/ssr`, not in `localStorage`,
+   so the driver found no token there. It was executed instead from Node against
+   a real session obtained through `signInWithPassword`, which is the same
+   identity reaching the same PostgREST, and it is recorded above.
+3. **`0029`'s own header still says "NOT APPLIED TO THE HOSTED PROJECT".** The
+   file was deliberately left byte-identical: it is now an applied migration
+   whose bytes the hosted ledger records, and editing an applied migration to
+   correct a comment would make the repository and the ledger disagree about
+   what ran. The correction lives here and in `CLAUDE.md` instead.
+4. **The backup covers `public` and `supabase_migrations` only.** The `auth`
+   schema is deliberately excluded, as in every previous backup; the sign-ins
+   this unit performed wrote auth sessions, which are not restorable state and
+   are not part of what this phase could affect.
+5. **`migration-chain-test.mjs`'s "no document claims a real workbook was
+   imported" rule is stale** — one WAS imported on 2026-09-06 and `CLAUDE.md`
+   says so; the rule passes only because its subject pattern does not match the
+   phrasing used. Pre-existing, untouched here, and worth a separate look.
+
+#### Still deferred, and deliberately so
+
+P6E has **no** canonical draft and did not get one. Nothing was deployed, no
+application code was promoted, the client route was not switched, no publication
+or immutable snapshot was created, no legacy draft was converted, no formula
+moved, and shadow mode is still off everywhere.
