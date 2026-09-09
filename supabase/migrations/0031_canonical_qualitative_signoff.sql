@@ -300,7 +300,20 @@ begin
   -- 3. THE LOCK, before the first read a decision depends on. `for update`
   --    locks nothing when no row exists yet, which is the hole 0029 recorded in
   --    the legacy draft function; an advisory lock on the study does not have it.
-  perform pg_advisory_xact_lock(hashtextextended('canonical_qualitative_signoff', 0), hashtextextended(target.id::text, 0));
+  --
+  -- ONE bigint, and `pg_catalog`-qualified. There is no
+  -- `pg_advisory_xact_lock(bigint, bigint)` — the two-argument form takes two
+  -- INTEGERS — and under `search_path = ''` an unqualified name resolves to
+  -- nothing. The first draft of this line had both faults and the disposable
+  -- database refused every sign-off it was asked to write. 0029 takes the lock
+  -- exactly this way, for exactly this reason.
+  --
+  -- Transaction-scoped, so COMMIT or ROLLBACK releases it and nothing has to
+  -- release it by hand. A hash collision between two studies costs a little
+  -- waiting and can never cost correctness.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(target.id::text, 0)
+  );
 
   -- 4. THE SAME WORDS, ALREADY SIGNED OFF. Returned, never duplicated.
   select * into existing

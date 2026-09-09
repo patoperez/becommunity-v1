@@ -174,13 +174,23 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
       (${q(CASCADE_STUDY)}, ${q(TENANT)}, 'Estudio que se borra entero');
   `);
 
+  // THE DATABASE'S OWN MESSAGE IS KEPT. A refusal reported only as a boolean is
+  // a mystery, and this gate has already spent one run on `pg_advisory_xact_lock`
+  // being called with two bigints when no such overload exists.
   const attempt = (sql) => {
     try {
       return { ok: true, value: db.json(sql) };
     } catch (thrown) {
-      return { ok: false, sqlstate: thrown.sqlstate ?? null };
+      return {
+        ok: false,
+        sqlstate: thrown.sqlstate ?? null,
+        message: /ERROR:\s+[0-9A-Z]{5}:\s+(.*)/.exec(thrown.databaseMessage ?? "")?.[1] ?? "",
+      };
     }
   };
+  /** Report an unexpected refusal WITH what the database said about it. */
+  const succeeded = (outcome, message) =>
+    check(outcome.ok, outcome.ok ? message : `${message} — ${outcome.sqlstate} ${outcome.message}`);
   const recordSql = (over = {}) => {
     const {
       studyId = STUDY,
@@ -293,7 +303,7 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   console.log("\n[3] Se registra una vez, y las mismas palabras no se registran dos veces");
 
   const first = attempt(recordSql());
-  check(first.ok, "una revisión legítima se registra");
+  succeeded(first, "una revisión legítima se registra");
   eq("y se declara creada", first.value?.created, true);
   eq("una fila", countIn("canonical_qualitative_signoff"), 1);
   eq(
@@ -308,14 +318,14 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   );
 
   const replay = attempt(recordSql());
-  check(replay.ok, "registrar las MISMAS palabras otra vez responde");
+  succeeded(replay, "registrar las MISMAS palabras otra vez responde");
   eq("y dice que no creó nada", replay.value?.created, false);
   eq("sigue habiendo una sola fila", countIn("canonical_qualitative_signoff"), 1);
   eq("y devuelve la misma firma", replay.value?.signoffId, first.value?.signoffId);
 
   // DIFFERENT WORDS ARE A DIFFERENT DECISION.
   const second = attempt(recordSql({ digest: OTHER_DIGEST, categories: ["Tiempo", "Costo"] }));
-  check(second.ok, "otras palabras SÍ son una segunda decisión");
+  succeeded(second, "otras palabras SÍ son una segunda decisión");
   eq("y ahora hay dos", countIn("canonical_qualitative_signoff"), 2);
 
   /* ------------------------------------------------------------------------ */
@@ -383,7 +393,7 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   };
 
   const published = attempt(publishSql({ key: "publish-key-0001" }));
-  check(published.ok, "una publicación con la revisión al día se realiza");
+  succeeded(published, "una publicación con la revisión al día se realiza");
   eq("y es la versión 1", published.value?.version, 1);
   eq("y devuelve el estado cualitativo", published.value?.qualitativeReviewState, "current");
   eq("hay una instantánea", countIn("canonical_presentation_revision"), 1);
@@ -407,7 +417,7 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
 
   // A REPLAY WRITES NOTHING, which is what a replay means.
   const replayedPublish = attempt(publishSql({ key: "publish-key-0001" }));
-  check(replayedPublish.ok, "el mismo idempotency key responde");
+  succeeded(replayedPublish, "el mismo idempotency key responde");
   eq("y se declara repetición", replayedPublish.value?.replayed, true);
   eq("sin una segunda instantánea", countIn("canonical_presentation_revision"), 1);
   eq("ni un segundo registro cualitativo", countIn("canonical_publication_qualitative_signoff"), 1);
@@ -488,7 +498,7 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
       expectedActive: activeRevision,
     }),
   );
-  check(pendingPublish.ok, "publicar con las categorías sin revisar se permite");
+  succeeded(pendingPublish, "publicar con las categorías sin revisar se permite");
   eq("y queda registrado como pendiente", pendingPublish.value?.qualitativeReviewState, "pending");
   eq("con dos registros cualitativos", countIn("canonical_publication_qualitative_signoff"), 2);
   eq(
