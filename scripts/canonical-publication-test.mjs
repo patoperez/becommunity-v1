@@ -39,6 +39,16 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+// THE REAL COMPONENT, RENDERED TO REAL MARKUP.
+//
+// The disagreement this unit corrects was between a COUNT and a PICTURE, and
+// no assertion over the count alone could have found it. So the gate draws the
+// product's own renderer with the product's own audience and counts the cards
+// that come out. `react-dom/server` is already a dependency of the app; this
+// adds no package.
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
 import { buildPresentationRead, resolveUnderSelection } from "../src/lib/viewer/index.ts";
 import { bindPresentationDocument } from "../src/lib/presentation/registry.ts";
 import { validatePresentationDocument } from "../src/lib/presentation/document.ts";
@@ -48,6 +58,7 @@ import { JOURNEY_ROUTES_VARIANTS, offeredChartVariants } from "../src/lib/compos
 import { serializeDeterministic } from "../src/lib/presentation/serialize.ts";
 import { runPublicationPreflight } from "../src/lib/publication/preflight.ts";
 import {
+  CLIENT_SURFACE_IS_LIVE,
   WARNINGS_REQUIRING_ACKNOWLEDGEMENT,
   warningRequiresAcknowledgement,
 } from "../src/lib/publication/contract.ts";
@@ -58,6 +69,7 @@ import {
   pageTitle,
 } from "../src/lib/publication/inventory.ts";
 import { structuralDifference } from "../src/lib/publication/difference.ts";
+import { PresentationRenderer } from "../src/components/presentation/PresentationRenderer.tsx";
 import { composerFixtureSource } from "./lib/composer-fixture.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -135,7 +147,16 @@ const blockOf = (id, over = {}) => ({
   visible: over.visible ?? true,
   availability: over.availability ?? "available",
   provenance: null,
-  payload: over.payload ?? { shape: "value", value: null, absence: null },
+  // A BLOCK A CLIENT WOULD ACTUALLY SEE, unless a caller says otherwise.
+  //
+  // It used to default to a `value` payload holding NULL — nothing a reader
+  // could be shown — and the preflight counted it as visible anyway, because
+  // its own `visible` tally was a third implementation of the renderer's rule
+  // and did not look at the payload at all. Now that all three ask one
+  // predicate, a null-valued block is honestly reported as showing a client
+  // nothing, and a baseline made of those would raise `nothing_visible` on
+  // every assertion below. So the default carries a value.
+  payload: over.payload ?? { shape: "value", value: { text: "7,0", numeric: 7 }, absence: null },
   methodology: { level: "none", explanation: null, base: null },
   sampleDisplay: over.sampleDisplay ?? { state: "shown" },
   connectedFilterPanelIds: [],
@@ -154,6 +175,8 @@ const modelOf = (blocks, pageTitleText = "Primera") => ({
 /** A subject that passes every stage, so a single field can be varied at a time. */
 const healthy = (over = {}) => ({
   authorized: true,
+  clientSurfaceIsLive: CLIENT_SURFACE_IS_LIVE,
+  requiredBlockIds: [],
   readRefusal: null,
   stored: {
     revision: 7,
@@ -248,6 +271,19 @@ const cases = [
     { model: modelOf([blockOf("b1", { availability: "unresolved" })]) },
   ],
   ["publication_pointer_moved", { expectedActiveVersion: 1, actualActiveVersion: 2 }],
+  [
+    "required_content_missing",
+    {
+      model: modelOf([
+        blockOf("temas-recorrido", {
+          title: "Puntos de dolor del recorrido",
+          availability: "configuration_required",
+          payload: { shape: "editorial", body: null, absence: null },
+        }),
+      ]),
+      requiredBlockIds: ["temas-recorrido"],
+    },
+  ],
 ];
 
 for (const [code, over] of cases) {
@@ -266,19 +302,26 @@ const DECLARED_BLOCKERS = [
   .map((match) => match[1])
   .filter((code) => BLOCKER_CODES.includes(code) || /drift|blocker/.test(code));
 check(
-  BLOCKER_CODES.length === 18,
-  `los 18 códigos de bloqueo están ejercidos, cada uno por su condición (${BLOCKER_CODES.length})`,
+  BLOCKER_CODES.length === 19,
+  `los 19 códigos de bloqueo están ejercidos, cada uno por su condición (${BLOCKER_CODES.length})`,
 );
 check(DECLARED_BLOCKERS.length > 0, "y el contrato los declara como literales cerrados");
 
 /* -------------------------------------------------------------------------- */
-console.log("\n[3] Un aviso es un aviso, y sólo cuatro exigen confirmación");
+console.log("\n[3] Un aviso es un aviso, y sólo seis exigen confirmación");
 
 eq(
   "advertencias que exigen confirmación, declaradas",
   JSON.stringify([...WARNINGS_REQUIRING_ACKNOWLEDGEMENT].sort()),
   JSON.stringify(
-    ["configuration_required_blocks", "nothing_visible", "qualitative_review_pending", "withheld_by_sample_policy"],
+    [
+      "configuration_required_blocks",
+      "granular_filter_dimensions",
+      "inoperable_filter_panels",
+      "nothing_visible",
+      "qualitative_review_pending",
+      "withheld_by_sample_policy",
+    ],
   ),
 );
 for (const code of WARNINGS_REQUIRING_ACKNOWLEDGEMENT) {
@@ -288,16 +331,46 @@ for (const code of ["annotated_by_sample_policy", "unavailable_blocks", "hidden_
   check(!warningRequiresAcknowledgement(code), `«${code}» NO exige confirmación`);
 }
 
+// AN ABSENCE THE CONTRACT STATES IS SOMETHING A CLIENT IS SHOWN, so the block
+// carries the absence its resolver would have produced. A hand-built block that
+// said `availability: "unavailable"` over a live value was describing a state
+// the resolver never emits, and the assertion under it meant something else.
 const unavailable = runPublicationPreflight(
-  healthy({ model: modelOf([blockOf("b1", { availability: "unavailable" })]) }),
+  healthy({
+    model: modelOf([
+      blockOf("b1", {
+        availability: "unavailable",
+        payload: { shape: "value", value: null, absence: { state: "unavailable", reason: "no_responses" } },
+      }),
+    ]),
+  }),
 );
 check(has(unavailable.warnings, "unavailable_blocks"), "una medición que el estudio no tiene es un aviso");
 check(!has(unavailable.blockers, "block_unresolved"), "y no se confunde con una pregunta abierta");
+// C11's EXCEPTION, ASSERTED. «Nadie respondió a esta medición» is a caveat
+// about something the reader IS being shown, so the renderer draws it — and
+// this layer therefore counts the block as visible. The preflight used to say
+// the opposite while the renderer drew the sentence, which is the same class of
+// disagreement as the filter panels.
 check(
-  unavailable.canPublish === false,
-  "aunque con un solo bloque invisible el documento no muestra nada y hay que confirmarlo",
+  !has(unavailable.warnings, "nothing_visible"),
+  "y el cliente sí ve esa aclaración, así que el documento no está vacío",
 );
-check(has(unavailable.warnings, "nothing_visible"), "que es exactamente la advertencia «nada visible»");
+check(unavailable.canPublish, "y se puede publicar sin confirmar nada más");
+
+// NOTHING VISIBLE, for real: one block whose payload holds no value and states
+// no absence. The client gets a page with nothing on it.
+const emptyDocument = runPublicationPreflight(
+  healthy({
+    model: modelOf([blockOf("b1", { payload: { shape: "value", value: null, absence: null } })]),
+  }),
+);
+check(has(emptyDocument.warnings, "nothing_visible"), "un documento sin nada que dibujar lo dice");
+check(emptyDocument.blockers.length === 0, "sin bloquear");
+check(
+  emptyDocument.canPublish === false,
+  "y no se publica hasta que alguien confirme que el cliente no vería nada",
+);
 
 const hidden = runPublicationPreflight(
   healthy({ model: modelOf([blockOf("b1"), blockOf("b2", { visible: false })]) }),
@@ -485,7 +558,7 @@ eq(
 /* -------------------------------------------------------------------------- */
 console.log("\n[8] El inventario y la diferencia hablan en títulos, no en almacenamiento");
 
-const inventory = buildPublicationInventory(REAL_MODEL);
+const inventory = buildPublicationInventory(REAL_MODEL, CLIENT_SURFACE_IS_LIVE);
 check(inventory.length === REAL_MODEL.pages.length, `hay una entrada por página (${inventory.length})`);
 const inventoryText = JSON.stringify(inventory);
 for (const [what, pattern] of [
@@ -513,7 +586,11 @@ check(
   "y una página sin título por su posición",
 );
 
-eq("bloques que el cliente vería, en el modelo real", countVisibleToClient(REAL_MODEL) > 0, true);
+eq(
+  "bloques que el cliente vería, en el modelo real",
+  countVisibleToClient(REAL_MODEL, CLIENT_SURFACE_IS_LIVE) > 0,
+  true,
+);
 
 const before = modelOf([blockOf("b1", { title: "Índice de renovación" })], "Resumen");
 const after = modelOf(
@@ -696,6 +773,378 @@ for (const file of ["contract.ts", "preflight.ts", "inventory.ts", "difference.t
 check(
   /^import "server-only";/m.test(workspaceSource),
   "y el módulo que sí tiene transporte lleva la marca",
+);
+
+
+/* -------------------------------------------------------------------------- */
+console.log("\n[13] EL CONTEO Y EL DIBUJO SON UN SOLO HECHO");
+
+/*
+ * THE DEFECT THIS SECTION EXISTS FOR.
+ *
+ * The review screen reported «23 bloques los ve el cliente» over a preview that
+ * drew 20. Three filter panels: counted by the inventory, dropped by the
+ * renderer, and both halves were internally consistent. No assertion over the
+ * count alone could have seen it, so this section renders the REAL component
+ * with the REAL audience and counts the cards in the markup.
+ */
+
+/** How many block cards the renderer actually draws, from the markup itself. */
+const drawnCards = (model, live) => {
+  const html = renderToStaticMarkup(
+    createElement(PresentationRenderer, {
+      model,
+      audience: "client",
+      // THE SURFACE FACT, SPELLED THE WAY THE PRODUCT SPELLS IT. The renderer
+      // reads `viewer !== undefined`; the review surface hands it a real
+      // controls object, and this hands it the smallest one that is not
+      // undefined. What is being proved is the PREDICATE, not the callbacks.
+      viewer: live
+        ? {
+            pending: EMPTY_VIEWER_SELECTION,
+            status: "idle",
+            message: null,
+            onToggle: () => {},
+            onClearPanel: () => {},
+          }
+        : undefined,
+    }),
+  );
+  return (html.match(/<section class="min-w-0 rounded-2xl/g) ?? []).length;
+};
+
+for (const live of [true, false]) {
+  const drawn = drawnCards(REAL_MODEL, live);
+  const counted = countVisibleToClient(REAL_MODEL, live);
+  const listed = buildPublicationInventory(REAL_MODEL, live)
+    .flatMap((page) => page.blocks)
+    .filter((block) => block.visibleToClient).length;
+  eq(`el renderizador dibuja (live=${live})`, drawn, counted);
+  eq(`y el inventario marca lo mismo (live=${live})`, listed, counted);
+}
+
+/*
+ * AND THE SAME OVER A DOCUMENT THAT HAS PANELS.
+ *
+ * The generic blueprint over the fixture may or may not carry a filter panel,
+ * so the discriminating case is built by hand: one operable panel, one panel
+ * nobody connected, and one ordinary block. On a live surface the operable
+ * panel is drawn and counted and the disconnected one is neither; on a dead
+ * surface neither panel is drawn or counted. Before the correction the count
+ * said two panels on both surfaces.
+ */
+const panelPayload = (movesBlocks) => ({
+  shape: "filter_controls",
+  dimensions: [
+    {
+      handle: "dimension:generacion",
+      label: "Generación",
+      options: [
+        { token: "o0", label: "Generación X", participants: 3 },
+        { token: "o1", label: "Millenial", participants: 2 },
+      ],
+      selected: [],
+    },
+  ],
+  selection: {
+    neutral: true,
+    summary: null,
+    selectedPeople: 5,
+    basePeople: 5,
+    countSentence: "Con esta selección quedan 5 de 5 personas.",
+    empty: false,
+    movesBlocks,
+  },
+});
+
+const withPanels = modelOf([
+  blockOf("b1", { title: "Índice de renovación" }),
+  blockOf("panel-vivo", { title: "Filtros", payload: panelPayload(1) }),
+  blockOf("panel-muerto", { title: "Filtros del recorrido", payload: panelPayload(0) }),
+]);
+
+eq("con filtros vivos, el cliente ve", countVisibleToClient(withPanels, true), 2);
+eq("y el renderizador dibuja exactamente eso", drawnCards(withPanels, true), 2);
+eq("sin filtros vivos, el cliente ve", countVisibleToClient(withPanels, false), 1);
+eq("y el renderizador dibuja exactamente eso", drawnCards(withPanels, false), 1);
+
+const panelInventory = buildPublicationInventory(withPanels, true)[0].blocks;
+check(
+  panelInventory.find((entry) => entry.title === "Filtros del recorrido").visibleToClient === false,
+  "un panel que no mueve nada NO se cuenta como visible",
+);
+check(
+  panelInventory
+    .find((entry) => entry.title === "Filtros del recorrido")
+    .state.includes("no le aparece"),
+  "y el inventario dice que al cliente no le aparece, en vez de «se dibuja»",
+);
+
+// THE PREDICATE IS ONE FUNCTION, NOT THREE THAT AGREE. A copy could pass every
+// assertion above and drift a week later, so the gate reads the source: neither
+// the renderer, nor the inventory, nor the preflight may define its own.
+for (const [file, source] of [
+  ["src/components/presentation/PresentationRenderer.tsx", read("src/components/presentation/PresentationRenderer.tsx")],
+  ["src/components/presentation/FilterControls.tsx", read("src/components/presentation/FilterControls.tsx")],
+  ["src/lib/publication/inventory.ts", read("src/lib/publication/inventory.ts")],
+  ["src/lib/publication/preflight.ts", read("src/lib/publication/preflight.ts")],
+]) {
+  const code = stripComments(source);
+  check(
+    !/function\s+(clientSeesBlock|clientHasContent|clientSeesPage|filterPanelIsOperable)\s*\(/.test(code),
+    `${file} no define su propia copia del predicado`,
+  );
+  check(
+    /clientSeesBlock|clientSeesPage|filterPanelIsOperable/.test(code),
+    `y sí lo importa de la capa de presentación`,
+  );
+}
+
+/*
+ * AND THE PREVIEW THAT MAKES THE FILTERS OPERABLE WRITES NOTHING.
+ *
+ * The review surface now resolves the stored draft under a reviewer's own
+ * selection, which is a new path through a module that also publishes. The
+ * boundary gate asserts the ACTION performs no write directly; this asserts it
+ * of the workspace FUNCTION the action calls, read as its own slice of the
+ * file, so a write added inside it fails here even though the module around it
+ * legitimately contains an RPC.
+ */
+const workspaceText = read("src/lib/studio/publication-workspace.ts");
+const previewStart = workspaceText.indexOf(
+  "export async function previewStoredPresentationUnderSelection",
+);
+check(previewStart > 0, "la función de vista previa existe en el workspace");
+const previewEnd = workspaceText.indexOf(
+  "\nexport ",
+  previewStart + 1,
+);
+const previewBody = stripComments(
+  workspaceText.slice(previewStart, previewEnd > 0 ? previewEnd : workspaceText.length),
+);
+for (const writer of [".insert(", ".update(", ".upsert(", ".delete(", ".rpc(", "revalidatePath"]) {
+  check(!previewBody.includes(writer), `y no ejecuta ${writer}`);
+}
+check(
+  /EMPTY_VIEWER_SELECTION/.test(stripComments(workspaceText.slice(workspaceText.indexOf("export async function publishStoredPresentation")))) ||
+    /resolveUnderSelection\(built, document, EMPTY_VIEWER_SELECTION\)/.test(stripComments(workspaceText)),
+  "y lo que se publica se resuelve con la selección NEUTRA, no con la del revisor",
+);
+
+/* -------------------------------------------------------------------------- */
+console.log("\n[14] Paneles que no mueven nada, y características que aíslan a una persona");
+
+const inoperable = runPublicationPreflight(healthy({ model: withPanels }));
+check(
+  has(inoperable.warnings, "inoperable_filter_panels"),
+  "un panel que ningún bloque usa se avisa",
+);
+check(
+  inoperable.blockers.length === 0,
+  "y no bloquea: es una decisión, no un defecto del documento",
+);
+check(
+  inoperable.required.includes("inoperable_filter_panels"),
+  "pero exige confirmación, porque el cliente recibe una página sin ese panel",
+);
+const inoperableWarning = inoperable.warnings.find((entry) => entry.code === "inoperable_filter_panels");
+check(
+  inoperableWarning.where.some((where) => where.includes("Filtros del recorrido")),
+  "y nombra el panel por su título",
+);
+check(
+  !inoperableWarning.where.some((where) => where.includes("panel-muerto")),
+  "nunca por su identificador",
+);
+// THE SENTENCE DESCRIBES THE CONSEQUENCE, NOT THE MECHANISM.
+check(
+  /no los recibe|no aparece el panel/.test(inoperableWarning.detail),
+  "y la advertencia dice qué le pasa al cliente, no cómo está implementado",
+);
+
+// A dimension whose options are all carried by several people raises nothing.
+const shared = runPublicationPreflight(healthy({ model: withPanels }));
+check(
+  !has(shared.warnings, "granular_filter_dimensions"),
+  "con opciones de tres y dos personas no se avisa de granularidad",
+);
+
+const lonely = panelPayload(1);
+lonely.dimensions = [
+  {
+    handle: "dimension:giro",
+    label: "Giro",
+    options: [
+      { token: "o0", label: "Construcción", participants: 3 },
+      { token: "o1", label: "Notaría", participants: 1 },
+      { token: "o2", label: "Veterinaria", participants: 1 },
+    ],
+    selected: [],
+  },
+];
+const granular = runPublicationPreflight(
+  healthy({
+    model: modelOf([
+      blockOf("b1", { title: "Índice de renovación" }),
+      blockOf("panel-vivo", { title: "Filtros", payload: lonely }),
+    ]),
+  }),
+);
+check(
+  has(granular.warnings, "granular_filter_dimensions"),
+  "una característica con opciones de una sola persona se avisa",
+);
+const granularWarning = granular.warnings.find((entry) => entry.code === "granular_filter_dimensions");
+check(granular.blockers.length === 0, "y no bloquea");
+check(
+  granular.required.includes("granular_filter_dimensions"),
+  "pero exige que alguien lo decida",
+);
+check(
+  granularWarning.where.some((where) => where.includes("Giro") && where.includes("2 opciones")),
+  "y dice qué característica y cuántas opciones son, por su título",
+);
+// NEVER THE OPTION ITSELF. Naming «Notaría (1 persona)» on a review screen is
+// naming the person, which is the disclosure the warning exists to prevent.
+check(
+  !granularWarning.where.some((where) => /Notar|Veterinaria/.test(where)),
+  "y NUNCA nombra la opción que una sola persona tiene",
+);
+
+// NOTHING IS HIDDEN, AND NO NUMBER MOVES. The warning is the whole action: the
+// three options are still offered, the counts are untouched, and the sample
+// policy is not consulted.
+const granularModel = granular.warnings.length > 0 ? lonely : null;
+eq("las opciones siguen ofreciéndose", granularModel.dimensions[0].options.length, 3);
+eq("con su conteo intacto", granularModel.dimensions[0].options[1].participants, 1);
+check(
+  !has(granular.warnings, "withheld_by_sample_policy") && !has(granular.warnings, "annotated_by_sample_policy"),
+  "y no se toca la política de muestra: `show_all` sigue siendo el valor por omisión",
+);
+// NO THRESHOLD ENTERED THE LAYER. The only number in the comparison is one, and
+// one is the definition of a group of one rather than a chosen cut-off.
+const preflightCode = stripComments(read("src/lib/publication/preflight.ts"));
+check(
+  !/participants\s*[<>]=?\s*[0-9]+/.test(preflightCode),
+  "y en la capa no aparece ninguna comparación de tamaño contra un número",
+);
+check(
+  /participants === 1/.test(preflightCode),
+  "sólo la igualdad con uno, que es lo que significa «una sola persona»",
+);
+
+
+/* -------------------------------------------------------------------------- */
+console.log("\n[15] Contenido que el plano aprobado exige no se salta con una confirmación");
+
+/*
+ * THE STANDING RULE, AND WHY IT NOW HAS AN EXCEPTION THE AUTHOR WRITES.
+ *
+ * `configuration_required` is still a warning for every block nobody marked:
+ * what nobody has finished renders as nothing on a client's page, and publishing
+ * that is a decision. What changed is that the approved north-star for a study
+ * is not a menu. A layout that DECLARES the journey pain cloud and delivers a
+ * page without it is a different experience from the one that was signed off,
+ * and «entiendo que desaparecerá» is not the person who signed it off saying so.
+ */
+const painCloudBlock = (over = {}) =>
+  blockOf("temas-recorrido", {
+    title: "Puntos de dolor del recorrido",
+    availability: "configuration_required",
+    payload: { shape: "editorial", body: null, absence: null },
+    ...over,
+  });
+
+const requiredMissing = runPublicationPreflight(
+  healthy({
+    model: modelOf([blockOf("b1", { title: "Índice de renovación" }), painCloudBlock()]),
+    requiredBlockIds: ["temas-recorrido"],
+  }),
+);
+check(
+  has(requiredMissing.blockers, "required_content_missing"),
+  "una ranura marcada como exigida y vacía BLOQUEA",
+);
+check(
+  !requiredMissing.required.includes("required_content_missing"),
+  "y no hay confirmación que la levante: no es una advertencia",
+);
+check(
+  !has(requiredMissing.warnings, "configuration_required_blocks"),
+  "y no se repite además como aviso confirmable, que sería ofrecer una salida que no existe",
+);
+const requiredFinding = requiredMissing.blockers.find(
+  (entry) => entry.code === "required_content_missing",
+);
+check(
+  requiredFinding.where.some((where) => where.includes("Puntos de dolor del recorrido")),
+  "el bloqueo nombra el bloque por su título",
+);
+check(
+  !requiredFinding.where.some((where) => where.includes("temas-recorrido")),
+  "nunca por su identificador",
+);
+// THE TWO REMEDIES ARE IN THE SENTENCE. A blocker nobody can act on is a wall.
+check(
+  /Escribe el contenido/.test(requiredFinding.detail) && /quita el bloque/.test(requiredFinding.detail),
+  "y dice las dos salidas honestas: escribir el contenido, o quitar el bloque",
+);
+check(
+  runPublicationPreflight(
+    healthy({
+      model: modelOf([blockOf("b1"), painCloudBlock()]),
+      requiredBlockIds: ["temas-recorrido"],
+      acknowledged: [...WARNINGS_REQUIRING_ACKNOWLEDGEMENT],
+    }),
+  ).canPublish === false,
+  "confirmar TODAS las advertencias del vocabulario no lo desbloquea",
+);
+
+// AN UNMARKED SLOT IS STILL A WARNING, so the standing rule is intact and the
+// blueprint's other empty slots stay publishable.
+const unmarked = runPublicationPreflight(
+  healthy({ model: modelOf([blockOf("b1"), painCloudBlock()]), requiredBlockIds: [] }),
+);
+check(
+  has(unmarked.warnings, "configuration_required_blocks") && unmarked.blockers.length === 0,
+  "una ranura que nadie marcó sigue siendo un aviso y no un bloqueo",
+);
+
+// REMOVING THE BLOCK IS A REAL REMEDY, not a sentence.
+check(
+  runPublicationPreflight(
+    healthy({ model: modelOf([blockOf("b1")]), requiredBlockIds: ["temas-recorrido"] }),
+  ).blockers.length === 0,
+  "y quitar el bloque del documento levanta el bloqueo de verdad",
+);
+
+// FILLING IT IS THE OTHER.
+check(
+  runPublicationPreflight(
+    healthy({
+      model: modelOf([
+        blockOf("b1"),
+        painCloudBlock({
+          availability: "available",
+          payload: { shape: "editorial", body: "Contenido curado y aprobado.", absence: null },
+        }),
+      ]),
+      requiredBlockIds: ["temas-recorrido"],
+    }),
+  ).blockers.length === 0,
+  "y escribir el contenido también",
+);
+
+// THE APPROVED BLUEPRINT DECLARES IT. Read from the blueprint's own bytes, so
+// the requirement cannot quietly stop being declared.
+const approvedSource = read("src/lib/presentation/blueprints/cuicuilco-approved.ts");
+check(
+  /id: "temas-recorrido"/.test(approvedSource),
+  "el plano aprobado sigue declarando la ranura de la nube de puntos de dolor",
+);
+check(
+  /H\.journeyPainCloud,\s*\n\s*true,/.test(approvedSource),
+  "y la marca como contenido exigido",
 );
 
 /* -------------------------------------------------------------------------- */

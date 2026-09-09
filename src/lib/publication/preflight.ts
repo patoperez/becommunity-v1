@@ -34,6 +34,7 @@
  * bases are. A gate asserts that with bases of one.
  */
 
+import { clientSeesBlock, filterPanelIsOperable } from "../presentation";
 import type { PresentationRenderModel } from "../presentation";
 import {
   WARNINGS_REQUIRING_ACKNOWLEDGEMENT,
@@ -75,6 +76,16 @@ export type QualitativeBinding = {
 export type PublicationSubject = {
   /** Whether the actor may publish at all. Re-checked by the database too. */
   authorized: boolean;
+  /**
+   * Whether the surface a client reads hands the renderer live filter controls.
+   *
+   * It is a fact about the DELIVERABLE, not about this screen, and it is
+   * required rather than defaulted. Every "would a client see this" question
+   * below is asked with it, the review preview is mounted with it, and a gate
+   * renders the real component and compares the two counts — because the last
+   * time this was two separate answers, the review said 23 over a preview of 20.
+   */
+  clientSurfaceIsLive: boolean;
   /** Why the canonical read produced nothing, or null when it produced results. */
   readRefusal:
     | "no_canonical_package"
@@ -108,6 +119,16 @@ export type PublicationSubject = {
    * reason the columns exist beside the fingerprint.
    */
   lastPublished: PublicationIdentity | null;
+  /**
+   * Block ids the AUTHOR marked as required content.
+   *
+   * Ids rather than titles, because the model is matched by id and the
+   * SENTENCE is built from the title — so nothing internal reaches a screen.
+   * It comes from the document, which the preflight does not otherwise read:
+   * the resolved model deliberately carries no authoring material, and a
+   * requirement is authoring material.
+   */
+  requiredBlockIds: readonly string[];
   /** The qualitative groups this document's blocks bind. */
   qualitative: readonly QualitativeBinding[];
   /** The publication version the reviewer saw, and the one the store holds. */
@@ -326,7 +347,32 @@ export function runPublicationPreflight(subject: PublicationSubject): Publicatio
 
   // [8] THE CONTENT, block by block. Every count below comes from the resolved
   //     model, so it describes what a client would actually see.
-  const inspected = inspectBlocks(subject.model);
+  const inspected = inspectBlocks(
+    subject.model,
+    subject.clientSurfaceIsLive,
+    new Set(subject.requiredBlockIds),
+  );
+
+  // [8a] CONTENT THE AUTHOR SAID IS REQUIRED, AND IS NOT THERE.
+  //
+  // A BLOCKER, and the only one in this file that a person could have
+  // prevented by editing the layout. It is deliberately not acknowledgeable:
+  // the approved north-star for this study shows the journey pain cloud, and
+  // ticking «entiendo que no aparecerá» is not the same decision as the one
+  // that approved it. The two remedies are in the sentence, because a blocker
+  // nobody can act on is a wall.
+  if (inspected.requiredMissing.length > 0) {
+    blockers.push(
+      blocker(
+        "required_content_missing",
+        "Estos bloques llevan contenido que el plano aprobado exige, y ahora mismo están " +
+          "vacíos: al cliente no le aparecería nada en su lugar. Escribe el contenido que " +
+          "falta, o quita el bloque del documento en Construcción si ya no forma parte de la " +
+          "entrega. No se puede publicar confirmando que desaparecerá.",
+        inspected.requiredMissing,
+      ),
+    );
+  }
 
   if (inspected.unresolved.length > 0) {
     blockers.push(
@@ -338,6 +384,10 @@ export function runPublicationPreflight(subject: PublicationSubject): Publicatio
     );
   }
 
+  // THE REQUIRED ONES ARE NOT REPEATED HERE. They are already a blocker, and
+  // a screen that listed the same block twice — once as «no se puede publicar»
+  // and once as «confírmalo y publica» — would be offering a way past the
+  // blocker that does not exist.
   if (inspected.configurationRequired.length > 0) {
     warnings.push(
       warning(
@@ -384,6 +434,31 @@ export function runPublicationPreflight(subject: PublicationSubject): Publicatio
         "annotated_by_sample_policy",
         "Alguien escribió una política de muestra que añade una nota junto a estos resultados. Se publican con esa nota.",
         inspected.annotated,
+      ),
+    );
+  }
+
+  if (inspected.inoperablePanels.length > 0) {
+    warnings.push(
+      warning(
+        "inoperable_filter_panels",
+        "Hay paneles de filtros que ningún bloque usa, así que no cambiarían ninguna cifra. El " +
+          "cliente no los recibe: en su página no aparece el panel, ni un hueco donde estaría. Si " +
+          "querías que filtraran algo, conéctalos en Construcción antes de publicar.",
+        inspected.inoperablePanels,
+      ),
+    );
+  }
+
+  if (inspected.granularDimensions.length > 0) {
+    warnings.push(
+      warning(
+        "granular_filter_dimensions",
+        "Estas características de filtro incluyen opciones que una sola persona tiene. Quien lea el " +
+          "tablero puede elegir una de ellas y quedarse mirando las cifras de esa única persona. No " +
+          "se oculta nada por tu cuenta y ninguna cifra cambia: la decisión de dejar la " +
+          "característica en el panel o quitarla en Construcción es tuya.",
+        inspected.granularDimensions,
       ),
     );
   }
@@ -531,6 +606,18 @@ type Inspection = {
   hidden: string[];
   withheld: string[];
   annotated: string[];
+  /** Blocks the author marked required whose content is not there. */
+  requiredMissing: string[];
+  /** Panels the author placed that a client will not receive. */
+  inoperablePanels: string[];
+  /**
+   * Filter characteristics offering an option only one person carries.
+   *
+   * One sentence per dimension, naming the panel, the characteristic and how
+   * many of its options are that small. Never the option's own label: naming
+   * «Giro: Notaría (1 persona)» on a review screen is naming the person.
+   */
+  granularDimensions: string[];
   /** How many blocks a client would actually see something in. */
   visible: number;
 };
@@ -543,7 +630,11 @@ type Inspection = {
  * authored policy, and `visible` is what the author wrote. This function
  * classifies; it does not judge.
  */
-function inspectBlocks(model: PresentationRenderModel): Inspection {
+function inspectBlocks(
+  model: PresentationRenderModel,
+  live: boolean,
+  requiredBlockIds: ReadonlySet<string>,
+): Inspection {
   const found: Inspection = {
     unresolved: [],
     unavailable: [],
@@ -551,12 +642,32 @@ function inspectBlocks(model: PresentationRenderModel): Inspection {
     hidden: [],
     withheld: [],
     annotated: [],
+    requiredMissing: [],
+    inoperablePanels: [],
+    granularDimensions: [],
     visible: 0,
   };
 
   for (const page of model.pages) {
     for (const block of page.blocks) {
       const where = `${pageTitle(page)} · ${blockTitle(block)}`;
+      // THE COUNT IS THE RENDERER'S OWN VERDICT, taken once, before the
+      // classification below. It used to be `found.visible += 1` at the bottom
+      // of this loop — a third implementation of a rule two other files also
+      // held — and it disagreed with both of them about a filter panel.
+      const seen = clientSeesBlock(block, live);
+      if (seen) found.visible += 1;
+
+      // REQUIRED AND ABSENT, whatever the reason it is absent. A required
+      // block waiting for content, hidden by its author, emptied by a policy
+      // or holding nothing at all are four ways to deliver the same missing
+      // half of the approved experience, and the reviewer needs to be stopped
+      // by all four rather than by the one this file happened to test for.
+      if (requiredBlockIds.has(block.id) && !seen) {
+        found.requiredMissing.push(where);
+        continue;
+      }
+
       if (!block.visible) {
         found.hidden.push(where);
         continue;
@@ -577,10 +688,27 @@ function inspectBlocks(model: PresentationRenderModel): Inspection {
         found.withheld.push(where);
         continue;
       }
+      if (block.payload.shape === "filter_controls") {
+        if (!filterPanelIsOperable(block, live)) {
+          found.inoperablePanels.push(where);
+          continue;
+        }
+        // COUNTED, NOT COMPARED. `participants` is the canonical layer's own
+        // unfiltered figure for that option, already measured; this counts how
+        // many of a dimension's options carry exactly one person. No threshold
+        // is chosen, nothing is hidden, and no number moves.
+        for (const dimension of block.payload.dimensions) {
+          const alone = dimension.options.filter((option) => option.participants === 1).length;
+          if (alone === 0) continue;
+          found.granularDimensions.push(
+            `${where} · ${dimension.label}: ${alone} ${alone === 1 ? "opción" : "opciones"} ` +
+              `${alone === 1 ? "corresponde" : "corresponden"} a una sola persona`,
+          );
+        }
+      }
       if (block.sampleDisplay.state === "shown_with_note") {
         found.annotated.push(where);
       }
-      found.visible += 1;
     }
   }
 

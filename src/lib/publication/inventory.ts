@@ -27,6 +27,7 @@
  * content is in the document and is nothing on the page.
  */
 
+import { clientSeesBlock, filterPanelIsOperable } from "../presentation";
 import type { PresentationRenderModel, RenderBlock, RenderPage } from "../presentation";
 import type { BlockInventoryEntry, PageInventoryEntry } from "./contract";
 
@@ -70,36 +71,79 @@ export function blockTitle(block: RenderBlock, positionInPage?: number): string 
 /**
  * What the client would see here, in one phrase.
  *
- * The order of the tests is the order of precedence a reader experiences: a
- * hidden block is nothing whatever its availability says, and a withheld result
- * is nothing whatever its payload holds.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE VERDICT IS THE RENDERER'S, AND ONLY THE SENTENCE IS THIS FILE'S.
+ *
+ * `visibleToClient` used to be decided here, by a second implementation of the
+ * renderer's rule. The two agreed on ten shapes and disagreed on the eleventh:
+ * a filter panel is content on a surface where filtering works and an
+ * unfinished edge where it does not, the renderer knew that and this file did
+ * not, and a review screen reported «23» over a preview that drew 20.
+ *
+ * So the answer now comes from `clientSeesBlock` — the one the renderer calls,
+ * with the same `live` argument — and what remains here is the SENTENCE, which
+ * is a reviewer's own vocabulary and belongs to the review surface. The order
+ * of the tests is the order of precedence a reader experiences: a hidden block
+ * is nothing whatever its availability says, and a withheld result is nothing
+ * whatever its payload holds.
  */
-function blockState(block: RenderBlock): { state: string; visibleToClient: boolean } {
-  if (!block.visible) return { state: "Oculto: no se dibuja", visibleToClient: false };
+function blockState(block: RenderBlock, live: boolean): { state: string; visibleToClient: boolean } {
+  const visibleToClient = clientSeesBlock(block, live);
+  if (!block.visible) return { state: "Oculto: no se dibuja", visibleToClient };
   if (block.availability === "unresolved") {
-    return { state: "Pregunta abierta: el contrato no lo resuelve", visibleToClient: false };
+    return { state: "Pregunta abierta: el contrato no lo resuelve", visibleToClient };
   }
   if (block.availability === "configuration_required") {
-    return { state: "Espera contenido: al cliente no le aparece nada", visibleToClient: false };
+    return { state: "Espera contenido: al cliente no le aparece nada", visibleToClient };
   }
   if (block.availability === "unavailable") {
-    return { state: "El estudio no tiene esta medición", visibleToClient: false };
+    return { state: "El estudio no tiene esta medición", visibleToClient };
   }
   if (block.sampleDisplay.state === "withheld_by_policy") {
-    return { state: "Reservado por una política escrita a mano", visibleToClient: false };
+    return { state: "Reservado por una política escrita a mano", visibleToClient };
+  }
+  // A PANEL THAT CANNOT APPEAR IS NAMED AS SUCH, AND NEVER COUNTED.
+  //
+  // A panel nobody connected to a block moves no figure, so the renderer draws
+  // it for nobody. Saying «se dibuja» about it — as this file used to, because
+  // its availability is `available` and its payload is not empty — is the exact
+  // sentence that made the count disagree with the picture.
+  if (block.payload.shape === "filter_controls" && !filterPanelIsOperable(block, live)) {
+    return {
+      state: live
+        ? "No mueve ninguna cifra: al cliente no le aparece"
+        : "Los filtros no se aplican en esta vista: al cliente no le aparece",
+      visibleToClient,
+    };
   }
   if (block.sampleDisplay.state === "shown_with_note") {
-    return { state: "Se dibuja, con la nota que alguien escribió", visibleToClient: true };
+    return { state: "Se dibuja, con la nota que alguien escribió", visibleToClient };
   }
-  return { state: "Se dibuja", visibleToClient: true };
+  if (!visibleToClient) {
+    // Everything above is a NAMED reason. This is the honest catch-all for a
+    // block the renderer drops for a reason the sentences above do not cover —
+    // an empty payload, say — and it says so rather than claiming it is drawn.
+    return { state: "No hay contenido que dibujar: al cliente no le aparece", visibleToClient };
+  }
+  return { state: "Se dibuja", visibleToClient };
 }
 
-/** The whole inventory, page by page, in the order the client would read it. */
-export function buildPublicationInventory(model: PresentationRenderModel): PageInventoryEntry[] {
+/**
+ * The whole inventory, page by page, in the order the client would read it.
+ *
+ * `live` is the surface fact, and it is REQUIRED rather than defaulted: the
+ * review preview draws the client's own reading surface, where filtering works,
+ * and an inventory built for a different surface would describe a different
+ * deliverable.
+ */
+export function buildPublicationInventory(
+  model: PresentationRenderModel,
+  live: boolean,
+): PageInventoryEntry[] {
   return model.pages.map((page) => ({
     title: pageTitle(page),
     blocks: page.blocks.map((block, index): BlockInventoryEntry => {
-      const { state, visibleToClient } = blockState(block);
+      const { state, visibleToClient } = blockState(block, live);
       return {
         title: blockTitle(block, index + 1),
         kind: KIND_LABEL[block.payload.shape] ?? "Bloque",
@@ -110,11 +154,17 @@ export function buildPublicationInventory(model: PresentationRenderModel): PageI
   }));
 }
 
-/** How many blocks a client would see something in. Counted, never estimated. */
-export function countVisibleToClient(model: PresentationRenderModel): number {
+/**
+ * How many blocks a client would see something in. Counted, never estimated.
+ *
+ * It is the inventory's own verdict summed, which is the renderer's verdict
+ * summed, which is what the preview draws. The three cannot disagree because
+ * there is one predicate and it takes the surface as an argument.
+ */
+export function countVisibleToClient(model: PresentationRenderModel, live: boolean): number {
   let total = 0;
   for (const page of model.pages) {
-    for (const block of page.blocks) if (blockState(block).visibleToClient) total += 1;
+    for (const block of page.blocks) if (blockState(block, live).visibleToClient) total += 1;
   }
   return total;
 }

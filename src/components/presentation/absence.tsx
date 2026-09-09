@@ -33,6 +33,7 @@
  * which it is, once, at the top, and every leaf reads it from one place.
  */
 
+import { sampleVisibleNote } from "@/lib/presentation";
 import type { RenderAbsence, RenderSampleDisplay } from "@/lib/presentation";
 
 /** Who is looking. A property of the surface, never of the render model. */
@@ -96,10 +97,13 @@ export function absenceSentence(absence: RenderAbsence): string {
  * they wrote. Never the threshold, never the author, never the rationale.
  */
 export function visibleNote(sample: RenderSampleDisplay): string | null {
-  if (sample.state === "shown_with_note") return sample.note;
-  if (sample.state === "withheld_by_policy") return sample.note;
-  return null;
+  // THE PURE ONE. It is re-exported rather than reimplemented because the
+  // publication inventory and the preflight decide client visibility from the
+  // same fact, and a second copy of this two-line function is exactly how the
+  // three answers drifted apart the first time.
+  return sampleVisibleNote(sample);
 }
+
 
 /**
  * The internal marker every reviewer-only placeholder wears.

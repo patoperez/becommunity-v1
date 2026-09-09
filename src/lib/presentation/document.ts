@@ -235,6 +235,36 @@ type BlockCommon = {
    * from somebody.
    */
   visible: boolean;
+  /**
+   * Whether this block's content is REQUIRED for the study to be publishable.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * AN AUTHORED REQUIREMENT, NEVER A SOFTWARE RULE.
+   *
+   * The standing rule was that `configuration_required` is a warning and never
+   * a blocker, and the argument was sound as far as it went: what nobody has
+   * finished renders as nothing on a client's page (C11), so publishing it is
+   * a decision a person makes knowingly — and blocking would have made the
+   * approved blueprint, which declares the curated pain-cloud slot and leaves
+   * it empty, unpublishable forever.
+   *
+   * What that argument missed is that «the client sees nothing» and «the
+   * deliverable is finished» are two different facts. The approved north-star
+   * this study was signed off against SHOWS the journey pain cloud. Publishing
+   * without it does not deliver a smaller version of the approved experience;
+   * it delivers a different one, and an acknowledgement that it «will simply
+   * not exist for the reader» is not consent to that from the person who
+   * approved the north-star.
+   *
+   * So the requirement is AUTHORED, per block, by whoever wrote the layout —
+   * exactly as a sample policy is authored. A block marked required whose
+   * content is missing is a BLOCKER with two honest remedies: supply the
+   * content, or take the block out of the layout. Neither is a checkbox.
+   *
+   * Absent or false on every document authored before this existed, so nothing
+   * already saved becomes unpublishable by the flag arriving.
+   */
+  requiredContent?: boolean;
   /** Null means "inherit the document's policy". */
   samplePolicy: SampleDisplayPolicy | null;
   /** Null means "inherit the document's level". */
@@ -444,6 +474,12 @@ const commonFields = {
   copy: copySchema,
   placement: placementSchema,
   visible: z.boolean(),
+  // OPTIONAL, so every document saved before this field existed still
+  // validates byte-for-byte. `.optional()` rather than `.default(false)`:
+  // a default would REWRITE a stored document on the way through the
+  // validator, and its digest would then disagree with the bytes the store
+  // holds — which `persistence_hash_mismatch` exists to refuse.
+  requiredContent: z.boolean().optional(),
   connectedFilterPanelIds: z.array(identifier).max(16),
   samplePolicy: samplePolicySchema.nullable(),
   methodologyDisclosure: disclosureSchema.nullable(),

@@ -111,6 +111,57 @@ export type PublicationReview =
   | { ok: false; unavailable: PublicationUnavailable };
 
 /* -------------------------------------------------------------------------- */
+/* the review preview, under a reader's own selection                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * WHAT COMES BACK WHEN A REVIEWER OPERATES A FILTER IN THE PREVIEW.
+ *
+ * A render model, and the count of blocks a client would see under that
+ * selection. Nothing else — no document, no digest, no binding, no identity,
+ * and no draft revision, because operating a filter does not change which
+ * revision is under review.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * A SELECTION IN THE PREVIEW WRITES NOTHING, AND THAT IS ENFORCED BY SHAPE.
+ *
+ * The action that produces this reads the STORED draft, resolves it under the
+ * selection, and returns. It has no insert, no update, no upsert, no delete, no
+ * RPC and no `revalidatePath`; the draft's revision, its bytes and its digest
+ * are the same after as before, and the publication snapshot — which does not
+ * exist yet at review time — is not touched at all. A reviewer moving a
+ * checkbox is a reader moving a checkbox: ephemeral, private to the request,
+ * and gone when the screen closes.
+ *
+ * And publishing still ignores it entirely. `publishStoredPresentation`
+ * resolves the stored draft under `EMPTY_VIEWER_SELECTION`, so what is snapshot
+ * is the unfiltered document whatever the reviewer happened to be looking at.
+ */
+export type PublicationPreviewPayload = {
+  model: PresentationRenderModel;
+  /** Blocks a client would see under this selection. Counted on the server. */
+  visibleBlockCount: number;
+};
+
+export type PublicationPreviewResult =
+  | { ok: true; payload: PublicationPreviewPayload }
+  | { ok: false; unavailable: PublicationUnavailable };
+
+/**
+ * The preview action, as the review surface names it.
+ *
+ * The selection travels as a JSON STRING for the same reason the composer's
+ * does: a Server Action's arguments are deserialized before anything validates
+ * them, and a string is the one shape that cannot arrive as a half-parsed
+ * object. It is capped, parsed inside a try/catch, and then validated against
+ * what this document and this study actually offer.
+ */
+export type PreviewPublicationUnderSelection = (
+  studyId: string,
+  viewerJson: string,
+) => Promise<PublicationPreviewResult>;
+
+/* -------------------------------------------------------------------------- */
 /* publishing                                                                  */
 /* -------------------------------------------------------------------------- */
 

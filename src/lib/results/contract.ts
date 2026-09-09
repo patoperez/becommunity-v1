@@ -66,8 +66,27 @@
  * under one name would offer a reader two controls it could not tell apart.
  * Which cohorts answered is a fact this layer already holds; saying it is what
  * lets a surface name them truthfully. Additive, so minor.
+ *
+ * 2.3.0 — `FilterValue` gained `rawValues`. The source states one answer in
+ * more than one spelling: «Construcción» and «Construcción·» — the same word
+ * with a trailing space — were two filter options with two counts, and the
+ * approved study's «Giro» column carries FOUR such pairs while «Tipo de
+ * empresa» carries one. A reader picking one of them saw a third of the
+ * people who had actually answered it, and no screen could tell them apart.
+ *
+ * So a filter value is now a GROUP: one display spelling, and every canonical
+ * raw value that differs from it by leading or trailing whitespace only. The
+ * raws are preserved rather than rewritten — the canonical rows are evidence
+ * and this boundary does not edit evidence — and `applyFilters` matches a
+ * person carrying ANY of them. Values differing by so much as one internal
+ * character are never merged: that would be this layer deciding two answers
+ * mean the same thing, which is an editorial judgement nobody made.
+ *
+ * Additive in SHAPE and not in OUTPUT: a dimension that had a whitespace
+ * twin now publishes one option instead of two, and its participant count is
+ * the sum. That is the defect being corrected, not a side effect of it.
  */
-export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.2.0";
+export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.3.0";
 
 /**
  * The unit a number lives in. Presentation may style it; it may not change it.
@@ -356,8 +375,29 @@ export type FilterValue = {
    *
    * For an attribute it is the answer text; for the cohort dimension it is the
    * cohort key, which is an internal enum. A surface must render `label`.
+   *
+   * WHEN A GROUP HAS SEVERAL RAW SPELLINGS this is the FIRST of them in
+   * codepoint order — a stable representative, so a stored selection and an
+   * echoed one name the same string across two builds. It is never the whole
+   * answer to «who carries this»: that is `rawValues`, and every matcher must
+   * use it.
    */
   value: string;
+  /**
+   * EVERY canonical raw value this display option stands for.
+   *
+   * At least one, and equal to `[value]` in the ordinary case. More than one
+   * when the source spells one answer several ways with different leading or
+   * trailing whitespace. The raws are the canonical rows' own bytes,
+   * preserved: nothing here rewrites evidence, and a lineage trace still
+   * leads back to the exact cell.
+   *
+   * MEANINGFUL TEXT IS NEVER MERGED. «B2B» and «B2B ·» group; «B2B» and «B2C»
+   * do not, and neither do «Construcción» and «Construccion». Deciding two
+   * differently-spelled answers mean the same thing is an editorial act with
+   * a person's name on it, and this boundary does not perform editorial acts.
+   */
+  rawValues: string[];
   /**
    * The study's own words for this value.
    *
@@ -367,7 +407,13 @@ export type FilterValue = {
    * dimension is which, and so that `active` never reaches a screen.
    */
   label: string;
-  /** How many people in the unfiltered population carry it. */
+  /**
+   * How many people in the unfiltered population carry it.
+   *
+   * Over the WHOLE group: somebody who answered «Construcción·» and somebody
+   * who answered «Construcción» both carry this option, because they gave the
+   * same answer.
+   */
   participants: number;
 };
 
@@ -404,7 +450,17 @@ export type FilterDimension = {
 
 export type AppliedFilter = {
   dimensionKey: string;
-  /** Values selected. Empty means the dimension was not constrained. */
+  /**
+   * Values selected. Empty means the dimension was not constrained.
+   *
+   * ONE ENTRY PER DISPLAY OPTION, named by its representative `value`, not
+   * one per raw spelling. A selection is a reader choosing an answer; that
+   * the source wrote that answer two ways is not part of what they chose, and
+   * an echo listing both would show them a choice they did not make.
+   * `applyFilters` expands each entry to its group's whole raw set before
+   * testing anybody, and it accepts a raw spelling as a name for its group so
+   * a selection stored before the grouping existed still resolves.
+   */
   values: string[];
 };
 

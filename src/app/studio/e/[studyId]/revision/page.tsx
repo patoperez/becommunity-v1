@@ -9,6 +9,7 @@ import { StudyWorkSurface } from "@/components/studio/StudyWorkSurface";
 import { PublicationReviewView } from "@/components/studio/publication/PublicationReviewView";
 import { studioStudyConstruction } from "@/lib/studio/routes";
 import {
+  previewPublicationUnderSelection,
   publishCanonicalPresentation,
   restoreCanonicalPublication,
 } from "./actions";
@@ -59,16 +60,31 @@ type Search = Promise<{ ok?: string; error?: string }>;
  * counts, authored titles, finished Spanish sentences, two revision numbers and
  * a history of versions and dates. No document, no digest, no binding, no
  * package identity, no tenant or study uuid, no actor and no note about a
- * person. The two actions are handed DOWN as props rather than imported by the
+ * person. The THREE actions are handed DOWN as props rather than imported by the
  * client component, because a `"use client"` module with a static import of
- * either would have a path to the canonical read layer in the import graph.
+ * any of them would have a path to the canonical read layer in the import graph.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE PREVIEW IS THE CLIENT'S SCREEN, FILTERS AND ALL.
+ *
+ * The third action resolves the STORED draft under a reviewer's own filter
+ * selection and returns a render model. It exists because the preview was
+ * mounted without viewer controls, so the approved layout's three filter panels
+ * were dropped from it as unfinished edges while the inventory beside it counted
+ * them as client-visible — twenty drawn against twenty-three reported. A person
+ * cannot approve controls they cannot work.
+ *
+ * The selection is EPHEMERAL: it is never stored, the action writes nothing, and
+ * publishing resolves the stored document under the neutral selection whatever
+ * the reviewer had ticked.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * THIS PAGE FUNCTION WRITES NOTHING.
  *
- * No insert, update, upsert, delete, RPC or `revalidatePath`. What may write is
- * the two actions, and each writes exactly one thing: a publication, or a draft
- * revision through the draft's own save function.
+ * No insert, update, upsert, delete, RPC or `revalidatePath`. Of the three
+ * actions, exactly TWO may write, and each writes exactly one thing: a
+ * publication, or a draft revision through the draft's own save function. The
+ * preview action writes nothing at all — it is a read that ends in a value.
  */
 export default async function StudioStudyReviewPage({
   params,
@@ -107,6 +123,7 @@ export default async function StudioStudyReviewPage({
           payload={review.payload}
           publish={publishCanonicalPresentation}
           restore={restoreCanonicalPublication}
+          preview={previewPublicationUnderSelection}
         />
       ) : (
         <section className="rounded-xl border border-caution-line bg-caution-surface p-5">

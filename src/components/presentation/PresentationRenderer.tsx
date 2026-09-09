@@ -32,10 +32,9 @@
  * two must not be read for each other.
  */
 
-import { chartVariantLabel } from "@/lib/presentation";
+import { chartVariantLabel, clientSeesBlock, clientSeesPage } from "@/lib/presentation";
 import type { PresentationRenderModel, RenderBlock, RenderPage } from "@/lib/presentation";
 import { AbsenceNotice, InternalPlaceholder, visibleNote, type PresentationAudience } from "./absence";
-import { filterPanelIsOperable } from "./FilterControls";
 import { RENDERERS } from "./renderers";
 import type { ViewerControls } from "./viewer";
 import { DESKTOP_SPAN, TABLET_SPAN } from "./vocabulary";
@@ -49,104 +48,20 @@ function byOrderThenId<T extends { order: number; id: string }>(a: T, b: T): num
 }
 
 /**
- * Does this block have anything a CLIENT may be shown?
+ * THE PREDICATE IS NOT DEFINED HERE ANY MORE, AND THAT IS THE POINT.
  *
- * C11: a block whose whole content is an omission renders as nothing — no card,
- * no heading, no reserved row. The question has to be asked BEFORE the card is
- * drawn, which is why it lives here and not inside each leaf: a leaf returning
- * null still leaves a bordered box with a title over an empty space, and an
- * empty box is exactly the shape of a gap C11 removes.
- */
-function clientHasContent(block: RenderBlock, live: boolean): boolean {
-  const payload = block.payload;
-  // AN ABSENCE THE CONTRACT STATES IS NOT A GAP WE MADE.
-  //
-  // "Nobody responded" and "no authority states this relationship" are facts
-  // about the STUDY, and C11's exception is explicit that a caveat about what a
-  // reader is being shown survives. An earlier version filtered any block with
-  // an empty payload, so those two sentences were removed along with the gaps —
-  // the opposite defect, and the more damaging one, because it makes a study
-  // look complete where it was honest.
-  const stated =
-    "absence" in payload &&
-    payload.absence !== null &&
-    (payload.absence.state === "unavailable" || payload.absence.state === "unresolved");
-  if (stated) return true;
-  switch (payload.shape) {
-    case "value":
-      return payload.value !== null;
-    case "categories":
-      return payload.categories.length > 0;
-    case "series":
-      return payload.points.some((point) =>
-        point.measures.some(
-          (measure) =>
-            measure.value !== null ||
-            measure.absence?.state === "unavailable" ||
-            measure.absence?.state === "unresolved",
-        ),
-      );
-    case "terms":
-      return payload.terms.length > 0;
-    case "cohorts":
-      return payload.cohorts.length > 0;
-    case "instrument_bases":
-      return payload.instruments.length > 0;
-    case "touchpoint":
-      return payload.satisfaction !== null || payload.processUnawareness !== null || payload.unawarenessShare !== null;
-    case "journey_group":
-      return payload.touchpointCount > 0;
-    // A route with no points is a route nobody finished configuring: the
-    // block exists, and there is nothing in it for a reader.
-    case "routes":
-      return payload.routes.some((route) => route.points.length > 0);
-    case "editorial":
-      return payload.body !== null;
-    // A FILTER PANEL IS CONTENT WHEN IT WORKS, AND AN UNFINISHED EDGE WHEN IT
-    // DOES NOT.
-    //
-    // Unit 6B.1 answered `false` unconditionally, and that was right while the
-    // controls were dead: a client's page must not carry a control that will
-    // work later. A LIVE panel is the opposite — it is a finished part of the
-    // deliverable, and hiding it would take a reader's own instrument away.
-    //
-    // The question is asked by the component that draws the panel, so the card
-    // and its contents can never disagree about whether there is anything here.
-    case "filter_controls":
-      return filterPanelIsOperable(block, live);
-    default:
-      return false;
-  }
-}
-
-/**
- * Would a CLIENT see anything at all for this block?
+ * `clientSeesBlock` and `clientSeesPage` used to live in this file, and the
+ * publication inventory and the publication preflight each had their own copy.
+ * The three agreed until a filter panel became content on a live surface and an
+ * unfinished edge on a dead one — and then a review screen counted three panels
+ * its own preview did not draw.
  *
- * `clientHasContent` asks about the payload. This asks the whole question,
- * including the block-level sample outcome: a block whose sample was withheld
- * by policy carries no content AND, unless somebody authored a public note, no
- * sentence either — so on a client surface it is a titled card over nothing,
- * which is the exact shape C11 removes.
+ * There is now one implementation, in `@/lib/presentation`, and every surface
+ * that draws, counts or lists client-visible blocks reads it from there. `live`
+ * is a property of the SURFACE — it is `viewer !== undefined`, the same fact
+ * that makes the controls operable — and it is passed explicitly at every call
+ * so no caller can forget which surface it is on.
  */
-function clientSeesBlock(block: RenderBlock, live: boolean): boolean {
-  if (!block.visible) return false;
-  if (block.sampleDisplay.state === "withheld_by_policy") {
-    return visibleNote(block.sampleDisplay) !== null;
-  }
-  return clientHasContent(block, live);
-}
-
-/**
- * And would a client see anything at all for this PAGE?
- *
- * A page heading over nothing is a heading over nothing whether the emptiness
- * came from one block or from all of them. Without this, a page whose every
- * block is withheld or configuration-required still printed its title and its
- * spacing on a client surface — an absence with a name on it.
- */
-function clientSeesPage(page: RenderPage, live: boolean): boolean {
-  return page.blocks.some((block) => clientSeesBlock(block, live));
-}
 
 function BlockCard({
   block,

@@ -15,6 +15,21 @@
  * silence: the dimension carries the section it may not cross and the id of the
  * authority that says so, and the section that would have used it reports
  * `cross_not_permitted`.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ONE ANSWER, ONE OPTION — EVEN WHEN THE SOURCE SPELLS IT TWICE.
+ *
+ * The approved study's «Giro» column holds «Construcción» and «Construcción·»,
+ * «Capacitación y Coaching» and «Capacitación y Coaching·», and two more pairs
+ * like them; «Tipo de empresa» holds «B2B» and «B2B·». They are the same
+ * answer with a trailing space, and they were two options with two counts, so
+ * a reader who picked one saw a third of the people who gave it.
+ *
+ * Options are therefore GROUPED by the answer with its outer whitespace
+ * removed. Every raw spelling is preserved on the value, the canonical rows
+ * are not touched, and `applyFilters` matches a person carrying any spelling
+ * in the group. Nothing that differs by a single internal character is ever
+ * merged: that is an editorial judgement, and this file makes none.
  */
 
 import type { SourceValueStatus } from "../ingestion/canonical-package/values";
@@ -37,6 +52,52 @@ export const ANSWERED_NOT_CARRIED = "answered_not_carried";
 
 function codepointCompare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * The display spelling a raw answer groups under.
+ *
+ * `trim()` and nothing else: it removes leading and trailing whitespace —
+ * including the non-breaking space and the byte-order mark, which JavaScript
+ * counts as whitespace and spreadsheets emit — and touches not one character
+ * in between.
+ *
+ * A WHITESPACE-ONLY ANSWER GROUPS WITH NOTHING. Its trimmed form is the empty
+ * string, which is not a spelling anybody could read on a control, and
+ * folding every such answer into one blank option would merge answers this
+ * boundary cannot tell apart. So it keeps its own raw form and its own count,
+ * exactly as it did before grouping existed.
+ */
+function displaySpelling(raw: string): string {
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : raw;
+}
+
+/**
+ * Build one dimension's grouped values from its raw answer counts.
+ *
+ * `value` is the first raw in codepoint order, so two builds over the same
+ * evidence name the same representative. `rawValues` is every spelling, also
+ * in codepoint order, so the whole structure is byte-stable.
+ */
+function groupedValues(counts: Map<string, number>): FilterValue[] {
+  const groups = new Map<string, { raws: string[]; participants: number }>();
+  for (const [raw, participants] of counts) {
+    const display = displaySpelling(raw);
+    const group = groups.get(display);
+    if (group) {
+      group.raws.push(raw);
+      group.participants += participants;
+    } else {
+      groups.set(display, { raws: [raw], participants });
+    }
+  }
+  return [...groups.entries()]
+    .sort((a, b) => codepointCompare(a[0], b[0]))
+    .map(([display, group]) => {
+      const raws = [...group.raws].sort(codepointCompare);
+      return { value: raws[0], label: display, rawValues: raws, participants: group.participants };
+    });
 }
 
 function valuesByParticipant(source: CanonicalResultSource): Map<string, Map<string, ResultAttributeValue>> {
@@ -83,16 +144,21 @@ export function buildFilterDimensions(source: CanonicalResultSource, spec: Study
   // specification does not declare has no word but its own, so it is labelled
   // with its key rather than with an invented sentence; `population.cohorts`
   // has always resolved it the same way.
+  // NOT GROUPED, AND IT MUST NOT BE. A cohort key is a closed enum the
+  // specification declares, not a person's typing, so there is no spelling
+  // variation to fold — and folding a key would change what a stored
+  // selection names.
   const cohortValues: FilterValue[] = spec.cohorts
     .filter((cohort) => cohortCounts.has(cohort.key))
     .map((cohort) => ({
       value: cohort.key,
       label: cohort.label,
+      rawValues: [cohort.key],
       participants: cohortCounts.get(cohort.key) ?? 0,
     }));
   for (const [key, participants] of [...cohortCounts.entries()].sort((a, b) => codepointCompare(a[0], b[0]))) {
     if (!cohortValues.some((value) => value.value === key)) {
-      cohortValues.push({ value: key, label: key, participants });
+      cohortValues.push({ value: key, label: key, rawValues: [key], participants });
     }
   }
   dimensions.push({
@@ -169,12 +235,11 @@ export function buildFilterDimensions(source: CanonicalResultSource, spec: Study
       label: definition.label,
       cohortLabels: cohortsAnswering(definition.key),
       dataType: definition.dataType,
-      // An attribute's answer text IS what a reader is shown, so the value and
-      // the label are the same string here. They are still two fields, because
-      // a surface must never have to know which dimension is the exception.
-      values: [...counts.entries()]
-        .sort((a, b) => codepointCompare(a[0], b[0]))
-        .map(([value, participants]) => ({ value, label: value, participants })),
+      // An attribute's answer text IS what a reader is shown, so the label is
+      // that text with its outer whitespace removed — the one clean spelling
+      // of an answer the source may have written several ways. Every raw
+      // spelling stays on the value, and the count is over all of them.
+      values: groupedValues(counts),
       absent: [...absent.entries()]
         .sort((a, b) => codepointCompare(a[0], b[0]))
         .map(([status, participants]) => ({ status, participants })),
@@ -214,31 +279,71 @@ export function applyFilters(
   const dimensions = buildFilterDimensions(source, spec);
   const byDimension = new Map(dimensions.map((dimension) => [dimension.key, dimension]));
 
-  const normalized: AppliedFilter[] = [];
+  // WHAT WAS CHOSEN, AND WHAT IT MATCHES, TRAVEL TOGETHER — ONE PAIR PER
+  // CONSTRAINT.
+  //
+  // `values` is the ECHO: one representative value per display option a reader
+  // picked, which is what they chose. `raws` is the SET OF RAW SPELLINGS those
+  // options stand for, and it is the only thing a person is ever tested
+  // against. Keeping them apart is what lets «Construcción» mean «Construcción
+  // or Construcción·» without the echo claiming the reader ticked two boxes.
+  //
+  // THE PAIRING IS PER CONSTRAINT AND NEVER PER DIMENSION, and that is
+  // load-bearing. Two panels may constrain the SAME characteristic differently,
+  // and `viewerAppliedFilters` deliberately does not merge them: a person must
+  // satisfy every entry, so «Generación X» from one panel and «Millenial» from
+  // another intersect to nobody. Collecting the raw spellings into one set per
+  // dimension key would union them instead — turning the AND that empties a
+  // population into an OR that fills it, silently, and only when two panels
+  // move one block.
+  const constraints: { dimensionKey: string; values: string[]; raws: Set<string> }[] = [];
   for (const filter of applied) {
     const dimension = byDimension.get(filter.dimensionKey);
     if (!dimension) throw new RangeError(`unknown filter dimension: ${filter.dimensionKey}`);
-    const values = [...new Set(filter.values)].sort(codepointCompare);
-    for (const value of values) {
-      if (!dimension.values.some((candidate) => candidate.value === value)) {
+    const chosen = new Set<string>();
+    const raws = new Set<string>();
+    for (const value of filter.values) {
+      // A GROUP MAY BE NAMED BY ANY OF ITS SPELLINGS. The representative is
+      // what this layer publishes today, and a selection saved before the
+      // grouping existed names one of the others — refusing it would turn a
+      // correction into a broken saved view.
+      const group = dimension.values.find(
+        (candidate) => candidate.value === value || candidate.rawValues.includes(value),
+      );
+      if (!group) {
         throw new RangeError(`unknown value for filter dimension ${filter.dimensionKey}`);
       }
+      chosen.add(group.value);
+      for (const raw of group.rawValues) raws.add(raw);
     }
-    if (values.length > 0) normalized.push({ dimensionKey: filter.dimensionKey, values });
+    if (chosen.size === 0) continue;
+    constraints.push({
+      dimensionKey: filter.dimensionKey,
+      values: [...chosen].sort(codepointCompare),
+      raws,
+    });
   }
-  normalized.sort((a, b) => codepointCompare(a.dimensionKey, b.dimensionKey));
+  constraints.sort((a, b) => codepointCompare(a.dimensionKey, b.dimensionKey));
+  const normalized: AppliedFilter[] = constraints.map(({ dimensionKey, values }) => ({
+    dimensionKey,
+    values,
+  }));
 
   const attributeValues = valuesByParticipant(source);
   const participantIds = new Set<string>();
   for (const participant of source.participants) {
     let keep = true;
-    for (const filter of normalized) {
-      if (filter.dimensionKey === COHORT_DIMENSION_KEY) {
-        if (!filter.values.includes(participant.cohortKey)) keep = false;
+    for (const constraint of constraints) {
+      // THE RAW SET OF THIS CONSTRAINT, NEVER THE ECHO AND NEVER THE
+      // DIMENSION'S. A participant's stored answer is the source's own bytes —
+      // trailing space and all — so it is tested against every spelling the
+      // options chosen IN THIS CONSTRAINT stand for.
+      if (constraint.dimensionKey === COHORT_DIMENSION_KEY) {
+        if (!constraint.raws.has(participant.cohortKey)) keep = false;
       } else {
-        const value = attributeValues.get(participant.participantId)?.get(filter.dimensionKey);
+        const value = attributeValues.get(participant.participantId)?.get(constraint.dimensionKey);
         const text = value && value.status === "answered" ? value.text ?? (value.numeric === null ? null : String(value.numeric)) : null;
-        if (text === null || !filter.values.includes(text)) keep = false;
+        if (text === null || !constraint.raws.has(text)) keep = false;
       }
       if (!keep) break;
     }

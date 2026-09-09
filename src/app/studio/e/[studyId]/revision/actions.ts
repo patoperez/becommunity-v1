@@ -49,10 +49,15 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
+  previewStoredPresentationUnderSelection,
   publishStoredPresentation,
   restoreStoredPublication,
 } from "@/lib/studio/publication-workspace";
-import type { PublishResult, RestoreResult } from "@/lib/publication";
+import type {
+  PublicationPreviewResult,
+  PublishResult,
+  RestoreResult,
+} from "@/lib/publication";
 
 const uuid = z.string().uuid();
 
@@ -80,6 +85,18 @@ const ACKNOWLEDGED = z.array(z.string().regex(/^[a-z0-9_]{1,64}$/)).max(32);
 
 /** A stated reason, bounded exactly as the column is. */
 const REASON = z.string().min(1).max(200);
+
+/**
+ * A ceiling on the viewer selection, checked before it is parsed.
+ *
+ * A selection is a list of panel ids, opaque handles and ordinal tokens, and
+ * the presentation layer's own limits already bound it to 32 panels of 32
+ * dimensions of 64 tokens — every one of them short. `JSON.parse` runs before
+ * any of those limits can speak, so a megabyte of nested arrays is refused by
+ * LENGTH first. The composer's preview action uses the same ceiling for the
+ * same reason.
+ */
+const MAX_VIEWER_BYTES = 64 * 1024;
 
 /** Authorize, then — and only then — build the privileged client and the scope. */
 async function authorizedStudioScope(
@@ -235,4 +252,63 @@ export async function restoreCanonicalPublication(
     parsedReason.data,
     idempotencyKey,
   );
+}
+
+/**
+ * Resolve the draft under review beneath a reviewer's own filter selection.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT IS A READ THAT ENDS IN A VALUE, AND IT WRITES NOTHING.
+ *
+ * No insert, update, upsert, delete, RPC or `revalidatePath`. The stored draft
+ * keeps its revision, its bytes and its digest; the publication pointer is not
+ * read for it and not moved by it. A reviewer ticking a filter box is doing
+ * exactly what a reader will do, and a reader's selection has never been
+ * allowed to change what exists.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE SELECTION IS HOSTILE UNTIL IT IS VALIDATED.
+ *
+ * It arrives as a JSON string from a browser: capped by length, parsed inside a
+ * try/catch, and then checked against what THIS document and THIS study
+ * actually offer — which panel exists, which characteristics that panel offers,
+ * which ordinal positions the study minted. A selection is never turned into a
+ * predicate here; the browser names positions and the server looks the values
+ * up, so a canonical value has no field to travel in.
+ */
+export async function previewPublicationUnderSelection(
+  studyId: string,
+  viewerJson: string,
+): Promise<PublicationPreviewResult> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return {
+      ok: false,
+      unavailable: { reason: "review_refused", detail: authorized.detail },
+    };
+  }
+
+  if (typeof viewerJson !== "string" || viewerJson.length > MAX_VIEWER_BYTES) {
+    return {
+      ok: false,
+      unavailable: {
+        reason: "review_refused",
+        detail: "La selección de filtros enviada excede el tamaño que esta capa admite.",
+      },
+    };
+  }
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(viewerJson);
+  } catch {
+    return {
+      ok: false,
+      unavailable: {
+        reason: "review_refused",
+        detail: "La selección de filtros enviada no es JSON válido.",
+      },
+    };
+  }
+
+  return previewStoredPresentationUnderSelection(authorized.admin, authorized.scope, candidate);
 }

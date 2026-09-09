@@ -177,3 +177,20 @@ export type {
   RenderTerm,
   RenderValue,
 } from "./render-model";
+
+/**
+ * WHAT A CLIENT WOULD SEE, asked in exactly one place.
+ *
+ * Client-safe by construction: these read a render model of already-final
+ * values and nothing else. Every surface that draws, counts or lists
+ * client-visible blocks imports them from here, so a count and a drawing cannot
+ * disagree.
+ */
+export {
+  clientHasContent,
+  clientSeesBlock,
+  clientSeesPage,
+  countClientVisibleBlocks,
+  filterPanelIsOperable,
+  sampleVisibleNote,
+} from "./visibility";

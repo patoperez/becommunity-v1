@@ -47,6 +47,32 @@
 import type { PresentationRenderModel } from "../presentation";
 
 /* -------------------------------------------------------------------------- */
+/* the one fact about the surface a client reads                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * DOES THE CLIENT'S OWN READING SURFACE HAND THE RENDERER LIVE FILTER CONTROLS?
+ *
+ * It does. Unit 6B.2 turned the panels into working viewer controls, and a
+ * working control is a finished part of the deliverable rather than an
+ * unfinished edge — `docs/CURRENT_STATE.md` §"Unit 6B.2" and `FilterControls`
+ * both say so.
+ *
+ * It is declared ONCE, here, because three places have to agree about it and
+ * two of them used to disagree in silence:
+ *
+ *   - the review preview MOUNTS the renderer with viewer controls, so what a
+ *     reviewer approves is the screen a client gets, panels and all;
+ *   - the inventory and the preflight COUNT with it, so «los ve el cliente»
+ *     counts the same blocks the preview drew.
+ *
+ * A gate renders the real component to real markup and compares the two. If the
+ * client route ever ships without live filtering, this constant is the one line
+ * that changes and every count follows it.
+ */
+export const CLIENT_SURFACE_IS_LIVE = true;
+
+/* -------------------------------------------------------------------------- */
 /* blockers                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -128,6 +154,24 @@ export type PublicationBlockerCode =
    */
   | "render_model_not_reproducible"
 
+  /* -------- REQUIRED CONTENT THE AUTHOR DECLARED, AND IS MISSING -------- */
+  /**
+   * A block the author marked as required content shows a client nothing.
+   *
+   * THE ONE BLOCKER A PERSON CAN CLEAR BY EDITING THE LAYOUT, and it is
+   * deliberately not acknowledgeable. `configuration_required` stays a
+   * warning for every block nobody marked: what nobody has finished renders
+   * as nothing (C11), and publishing that is a decision. But the approved
+   * north-star for a study is not a menu — a layout that DECLARES the journey
+   * pain cloud and delivers a page without it is a different experience from
+   * the one that was signed off, and «entiendo que desaparecerá» is not the
+   * person who signed it off saying so.
+   *
+   * The remedies are supplying the content or removing the block, both of
+   * which are in the sentence. Neither is a checkbox.
+   */
+  | "required_content_missing"
+
   /* -------- UNAUTHORIZED, and the state of the world -------- */
   | "not_authorized"
   /** Somebody published while this review was open. */
@@ -201,7 +245,37 @@ export type PublicationWarningCode =
    * numbers behind it are no longer the study's current numbers, which is
    * precisely the fact a stored render model would otherwise hide.
    */
-  | "evidence_changed_since_publication";
+  | "evidence_changed_since_publication"
+  /**
+   * A filter panel the author put on the page that a client will never receive.
+   * ACKNOWLEDGEMENT REQUIRED.
+   *
+   * A panel no block is connected to moves no figure, so the renderer draws it
+   * for nobody — C11 again: an unfinished edge is not a client's business. The
+   * consequence is what the sentence says: somebody authored a control and the
+   * client gets a page without it. That is a decision, and it used to be
+   * invisible on both halves of this screen at once — the inventory counted the
+   * panel as visible and the preview did not draw it.
+   */
+  | "inoperable_filter_panels"
+  /**
+   * A filter dimension whose options include ones only ONE person carries.
+   * ACKNOWLEDGEMENT REQUIRED.
+   *
+   * NOT A THRESHOLD, AND THE DIFFERENCE IS THE WHOLE REASON THIS CODE EXISTS.
+   * There is still no number in this file: "one person" is not a chosen cut-off
+   * below which something is hidden, it is the definition of a group of one —
+   * an option a reader can select to isolate a single identifiable individual.
+   * Nothing is suppressed, no sample policy changes, `show_all` stays the
+   * default, and every option keeps being offered. What happens is that the
+   * fact is SAID, by dimension, and the operator decides: take the dimension
+   * out of the panel in Construcción, or keep it and say so.
+   *
+   * The alternative — hiding those options automatically — would be this
+   * software making a privacy decision on the client's behalf, which is
+   * precisely what this product does not do.
+   */
+  | "granular_filter_dimensions";
 
 /** Which warnings a person has to tick before the publish control works. */
 export const WARNINGS_REQUIRING_ACKNOWLEDGEMENT: readonly PublicationWarningCode[] = [
@@ -209,6 +283,8 @@ export const WARNINGS_REQUIRING_ACKNOWLEDGEMENT: readonly PublicationWarningCode
   "qualitative_review_pending",
   "withheld_by_sample_policy",
   "nothing_visible",
+  "inoperable_filter_panels",
+  "granular_filter_dimensions",
 ];
 
 export function warningRequiresAcknowledgement(code: PublicationWarningCode): boolean {

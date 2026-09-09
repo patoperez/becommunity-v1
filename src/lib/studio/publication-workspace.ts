@@ -51,6 +51,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  CLIENT_SURFACE_IS_LIVE,
   buildPublicationInventory,
   countVisibleToClient,
   runPublicationPreflight,
@@ -61,6 +62,7 @@ import {
   type PublicationPreflight,
   type PublicationReview,
   type PublicationReviewPayload,
+  type PublicationPreviewResult,
   type PublicationSubject,
   type PublicationUnavailable,
   type PublicationUnavailableReason,
@@ -193,6 +195,21 @@ function identityOf(built: CanonicalPresentationRead): PublicationIdentity {
 }
 
 /**
+ * The ids of every block whose author marked its content required.
+ *
+ * A flat list over pages, in document order. The preflight matches it against
+ * the resolved model by id and reports the block's authored TITLE, so nothing
+ * internal reaches the review screen.
+ */
+function requiredBlockIdsOf(document: PresentationDocument): string[] {
+  const ids: string[] = [];
+  for (const page of document.pages) {
+    for (const block of page.blocks) if (block.requiredContent === true) ids.push(block.id);
+  }
+  return ids;
+}
+
+/**
  * Which qualitative groups this document binds, and whether anybody has reviewed
  * them.
  *
@@ -314,6 +331,7 @@ async function assemble(
   ): Assembled => ({
     subject: {
       authorized: true,
+      clientSurfaceIsLive: CLIENT_SURFACE_IS_LIVE,
       readRefusal: null,
       stored: null,
       reviewedRevision: asserted.reviewedRevision,
@@ -325,6 +343,7 @@ async function assemble(
       current: null,
       authored: null,
       lastPublished: null,
+      requiredBlockIds: [],
       qualitative: [],
       expectedActiveVersion: asserted.expectedActiveVersion,
       actualActiveVersion: null,
@@ -430,6 +449,7 @@ async function assemble(
 
   const subject: PublicationSubject = {
     authorized: true,
+    clientSurfaceIsLive: CLIENT_SURFACE_IS_LIVE,
     readRefusal: null,
     ...base,
     reviewedRevision: asserted.reviewedRevision,
@@ -438,6 +458,11 @@ async function assemble(
     resolutionIssues: null,
     model: first.model,
     reproducible,
+    // READ FROM THE DOCUMENT, WHICH IS THE ONLY PLACE IT EXISTS. A required
+    // block is an authoring decision, and the resolved render model carries no
+    // authoring material — so the ids travel beside the model rather than
+    // inside it, and only the block's own TITLE ever reaches a screen.
+    requiredBlockIds: requiredBlockIdsOf(document),
     qualitative: qualitativeBindings(built, document),
     expectedActiveVersion: asserted.expectedActiveVersion,
     structureChanged:
@@ -529,8 +554,13 @@ export async function loadPublicationReview(
     draftSavedAt: assembled.row.updated_at,
     pageCount: model?.pages.length ?? 0,
     blockCount: model?.pages.reduce((total, page) => total + page.blocks.length, 0) ?? 0,
-    visibleBlockCount: model ? countVisibleToClient(model) : 0,
-    inventory: model ? buildPublicationInventory(model) : [],
+    // THE SAME FACT THE PREVIEW IS MOUNTED WITH. `PublicationReviewView` hands
+    // the renderer viewer controls, so the count and the picture are taken over
+    // the same surface — which is what makes «los ve el cliente: 23» a
+    // statement about the 23 cards below it rather than about a different
+    // screen.
+    visibleBlockCount: model ? countVisibleToClient(model, CLIENT_SURFACE_IS_LIVE) : 0,
+    inventory: model ? buildPublicationInventory(model, CLIENT_SURFACE_IS_LIVE) : [],
     // A REFUSED RESOLUTION STILL SHOWS THE CLIENT VIEW OF NOTHING. There is no
     // model to preview, and inventing an empty one would be a preview of a page
     // that does not exist; the blockers say why, and the screen draws no preview.
@@ -572,6 +602,92 @@ const EMPTY_MODEL: PresentationRenderModel = {
   locale: "es-MX",
   pages: [],
 };
+
+/* -------------------------------------------------------------------------- */
+/* the preview, under a reviewer's own selection                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Resolve the STORED draft under one reader's selection, and return only that.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THE REVIEW PREVIEW HAS TO BE OPERABLE.
+ *
+ * The screen's promise is «esta es la pantalla real». It was not: the renderer
+ * was mounted without viewer controls, so every filter panel in the approved
+ * layout was dropped from the preview as an unfinished edge — while the
+ * inventory beside it counted all three as client-visible. Twenty drawn,
+ * twenty-three reported, and both halves believed themselves.
+ *
+ * A reviewer approving a page with three working controls has to be able to
+ * work them. Otherwise «revisé la vista del cliente» is a statement about a
+ * screen no client will ever be served.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT WRITES NOTHING, AND IT DOES NOT RE-BIND.
+ *
+ * The document is decoded from storage and resolved AS STORED, exactly as the
+ * publish path does. There is no insert, update, upsert, delete, RPC or
+ * revalidation anywhere on this path; the draft's revision, bytes and digest
+ * are identical before and after, and no publication row is read for it or
+ * written by it.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * AND IT REFUSES RATHER THAN APPROXIMATING.
+ *
+ * A selection naming a panel this document does not have, a dimension that
+ * panel does not offer, or an ordinal position this study never minted is
+ * refused by `resolveUnderSelection` with a typed issue. Nothing is dropped
+ * quietly: a control that filtered by less than it said would be the one
+ * failure a reader could never see.
+ */
+export async function previewStoredPresentationUnderSelection(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  selection: unknown,
+): Promise<PublicationPreviewResult> {
+  let built: CanonicalPresentationRead;
+  try {
+    built = await readAndBuild(client, scope);
+  } catch (caught) {
+    const refusal = refusalFor(caught);
+    const reason: PublicationUnavailableReason =
+      (READ_REFUSAL[refusal.reason] as PublicationUnavailableReason | undefined) ??
+      "canonical_read_refused";
+    return { ok: false, unavailable: unavailable(reason) };
+  }
+
+  const stored = await readStoredDraftRow(client, scope);
+  if (!stored.ok) return { ok: false, unavailable: unavailable("canonical_read_refused") };
+  if (!stored.row) return { ok: false, unavailable: unavailable("no_stored_draft") };
+
+  const decoded = decodeStoredDraft(stored.row, scope);
+  if (!decoded.ok) {
+    return {
+      ok: false,
+      unavailable: unavailable(
+        "review_refused",
+        decoded.errors.map((issue) => ({ code: issue.code, path: issue.path })),
+      ),
+    };
+  }
+
+  const resolved = resolveUnderSelection(built, decoded.value, selection);
+  if (!resolved.ok) {
+    return { ok: false, unavailable: unavailable("review_refused", [...resolved.issues]) };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      model: resolved.model,
+      // THE SAME PREDICATE, THE SAME SURFACE. A filtered view can leave a block
+      // with nothing in it, so the count follows the selection rather than
+      // staying at whatever the unfiltered document reported.
+      visibleBlockCount: countVisibleToClient(resolved.model, CLIENT_SURFACE_IS_LIVE),
+    },
+  };
+}
 
 /* -------------------------------------------------------------------------- */
 /* publishing                                                                  */

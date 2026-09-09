@@ -14,6 +14,7 @@
  */
 
 export {
+  CLIENT_SURFACE_IS_LIVE,
   WARNINGS_REQUIRING_ACKNOWLEDGEMENT,
   warningRequiresAcknowledgement,
 } from "./contract";
@@ -46,6 +47,9 @@ export { blockTitle, buildPublicationInventory, countVisibleToClient, pageTitle 
 export { structuralDifference } from "./difference";
 
 export type {
+  PreviewPublicationUnderSelection,
+  PublicationPreviewPayload,
+  PublicationPreviewResult,
   PublicationReview,
   PublicationReviewPayload,
   PublicationUnavailable,

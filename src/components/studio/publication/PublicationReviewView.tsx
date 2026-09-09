@@ -1,9 +1,21 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 
 import { PresentationRenderer } from "@/components/presentation/PresentationRenderer";
+import type { ViewerControls } from "@/components/presentation/viewer";
+import {
+  acceptViewerResponse,
+  openViewerSession,
+  requestViewerCleared,
+  requestViewerOption,
+  requestViewerPanelCleared,
+  type ViewerSession,
+} from "@/lib/composer";
+import { viewerSelectionIsNeutral } from "@/lib/presentation";
+import type { PresentationRenderModel } from "@/lib/presentation";
 import type {
+  PreviewPublicationUnderSelection,
   PublicationReviewPayload,
   PublicationWarningCode,
   PublishPresentation,
@@ -61,6 +73,10 @@ const ACKNOWLEDGEMENT_LABEL: Record<PublicationWarningCode, string> = {
   withheld_by_sample_policy:
     "Entiendo que la política de muestra escrita a mano reserva estos resultados y el cliente no los verá.",
   nothing_visible: "Entiendo que, tal como está, el cliente no vería nada en esta presentación.",
+  inoperable_filter_panels:
+    "Entiendo que estos paneles de filtros no le aparecerán al cliente porque no mueven ninguna cifra.",
+  granular_filter_dimensions:
+    "Entiendo que estas características dejan aislar a una sola persona, y decido dejarlas en el panel.",
   annotated_by_sample_policy: "",
   unavailable_blocks: "",
   hidden_blocks: "",
@@ -93,11 +109,13 @@ export function PublicationReviewView({
   payload,
   publish,
   restore,
+  preview,
 }: {
   studyId: string;
   payload: PublicationReviewPayload;
   publish: PublishPresentation;
   restore: RestorePublication;
+  preview: PreviewPublicationUnderSelection;
 }) {
   const [acknowledged, setAcknowledged] = useState<PublicationWarningCode[]>([]);
   const [confirmed, setConfirmed] = useState(false);
@@ -106,6 +124,88 @@ export function PublicationReviewView({
   const [restoring, setRestoring] = useState<number | null>(null);
   const [reason, setReason] = useState("");
   const [pending, startTransition] = useTransition();
+
+  /* ------------------------------------------------------------------------ */
+  /* THE PREVIEW IS THE CLIENT'S OWN SCREEN, INCLUDING ITS CONTROLS.           */
+  /* ------------------------------------------------------------------------ */
+
+  /**
+   * A REVIEWER'S SELECTION IS EPHEMERAL, EXACTLY AS A READER'S IS.
+   *
+   * It lives in this component's state, it travels to the server as ordinal
+   * positions, and it is gone when the screen closes. It never reaches the
+   * draft: the action that answers it reads storage and writes nothing, and
+   * publishing resolves the stored document under the NEUTRAL selection
+   * whatever is ticked here. So a reviewer may work the filters to satisfy
+   * themselves the controls are real, and what gets published is still the
+   * whole study.
+   *
+   * WHY THE PREVIEW HAD TO BECOME OPERABLE AT ALL. It was mounted without
+   * viewer controls, so every filter panel in the approved layout was dropped
+   * from it as an unfinished edge — while the inventory beside it counted all
+   * three as client-visible. Twenty drawn, twenty-three reported. A reviewer
+   * ticking «revisé la vista del cliente» was approving a screen no client
+   * would ever be served.
+   */
+  const [session, setSession] = useState<ViewerSession>(openViewerSession);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const [shown, setShown] = useState<{ model: PresentationRenderModel; visible: number }>({
+    model: payload.model,
+    visible: payload.visibleBlockCount,
+  });
+  /**
+   * The newest request wins, and an older answer is DROPPED rather than drawn.
+   *
+   * Two clicks in quick succession are two round trips, and the network does
+   * not promise to answer them in order. `acceptViewerResponse` already drops a
+   * stale answer's session update; this ticket drops its MODEL too, because a
+   * model resolved under an older selection, drawn beneath a newer set of
+   * ticked boxes, is the one state a reader could not see was wrong.
+   */
+  const inFlight = useRef(0);
+
+  const runViewer = useCallback(
+    async (next: { session: ViewerSession; request: number | null }) => {
+      setSession(next.session);
+      if (next.request === null) return;
+      const request = next.request;
+      const ticket = (inFlight.current += 1);
+      try {
+        const result = await preview(studyId, JSON.stringify(next.session.pending));
+        if (ticket !== inFlight.current) return;
+        if (result.ok) {
+          setShown({ model: result.payload.model, visible: result.payload.visibleBlockCount });
+          setSession((live) => acceptViewerResponse(live, request, { ok: true }));
+        } else {
+          setSession((live) =>
+            acceptViewerResponse(live, request, { ok: false, message: result.unavailable.detail }),
+          );
+        }
+      } catch {
+        if (ticket !== inFlight.current) return;
+        setSession((live) =>
+          acceptViewerResponse(live, request, {
+            ok: false,
+            message:
+              "No se pudieron aplicar los filtros. Se mantiene la selección con la que se calcularon las cifras.",
+          }),
+        );
+      }
+    },
+    [preview, studyId],
+  );
+
+  const viewer: ViewerControls = {
+    pending: session.pending,
+    status: session.status,
+    message: session.message,
+    onToggle: (panelId, handle, token, on) =>
+      void runViewer(requestViewerOption(sessionRef.current, panelId, handle, token, on)),
+    onClearPanel: (panelId) =>
+      void runViewer(requestViewerPanelCleared(sessionRef.current, panelId)),
+  };
+  const filtered = !viewerSelectionIsNeutral(session.applied);
 
   /**
    * ONE KEY PER ATTEMPT, MINTED ONCE.
@@ -199,8 +299,17 @@ export function PublicationReviewView({
           </div>
           <div className="rounded-lg border border-line bg-surface-sunken px-3 py-2">
             <dt className="text-xs text-muted">Los ve el cliente</dt>
+            {/*
+              THE SAME NUMBER THE PREVIEW DRAWS, AND IT FOLLOWS THE FILTERS.
+
+              The server counts it with the same predicate the renderer uses,
+              over the same surface, so this figure and the cards below it are
+              one fact rather than two that happen to agree. Under a reviewer's
+              own selection it is the count for THAT selection, and the banner
+              over the preview says so.
+            */}
             <dd className="text-lg font-semibold text-strong" data-testid="conteo-visibles">
-              {payload.visibleBlockCount}
+              {shown.visible}
             </dd>
           </div>
         </dl>
@@ -292,11 +401,33 @@ export function PublicationReviewView({
             Lo que vería el cliente
           </h2>
           <p className="mt-1 max-w-prose text-sm text-muted">
-            Esta es la pantalla real, con sus cifras ya calculadas. Lo que no está no aparece: ni un
-            hueco, ni un título, ni una explicación.
+            Esta es la pantalla real, con sus cifras ya calculadas y sus filtros funcionando. Lo que
+            no está no aparece: ni un hueco, ni un título, ni una explicación. Puedes mover los
+            filtros para comprobarlos: la selección es sólo tuya, desaparece al salir, no toca el
+            borrador y no cambia lo que se publica.
           </p>
+          {filtered ? (
+            <div
+              className="mt-3 flex flex-wrap items-center gap-3"
+              data-testid="vista-cliente-filtrada"
+            >
+              <p className="text-sm text-caution">
+                Estás mirando una selección de filtros, no el estudio completo. Se publica siempre el
+                documento sin filtrar.
+              </p>
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={session.status === "loading"}
+                onClick={() => void runViewer(requestViewerCleared(sessionRef.current))}
+                data-testid="limpiar-filtros-vista"
+              >
+                Ver el estudio completo
+              </button>
+            </div>
+          ) : null}
           <div className="mt-4 overflow-x-auto rounded-lg border border-line bg-surface-sunken p-4">
-            <PresentationRenderer model={payload.model} audience="client" />
+            <PresentationRenderer model={shown.model} audience="client" viewer={viewer} />
           </div>
         </section>
       )}
@@ -377,8 +508,15 @@ export function PublicationReviewView({
           <>
             {missing.length > 0 ? (
               <p className="mt-4 text-sm text-caution" data-testid="faltan-confirmaciones">
-                Falta{missing.length === 1 ? "" : "n"} {missing.length} confirmación
-                {missing.length === 1 ? "" : "es"} de arriba.
+                {/*
+                  «confirmaciones», not «confirmaciónes». Spanish drops the
+                  written accent when the stress stops falling on the last
+                  syllable, so a plural is not the singular plus «es» — and
+                  building it that way printed a misspelling on the one line
+                  that tells an operator what is still missing.
+                */}
+                Falta{missing.length === 1 ? "" : "n"} {missing.length}{" "}
+                {missing.length === 1 ? "confirmación" : "confirmaciones"} de arriba.
               </p>
             ) : null}
             <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-2 rounded-lg border border-line-strong bg-surface-sunken px-3 py-2">

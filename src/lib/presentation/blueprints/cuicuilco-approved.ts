@@ -187,8 +187,30 @@ function result(
   return { ...shell({ ...seed, displayFormat }), kind: "result", binding, chartVariant };
 }
 
-function editorial(seed: BlockSeed, body: string | null, slot: PresentationHandle | null = null): PresentationBlock {
-  return { ...shell(seed), kind: "editorial", slot, content: body === null ? null : { body } };
+/**
+ * An editorial block, and — when the approved north-star SHOWS its content — a
+ * declaration that the study is not publishable without it.
+ *
+ * `required` is not a software rule and not a default. It is this blueprint,
+ * which is the approved experience written down, saying which of its slots are
+ * part of the approved experience rather than optional furniture.
+ */
+function editorial(
+  seed: BlockSeed,
+  body: string | null,
+  slot: PresentationHandle | null = null,
+  required = false,
+): PresentationBlock {
+  const block: PresentationBlock = {
+    ...shell(seed),
+    kind: "editorial",
+    slot,
+    content: body === null ? null : { body },
+  };
+  // ONLY WHEN TRUE. Writing `requiredContent: false` on every other block would
+  // change the bytes of every document this blueprint has ever produced, and
+  // the binding fingerprint with them, for a field that means nothing there.
+  return required ? { ...block, requiredContent: true } : block;
 }
 
 function panel(seed: BlockSeed, dimensions: PresentationHandle[]): PresentationBlock {
@@ -627,13 +649,24 @@ export function buildApprovedCuicuilcoBlueprint(
       H.qualitativeDeserter,
       "word_cloud",
     ),
-    // CONFIGURATION REQUIRED, and it stays that way. The approved dashboard
-    // publishes a populated pain-point cloud, but the canonical contract
-    // classifies that content as `editorial_review`: it depends on a phrase
-    // segmentation and a touchpoint-to-stage alias table that the approved
-    // dashboard resolves with a hand-written table in its own build script,
-    // which is an implementation and not an authority. The slot is declared,
-    // left empty, and reported as awaiting a human — never inferred.
+    // CONFIGURATION REQUIRED, EMPTY, AND NOW REQUIRED FOR PUBLICATION.
+    //
+    // Two facts, and they are not in tension. The content is still not derivable:
+    // the approved dashboard's cloud depends on a phrase segmentation and on a
+    // touchpoint-to-stage alias table it resolves with a hand-written map in its
+    // own build script, and a hand-written map is an implementation rather than
+    // an authority. Comparing the two vocabularies directly settles it: of the
+    // eighteen curated journey stages, six match a CSAT touchpoint label exactly,
+    // «Eventos regionales·» differs by a trailing space, one stage covers TWO
+    // touchpoints («Reunión semanal presencial/en línea») and «BNI Connect»
+    // could name either the web platform or the phone app. Nothing here guesses
+    // any of that, and the slot stays empty until a person maps it.
+    //
+    // But the approved north-star SHOWS this cloud, so a page delivered without
+    // it is not a smaller version of the approved experience — it is a different
+    // one. `required` therefore makes the omission a BLOCKER rather than a
+    // checkbox: fill it through the authoring surface, or take the block out of
+    // the layout and stop claiming the approved structure.
     editorial(
       {
         id: "temas-recorrido",
@@ -644,6 +677,7 @@ export function buildApprovedCuicuilcoBlueprint(
       },
       null,
       H.journeyPainCloud,
+      true,
     ),
     editorial(
       {

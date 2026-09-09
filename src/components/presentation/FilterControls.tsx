@@ -48,24 +48,21 @@
  * `payload.selection`. Nothing on this side adds, divides, rounds or compares.
  */
 
+import { filterPanelIsOperable } from "@/lib/presentation";
 import type { RenderBlock } from "@/lib/presentation";
 import { InternalPlaceholder, type PresentationAudience } from "./absence";
 import { Count } from "./primitives";
 import type { ViewerControls } from "./viewer";
 
 /**
- * Does this panel offer a reader anything they can actually use?
+ * `filterPanelIsOperable` IS IMPORTED, NOT DEFINED HERE.
  *
- * Asked here and asked again by `clientHasContent`, from the same three facts,
- * so a client is never shown a card this component would then draw as a
- * disabled placeholder inside.
+ * It used to live in this file and the renderer imported it; the publication
+ * inventory did not, and so a review screen counted panels its own preview
+ * dropped. The predicate now lives beside every other "would a client see
+ * this" question, in `@/lib/presentation`, and this component asks it with the
+ * same `live` argument the renderer uses — `viewer !== undefined`.
  */
-export function filterPanelIsOperable(block: RenderBlock, live: boolean): boolean {
-  if (block.payload.shape !== "filter_controls") return false;
-  if (!live) return false;
-  if (block.payload.dimensions.length === 0) return false;
-  return block.payload.selection.movesBlocks > 0;
-}
 
 export function FilterControl({
   block,

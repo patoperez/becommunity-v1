@@ -923,17 +923,26 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       loader: "src/lib/studio/presentation-workspace.ts",
     },
     /**
-     * Unit 6B.4A. The publication review's two actions, for the same forced
-     * reason: publishing has to re-run the whole preflight over a fresh
-     * canonical read on the server, and the only two ways to be called from a
-     * browser are a Server Action and an HTTP route handler — and route
-     * handlers are refused above, for stronger reasons.
+     * Unit 6B.4A, widened by 6B.4B2. The publication review's THREE actions,
+     * for the same forced reason: publishing has to re-run the whole preflight
+     * over a fresh canonical read on the server, and the only two ways to be
+     * called from a browser are a Server Action and an HTTP route handler —
+     * and route handlers are refused above, for stronger reasons.
      *
-     * It re-authorizes with `getUser()`, reads the role from the database,
-     * validates the study id as a UUID, reads the tenant back from the row
-     * rather than taking it from the request, and accepts NO document: four
-     * numbers and a list of closed codes, so there is nothing for a browser to
-     * smuggle in.
+     * Each re-authorizes with `getUser()`, reads the role from the database,
+     * validates the study id as a UUID, and reads the tenant back from the row
+     * rather than taking it from the request. Publish and restore accept NO
+     * document: four numbers and a list of closed codes, so there is nothing
+     * for a browser to smuggle in.
+     *
+     * THE THIRD IS THE PREVIEW, AND IT ACCEPTS NO DOCUMENT EITHER — only a
+     * viewer selection, which is a list of panel ids, opaque handles and
+     * ordinal tokens. It exists because the review preview was mounted
+     * without viewer controls, so the approved layout's filter panels were
+     * dropped from it while the inventory beside it counted them: a person
+     * cannot approve controls they cannot work. It reads the STORED draft and
+     * writes nothing, which the section below asserts over the workspace
+     * function it calls as well as over this file.
      */
     {
       file: "src/app/studio/e/[studyId]/revision/actions.ts",
