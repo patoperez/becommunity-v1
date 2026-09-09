@@ -28,6 +28,7 @@
     "test:canonical-presentation-draft-live": "tsx scripts/canonical-presentation-draft-live-test.mjs",
     "test:canonical-publication": "tsx scripts/canonical-publication-test.mjs",
     "test:canonical-publication-live": "tsx scripts/canonical-publication-live-test.mjs",
+    "test:canonical-qualitative-signoff-live": "tsx scripts/canonical-qualitative-signoff-live-test.mjs",
     "test:canonical-publication-audit": "tsx scripts/canonical-publication-audit.mjs",
     "qa:canonical-publication": "tsx scripts/canonical-publication-qa.mjs",
     "qa:canonical-presentation-draft": "tsx scripts/canonical-presentation-draft-qa.mjs",
