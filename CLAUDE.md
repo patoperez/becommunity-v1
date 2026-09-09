@@ -957,13 +957,17 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `scripts/lib/secret-patterns.mjs` is security configuration, a declared
   human-review zone — so it is RECOMMENDED SEPARATELY and was not changed here.
   Do not "fix" this by renaming the local until it stops matching.
-- ⓘ **`0030` IS APPLIED TO NO DATABASE, and the hosted fingerprint pins that.**
-  `npm run test:canonical-presentation-hosted-fingerprint` asserts that the three
-  publication tables are ABSENT and the three functions not callable on the hosted
-  project — six `PGRST205`/`PGRST202` answers. It was written in the same run that
-  recorded their absence, because a check that has never been seen to fail is a
-  check nobody has tested. **When the hosted activation happens, INVERT it rather
-  than deleting it**, exactly as Unit 6B.3B inverted `0029`'s.
+- ⓘ **`0030` IS APPLIED to the hosted project** (2026-09-09, Unit 6B.4B1).
+  **No experience was published.** Those are two facts and the second is the one
+  people get wrong: the storage exists and all three publication tables are
+  EMPTY. `npm run test:canonical-presentation-hosted-fingerprint` now pins both —
+  the three tables must exist and the three functions be exposed, AND every one
+  of the three must hold zero rows, so a table that vanished and a publication
+  that appeared each fail it. The section previously asserted the opposite; it
+  was INVERTED rather than deleted, exactly as Unit 6B.3B inverted `0029`'s, and
+  it was watched failing all six of its old assertions immediately after the
+  migration was applied — which is how a check nobody has seen fail becomes one
+  that has been tested.
 - `readXlsx()`/`parseXlsx()` are the LEGACY reader and their behaviour is
   frozen — every existing study was imported through them. The canonical
   multi-sheet reader is `readXlsxWorkbook()` in the same module; both must stay

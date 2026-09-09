@@ -27,6 +27,14 @@
 // write, exactly one `draft_created` event must describe it, and no other study
 // may have acquired one.
 //
+// AND WHAT UNIT 6B.4B1 PUT THERE, WITH THE OPPOSITE EMPHASIS. Until 2026-09-09
+// §[3b] proved the three canonical PUBLICATION tables did not exist, because
+// migration 0030 was applied to no project. 6B.4B1 applied it — and published
+// nothing — so that assertion is inverted the same way, but into TWO claims
+// rather than one: the storage must EXIST, and it must be EMPTY. Applying a
+// migration and using it are different acts; this gate now fails if either the
+// tables have gone or a publication has appeared.
+//
 // -----------------------------------------------------------------------------
 // IT WRITES NOTHING, AND THAT IS STRUCTURAL
 // -----------------------------------------------------------------------------
@@ -268,34 +276,56 @@ if (canonicalEvents) {
 
 /* -------------------------------------------------------------------------- */
 /* -------------------------------------------------------------------------- */
-console.log("\n[3b] Migration 0030 is applied to NO project, and its storage is absent here");
+console.log("\n[3b] Migration 0030 IS applied here, and its storage is EMPTY");
 
-// THE MIRROR OF THE SECTION ABOVE, AIMED THE OTHER WAY.
+// THE SAME MIRROR, TURNED ROUND ON 2026-09-09 — INVERTED, NOT DELETED.
 //
-// Unit 6B.4A designed and proved the canonical publication lifecycle against
-// disposable targets and applied its migration nowhere. So the finding worth
-// catching is a publication table that has APPEARED — because the only ways
-// that happens are an application nobody recorded, or a project that is not the
-// one this gate believes it is contacting.
+// It was written by Unit 6B.4A while the publication migration existed only in
+// git, and it asserted the opposite: the three tables had to be ABSENT and the
+// three functions uncallable, because the finding worth catching then was a
+// table that had APPEARED. That check was never a formality — Unit 6B.4B1 ran
+// it immediately after applying the migration and watched all six assertions
+// fail, for exactly the right reason, which is the only way to learn that a
+// check nobody has seen fail actually works.
 //
-// It is written now, in the same run that records its absence, rather than
-// after somebody applies it: a check added at activation time has never once
-// been seen to fail, and a check that has never failed is a check nobody has
-// tested. This one fails today if the table exists, which is a claim with a
-// consequence.
-//
-// WHEN THE HOSTED ACTIVATION HAPPENS, INVERT THIS, DO NOT DELETE IT — exactly as
-// 6B.3B inverted the section above rather than removing it.
+// Unit 6B.4B1 applied `0030_canonical_publication.sql` on 2026-09-09, so the
+// finding worth catching is now a publication table that has GONE — and,
+// separately and just as importantly, one that has acquired a ROW. Applying the
+// storage and using it are different acts: this phase authorized the first and
+// forbade the second, so absence of the tables and presence of a publication
+// are both failures, and this section asserts against both at once.
 for (const table of [
   "canonical_presentation_revision",
   "canonical_presentation_publication",
   "canonical_presentation_publication_event",
 ]) {
   const { error } = await client.from(table).select("study_id").limit(1);
-  record.present[table] = error ? `absent (${error.code})` : "PRESENT";
+  record.present[table] = error ? `absent (${error.code})` : "present";
   check(
-    error !== null,
-    `${table} does NOT exist on the hosted project${error ? ` (${error.code})` : " — IT IS THERE, AND MIGRATION 0030 WAS APPLIED TO NO PROJECT. Stop and investigate."}`,
+    error === null,
+    `${table} exists on the hosted project${error ? ` — IT IS GONE (${error.code}), WHICH MEANS 0030 WAS REVERSED` : ""}`,
+  );
+}
+
+// NO EXPERIENCE HAS BEEN PUBLISHED, AND THAT IS THE HALF THAT MATTERS MOST.
+//
+// The tables above are storage. A row in any of them means somebody published,
+// restored or moved a pointer on the hosted project — none of which this line of
+// work has authorized. There is no acceptable non-zero value here yet, so the
+// expectation is a bare zero rather than a pinned count: when publishing IS
+// authorized, this becomes a pinned version and pointer, in the same way §[3]
+// pins the one canonical draft.
+for (const [table, what] of [
+  ["canonical_presentation_revision", "no immutable snapshot exists"],
+  ["canonical_presentation_publication", "no study points at a current publication"],
+  ["canonical_presentation_publication_event", "no publication or restoration was ever recorded"],
+]) {
+  const { count, error } = await client.from(table).select("*", { count: "exact", head: true });
+  check(error === null, `${table} counts${error ? ` — ${error.code}` : ""}`);
+  record.counts[table] = count ?? null;
+  check(
+    count === 0,
+    `${what} (${count} rows)${count === 0 ? "" : " — SOMETHING PUBLISHED. Stop and investigate."}`,
   );
 }
 // THE FUNCTIONS ARE READ OUT OF THE API DESCRIPTION, NOT CALLED.
@@ -324,12 +354,17 @@ for (const table of [
     paths.includes("/rpc/save_canonical_presentation_draft"),
     "the canonical DRAFT save appears there, which is what makes the absences below meaningful",
   );
+  // INVERTED WITH THE SECTION ABOVE, AND STILL NOT CALLED. Reading the
+  // description proves the function is there; calling it would prove the same
+  // thing and would be an invocation of a publication RPC, which is the one act
+  // this line of work has not authorized. The reason for reading rather than
+  // calling has not changed just because the expected answer has.
   for (const fn of ["publish_canonical_presentation", "restore_canonical_presentation", "read_canonical_publication"]) {
     const present = paths.includes(`/rpc/${fn}`);
-    record.present[fn] = present ? "PRESENT" : "absent";
+    record.present[fn] = present ? "present" : "ABSENT";
     check(
-      !present,
-      `${fn} is not exposed by the hosted project${present ? " — IT IS THERE. Stop and investigate." : ""}`,
+      present,
+      `${fn} is exposed by the hosted project${present ? "" : " — IT IS GONE, WHICH MEANS 0030 WAS REVERSED. Stop and investigate."}`,
     );
   }
 }
@@ -370,6 +405,7 @@ console.log(
   "RESULT: both legacy experience drafts are at the versions and revisions the previous unit\n" +
     "        recorded, neither is schema version 4, the experience log is unchanged, migration\n" +
     "        0029's storage exists and holds exactly ONE canonical draft — Cuicuilco's, at\n" +
-    "        revision 1, under one draft_created event — no other study has acquired one, and\n" +
-    "        every protected table was counted. Nothing was written.",
+    "        revision 1, under one draft_created event — no other study has acquired one,\n" +
+    "        migration 0030's storage exists and is EMPTY in all three tables so no experience\n" +
+    "        has been published, and every protected table was counted. Nothing was written.",
 );

@@ -284,14 +284,22 @@ and those two cannot both hold: removing an authentication identity issues
 exactly that UPDATE and the user becomes undeletable. `0030` stores a bare uuid,
 as the earlier event table already does.
 
-**It is applied to no database.** `npm run test:canonical-publication-live`
-executes it against a disposable PostgreSQL 17 — **188 assertions, 188 passed, 0
-skipped**, including the fourteen proofs the phase names and the whole contract a
-second time over a real PostgREST with `supabase-js`. The hosted activation is a
-separate, later, separately authorized phase, and
-`npm run test:canonical-presentation-hosted-fingerprint` now pins that the three
-tables and the three functions are ABSENT on the hosted project, so their
-appearance would fail a gate rather than pass unnoticed.
+**It IS APPLIED to the hosted project.** **No experience was published.**
+`npm run test:canonical-publication-live` executes it against a disposable
+PostgreSQL 17 — **188 assertions, 188 passed, 0 skipped**, including the fourteen
+proofs the phase names and the whole contract a second time over a real PostgREST
+with `supabase-js`. That was the evidence on which Unit 6B.4B1 applied the
+migration to `ontvqazsqiwisdddblif` on **2026-09-09**, as its own separately
+authorized phase — see "`0030` is applied too" below.
+
+**The storage exists; no experience was published into it.** Those are separate
+facts and the second is the one worth stating out loud: all three publication
+tables are empty, no study points at a current publication, and no publication
+event exists. `npm run test:canonical-presentation-hosted-fingerprint` pins both
+halves — the three tables must EXIST and the three functions be exposed, and all
+three tables must hold ZERO rows. It previously pinned that they were absent; the
+assertion was inverted rather than deleted, so a table that vanished and a
+publication that appeared each fail a gate rather than pass unnoticed.
 
 ## Security boundary
 
@@ -1094,6 +1102,38 @@ every earlier migration digests to what it digested before. The full record — 
 backup and its digest, the restore rehearsal, the least-privilege probes, the one
 explicit save that created Cuicuilco's canonical draft at revision 1, and the
 57-check after-state proof — is `docs/CURRENT_STATE.md` §"Unit 6B.3B".
+
+### `0030` is applied too, on 2026-09-09 — and NOTHING WAS PUBLISHED
+
+`0030_canonical_publication` **was applied** to the same project on **2026-09-09
+00:20:33-00:20:43 UTC**, from commit `952233a`, by the same `supabase db push`
+path, the same CLI version (`2.115.0`) and the same session connection. Its dry
+run proposed that one file and nothing else, and no ledger entry was
+hand-written. The file digests to
+`4cf35320407f68f60d1329a3004468426bb9e278f4982657cd4dd8d2643bb1e9`.
+
+**Applying the storage and using it are different acts, and only the first was
+authorized.** All three publication tables are EMPTY, no study points at a
+current publication, and no publication event exists. **No experience was
+published.** Migration `0025`'s legacy publication model is untouched and still
+empty as well.
+
+| migration | duration | verified immediately after |
+|---|---|---|
+| `0030_canonical_publication` | 10 s | three tables and four functions added and **nothing pre-existing altered**, proved by an object-by-object diff of a structural fingerprint taken before and after; RLS + FORCE RLS + `deny_browser_roles` (`for all to anon, authenticated using (false) with check (false)`) on all three; grants of exactly `service_role: SELECT`; the three RPCs `SECURITY DEFINER` with `search_path=""` and EXECUTE held by `service_role` and the owner alone, `refuse_canonical_publication_change` neither `SECURITY DEFINER` nor executable by `service_role`, and PUBLIC holding none of the four; the `refuse_change` trigger `BEFORE DELETE OR UPDATE` on the snapshot and the event log and deliberately NOT on the mutable pointer; 36 executed role probes in rolled-back transactions returning `42501` for every `anon` and `authenticated` read and write and for every `service_role` write; and the same refusals over real HTTPS with the anon key and with a genuine signed-in session |
+
+ⓘ **No publication RPC was invoked, not even to prove it exists.** Whether a role
+holds EXECUTE was read from `has_function_privilege`, and whether the functions
+are exposed was read from PostgREST's own OpenAPI description — a GET. Calling
+one would have been an invocation of a publication function, which is precisely
+what that phase did not authorize; the catalogue answers the same question
+without it.
+
+**The ledger is now 31 rows, 0000-0030, no duplicate**, and the recorded body of
+every earlier migration digests to what it digested before. The full record — the
+backup and its digest, the restore rehearsal into a disposable PostgreSQL 17.11,
+the least-privilege probes, the empty-publication proof and the unchanged-data
+proof — is `docs/CURRENT_STATE.md` §"Unit 6B.4B1".
 
 ### Hosted synthetic acceptance
 

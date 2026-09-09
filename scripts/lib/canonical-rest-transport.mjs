@@ -297,7 +297,7 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
      * silently ran against migrations 0000-0027 would be measuring the wrong
      * database.
      */
-    async prepare(upTo = 29) {
+    async prepare(upTo = 30) {
       // THE BOUND IS A FACT ABOUT THE TARGET, NOT THE NEWEST FILE ON DISK — the
       // two transports answer different questions and must be allowed to
       // disagree.
@@ -305,12 +305,13 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
       // The psql transport APPLIES, so its bound tracks the newest migration in
       // the repository. This one VERIFIES a target that is already migrated, so
       // its bound says where that target actually is. It read 28 for as long as
-      // that was true and it now reads 29, because Unit 6B.3B applied
-      // `0029_canonical_presentation_draft.sql` to the hosted project on
-      // 2026-09-08. The two numbers agreeing again is a coincidence of this
-      // moment, not the rule: the moment a migration is written and not yet
-      // applied, they diverge, and this bound must follow the PROJECT.
-      if (upTo !== 29) {
+      // that was true, then 29 when Unit 6B.3B applied
+      // `0029_canonical_presentation_draft.sql` on 2026-09-08, and it now reads
+      // 30, because Unit 6B.4B1 applied `0030_canonical_publication.sql` on
+      // 2026-09-09. The two numbers agreeing is a coincidence of this moment,
+      // not the rule: the moment a migration is written and not yet applied,
+      // they diverge, and this bound must follow the PROJECT.
+      if (upTo !== 30) {
         refuse(
           `this transport cannot roll the schema back to ${upTo}: it applies no migration and reverses none.`,
         );
@@ -334,6 +335,23 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
           "public.canonical_presentation_draft is not reachable, so migration 0029 is not applied " +
             "to this target. It was applied to the hosted project on 2026-09-08; a target without " +
             "it is not the target this transport verifies. Stop and investigate.",
+        );
+      }
+      // AND SO MUST 0030'S. The same assertion, one migration later and aimed
+      // the same way. It too used to run in the opposite direction — refusing a
+      // target that CARRIED the publication storage, because the migration was
+      // applied to no project — and Unit 6B.4B1 inverted rather than deleted it
+      // on 2026-09-09. What it does NOT assert is that anything was published:
+      // the table must EXIST, and the hosted fingerprint gate is what pins that
+      // it is still empty.
+      const { error: noPublication } = await service
+        .from("canonical_presentation_revision")
+        .select("study_id", { count: "exact", head: true });
+      if (noPublication) {
+        refuse(
+          "public.canonical_presentation_revision is not reachable, so migration 0030 is not " +
+            "applied to this target. It was applied to the hosted project on 2026-09-09; a target " +
+            "without it is not the target this transport verifies. Stop and investigate.",
         );
       }
     },

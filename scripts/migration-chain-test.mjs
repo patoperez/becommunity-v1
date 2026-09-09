@@ -319,9 +319,10 @@ const COMMIT_SLUG = "canonical_commit_and_rollback";
  * project has", which is exactly the failure the note above records for the
  * commit migration. It moved from `canonical_commit_and_rollback` to
  * `canonical_presentation_draft` on 2026-09-08, when Unit 6B.3B applied 0029,
- * and it must be moved BY HAND again, after a migration is applied there.
+ * and to `canonical_publication` on 2026-09-09, when Unit 6B.4B1 applied 0030.
+ * It must be moved BY HAND again, after a migration is applied there.
  */
-const HOSTED_APPLIED_SLUG = "canonical_presentation_draft";
+const HOSTED_APPLIED_SLUG = "canonical_publication";
 const canonical = parsed.filter((e) => e.slug.startsWith("canonical_"));
 
 {
@@ -413,12 +414,12 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
   // target. The rule names each bound for what it is, and keeps naming them
   // separately even when the two numbers agree.
   //
-  // THEY AGREE AGAIN AS OF UNIT 6B.3B, AND THAT IS A COINCIDENCE OF THIS MOMENT.
-  // The hosted project stopped at the canonical COMMIT migration for as long as
-  // 0029 was applied to no project; 6B.3B applied it on 2026-09-08, so the
-  // hosted bound moved to the presentation migration. The next migration written
-  // and not yet applied will separate them again, and this rule must not be
-  // rewritten back into "the last file on disk" when it does.
+  // THEY AGREE AGAIN AS OF UNIT 6B.4B1, AND THAT IS A COINCIDENCE OF THIS
+  // MOMENT. The hosted project stopped at the canonical COMMIT migration for as
+  // long as 0029 was applied to no project; 6B.3B applied it on 2026-09-08 and
+  // 6B.4B1 applied 0030 on 2026-09-09, so the hosted bound moved twice. The next
+  // migration written and not yet applied will separate them again, and this
+  // rule must not be rewritten back into "the last file on disk" when it does.
   const restDefault = /async prepare\(upTo = (\d+)\)/.exec(rest);
   const restGuard = /if \(upTo !== (\d+)\)/.exec(rest);
   check(restDefault !== null && restGuard !== null, "the REST transport declares a default bound and a refusal bound");
@@ -434,14 +435,18 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
         `${draftEntry?.prefix ?? "?"} ${HOSTED_APPLIED_SLUG} — which is a fact about the project, ` +
         `not a restatement of the last file on disk (${restDefault[1]})`,
     );
-    // And the transport must actively check for that migration's own table, or
-    // "0029 is applied to the hosted project" would be a claim with no check.
-    // The assertion used to require the opposite and was INVERTED rather than
-    // deleted: a target that has lost the storage is as much a finding as one
-    // that gained it unexpectedly.
+    // And the transport must actively check for each applied migration's own
+    // table, or "0029 and 0030 are applied to the hosted project" would be two
+    // claims with no check. Both assertions used to require the opposite and
+    // were INVERTED rather than deleted: a target that has lost the storage is
+    // as much a finding as one that gained it unexpectedly.
     check(
       /canonical_presentation_draft/.test(rest),
       "and it refuses a hosted target that has lost the presentation migration's storage",
+    );
+    check(
+      /canonical_presentation_revision/.test(rest),
+      "and one that has lost the publication migration's storage",
     );
   }
 
@@ -879,6 +884,42 @@ console.log("\n[7] The documentation does not claim an application that never ha
     );
 
   /**
+   * Sentences asserting the PUBLICATION migration is applied — now required.
+   *
+   * A third separate requirement for the same reason the second one exists: the
+   * three facts became true on three different days — `0026`-`0028` on
+   * 2026-09-06, `0029` on 2026-09-08 and `0030` on 2026-09-09 — and a document
+   * recording only the older ones is out of date in a way the older rules
+   * cannot see.
+   *
+   * `\b0030\b` DOES NOT MATCH `0030_canonical_publication.sql`, because `_` is a
+   * word character and there is therefore no boundary after the digits. Every
+   * document names the migration by its filename at least once, so the
+   * lookaround form is used, exactly as it is for the presentation migration.
+   */
+  const PUBLICATION_APPLIED_SUBJECT =
+    /(?<![0-9])0030(?![0-9])|\bcanonical_publication\b|\bpublication migration\b|\bcanonical publication storage\b/i;
+  const assertsPublicationApplied = (text) =>
+    sentences(text).filter(
+      (s) => PUBLICATION_APPLIED_SUBJECT.test(s) && APPLIED_VERB.test(s) && !NEGATOR.test(s),
+    );
+
+  /**
+   * And that NOTHING WAS PUBLISHED — required in the same breath.
+   *
+   * Applying the storage and using it are different acts, and a document that
+   * records the first without the second invites the next reader to assume a
+   * client is being served something. Unit 6B.4B1 applied the migration and
+   * published nothing; every governing document has to say so.
+   */
+  const assertsNothingPublished = (text) =>
+    sentences(text).filter(
+      (s) =>
+        /\bpublicat(?:ion|ions)\b|\bpublished\b|\bexperience\b/i.test(s) &&
+        /\bno (?:canonical )?(?:experience|publication|presentation)[^.]{0,40}\b(?:was|were|has been|have been) published\b|\bnothing (?:was|has been) published\b|\bpublication tables? (?:remain|remains|are|is) empty\b|\bno experience was published\b/i.test(s),
+    );
+
+  /**
    * (a) Sentences RECORDING the real workbook import — now required.
    *
    * The subject deliberately tolerates a word between "real" and the noun,
@@ -989,6 +1030,29 @@ console.log("\n[7] The documentation does not claim an application that never ha
     [/\bcanonical_presentation_draft\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
       "canonical_presentation_draft EXISTS on the hosted project"],
     [/\bno study has a canonical (?:presentation )?draft\b/i, "Cuicuilco has one, at revision 1"],
+    // Withdrawn by Unit 6B.4B1 on 2026-09-09. Each was true while 0030 existed
+    // only in git; leaving one in place tells the next session the hosted
+    // project has no canonical publication storage, which is the single fact
+    // this unit changed.
+    //
+    // THESE ARE DELIBERATELY NARROW, and the first draft of them was not. It
+    // also carried `/carried by no database/`, `/are ABSENT .. hosted/` and
+    // `/no migration was applied to hosted infrastructure/`, which failed three
+    // documents for RECORDING what a previous unit correctly did — including
+    // 0029's own superseded heading, which has read "carried by no database yet"
+    // beside a supersession note since 2026-09-08. A rule that forbids this
+    // repository's own way of keeping history is a rule that teaches people to
+    // delete the history. What must not survive is a present-tense claim, and
+    // that is what these match.
+    //
+    // NOTHING HERE WITHDRAWS "nothing has been published" — that is still true,
+    // it is REQUIRED above, and it must never be confused with "the storage does
+    // not exist".
+    [/(?<![0-9])0030(?![0-9])[^.]{0,120}\bapplied to no project\b/i,
+      "0030 IS applied to the hosted project (2026-09-09)"],
+    [/\bpublication migration is applied to no project\b/i, "the publication migration IS applied"],
+    [/\bcanonical_presentation_revision\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
+      "canonical_presentation_revision EXISTS on the hosted project"],
     // Withdrawn on 2026-09-06 by Unit 5 Phase 2, and guarded here only from
     // 2026-09-08 — this section spent five weeks asserting the opposite.
     //
@@ -1022,6 +1086,19 @@ console.log("\n[7] The documentation does not claim an application that never ha
     check(
       presentationApplied.length > 0,
       `${doc} records that the PRESENTATION migration is applied too${presentationApplied.length ? "" : " — it does not, and it is, since 2026-09-08"}`,
+    );
+
+    const publicationApplied = assertsPublicationApplied(text);
+    check(
+      publicationApplied.length > 0,
+      `${doc} records that the PUBLICATION migration is applied too${publicationApplied.length ? "" : " — it does not, and it is, since 2026-09-09"}`,
+    );
+
+    const nothingPublished = assertsNothingPublished(text);
+    check(
+      nothingPublished.length > 0,
+      `${doc} records that applying it published NOTHING` +
+        `${nothingPublished.length ? "" : " — it does not, and a reader could take applied storage for a served experience"}`,
     );
 
     const stillPending = sentences(text).filter((s) =>
