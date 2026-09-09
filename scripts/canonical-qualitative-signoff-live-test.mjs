@@ -191,6 +191,16 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   /** Report an unexpected refusal WITH what the database said about it. */
   const succeeded = (outcome, message) =>
     check(outcome.ok, outcome.ok ? message : `${message} — ${outcome.sqlstate} ${outcome.message}`);
+  /** And the same in the other direction: an expected refusal, by its code. */
+  const refused = (outcome, expected, message) =>
+    check(
+      !outcome.ok && outcome.sqlstate === expected,
+      outcome.ok
+        ? `${message} — but it SUCCEEDED`
+        : `${message} = ${expected}${
+            outcome.sqlstate === expected ? "" : ` (was ${outcome.sqlstate}: ${outcome.message})`
+          }`,
+    );
   const recordSql = (over = {}) => {
     const {
       studyId = STUDY,
@@ -332,23 +342,29 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   console.log("\n[4] Una revisión es inmutable, y sólo se va con su estudio");
 
   const signoffId = first.value.signoffId;
-  eq(
-    "actualizarla es rechazado como inmutable",
+  // A DATA-MODIFYING STATEMENT NEEDS A CTE. `update … returning` inside
+  // `from ( … )` is a syntax error, and a refusal for the wrong reason proves
+  // nothing about immutability — the first draft of this section asserted
+  // 2F002 and got 42601.
+  refused(
     attempt(
-      `select (update_result)::text from (
+      `with u as (
          update public.canonical_qualitative_signoff set note = 'editado'
-          where id = ${q(signoffId)} returning 1 as update_result) u;`,
-    ).sqlstate,
+          where id = ${q(signoffId)} returning 1)
+       select count(*)::text from u;`,
+    ),
     "2F002",
+    "actualizarla es rechazado como inmutable",
   );
-  eq(
-    "borrarla mientras su estudio existe, también",
+  refused(
     attempt(
-      `select (d)::text from (
+      `with d as (
          delete from public.canonical_qualitative_signoff
-          where id = ${q(signoffId)} returning 1 as d) x;`,
-    ).sqlstate,
+          where id = ${q(signoffId)} returning 1)
+       select count(*)::text from d;`,
+    ),
     "2F002",
+    "borrarla mientras su estudio existe, también",
   );
   eq("y sigue ahí", countIn("canonical_qualitative_signoff"), 2);
 
@@ -412,7 +428,7 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
                 public.canonical_presentation_revision r;`,
       )
       .trim(),
-    "t",
+    "true",
   );
 
   // A REPLAY WRITES NOTHING, which is what a replay means.
@@ -423,14 +439,15 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   eq("ni un segundo registro cualitativo", countIn("canonical_publication_qualitative_signoff"), 1);
 
   // THE RECORD IS IMMUTABLE TOO.
-  eq(
-    "el registro cualitativo de una publicación no se puede editar",
+  refused(
     attempt(
-      `select (u)::text from (
+      `with u as (
          update public.canonical_publication_qualitative_signoff set review_state = 'pending'
-          returning 1 as u) x;`,
-    ).sqlstate,
+          returning 1)
+       select count(*)::text from u;`,
+    ),
     "2F002",
+    "el registro cualitativo de una publicación no se puede editar",
   );
 
   /* ------------------------------------------------------------------------ */
@@ -473,8 +490,19 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   // A stale draft revision: the inner function refuses, and the wrapper's own
   // insert must go with it. If they were two transactions, this would leave a
   // qualitative record for a publication that does not exist.
+  //
+  // TWO PRECONDITIONS FAIL HERE AND ONLY ONE CODE COMES BACK. The pointer
+  // already moved (a publication succeeded above) and the draft revision is
+  // nonsense, so which refusal wins is an ORDER fact about the wrapper and the
+  // function it calls. What this section is proving is neither: it is that a
+  // REFUSED publication leaves no qualitative record, whichever precondition
+  // refused it. So the assertion is that it was refused at all, and the code is
+  // printed rather than pinned.
   const stale = attempt(publishSql({ revision: 99, key: "k-stale" }));
-  eq("una revisión de borrador rancia es rechazada", stale.sqlstate, "55000");
+  check(
+    !stale.ok,
+    `una publicación con la revisión de borrador rancia es rechazada (${stale.sqlstate}: ${stale.message})`,
+  );
   eq("y no dejó registro cualitativo", countIn("canonical_publication_qualitative_signoff"), before);
   eq("ni instantánea", countIn("canonical_presentation_revision"), 1);
 
