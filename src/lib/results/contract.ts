@@ -85,8 +85,31 @@
  * Additive in SHAPE and not in OUTPUT: a dimension that had a whitespace
  * twin now publishes one option instead of two, and its participant count is
  * the sum. That is the defect being corrected, not a side effect of it.
+ *
+ * 3.0.0 — `QualitativeGroupResult.reviewStatus` is GONE, and its removal is
+ * the reason this is a major. It was the literal `"pending"`, written by
+ * `buildQualitativeGroups` on every group of every study for ever, and it was
+ * read as «nobody at Be Community has reviewed these categories». That reading
+ * was true of nothing: this layer cannot know whether anybody reviewed
+ * anything, because a review is a person's act recorded somewhere else, and a
+ * constant that never changes is not a fact — it is a sentence that happens to
+ * be printed. A review surface consequently showed the same permanent warning
+ * whatever anybody did, which is how a warning stops being read.
+ *
+ * `coding` replaces it and says the thing this layer DOES know: where the
+ * categories came from. `source_coded` means the source's own closed-coded
+ * columns — the category vocabulary the study itself created while reading
+ * answers — and `be_community_curated` means a Be Community analyst produced
+ * them. The two are decided differently and the distinction is the first thing
+ * a reviewer needs; conflating them under one review state hid it.
+ *
+ * WHERE THE REVIEW STATE WENT. To the publication boundary, tied to a DIGEST
+ * of the exact category set, so «reviewed» means «reviewed these words» and
+ * goes stale by itself when the words change. `CuratedFindingCount.reviewStatus`
+ * stays exactly as it was: that one is a real canonical column on `pain_point`,
+ * written by ingestion and readable per row.
  */
-export const CANONICAL_RESULTS_CONTRACT_VERSION = "2.3.0";
+export const CANONICAL_RESULTS_CONTRACT_VERSION = "3.0.0";
 
 /**
  * The unit a number lives in. Presentation may style it; it may not change it.
@@ -725,9 +748,9 @@ export type PerformanceDimensionResult = {
 /**
  * One curated category and its count.
  *
- * A LABEL and a COUNT. Never a respondent's words: `reviewStatus` records that
- * an imported finding has been read by nobody yet, so a publication surface can
- * refuse it without this layer having to decide.
+ * A LABEL and a COUNT, and never a respondent's words. The free-text column
+ * beside every closed-coded category column does not enter the read model in
+ * any shape, so a textual answer cannot be aggregated here even by accident.
  */
 export type QualitativeTerm = {
   label: string;
@@ -765,7 +788,27 @@ export type QualitativeGroupResult = {
   /** A documented category deliberately kept out of the cloud, and its count. */
   excluded: { label: string; count: number }[];
   terms: QualitativeTerm[];
-  reviewStatus: "pending" | "confirmed" | "mixed";
+  /**
+   * WHERE THESE CATEGORIES CAME FROM — and deliberately NOT a review state.
+   *
+   * This field replaced `reviewStatus`, which was the constant `"pending"` on
+   * every group of every study. Whether a person at Be Community has read a
+   * category set is not something the canonical layer can know: it is an act
+   * recorded at the publication boundary, against a digest of the exact set
+   * that was read. What this layer knows is provenance, and provenance is what
+   * decides who has to look:
+   *
+   *   `source_coded`         — the source's own closed-coded category columns,
+   *                            a vocabulary the study created while reading its
+   *                            own answers. Publishing them shows a client the
+   *                            study's coding as it came.
+   *   `be_community_curated` — categories a Be Community analyst produced.
+   *                            Publishing them shows a client our own words.
+   *
+   * The two are different decisions, and a review screen that could not tell
+   * them apart was asking one question about two things.
+   */
+  coding: "source_coded" | "be_community_curated";
   provenance: ResultProvenance;
 };
 

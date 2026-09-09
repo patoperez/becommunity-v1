@@ -197,16 +197,44 @@ export type PublicationWarningCode =
    */
   | "configuration_required_blocks"
   /**
-   * Curated qualitative categories nobody at Be Community has reviewed.
+   * Qualitative categories nobody has recorded a review of.
    * ACKNOWLEDGEMENT REQUIRED.
    *
-   * `src/lib/results/qualitative.ts` states the rule and hands the decision
-   * here in as many words: the categories are the SOURCE's own coding, not a
-   * review artefact, "so the publication boundary must decide about them before
-   * showing them to a client". Deciding is what an acknowledgement is. Blocking
-   * outright would not be deciding — it would be refusing forever.
+   * IT USED TO BE UNCONDITIONAL, AND THAT WAS THE DEFECT. The canonical layer
+   * wrote `reviewStatus: "pending"` as a literal on every group of every study
+   * for ever, so this warning appeared on every review, could not be cleared by
+   * reviewing anything, and named two GROUP labels while three blocks in the
+   * approved layout draw those categories. A permanent warning is one people
+   * learn to tick.
+   *
+   * It now describes a real state: nobody has recorded a sign-off against the
+   * digest of this document's exact category set. Recording one clears it. It
+   * stays a warning rather than a blocker for the reason it always was —
+   * showing a client the source's own coding is a decision somebody may
+   * legitimately make — and it now NAMES every visible block that draws those
+   * categories rather than the groups they belong to.
    */
   | "qualitative_review_pending"
+  /**
+   * A qualitative review exists, and the categories have changed since.
+   * ACKNOWLEDGEMENT REQUIRED.
+   *
+   * A review is an act against an exact set of words, so it is recorded with a
+   * digest of that set and stops being true when the set moves — a category
+   * added, removed or renamed, or evidence re-imported with a different
+   * vocabulary. It goes stale by itself, with nobody having to remember.
+   *
+   * SEPARATE FROM «nobody reviewed», and it must stay separate: the two need
+   * different sentences and different actions. «Nobody has read these» asks
+   * for a first reading; «what you approved is not what is here now» asks a
+   * person who already decided to look at what changed.
+   *
+   * A COUNT MOVING IS NOT A CHANGE. The digest covers labels and never counts:
+   * another person answering with a category that already existed does not
+   * alter the words anybody read, and expiring a review for it would make
+   * sign-off meaningless by making it constant in the other direction.
+   */
+  | "qualitative_review_stale"
   /**
    * An AUTHORED sample policy withheld a result. ACKNOWLEDGEMENT REQUIRED.
    *
@@ -281,6 +309,7 @@ export type PublicationWarningCode =
 export const WARNINGS_REQUIRING_ACKNOWLEDGEMENT: readonly PublicationWarningCode[] = [
   "configuration_required_blocks",
   "qualitative_review_pending",
+  "qualitative_review_stale",
   "withheld_by_sample_policy",
   "nothing_visible",
   "inoperable_filter_panels",

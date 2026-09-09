@@ -14,8 +14,11 @@ import {
 } from "@/lib/composer";
 import { viewerSelectionIsNeutral } from "@/lib/presentation";
 import type { PresentationRenderModel } from "@/lib/presentation";
+import { CODING_LABEL } from "@/lib/publication";
 import type {
   PreviewPublicationUnderSelection,
+  RecordQualitativeSignOff,
+  SignOffResult,
   PublicationReviewPayload,
   PublicationWarningCode,
   PublishPresentation,
@@ -69,7 +72,9 @@ const ACKNOWLEDGEMENT_LABEL: Record<PublicationWarningCode, string> = {
   configuration_required_blocks:
     "Entiendo que las partes que esperan contenido no le aparecerán al cliente de ninguna forma.",
   qualitative_review_pending:
-    "Entiendo que estas categorías cualitativas no las ha revisado nadie del equipo y aun así se publicarán.",
+    "Entiendo que nadie ha dejado constancia de haber revisado estas categorías y aun así se publicarán.",
+  qualitative_review_stale:
+    "Entiendo que las categorías cambiaron desde la última revisión y aun así se publicarán.",
   withheld_by_sample_policy:
     "Entiendo que la política de muestra escrita a mano reserva estos resultados y el cliente no los verá.",
   nothing_visible: "Entiendo que, tal como está, el cliente no vería nada en esta presentación.",
@@ -110,12 +115,14 @@ export function PublicationReviewView({
   publish,
   restore,
   preview,
+  signOff,
 }: {
   studyId: string;
   payload: PublicationReviewPayload;
   publish: PublishPresentation;
   restore: RestorePublication;
   preview: PreviewPublicationUnderSelection;
+  signOff: RecordQualitativeSignOff;
 }) {
   const [acknowledged, setAcknowledged] = useState<PublicationWarningCode[]>([]);
   const [confirmed, setConfirmed] = useState(false);
@@ -218,6 +225,22 @@ export function PublicationReviewView({
       void runViewer(requestViewerPanelCleared(sessionRef.current, panelId)),
   };
   const filtered = !viewerSelectionIsNeutral(session.applied);
+
+  /* ------------------------------------------------------------------------ */
+  /* THE QUALITATIVE SIGN-OFF.                                                */
+  /* ------------------------------------------------------------------------ */
+
+  const [signOffOutcome, setSignOffOutcome] = useState<SignOffResult | null>(null);
+  const [categoriesRead, setCategoriesRead] = useState(false);
+  const qualitative = payload.qualitative;
+  const onSignOff = () => {
+    if (qualitative.evidenceDigest === null) return;
+    const digest = qualitative.evidenceDigest;
+    setSignOffOutcome(null);
+    startTransition(async () => {
+      setSignOffOutcome(await signOff(studyId, digest));
+    });
+  };
 
   /**
    * ONE KEY PER ATTEMPT, MINTED ONCE.
@@ -403,6 +426,126 @@ export function PublicationReviewView({
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {/* 3b ─ THE QUALITATIVE CATEGORIES, AND WHO READ THEM. ---------------- */}
+      {qualitative.groups.length > 0 ? (
+        <section className={CARD} aria-labelledby="categorias" data-testid="categorias-cualitativas">
+          <h2 id="categorias" className="text-base font-semibold text-strong">
+            Categorías cualitativas
+          </h2>
+          {/*
+            WHY THIS CARD EXISTS AT ALL.
+
+            The old screen said «nadie del equipo las ha revisado todavía» on
+            every review of every study, for ever, because the canonical layer
+            wrote that state as a constant. It named two GROUPS while three
+            blocks of the approved layout draw those categories, and no amount
+            of reviewing could clear it. A permanent warning is one people learn
+            to tick.
+
+            Here are the words themselves, every block a client would read them
+            in, where the coding came from, and one control that records that a
+            person read exactly these. The record is tied to a digest of this
+            list, so it expires by itself the day the list changes.
+          */}
+          <p className="mt-1 max-w-prose text-sm text-muted">
+            Esto es lo que el cliente leería. Son categorías cerradas: ninguna respuesta escrita a
+            mano, ningún nombre y ninguna cita entran aquí ni pueden entrar.
+          </p>
+
+          <p
+            className={`mt-3 text-sm font-medium ${
+              qualitative.state === "current" ? "text-positive" : "text-caution"
+            }`}
+            data-testid="estado-revision-cualitativa"
+          >
+            {qualitative.state === "current"
+              ? `Alguien registró haber revisado exactamente estas categorías el ${whenLabel(
+                  qualitative.reviewedAt ?? "",
+                )}.`
+              : qualitative.state === "stale"
+                ? `La última revisión registrada es del ${whenLabel(
+                    qualitative.reviewedAt ?? "",
+                  )}, y las categorías han cambiado desde entonces: lo que se aprobó no es lo que se publicaría.`
+                : "Nadie ha dejado constancia de haber revisado estas categorías."}
+          </p>
+
+          <div className="mt-4 space-y-4">
+            {qualitative.groups.map((group) => (
+              <div key={group.groupLabel} className="rounded-lg border border-line">
+                <div className="border-b border-line bg-surface-sunken px-3 py-2">
+                  <h3 className="text-sm font-semibold text-strong">{group.groupLabel}</h3>
+                  <p className="text-xs text-muted">{CODING_LABEL[group.coding]}</p>
+                  <p className="mt-1 text-xs text-muted">
+                    {group.blocks.length === 0
+                      ? "Ningún bloque visible las dibuja."
+                      : `Se dibujan en: ${group.blocks.join(" · ")}`}
+                  </p>
+                </div>
+                <ul className="flex flex-wrap gap-1.5 px-3 py-2">
+                  {group.categories.map((category) => (
+                    <li
+                      key={category}
+                      className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-body [overflow-wrap:anywhere]"
+                    >
+                      {category}
+                    </li>
+                  ))}
+                </ul>
+                {group.excluded.length > 0 ? (
+                  <p className="border-t border-line px-3 py-2 text-xs text-muted">
+                    Fuera de la nube, y reportadas aparte: {group.excluded.join(", ")}.
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+
+          {qualitative.state === "current" ? null : (
+            <div className="mt-4 rounded-lg border border-line-strong bg-surface-sunken p-3">
+              <label className="flex min-h-11 cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4"
+                  checked={categoriesRead}
+                  onChange={() => setCategoriesRead((value) => !value)}
+                  data-testid="lei-las-categorias"
+                />
+                <span className="text-sm font-medium text-strong">
+                  Leí estas categorías una por una y son publicables tal como están.
+                </span>
+              </label>
+              <button
+                type="button"
+                className={`${BUTTON} mt-3`}
+                disabled={!categoriesRead || pending || qualitative.evidenceDigest === null}
+                onClick={onSignOff}
+                data-testid="registrar-revision-cualitativa"
+              >
+                {pending ? "Registrando…" : "Registrar mi revisión"}
+              </button>
+              <p className="mt-2 text-xs text-muted">
+                Queda registrado contra esta lista exacta. Si mañana aparece, cambia o desaparece una
+                categoría, la revisión deja de valer sola y hay que volver a mirarla.
+              </p>
+            </div>
+          )}
+
+          {signOffOutcome ? (
+            <p
+              className={`mt-3 text-sm ${signOffOutcome.ok ? "text-positive" : "text-danger"}`}
+              data-testid="resultado-revision-cualitativa"
+              role="status"
+            >
+              {signOffOutcome.ok
+                ? signOffOutcome.replayed
+                  ? "Estas mismas categorías ya estaban revisadas: no se registró una segunda decisión. Recarga la pantalla."
+                  : "Revisión registrada. Recarga esta pantalla para verla como el estado actual."
+                : signOffOutcome.detail}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

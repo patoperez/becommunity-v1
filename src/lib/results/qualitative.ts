@@ -13,7 +13,9 @@
  *   2. CURATED FINDING COUNTS. How many curated pain-map findings attach to
  *      each curated entity, through the real foreign keys the projection wrote.
  *      Counts only: that map is consultant prose nobody has cleared for
- *      publication, and `reviewStatus` says so.
+ *      publication, and `reviewStatus` — a REAL column on `pain_point`, written
+ *      per row by ingestion — says so. Measured read-only on the hosted project
+ *      on 2026-09-09: all fifty of Cuicuilco's pain points are `pending`.
  *
  * A term cloud's SIZE is a visual decision that belongs to the interface. This
  * contract carries counts and shares; how large a word is drawn changes nothing
@@ -123,7 +125,11 @@ export function buildQualitativeGroups(
         .sort((a, b) => codepointCompare(a[0], b[0]))
         .map(([label, count]) => ({ label, count })),
       terms,
-      reviewStatus: "pending",
+      // THE SOURCE'S OWN CODING, stated as a fact about provenance rather than
+      // as a review state nobody could change. See the contract's 3.0.0 note:
+      // the old `reviewStatus: "pending"` was a constant, and a constant that
+      // never moves is not a review.
+      coding: "source_coded",
       provenance: makeProvenance({
         calculationVersion: spec.calculationVersion,
         explanation:
@@ -136,9 +142,10 @@ export function buildQualitativeGroups(
           "Sólo se leen las columnas de categoría cerrada. La columna de texto libre contigua no " +
             "entra al modelo de lectura en ninguna forma, así que una respuesta textual no puede " +
             "agregarse ni siquiera por error.",
-          "«pending» describe el estado de revisión editorial: estas categorías son la codificación " +
-            "de la propia fuente, no un artefacto de revisión de Be Community, así que la frontera " +
-            "de publicación debe decidir sobre ellas antes de mostrarlas a un cliente.",
+          "Estas categorías son la codificación de la propia fuente, no un artefacto de revisión " +
+            "de Be Community. Que alguien del equipo las haya leído no es un dato de esta capa: se " +
+            "registra en la frontera de publicación, contra una huella del conjunto exacto de " +
+            "categorías, y caduca sola cuando ese conjunto cambia.",
           "Una categoría documentada como «no aplica» viaja como estado de ausencia canónico, no como " +
             "texto de respuesta, y su conteo se recupera desde ese estado. Se reporta aparte y nunca " +
             "entra a la nube.",

@@ -52,8 +52,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   CLIENT_SURFACE_IS_LIVE,
+  affectedBlocks,
+  blockTitle,
   buildPublicationInventory,
   countVisibleToClient,
+  pageTitle,
   runPublicationPreflight,
   structuralDifference,
   type PublicationHistoryEntry,
@@ -66,6 +69,10 @@ import {
   type PublicationSubject,
   type PublicationUnavailable,
   type PublicationUnavailableReason,
+  type QualitativeCategorySet,
+  type QualitativeReviewPanel,
+  type QualitativeSignOff,
+  type SignOffResult,
   type PublishResult,
   type PublishedPresentation,
   type QualitativeBinding,
@@ -73,6 +80,7 @@ import {
 } from "@/lib/publication";
 import {
   EMPTY_VIEWER_SELECTION,
+  clientSeesBlock,
   serializeDeterministic,
   type PresentationDocument,
   type PresentationRenderModel,
@@ -99,6 +107,8 @@ import {
 import {
   decodeStoredDraft,
   encodePresentationForStorage,
+  qualitativeEvidenceDigest,
+  qualitativeReviewState,
   readAndBuild,
   readStoredDraftRow,
   refusalFor,
@@ -113,6 +123,7 @@ import {
 /* the tables this module owns                                                 */
 /* -------------------------------------------------------------------------- */
 
+const SIGNOFF_TABLE = "canonical_qualitative_signoff";
 const REVISION_TABLE = "canonical_presentation_revision";
 const POINTER_TABLE = "canonical_presentation_publication";
 const EVENT_TABLE = "canonical_presentation_publication_event";
@@ -161,6 +172,8 @@ type EventRow = {
  */
 type Assembled = {
   subject: PublicationSubject;
+  /** The sign-off row behind `subject.qualitativeSignOff`, with its id. */
+  storedSignOff: StoredSignOff | null;
   built: CanonicalPresentationRead | null;
   document: PresentationDocument | null;
   model: PresentationRenderModel | null;
@@ -221,8 +234,25 @@ function requiredBlockIdsOf(document: PresentationDocument): string[] {
 function qualitativeBindings(
   built: CanonicalPresentationRead,
   document: PresentationDocument,
+  model: PresentationRenderModel | null,
 ): QualitativeBinding[] {
-  const found = new Map<number, QualitativeBinding>();
+  // WHICH BLOCKS A CLIENT WOULD ACTUALLY SEE, by their authored titles.
+  //
+  // From the RESOLVED MODEL and not from the document, for the same reason the
+  // inventory is: a block waiting for content is in the layout and is nothing on
+  // the page, and a reviewer asked to sign off on categories a client will never
+  // be shown is being asked the wrong question.
+  const visibleById = new Map<string, string>();
+  if (model) {
+    for (const page of model.pages) {
+      for (const block of page.blocks) {
+        if (!clientSeesBlock(block, CLIENT_SURFACE_IS_LIVE)) continue;
+        visibleById.set(block.id, `${pageTitle(page)} · ${blockTitle(block)}`);
+      }
+    }
+  }
+
+  const found = new Map<number, { set: QualitativeCategorySet; blocks: string[] }>();
   for (const page of document.pages) {
     for (const block of page.blocks) {
       if (block.kind !== "result") continue;
@@ -230,10 +260,83 @@ function qualitativeBindings(
       if (!address || address.at !== "qualitative.group") continue;
       const group = built.results.qualitative.groups[address.groupIndex];
       if (!group) continue;
-      found.set(address.groupIndex, { label: group.label, reviewStatus: group.reviewStatus });
+      const where = visibleById.get(block.id);
+      const entry = found.get(address.groupIndex);
+      if (entry) {
+        // THE SAME GROUP, A SECOND BLOCK. The approved layout draws the active
+        // group twice — «Miembros activos» and «Razones declaradas de riesgo» —
+        // and the old code kept only the first, so the warning named one of the
+        // two client-visible blocks carrying unreviewed categories.
+        if (where !== undefined && !entry.blocks.includes(where)) entry.blocks.push(where);
+        continue;
+      }
+      found.set(address.groupIndex, {
+        set: {
+          groupLabel: group.label,
+          coding: group.coding,
+          // The client's own order, which is the order a reviewer reads them in.
+          categories: group.terms.map((term) => term.label),
+          excluded: group.excluded.map((entry) => entry.label),
+          blocks: [],
+        },
+        blocks: where === undefined ? [] : [where],
+      });
     }
   }
-  return [...found.entries()].sort((a, b) => a[0] - b[0]).map(([, value]) => value);
+  return [...found.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, value]) => ({ ...value.set, blocks: value.blocks }));
+}
+
+/**
+ * A stored sign-off, with the row id the publication record needs.
+ *
+ * THE ID STAYS ON THE SERVER. `QualitativeSignOff` — the pure type the review
+ * payload carries — has a digest and a time and no id, because a row id is a
+ * database identifier and a review screen is held to naming none.
+ */
+type StoredSignOff = QualitativeSignOff & { id: string };
+
+/**
+ * The sign-off this study's CURRENT categories rest on, or the most recent one.
+ *
+ * TWO READS AND A PREFERENCE, and the preference is a lookup rather than a rule.
+ * A sign-off for the exact current digest is the answer whenever one exists —
+ * including when the categories changed and later changed back, because a review
+ * of those words is a review of those words whatever happened in between. When
+ * none exists, the most recent sign-off of ANY digest is returned so the
+ * preflight can say «somebody reviewed, and it is no longer what is here» rather
+ * than «nobody ever reviewed», which are different facts and need different
+ * actions from the person reading them.
+ */
+async function readQualitativeSignOff(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  digest: string | null,
+): Promise<StoredSignOff | null> {
+  const read = async (exact: string | null): Promise<StoredSignOff | null> => {
+    let query = client
+      .from(SIGNOFF_TABLE)
+      .select("id, evidence_digest, reviewed_at")
+      .eq("study_id", scope.studyId)
+      .eq("tenant_id", scope.tenantId);
+    if (exact !== null) query = query.eq("evidence_digest", exact);
+    const { data, error } = await query
+      .order("reviewed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ id: string; evidence_digest: string; reviewed_at: string }>();
+    // A MISSING TABLE IS NOT A MISSING REVIEW, AND IT IS NOT SILENT EITHER.
+    // Until migration 0031 is applied, this read fails and the answer is null —
+    // which the preflight reports as «nobody has reviewed these», the safe
+    // direction. It must never be reported as «reviewed».
+    if (error || !data) return null;
+    return { id: data.id, evidenceDigest: data.evidence_digest, reviewedAt: data.reviewed_at };
+  };
+  if (digest !== null) {
+    const exact = await read(digest);
+    if (exact) return exact;
+  }
+  return read(null);
 }
 
 /** Read the current publication pointer and the snapshot it names. */
@@ -345,12 +448,14 @@ async function assemble(
       lastPublished: null,
       requiredBlockIds: [],
       qualitative: [],
+      qualitativeReviewState: "not_applicable",
       expectedActiveVersion: asserted.expectedActiveVersion,
       actualActiveVersion: null,
       structureChanged: false,
       acknowledged: asserted.acknowledged,
       ...over,
     },
+    storedSignOff: null,
     built: null,
     document: null,
     model: null,
@@ -447,6 +552,18 @@ async function assemble(
 
   const publishedModel = currentRow ? (currentRow.render_model as PresentationRenderModel) : null;
 
+  // THE CATEGORIES, THEN THE DIGEST, THEN THE SIGN-OFF THAT MATCHES IT.
+  //
+  // In that order, because the digest is a fact about the categories and the
+  // sign-off is a fact about the digest. Reading the sign-off first would mean
+  // choosing which review to believe before knowing what it had to be about.
+  const qualitative = qualitativeBindings(built, document, first.model);
+  const qualitativeSignOff = await readQualitativeSignOff(
+    client,
+    scope,
+    qualitative.length === 0 ? null : qualitativeEvidenceDigest(qualitative),
+  );
+
   const subject: PublicationSubject = {
     authorized: true,
     clientSurfaceIsLive: CLIENT_SURFACE_IS_LIVE,
@@ -463,7 +580,8 @@ async function assemble(
     // authoring material — so the ids travel beside the model rather than
     // inside it, and only the block's own TITLE ever reaches a screen.
     requiredBlockIds: requiredBlockIdsOf(document),
-    qualitative: qualitativeBindings(built, document),
+    qualitative,
+    qualitativeReviewState: qualitativeReviewState(qualitative, qualitativeSignOff),
     expectedActiveVersion: asserted.expectedActiveVersion,
     structureChanged:
       publishedModel === null
@@ -474,6 +592,7 @@ async function assemble(
 
   return {
     subject,
+    storedSignOff: qualitativeSignOff,
     built,
     document,
     model: first.model,
@@ -580,6 +699,18 @@ export async function loadPublicationReview(
         ? structuralDifference(assembled.publishedModel, model)
         : null,
     history: assembled.history,
+    // THE WORDS, THE BLOCKS THAT DRAW THEM, AND WHO READ THEM.
+    //
+    // The whole card, not a group label. A reviewer signing off has to see the
+    // categories a client will read and every block that carries them, and the
+    // preflight's warning above names the same blocks from the same source.
+    qualitative: {
+      state: subject.qualitativeReviewState,
+      evidenceDigest:
+        subject.qualitative.length === 0 ? null : qualitativeEvidenceDigest(subject.qualitative),
+      reviewedAt: assembled.storedSignOff?.reviewedAt ?? null,
+      groups: subject.qualitative,
+    } satisfies QualitativeReviewPanel,
   };
 
   return { ok: true, payload };
@@ -690,6 +821,97 @@ export async function previewStoredPresentationUnderSelection(
 }
 
 /* -------------------------------------------------------------------------- */
+/* recording a qualitative sign-off                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Record that a person read this study's exact current qualitative categories.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE DIGEST THE BROWSER SENDS IS AN ASSERTION, AND IT IS CHECKED.
+ *
+ * The whole job is done again here, over a fresh read: the study's canonical
+ * results are read, the registry is rebuilt, the stored draft is decoded and
+ * resolved, the bound groups are collected, and the digest is recomputed. Only
+ * if it equals what the screen sent is anything recorded — so a category set
+ * that moved between the reading and the click is refused rather than signed,
+ * and a sign-off always names words somebody actually saw.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT WRITES EXACTLY ONE THING, THROUGH THE ONE PATH THAT MAY.
+ *
+ * `record_canonical_qualitative_signoff`, from migration 0031. The table grants
+ * `service_role` SELECT and nothing else, so this RPC is the only way a row is
+ * created — a caller that could INSERT directly could manufacture a review
+ * nobody performed. It touches no draft, no publication and no legacy table.
+ *
+ * REVIEWING THE SAME WORDS TWICE IS NOT TWO DECISIONS. The function returns the
+ * existing record rather than writing a second one, which is also what makes a
+ * retry after a lost response safe.
+ */
+export async function recordQualitativeSignOff(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  actorUserId: string,
+  assertedDigest: string,
+): Promise<SignOffResult> {
+  const assembled = await assemble(client, scope, {
+    reviewedRevision: null,
+    expectedActiveVersion: null,
+    acknowledged: [],
+  });
+  const groups = assembled.subject.qualitative;
+  if (groups.length === 0) {
+    return {
+      ok: false,
+      reason: "evidence_moved",
+      detail:
+        "Esta presentación ya no publica ninguna categoría cualitativa, así que no hay nada que revisar. Vuelve a cargar la pantalla.",
+    };
+  }
+  const digest = qualitativeEvidenceDigest(groups);
+  if (digest !== assertedDigest) {
+    return {
+      ok: false,
+      reason: "evidence_moved",
+      detail:
+        "Las categorías cambiaron mientras las leías, así que no se registra una revisión de algo que no viste. Vuelve a cargar la pantalla y míralas otra vez.",
+    };
+  }
+
+  const { data, error } = await client.rpc("record_canonical_qualitative_signoff", {
+    p_study_id: scope.studyId,
+    p_actor: actorUserId,
+    p_evidence_digest: digest,
+    // THE WORDS THEMSELVES, so an auditor reads what was approved rather than a
+    // hash of it. Closed-coded category labels only — the same short vocabulary
+    // a client is shown in the term cloud.
+    p_category_labels: groups.flatMap((group) => [...group.categories, ...group.excluded]),
+    p_block_titles: affectedBlocks(groups),
+    p_note: null,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      reason: "storage_refused",
+      // The database's own message is NOT forwarded: a constraint violation
+      // quotes the values that violated it, and those values are the words.
+      detail: "No se pudo registrar la revisión. No cambió nada; puedes volver a intentarlo.",
+    };
+  }
+  const answer = data as { reviewedAt?: unknown; created?: unknown } | null;
+  if (!answer || typeof answer.reviewedAt !== "string") {
+    return {
+      ok: false,
+      reason: "storage_refused",
+      detail: "El registro de la revisión no devolvió una fecha, así que no se da por hecho.",
+    };
+  }
+  return { ok: true, reviewedAt: answer.reviewedAt, replayed: answer.created !== true };
+}
+
+/* -------------------------------------------------------------------------- */
 /* publishing                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -783,7 +1005,22 @@ export async function publishStoredPresentation(
     };
   }
 
-  const { data, error } = await client.rpc("publish_canonical_presentation", {
+  // THE QUALITATIVE DECISION, RECORDED WITH THE PUBLICATION AND IN ITS
+  // TRANSACTION.
+  //
+  // 0031's wrapper does not reimplement publishing: it calls
+  // `publish_canonical_presentation` — every refusal that function makes still
+  // applies — and writes the qualitative record beside the snapshot in the same
+  // transaction, so a publication without one cannot exist. A claim that the
+  // categories were signed off names the sign-off row, and the database checks
+  // that it belongs to this study and carries this digest before believing it.
+  const signOffState = assembled.subject.qualitativeReviewState;
+  const signOffDigest =
+    assembled.subject.qualitative.length === 0
+      ? null
+      : qualitativeEvidenceDigest(assembled.subject.qualitative);
+
+  const { data, error } = await client.rpc("publish_canonical_presentation_with_qualitative", {
     p_study_id: scope.studyId,
     p_actor: actorUserId,
     p_source_draft_revision: row.revision,
@@ -799,6 +1036,12 @@ export async function publishStoredPresentation(
     p_mapping_version: identity.mappingVersion,
     p_package_idempotency_key: identity.packageIdempotencyKey,
     p_plan_fingerprint: identity.planFingerprint,
+    p_qualitative_review_state: signOffState,
+    p_qualitative_digest: signOffDigest,
+    // NAMED ONLY WHEN THE CLAIM IS «current». The database refuses that state
+    // without a sign-off row of this study carrying this digest, so the
+    // strongest thing a publication can record is also the hardest to assert.
+    p_qualitative_signoff_id: signOffState === "current" ? assembled.storedSignOff?.id ?? null : null,
     // THE SET THE PREFLIGHT REQUIRED, WHICH IS THE SET THAT WAS GIVEN.
     //
     // `canPublish` is false while any required acknowledgement is missing, and

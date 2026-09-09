@@ -968,6 +968,101 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   it was watched failing all six of its old assertions immediately after the
   migration was applied — which is how a check nobody has seen fail becomes one
   that has been tested.
+- ⓘ **UNIT 6B.4B2: THE REVIEW PREVIEW AND ITS INVENTORY ARE ONE FACT.** The
+  review screen reported «23 bloques los ve el cliente» over a preview that drew
+  20: three filter panels, counted by the inventory and dropped by the renderer,
+  and both halves were internally consistent. There is now ONE predicate —
+  `clientSeesBlock` / `clientHasContent` / `clientSeesPage` /
+  `filterPanelIsOperable` in `src/lib/presentation/visibility.ts` — and the
+  renderer, `FilterControls`, the publication inventory and the publication
+  preflight all import it; a gate reads those four files and refuses a private
+  copy. Two more disagreements fell out with it: the preflight counted a block
+  with a null value as visible, and both the inventory and the preflight called
+  a STATED absence invisible while the renderer drew its sentence.
+  `CLIENT_SURFACE_IS_LIVE` is declared once and used by the count and by the
+  mount, and the gate renders the real component with `react-dom/server` and
+  compares the cards in the markup against both.
+- ⓘ **THE PUBLICATION PREVIEW IS OPERABLE, AND ITS SELECTION IS EPHEMERAL.** A
+  third Server Action on `/studio/e/[studyId]/revision` resolves the STORED
+  draft under a reviewer's own filter selection. It writes nothing — no insert,
+  update, upsert, delete, RPC or revalidation, asserted over the function body
+  as well as over the action — the selection is never stored, and publishing
+  still resolves under `EMPTY_VIEWER_SELECTION` whatever is ticked. A person
+  cannot approve controls they cannot work.
+- ⓘ **`FilterValue` CARRIES `rawValues`, AND THE SOURCE IS WHY.** The approved
+  study's «Giro» column holds «Construcción» and «Construcción·», «Capacitación
+  y Coaching» and «Capacitación y Coaching·» and two more pairs like them;
+  «Tipo de empresa» holds «B2B» and «B2B·». They were two options with two
+  counts, so a reader picking one saw a third of the people who gave that
+  answer. Options now group by the answer with its OUTER whitespace removed,
+  every raw spelling is preserved server-side, `applyFilters` matches any of
+  them, and nothing differing by an internal character is ever merged. The raw
+  sets are kept PER CONSTRAINT and never per dimension: merging them turned two
+  panels' AND into an OR, and the viewer gate caught it.
+- ⓘ **NO PRIVACY DECISION IS MADE FOR THE CEO, AND NO THRESHOLD ENTERED THE
+  LAYER.** `granular_filter_dimensions` names the characteristics offering an
+  option only ONE person carries — a group of one, not a chosen cut-off — states
+  how many such options each has, and never names the option itself, because
+  naming «Giro: Notaría (1 persona)» on a review screen is naming the person.
+  Nothing is hidden, no count moves, `show_all` stays the default, and the
+  operator either takes the characteristic out of the panel in Construcción or
+  says they are keeping it. `inoperable_filter_panels` is its sibling: a panel
+  no block is connected to is one the client never receives.
+- ⓘ **REQUIRED CONTENT IS A BLOCKER, AND THE AUTHOR DECLARES IT.** Blocks carry
+  an optional `requiredContent`, the approved blueprint marks the journey
+  pain-cloud slot with it, and `required_content_missing` CANNOT be
+  acknowledged away — the two remedies are supplying the content or removing the
+  block, and both are in the sentence. `configuration_required` stays a warning
+  for every block nobody marked, so the standing rule is intact. The older note
+  that blocking «would make the approved blueprint unpublishable forever» was
+  answering a different question: «the client sees nothing» and «the deliverable
+  is finished» are two facts, and the approved north-star SHOWS that cloud.
+- ⓘ **`reviewStatus: "pending"` IS GONE FROM `QualitativeGroupResult`, AND THAT
+  IS WHY THE RESULTS CONTRACT IS `3.0.0`.** It was a literal, written on every
+  group of every study for ever, and the preflight read it as «nobody at Be
+  Community has reviewed these» — a warning that appeared on every review, could
+  never be cleared, and named two GROUP labels while THREE blocks of the
+  approved layout draw those categories. `coding`
+  (`source_coded` / `be_community_curated`) replaces it with what that layer
+  actually knows. `CuratedFindingCount.reviewStatus` is untouched: it is a real
+  column on `pain_point`, and all fifty of Cuicuilco's are `pending` (measured
+  read-only, 2026-09-09).
+- ⓘ **A QUALITATIVE SIGN-OFF IS ABOUT WORDS, AND IT EXPIRES BY ITSELF.**
+  `qualitativeEvidenceDigest` covers each bound group's label, its coding and
+  its ordered category and excluded labels — and never a COUNT, because another
+  person choosing a category that already existed changes no word anybody read.
+  Four states: `not_applicable`, `pending`, `stale`, `current`. The warning
+  names every VISIBLE BLOCK that draws the categories, «Razones declaradas de
+  riesgo» included. Migration `0031` stores it, and is applied to NO project.
+- ⓘ **`0031` WRAPS THE PUBLISH FUNCTION RATHER THAN REPLACING IT.**
+  `publish_canonical_presentation_with_qualitative` CALLS
+  `publish_canonical_presentation`, so every refusal that function makes still
+  applies, and writes the qualitative record in the SAME transaction — a
+  publication without one cannot exist. `publish_canonical_presentation` stays
+  byte-identical applied history. «current» is refused unless the named sign-off
+  belongs to this study and carries this digest.
+- ⓘ **THE EVIDENCE DIGEST IS SERVER-SIDE BY WHERE IT LIVES.**
+  `src/lib/publication/evidence-digest.ts` imports the product's SHA-256 from
+  under `canonical-commit/`, so the client-safe publication barrel does NOT
+  re-export it and `publication-workspace.ts` reaches it through
+  `presentation-workspace.ts` — the composer's declared loader — exactly as it
+  reaches `resolveUnderSelection`. The boundary gate refused both the barrel
+  re-export and the direct import, by name, the moment each existed.
+- ⓘ **THE JOURNEY PAIN-POINT MAPPING IS NOT PROVABLE FROM THE CANONICAL
+  SOURCES, and it was measured rather than argued.** Read-only on the hosted
+  project, 2026-09-09: `pain_point` 50 rows, **all `pending`**;
+  `pain_point_journey_stage` 15, `_organizational_unit` 8,
+  `_performance_dimension` 7, `_culture_dimension` 20;
+  `journey_stage_evidence_link` **0 rows**. Of the 18 curated journey stages,
+  **0** match a canonical `survey_item.label` (which is the full survey prompt),
+  6 match the workbook's short label row, and 5 match the bracketed text inside
+  the prompt — three different answers from three defensible readings, which is
+  itself the proof that label identity is not an authority. «Reunión semanal
+  presencial/en línea» is ONE stage over TWO touchpoints, and «BNI Connect» is
+  ambiguous between the web platform and the phone app while «App celular»
+  names that same app. The approved demo resolves all of it with a 38-entry
+  hand-written alias table plus a phrase-splitting rule (`split(/[\n.]+/)`);
+  both are implementation. **Do not copy either.**
 - `readXlsx()`/`parseXlsx()` are the LEGACY reader and their behaviour is
   frozen — every existing study was imported through them. The canonical
   multi-sheet reader is `readXlsxWorkbook()` in the same module; both must stay

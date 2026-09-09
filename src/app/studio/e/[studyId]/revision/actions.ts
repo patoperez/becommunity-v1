@@ -51,12 +51,14 @@ import { createClient } from "@/lib/supabase/server";
 import {
   previewStoredPresentationUnderSelection,
   publishStoredPresentation,
+  recordQualitativeSignOff,
   restoreStoredPublication,
 } from "@/lib/studio/publication-workspace";
 import type {
   PublicationPreviewResult,
   PublishResult,
   RestoreResult,
+  SignOffResult,
 } from "@/lib/publication";
 
 const uuid = z.string().uuid();
@@ -97,6 +99,16 @@ const REASON = z.string().min(1).max(200);
  * same reason.
  */
 const MAX_VIEWER_BYTES = 64 * 1024;
+
+/**
+ * A qualitative evidence digest, shaped before it is used.
+ *
+ * The database's own CHECK admits exactly this, and repeating it here means a
+ * malformed value is refused as «vuelve a cargar la pantalla» rather than
+ * arriving as a generic storage failure that tells an operator their review was
+ * not recorded without saying why.
+ */
+const EVIDENCE_DIGEST = z.string().regex(/^[0-9a-f]{64}$/);
 
 /** Authorize, then — and only then — build the privileged client and the scope. */
 async function authorizedStudioScope(
@@ -311,4 +323,45 @@ export async function previewPublicationUnderSelection(
   }
 
   return previewStoredPresentationUnderSelection(authorized.admin, authorized.scope, candidate);
+}
+
+/**
+ * Record that this person read this study's exact qualitative categories.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT THE BROWSER MAY SAY, AND WHAT IT MAY NOT.
+ *
+ * One digest, of category labels a client is already shown. There is no
+ * parameter for the categories themselves, for a note about a person, for a
+ * quotation, or for who did the reviewing: the actor is the authenticated
+ * session and is read from it, and the words are re-derived on the server from
+ * the study's own results. So a caller cannot sign off on words it invented,
+ * and cannot sign off AS somebody else.
+ *
+ * The digest is an ASSERTION about what was on screen, and it is checked: the
+ * server rebuilds the registry, resolves the stored draft, collects the bound
+ * groups and recomputes the digest, and refuses if it has moved. A category set
+ * that changed between the reading and the click is not signed.
+ */
+export async function recordCanonicalQualitativeSignOff(
+  studyId: string,
+  evidenceDigest: string,
+): Promise<SignOffResult> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return { ok: false, reason: authorized.reason, detail: authorized.detail };
+  }
+  if (!EVIDENCE_DIGEST.safeParse(evidenceDigest).success) {
+    return {
+      ok: false,
+      reason: "evidence_moved",
+      detail: "Lo que se envió no es la huella de un conjunto de categorías. Vuelve a cargar la pantalla.",
+    };
+  }
+  return recordQualitativeSignOff(
+    authorized.admin,
+    authorized.scope,
+    authorized.userId,
+    evidenceDigest,
+  );
 }

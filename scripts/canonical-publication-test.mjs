@@ -69,6 +69,14 @@ import {
   pageTitle,
 } from "../src/lib/publication/inventory.ts";
 import { structuralDifference } from "../src/lib/publication/difference.ts";
+import {
+  qualitativeEvidenceDigest,
+  qualitativeReviewState,
+} from "../src/lib/publication/evidence-digest.ts";
+import {
+  CODING_LABEL,
+  affectedBlocks,
+} from "../src/lib/publication/qualitative-signoff.ts";
 import { PresentationRenderer } from "../src/components/presentation/PresentationRenderer.tsx";
 import { composerFixtureSource } from "./lib/composer-fixture.mjs";
 
@@ -177,6 +185,7 @@ const healthy = (over = {}) => ({
   authorized: true,
   clientSurfaceIsLive: CLIENT_SURFACE_IS_LIVE,
   requiredBlockIds: [],
+  qualitativeReviewState: "not_applicable",
   readRefusal: null,
   stored: {
     revision: 7,
@@ -308,7 +317,7 @@ check(
 check(DECLARED_BLOCKERS.length > 0, "y el contrato los declara como literales cerrados");
 
 /* -------------------------------------------------------------------------- */
-console.log("\n[3] Un aviso es un aviso, y sólo seis exigen confirmación");
+console.log("\n[3] Un aviso es un aviso, y sólo siete exigen confirmación");
 
 eq(
   "advertencias que exigen confirmación, declaradas",
@@ -320,6 +329,7 @@ eq(
       "inoperable_filter_panels",
       "nothing_visible",
       "qualitative_review_pending",
+      "qualitative_review_stale",
       "withheld_by_sample_policy",
     ],
   ),
@@ -485,23 +495,65 @@ eq(
 /* -------------------------------------------------------------------------- */
 console.log("\n[6] Lo cualitativo sin revisar se decide, no se rechaza para siempre");
 
+// THE GROUPS, AS THE APPROVED LAYOUT BINDS THEM: one group drawn by TWO
+// visible blocks. That is the shape the old warning could not describe.
+const activeGroup = {
+  groupLabel: "Razones declaradas",
+  coding: "source_coded",
+  categories: ["Tiempo", "Costo", "Resultados"],
+  excluded: ["No aplica"],
+  blocks: ["Panorama · Miembros activos", "Panorama · Razones declaradas de riesgo"],
+};
+
 const pending = runPublicationPreflight(
-  healthy({ qualitative: [{ label: "Razones declaradas", reviewStatus: "pending" }] }),
+  healthy({ qualitative: [activeGroup], qualitativeReviewState: "pending" }),
 );
 check(has(pending.warnings, "qualitative_review_pending"), "una categoría sin revisar es un aviso");
 check(pending.required.includes("qualitative_review_pending"), "que exige confirmación");
+const pendingWhere = pending.warnings.find((e) => e.code === "qualitative_review_pending").where;
+// EVERY AFFECTED VISIBLE BLOCK, BY ITS AUTHORED TITLE. The old warning named
+// the GROUP, so «Razones declaradas de riesgo» — which draws the same
+// categories — was never mentioned to the person deciding.
+eq("bloques nombrados por el aviso", pendingWhere.length, 2);
 check(
-  pending.warnings.find((entry) => entry.code === "qualitative_review_pending")?.where.includes("Razones declaradas"),
-  "y nombra el grupo por su etiqueta, nunca por su handle",
+  pendingWhere.includes("Panorama · Razones declaradas de riesgo"),
+  "y nombra el segundo bloque que dibuja el mismo grupo",
 );
-const confirmed = runPublicationPreflight(
-  healthy({ qualitative: [{ label: "Razones declaradas", reviewStatus: "confirmed" }] }),
+check(
+  !pendingWhere.some((where) => /qualitative\.|handle|group-/.test(where)),
+  "por su título, nunca por un handle",
 );
-check(!has(confirmed.warnings, "qualitative_review_pending"), "una revisada no dice nada");
-const mixed = runPublicationPreflight(
-  healthy({ qualitative: [{ label: "Mezcla", reviewStatus: "mixed" }] }),
+
+const signedOff = runPublicationPreflight(
+  healthy({ qualitative: [activeGroup], qualitativeReviewState: "current" }),
 );
-check(has(mixed.warnings, "qualitative_review_pending"), "una mezclada sí, porque lleva material sin revisar");
+check(!has(signedOff.warnings, "qualitative_review_pending"), "una revisada no dice nada");
+check(!has(signedOff.warnings, "qualitative_review_stale"), "y tampoco dice que esté rancia");
+
+// STALE IS ITS OWN SENTENCE. «Nobody read these» asks for a first reading;
+// «what you approved is not what is here» asks somebody who already decided to
+// look at what changed. Collapsing them would ask the wrong person the wrong
+// question.
+const stale = runPublicationPreflight(
+  healthy({ qualitative: [activeGroup], qualitativeReviewState: "stale" }),
+);
+check(has(stale.warnings, "qualitative_review_stale"), "una revisión caducada tiene su propio aviso");
+check(!has(stale.warnings, "qualitative_review_pending"), "y no se confunde con no haber revisado nunca");
+check(stale.required.includes("qualitative_review_stale"), "y también exige confirmación");
+check(
+  stale.warnings.find((e) => e.code === "qualitative_review_stale").where.length === 2,
+  "nombrando los mismos bloques",
+);
+
+// A DOCUMENT WITH NO QUALITATIVE GROUP SAYS NOTHING AT ALL.
+const noQualitative = runPublicationPreflight(
+  healthy({ qualitative: [], qualitativeReviewState: "not_applicable" }),
+);
+check(
+  !has(noQualitative.warnings, "qualitative_review_pending") &&
+    !has(noQualitative.warnings, "qualitative_review_stale"),
+  "y un documento sin categorías cualitativas no dice nada de ellas",
+);
 
 /* -------------------------------------------------------------------------- */
 console.log("\n[7] El veredicto: sin bloqueos Y sin confirmaciones pendientes");
@@ -662,7 +714,15 @@ for (const [label, code] of [["la página", stripComments(pageSource)], ["la acc
   check(forbidden.length === 0, `${label} no escribe directamente${forbidden.length ? `: ${forbidden.join(", ")}` : ""}`);
 }
 
-// THE ONLY THREE RPCs THIS ROUTE MAY NAME.
+// THE ONLY FOUR RPCs THIS ROUTE MAY NAME.
+//
+// `publish_canonical_presentation_with_qualitative` replaced the bare publish
+// call: it does not reimplement publication — it CALLS
+// `publish_canonical_presentation`, so every refusal that function makes still
+// applies — and writes the qualitative review record beside the snapshot in the
+// same transaction. `record_canonical_qualitative_signoff` is how a person's
+// review of one exact set of category labels becomes a row. Both are migration
+// 0031's, and both are the only write path to the table they touch.
 {
   const named = new Set();
   let calls = 0;
@@ -673,7 +733,12 @@ for (const [label, code] of [["la página", stripComments(pageSource)], ["la acc
   eq(
     "los RPC que la ruta nombra",
     JSON.stringify([...named].sort()),
-    JSON.stringify(["publish_canonical_presentation", "read_canonical_publication", "restore_canonical_presentation"]),
+    JSON.stringify([
+      "publish_canonical_presentation_with_qualitative",
+      "read_canonical_publication",
+      "record_canonical_qualitative_signoff",
+      "restore_canonical_presentation",
+    ]),
   );
   // And every call names its function with a LITERAL. An allowlist that only
   // looks at literals is fooled by `client.rpc(name, …)`, which puts zero names
@@ -1145,6 +1210,189 @@ check(
 check(
   /H\.journeyPainCloud,\s*\n\s*true,/.test(approvedSource),
   "y la marca como contenido exigido",
+);
+
+
+/* -------------------------------------------------------------------------- */
+console.log("\n[16] La huella de la evidencia cualitativa: de qué es, y de qué NO");
+
+const setOf = (over = {}) => ({
+  groupLabel: "Razones declaradas",
+  coding: "source_coded",
+  categories: ["Tiempo", "Costo", "Resultados"],
+  excluded: ["No aplica"],
+  blocks: ["Panorama · Miembros activos"],
+  ...over,
+});
+
+const base = qualitativeEvidenceDigest([setOf()]);
+eq("la huella es un sha256", /^[0-9a-f]{64}$/.test(base), true);
+eq("y es determinista", qualitativeEvidenceDigest([setOf()]), base);
+
+/*
+ * WHAT MOVES IT. Adding, removing or renaming a category, changing the order a
+ * client reads them in, changing the excluded list, or changing where the
+ * coding came from. Each is a different thing to have read.
+ */
+for (const [what, over] of [
+  ["una categoría nueva", { categories: ["Tiempo", "Costo", "Resultados", "Distancia"] }],
+  ["una categoría menos", { categories: ["Tiempo", "Costo"] }],
+  ["una categoría renombrada", { categories: ["Tiempo", "Coste", "Resultados"] }],
+  ["otro orden de lectura", { categories: ["Costo", "Tiempo", "Resultados"] }],
+  ["otra categoría excluida", { excluded: ["No contesta"] }],
+  ["otra procedencia de la codificación", { coding: "be_community_curated" }],
+  ["otro grupo", { groupLabel: "Otras razones" }],
+]) {
+  check(qualitativeEvidenceDigest([setOf(over)]) !== base, `${what} mueve la huella`);
+}
+
+/*
+ * WHAT DOES NOT MOVE IT, and this half is the one that keeps a sign-off
+ * meaningful. A count moving means another person chose a category that already
+ * existed; the words nobody re-read are the same words. Expiring a review for
+ * that would make it constant in the other direction — which is exactly the
+ * defect this unit removed, wearing different clothes.
+ *
+ * The BLOCKS a group is drawn in do not move it either: moving a card on a page
+ * does not un-review a word.
+ */
+check(
+  qualitativeEvidenceDigest([setOf({ blocks: ["Otra página · Otro bloque", "Y otro"] })]) === base,
+  "mover el bloque que las dibuja NO mueve la huella",
+);
+// The digest has nowhere to put a count: the type carries none. Asserted over
+// the module's own text, because "there is no field" is stronger than "we did
+// not use it".
+const signOffSource = read("src/lib/publication/qualitative-signoff.ts");
+check(
+  !/count|share|participants|total/i.test(stripComments(signOffSource)),
+  "y el tipo no tiene siquiera un campo donde poner un conteo",
+);
+
+/*
+ * TWO GROUPS IN ANY ORDER ARE THE SAME EVIDENCE. A document that binds the same
+ * groups is the same set of words to read whichever card comes first, and a
+ * sign-off that expired because somebody reordered a page would be one nobody
+ * trusted.
+ */
+const two = [setOf(), setOf({ groupLabel: "Desertores", categories: ["Mudanza", "Costo"] })];
+eq(
+  "el orden de los grupos no cambia la huella",
+  qualitativeEvidenceDigest(two),
+  qualitativeEvidenceDigest([...two].reverse()),
+);
+
+/*
+ * AND A SEPARATOR CANNOT BE SPELLED BY A CATEGORY.
+ *
+ * A category label is a person's own Spanish and may contain any printable
+ * character. With a printable separator these two sets would serialize to one
+ * string and collide into one digest, so a review of one would silently count as
+ * a review of the other. The unit and record separators are unprintable, so they
+ * cannot appear in a label at all.
+ */
+check(
+  qualitativeEvidenceDigest([setOf({ categories: ["Tiempo, Costo", "Resultados"] })]) !==
+    qualitativeEvidenceDigest([setOf({ categories: ["Tiempo", "Costo", "Resultados"] })]),
+  "dos categorías y una que contiene la coma NO colisionan",
+);
+check(
+  qualitativeEvidenceDigest([setOf({ categories: ["Tiempo|Costo|Resultados"] })]) !== base,
+  "ni con la barra vertical",
+);
+
+/* ---- the four states, and the one that needs a matching digest ---------- */
+eq("sin grupos, no aplica", qualitativeReviewState([], null), "not_applicable");
+eq("con grupos y sin firma, pendiente", qualitativeReviewState([setOf()], null), "pending");
+eq(
+  "con la firma de estas palabras, al día",
+  qualitativeReviewState([setOf()], { evidenceDigest: base, reviewedAt: "2026-09-09T00:00:00Z" }),
+  "current",
+);
+eq(
+  "con la firma de otras palabras, rancia",
+  qualitativeReviewState([setOf({ categories: ["Tiempo"] })], {
+    evidenceDigest: base,
+    reviewedAt: "2026-09-09T00:00:00Z",
+  }),
+  "stale",
+);
+// A REVIEW DOES NOT EXPIRE WITH TIME, only when the words change. There is no
+// clock in the module, so it cannot.
+check(
+  !/Date\.now|new Date\(|Math\.random/.test(stripComments(read("src/lib/publication/evidence-digest.ts"))),
+  "y no hay reloj ni azar en la huella: una revisión no caduca con el tiempo",
+);
+
+/* ---- every affected block, deduplicated, in reading order --------------- */
+const blocks = affectedBlocks([
+  setOf({ blocks: ["Panorama · Miembros activos", "Panorama · Razones declaradas de riesgo"] }),
+  setOf({ groupLabel: "Desertores", blocks: ["Panorama · Desertores", "Panorama · Miembros activos"] }),
+]);
+eq("los bloques afectados, sin repetir", JSON.stringify(blocks), JSON.stringify([
+  "Panorama · Miembros activos",
+  "Panorama · Razones declaradas de riesgo",
+  "Panorama · Desertores",
+]));
+
+/* ---- and the coding is a word a person reads, not an enum -------------- */
+for (const coding of ["source_coded", "be_community_curated"]) {
+  check(
+    typeof CODING_LABEL[coding] === "string" && !/_/.test(CODING_LABEL[coding]),
+    `«${coding}» tiene una frase en español y no un enum (${CODING_LABEL[coding]})`,
+  );
+}
+
+/* ---- migration 0031 exists, is additive, and replaces no applied function */
+const migration = read("supabase/migrations/0031_canonical_qualitative_signoff.sql");
+check(
+  /create table public\.canonical_qualitative_signoff/.test(migration) &&
+    /create table public\.canonical_publication_qualitative_signoff/.test(migration),
+  "0031 crea sus dos tablas",
+);
+// IT MUST NOT REPLACE APPLIED HISTORY. `publish_canonical_presentation` is on
+// the hosted project; 0031 wraps it and a near-duplicate of its 295 lines would
+// make every future correction a choice about which copy is real.
+check(
+  !/create or replace function public\.publish_canonical_presentation\s*\(/.test(migration),
+  "y NO reemplaza `publish_canonical_presentation`, que es historia ya aplicada",
+);
+check(
+  /answer := public\.publish_canonical_presentation\(/.test(migration),
+  "sino que la llama, en la misma transacción",
+);
+// NO `ALTER TABLE` NAMES A TABLE AT ALL. The only two in the file are inside
+// `format('alter table public.%I …')`, whose argument is one of this
+// migration's own two names — so a literal table name after `alter table`
+// would be a table this migration was never given.
+check(
+  !/\balter table public\.[A-Za-z_]/.test(migration),
+  "y no altera por nombre ninguna tabla: los dos ALTER van por formato sobre las suyas",
+);
+check(
+  /'canonical_qualitative_signoff',\s*\n\s*'canonical_publication_qualitative_signoff'/.test(migration),
+  "y esas dos son exactamente las suyas",
+);
+// LEAST PRIVILEGE, the same shape 0029 and 0030 use.
+check(
+  /grant select on table public\.%I to service_role/.test(migration),
+  "service_role recibe SELECT y nada más sobre sus tablas",
+);
+check(
+  /security definer/.test(migration) && /set search_path = ''/.test(migration),
+  "y las funciones de escritura son SECURITY DEFINER con search_path vacío",
+);
+// A BARE UUID, not a foreign key into auth.users. 0025 made an identity
+// undeletable exactly that way and 0030 recorded the lesson.
+check(
+  /reviewed_by     uuid not null,/.test(migration) && !/reviewed_by[^\n]*auth\.users/.test(migration),
+  "y `reviewed_by` es un uuid suelto, no una llave foránea a auth.users",
+);
+const rollback = read("supabase/rollbacks/0031_drop_canonical_qualitative_signoff.sql");
+check(
+  /drop table public\.canonical_publication_qualitative_signoff;/.test(rollback) &&
+    !/drop table public\.canonical_presentation_revision/.test(rollback),
+  "la reversión borra su enlace y NO las publicaciones",
 );
 
 /* -------------------------------------------------------------------------- */

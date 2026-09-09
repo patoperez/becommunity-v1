@@ -296,6 +296,15 @@ const CANONICAL_ORDER = [
   // proved, against a real PostgreSQL, that the legacy publication model cannot
   // carry it.
   "canonical_publication",
+  // Unit 6B.4B2. The qualitative sign-off: a person recording that they read
+  // one EXACT set of category labels, digested, plus the link from an
+  // immutable publication to the review state it was made under. Last because
+  // it presupposes every one above it — the link table's primary key is a
+  // publication snapshot's id — and additive to all of them: it replaces no
+  // function, alters no table and drops nothing. In particular
+  // `publish_canonical_presentation` stays byte-identical applied history;
+  // 0031 wraps it rather than rewriting it.
+  "canonical_qualitative_signoff",
 ];
 
 /**

@@ -301,6 +301,103 @@ three tables must hold ZERO rows. It previously pinned that they were absent; th
 assertion was inverted rather than deleted, so a table that vanished and a
 publication that appeared each fail a gate rather than pass unnoticed.
 
+## Migration 0031: the qualitative sign-off
+
+`0031_canonical_qualitative_signoff.sql` is the sixth canonical migration, and
+it exists because a review state that could never change was being read as one
+that had.
+
+**NOT APPLIED TO ANY PROJECT.** It is proved against a disposable PostgreSQL and
+applied nowhere else. Until it is applied, the review surface cannot record a
+sign-off and a publication cannot carry one — the read fails closed and the
+preflight reports «nobody has reviewed these», which is the safe direction and
+is true.
+
+### What was wrong
+
+`QualitativeGroupResult.reviewStatus` was the literal `'pending'`, written by
+`buildQualitativeGroups` on every group of every study for ever. The publication
+preflight read it and raised «nadie del equipo las ha revisado todavía». So:
+
+* the warning appeared on every review of every study;
+* no amount of reviewing could ever clear it;
+* it named two GROUP labels while **three** blocks of the approved layout draw
+  those categories — «Razones declaradas de riesgo» binds the same active group
+  as «Miembros activos» and was never mentioned to the person deciding.
+
+A permanent warning is one people learn to tick. The canonical layer cannot know
+whether a person read something: that is an act, and an act is recorded
+somewhere else. `reviewStatus` is gone from that type — results contract
+**3.0.0**, a major because a field was removed — and `coding`
+(`source_coded` / `be_community_curated`) replaces it with the thing that layer
+does know. `CuratedFindingCount.reviewStatus` is untouched: that one is a real
+column on `pain_point`, written per row by ingestion.
+
+### What a sign-off is about, and what makes it expire
+
+An exact SET OF WORDS, digested by `qualitativeEvidenceDigest`
+(`src/lib/publication/evidence-digest.ts`): each bound group's label, its coding
+provenance, and the ordered category and excluded labels. A category added,
+removed or renamed moves the digest and the review is stale, with nobody having
+to remember.
+
+**Counts are deliberately outside the digest.** Another person answering with a
+category that already existed changes no word anybody read. Expiring a review
+for it would make sign-off constant in the other direction, which is the same
+defect wearing different clothes.
+
+### Two tables, and why the publish function is untouched
+
+| object | what it holds |
+|---|---|
+| `canonical_qualitative_signoff` | append-only: the digest, the category labels themselves, the authored titles of the blocks that draw them, a bare `reviewed_by` uuid and a time |
+| `canonical_publication_qualitative_signoff` | the review STATE one publication was made under, keyed by the snapshot's id |
+
+The obvious design is two more columns on `canonical_presentation_revision` and
+a replaced `publish_canonical_presentation`. That function is 295 lines of
+applied history; copying it to change four of them would put a near-duplicate in
+the repository and make every future correction a choice about which copy is
+real.
+
+**Atomicity is not traded for that.**
+`publish_canonical_presentation_with_qualitative` CALLS the 0030 function — so
+every refusal it makes still applies — and writes the link row in the SAME
+transaction, because a plpgsql function calling another runs inside one. A
+publication without its qualitative record cannot exist. A replay writes
+nothing, which is what a replay means.
+
+**`pending` and `stale` are recordable, deliberately.** Publishing with
+unreviewed categories is a decision a person may legitimately make, acknowledged
+in the open. A record that could only say «reviewed» would lie by omission about
+every other case.
+
+**«current» is a claim about a row, and the row is checked.** The function
+refuses that state unless the named sign-off belongs to this study and carries
+this digest, so the strongest thing a publication can record is also the hardest
+to assert.
+
+### Least privilege, and the same shape 0029 and 0030 use
+
+`grant select` and nothing else to `service_role` on both tables; RLS and FORCE
+RLS; `deny_browser_roles` for `anon` and `authenticated`; the two write paths
+are `SECURITY DEFINER` with `search_path = ''`, authorize the actor before
+reading anything, and derive the tenant from the study row. A `service_role`
+that could INSERT here directly could manufacture a review nobody performed,
+which is the one thing this table exists to make hard.
+
+`reviewed_by` is a **bare uuid**, not a foreign key into `auth.users`. Migration
+`0025` made an authentication identity undeletable exactly that way — `on delete
+set null` on a table whose trigger refuses every UPDATE — and `0030` recorded
+the lesson. This does not relearn it.
+
+### The rollback
+
+`supabase/rollbacks/0031_drop_canonical_qualitative_signoff.sql`. It destroys
+every recorded sign-off, said plainly: there is no other copy, and after it the
+review surface will report every study's categories as reviewed by nobody, which
+will be true again. **Publications survive** — dropping the record of what the
+qualitative state was does not unpublish anything and must not.
+
 ## Security boundary
 
 All 36 new tables — 18 in `0026`, 16 in `0027` and 2 in `0028` — are

@@ -899,7 +899,19 @@ console.log("\n[11] Cualitativo: etiquetas y conteos, nunca palabras de nadie");
   eq("categoría documentada como excluida", group.excluded[0].label, "No aplica");
   eq("y su conteo se recupera del estado de ausencia", group.excluded[0].count, 2);
   check(!group.terms.some((term) => term.label === "No aplica"), "la categoría excluida no entra a la nube");
-  eq("estado de revisión", group.reviewStatus, "pending");
+  // NOT A REVIEW STATE, AND THAT IS THE CORRECTION.
+  //
+  // This used to assert `reviewStatus === "pending"`, which passed because the
+  // builder wrote that literal on every group of every study for ever. The
+  // assertion was true and the field was not: this layer cannot know whether a
+  // person read anything. What it knows is where the coding came from, and the
+  // review state now lives at the publication boundary against a digest of the
+  // exact words.
+  eq("procedencia de la codificación", group.coding, "source_coded");
+  check(
+    !("reviewStatus" in group),
+    "y el grupo ya no publica un estado de revisión que esta capa no puede conocer",
+  );
   eq("conteo de hallazgos curados por entidad", results.qualitative.curatedFindingCounts.length, 2);
   eq(
     "hallazgos sobre la primera etapa",

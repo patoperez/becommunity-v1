@@ -37,6 +37,11 @@
 import { clientSeesBlock, filterPanelIsOperable } from "../presentation";
 import type { PresentationRenderModel } from "../presentation";
 import {
+  affectedBlocks,
+  type QualitativeCategorySet,
+  type QualitativeReviewState,
+} from "./qualitative-signoff";
+import {
   WARNINGS_REQUIRING_ACKNOWLEDGEMENT,
   warningRequiresAcknowledgement,
   type PublicationBlocker,
@@ -59,12 +64,16 @@ export type StoredDraftFacts = {
   bindingFingerprint: string;
 };
 
-/** One qualitative group a block in this document binds. */
-export type QualitativeBinding = {
-  /** The group's own label, as a client would read it. Never a handle. */
-  label: string;
-  reviewStatus: "pending" | "confirmed" | "mixed";
-};
+/**
+ * One qualitative group a block in this document binds.
+ *
+ * IT USED TO CARRY A `reviewStatus`, and that field was the canonical layer's
+ * literal `"pending"` — true of nothing, unchangeable by anybody, and read on
+ * every review of every study. `QualitativeCategorySet` replaces it: the
+ * group's own label, where its categories came from, the categories
+ * themselves, and every VISIBLE BLOCK that draws them.
+ */
+export type QualitativeBinding = QualitativeCategorySet;
 
 /**
  * Everything the preflight reasons over. Assembled by the server-only workspace.
@@ -129,8 +138,18 @@ export type PublicationSubject = {
    * requirement is authoring material.
    */
   requiredBlockIds: readonly string[];
-  /** The qualitative groups this document's blocks bind. */
+  /** The qualitative groups this document's blocks bind, with their words. */
   qualitative: readonly QualitativeBinding[];
+  /**
+   * Which of the four states the qualitative review is in.
+   *
+   * DECIDED BY THE WORKSPACE, NOT HERE, and for the same reason
+   * `structureChanged` is: deciding needs a digest, a digest needs SHA-256,
+   * and this file is client-safe by construction — an offline gate drives it
+   * and a review screen imports the barrel that re-exports it. A comparison of
+   * two digests is a server fact, and it arrives here already made.
+   */
+  qualitativeReviewState: QualitativeReviewState;
   /** The publication version the reviewer saw, and the one the store holds. */
   expectedActiveVersion: number | null;
   actualActiveVersion: number | null;
@@ -463,13 +482,33 @@ export function runPublicationPreflight(subject: PublicationSubject): Publicatio
     );
   }
 
-  const pending = subject.qualitative.filter((group) => group.reviewStatus !== "confirmed");
-  if (pending.length > 0) {
+  // [8b] THE QUALITATIVE SIGN-OFF, against the digest of these exact words.
+  //
+  // THREE STATES AND THREE SENTENCES. «Nobody has read these» asks for a first
+  // reading; «what you approved is not what is here now» asks somebody who
+  // already decided to look at what changed; «somebody read exactly these»
+  // says nothing at all, which is what a cleared warning should do.
+  //
+  // AND IT NAMES BLOCKS, NOT GROUPS. The approved layout draws the active
+  // group twice — «Miembros activos» and «Razones declaradas de riesgo» — and
+  // the old warning named the group, so one of the two client-visible blocks
+  // carrying unreviewed categories was never mentioned to the person deciding.
+  const qualitativeState = subject.qualitativeReviewState;
+  const qualitativeWhere = affectedBlocks(subject.qualitative);
+  if (qualitativeState === "pending") {
     warnings.push(
       warning(
         "qualitative_review_pending",
-        "Estas categorías cualitativas son la codificación de la propia fuente: nadie del equipo las ha revisado todavía. Publicar es la decisión de mostrárselas al cliente tal como vinieron.",
-        pending.map((group) => group.label),
+        "Nadie ha dejado constancia de haber revisado estas categorías cualitativas. Si publicas, el cliente las verá tal como están en los bloques de abajo. Puedes registrar la revisión aquí mismo, en la ficha de categorías, y entonces esta advertencia desaparece.",
+        qualitativeWhere,
+      ),
+    );
+  } else if (qualitativeState === "stale") {
+    warnings.push(
+      warning(
+        "qualitative_review_stale",
+        "Alguien revisó estas categorías, y desde entonces han cambiado: hay alguna categoría nueva, distinta o que ya no está. Lo que se aprobó no es lo que se publicaría. Míralas en la ficha de categorías y vuelve a registrar la revisión.",
+        qualitativeWhere,
       ),
     );
   }

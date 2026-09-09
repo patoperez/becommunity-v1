@@ -529,6 +529,21 @@ export async function resolveEditedPresentation(
 export { resolveUnderSelection } from "@/lib/viewer";
 export type { CanonicalPresentationRead } from "@/lib/viewer";
 export { encodePresentationForStorage } from "@/lib/presentation/server";
+/**
+ * THE QUALITATIVE EVIDENCE DIGEST, re-exported through the declared loader.
+ *
+ * `src/lib/publication/evidence-digest.ts` hashes a set of category labels with
+ * the product's own SHA-256, which lives under `canonical-commit/`. Importing it
+ * from `publication-workspace.ts` gave that module a one-hop edge into the
+ * canonical graph, and the boundary gate's door table refused it by name: the
+ * publication route's shortest path to that layer stopped running through this
+ * file.
+ *
+ * That is the rule working, not the rule being awkward. `resolveUnderSelection`
+ * and `encodePresentationForStorage` are here for exactly the same reason. One
+ * import statement, one path, one door.
+ */
+export { qualitativeEvidenceDigest, qualitativeReviewState } from "@/lib/publication/evidence-digest";
 
 /**
  * SHA-256 over the canonical, key-sorted serialization of a render model.

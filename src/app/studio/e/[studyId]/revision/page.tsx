@@ -11,6 +11,7 @@ import { studioStudyConstruction } from "@/lib/studio/routes";
 import {
   previewPublicationUnderSelection,
   publishCanonicalPresentation,
+  recordCanonicalQualitativeSignOff,
   restoreCanonicalPublication,
 } from "./actions";
 
@@ -124,6 +125,7 @@ export default async function StudioStudyReviewPage({
           publish={publishCanonicalPresentation}
           restore={restoreCanonicalPublication}
           preview={previewPublicationUnderSelection}
+          signOff={recordCanonicalQualitativeSignOff}
         />
       ) : (
         <section className="rounded-xl border border-caution-line bg-caution-surface p-5">

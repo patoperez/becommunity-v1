@@ -37,6 +37,10 @@
 
 import type { PresentationRenderModel } from "../presentation";
 import type {
+  QualitativeCategorySet,
+  QualitativeReviewState,
+} from "./qualitative-signoff";
+import type {
   CurrentPublicationSummary,
   PageInventoryEntry,
   PublicationBlocker,
@@ -92,6 +96,39 @@ export type PublicationReviewPayload = {
   /** How this draft differs from what is published. Null when nothing is. */
   difference: StructuralDifference | null;
   history: readonly PublicationHistoryEntry[];
+  /** The qualitative categories this document publishes, and who read them. */
+  qualitative: QualitativeReviewPanel;
+};
+
+/**
+ * WHAT A REVIEWER IS SHOWN ABOUT THE QUALITATIVE CATEGORIES, AND SIGNS OFF ON.
+ *
+ * The words themselves, every visible block that draws them, where the coding
+ * came from, and the state of the review. Not a group label and a permanent
+ * «pending», which is what this replaced.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE DIGEST DOES CROSS, AND IT IS THE ONE THAT MAY.
+ *
+ * Every other digest in this unit stays on the server: a definition digest and
+ * a binding fingerprint are about STORAGE, and a browser holding one is a
+ * browser one step from naming a row. This one is a SHA-256 of category labels
+ * a client is already shown in the term cloud — it discloses nothing that is
+ * not on the page beneath it.
+ *
+ * It crosses because a sign-off has to be provably about the words that were on
+ * screen. The browser echoes it back, the server recomputes it from the study's
+ * current results and compares, and a category set that changed between the
+ * reading and the click is refused rather than signed.
+ */
+export type QualitativeReviewPanel = {
+  state: QualitativeReviewState;
+  /** The digest of the categories on screen. Echoed back to sign off. */
+  evidenceDigest: string | null;
+  /** When the sign-off in force was recorded. Null when there is none. */
+  reviewedAt: string | null;
+  /** One entry per bound group: its words, and the blocks that draw them. */
+  groups: readonly QualitativeCategorySet[];
 };
 
 /**
@@ -160,6 +197,39 @@ export type PreviewPublicationUnderSelection = (
   studyId: string,
   viewerJson: string,
 ) => Promise<PublicationPreviewResult>;
+
+/* -------------------------------------------------------------------------- */
+/* recording a qualitative sign-off                                            */
+/* -------------------------------------------------------------------------- */
+
+export type SignOffRefusalReason =
+  | "not_authorized"
+  | "invalid_scope"
+  /** The categories changed between the reading and the click. */
+  | "evidence_moved"
+  | "storage_refused";
+
+export type SignOffResult =
+  | {
+      ok: true;
+      /** ISO-8601 UTC of the sign-off now in force. */
+      reviewedAt: string;
+      /** True when these exact words had already been signed off. */
+      replayed: boolean;
+    }
+  | { ok: false; reason: SignOffRefusalReason; detail: string };
+
+/**
+ * Record that a person read one exact set of categories.
+ *
+ * The digest is an ASSERTION about what was on screen. The server recomputes
+ * it from the study's current results and refuses if it has moved, so a
+ * sign-off is always about words somebody actually saw.
+ */
+export type RecordQualitativeSignOff = (
+  studyId: string,
+  evidenceDigest: string,
+) => Promise<SignOffResult>;
 
 /* -------------------------------------------------------------------------- */
 /* publishing                                                                  */

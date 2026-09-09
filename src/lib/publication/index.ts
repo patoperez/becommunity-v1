@@ -44,10 +44,34 @@ export type {
 } from "./preflight";
 
 export { blockTitle, buildPublicationInventory, countVisibleToClient, pageTitle } from "./inventory";
+
+/**
+ * THE QUALITATIVE SIGN-OFF — pure, and the digest is the whole of it.
+ *
+ * Client-safe: category labels are the study's own short closed vocabulary and
+ * are already published to a reader in the term cloud. There is no field here
+ * for a quotation, a name or a respondent's words, so none can travel through
+ * it.
+ */
+// THE DIGEST IS NOT HERE, AND THAT IS THE BOUNDARY. `./evidence-digest`
+// imports the product's SHA-256 from under `canonical-commit`, and everything
+// this barrel re-exports is one import away from a `"use client"` component.
+// Server modules and offline gates import that file directly.
+export { CODING_LABEL, affectedBlocks } from "./qualitative-signoff";
+export type {
+  QualitativeCategorySet,
+  QualitativeCoding,
+  QualitativeReviewState,
+  QualitativeSignOff,
+} from "./qualitative-signoff";
 export { structuralDifference } from "./difference";
 
 export type {
   PreviewPublicationUnderSelection,
+  QualitativeReviewPanel,
+  RecordQualitativeSignOff,
+  SignOffRefusalReason,
+  SignOffResult,
   PublicationPreviewPayload,
   PublicationPreviewResult,
   PublicationReview,

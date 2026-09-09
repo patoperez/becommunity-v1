@@ -4306,6 +4306,195 @@ approved value moved; no AI was added; and shadow mode is still off everywhere.
 
 ---
 
+### Unit 6B.4B2 — publication-readiness corrections (source only, 2026-09-09)
+
+> **NOTHING WAS PUBLISHED, AND NOTHING HOSTED WAS WRITTEN.** Hosted access in
+> this unit was READ-ONLY: the fingerprint gate before and after, and one
+> read-only pain-point audit. Migration `0031` is authored here and applied to
+> **no project**. The Cuicuilco canonical draft is still at **revision 1**, and
+> all three publication tables are still **empty**.
+
+The snapshot Unit 6B.4B1 left was mechanically publishable and materially
+different from the approved north-star. Six corrections, each traceable to a
+defect that was measured rather than suspected.
+
+#### 1. The review preview and its inventory disagreed, and both were consistent
+
+The screen reported «23 bloques los ve el cliente» over a preview that drew
+**20**. Three filter panels: the inventory counted them, the renderer dropped
+them. Neither half was wrong about itself — the renderer drops a panel on a
+surface it was not handed viewer controls for, because a control that will work
+later is an unfinished edge and C11 keeps those off a client's page; the
+inventory had never been told which surface it was describing.
+
+There were TWO more disagreements underneath, found by unifying them:
+
+| block | renderer | old inventory / preflight |
+|---|---|---|
+| filter panel, no viewer controls | not drawn | counted as visible |
+| `value` payload holding `null` | not drawn | preflight counted it visible |
+| stated absence (`unavailable` / `unresolved`) | draws the sentence | both called it invisible |
+
+`src/lib/presentation/visibility.ts` now holds the ONE predicate —
+`clientSeesBlock`, `clientHasContent`, `clientSeesPage`,
+`filterPanelIsOperable`, `sampleVisibleNote`. The renderer, `FilterControls`,
+`src/lib/publication/inventory.ts` and `src/lib/publication/preflight.ts` all
+import it, and §[13] of the offline gate reads those four files and refuses a
+private copy.
+
+**The equality is asserted at DOM level, not only at model level.** The gate
+renders the real `PresentationRenderer` with `react-dom/server` at
+`audience="client"` and counts the cards in the markup, on both surfaces, over
+the real resolved model AND over a hand-built document carrying one operable
+panel and one nobody connected: 2 drawn and 2 counted live, 1 and 1 dead.
+
+#### 2. The preview is now the client's screen, filters and all
+
+A third Server Action, `previewPublicationUnderSelection`, resolves the STORED
+draft under a reviewer's own selection and returns a render model and a count.
+
+* it **writes nothing** — no insert, update, upsert, delete, RPC or
+  `revalidatePath`, asserted over the extracted function body as well as over
+  the action file;
+* the selection is **ephemeral**: browser state, ordinal tokens on the wire,
+  gone when the screen closes;
+* **publishing ignores it entirely** — `publishStoredPresentation` still
+  resolves under `EMPTY_VIEWER_SELECTION`, so what is snapshot is the unfiltered
+  document whatever was ticked.
+
+`CLIENT_SURFACE_IS_LIVE` is declared once, in the publication contract, and used
+by the count and by the mount.
+
+#### 3. The false permanent «pending» is gone
+
+`QualitativeGroupResult.reviewStatus` was the literal `'pending'`, written on
+every group of every study for ever. The preflight read it as «nadie del equipo
+las ha revisado», so the warning appeared on every review, could never be
+cleared, and named two GROUP labels while **three** blocks of the approved
+layout draw those categories — «Razones declaradas de riesgo» binds the same
+active group as «Miembros activos».
+
+* the field is **removed**; results contract **2.2.0 → 3.0.0** (a major, because
+  a field went);
+* `coding` (`source_coded` / `be_community_curated`) replaces it with what that
+  layer can actually know;
+* `CuratedFindingCount.reviewStatus` is untouched — a real column on
+  `pain_point`, and all fifty of Cuicuilco's are `pending`;
+* the review state moved to the publication boundary, tied to
+  `qualitativeEvidenceDigest` over each bound group's label, coding and ordered
+  category and excluded labels — and never a COUNT, because another person
+  choosing an existing category changes no word anybody read;
+* four states — `not_applicable`, `pending`, `stale`, `current` — and `pending`
+  and `stale` get **separate sentences**, because «nobody read these» and «what
+  you approved is not what is here» need different people to do different
+  things;
+* the warning names every **visible block**, from the resolved model, so
+  «Razones declaradas de riesgo» is named;
+* the review screen carries the words themselves, the blocks that draw them, the
+  coding, and one control that records the sign-off. Nothing but closed-coded
+  labels crosses: there is no field anywhere on the path for a quotation, a name
+  or a respondent's words.
+
+`0031_canonical_qualitative_signoff.sql` stores it and is applied to **no
+project**. It WRAPS `publish_canonical_presentation` rather than replacing it —
+`publish_canonical_presentation_with_qualitative` calls it and writes the record
+in the same transaction — so 295 lines of applied history stay byte-identical
+and a publication without a qualitative record cannot exist.
+
+#### 4. The journey pain mapping: audited, and NOT provable
+
+Audited in the order the phase requires. **Hosted, read-only, 2026-09-09:**
+
+| fact | value |
+|---|---|
+| `pain_point` rows for Cuicuilco | 50, **all `review_status = pending`** |
+| `pain_point_journey_stage` | 15 |
+| `pain_point_organizational_unit` | 8 |
+| `pain_point_performance_dimension` | 7 |
+| `pain_point_culture_dimension` | 20 |
+| `journey_stage` | 18 |
+| `journey_stage_evidence_link` | **0** |
+| `survey_item` inside a domain | 55 (29 / 6 / 10 / 10) |
+
+**No canonical configuration relates a curated stage to a touchpoint.** The
+evidence-link table is empty, which is exactly what the contract's
+`journey_stage_evidence` requirement says it will be until a configuration
+declares one.
+
+**Label identity is not an authority, and the numbers say why.** Of the 18
+curated stage labels:
+
+* **0** match a canonical `survey_item.label` — that column holds the FULL
+  survey prompt (`clampLabel(header, …)` in the projector);
+* **6** match the CSAT sheet's short label row;
+* **5** match the bracketed text inside the prompt.
+
+Three defensible readings, three different answers. Beyond that, «Reunión
+semanal presencial/en línea» is ONE stage covering TWO touchpoints, and «BNI
+Connect» is ambiguous between «Plataforma BNI Connect (versión web)» and «App
+BNI Connect (celular)» while «App celular» names that same app.
+
+The approved demo resolves all of it with a **38-entry hand-written alias
+table** plus a sheet→domain table, and its cloud additionally depends on a
+phrase-splitting rule (`split(/[\n.]+/)`). Both are implementation, not
+authority, and neither is copied.
+
+**Conclusion: every one of the 15 journey pain points requires a human
+decision.** The precise unresolved mappings are listed under "Human decisions
+still required" below.
+
+#### 5. Filter options: whitespace grouping, and granularity the operator owns
+
+The approved study's «Giro» column (active profile) holds **four** pairs
+differing only by a trailing space — «Eventos y Servicios a Negocios»,
+«Capacitación y Coaching», «Servicios Inmobiliarios», «Construcción» — and
+«Tipo de empresa» holds one, «B2B». Sixteen options where twelve answers exist;
+a reader picking «Construcción» saw one of the three people who gave it.
+
+* `FilterValue` gains `rawValues`: every canonical raw spelling, preserved;
+* options group by the answer with its **outer** whitespace removed, and
+  nothing differing by an internal character is ever merged;
+* `applyFilters` matches any spelling in the group, and keeps the raw sets **per
+  constraint** — merging them per dimension turned two panels' AND into an OR,
+  which `test:canonical-viewer-filters` caught;
+* a whitespace-ONLY answer groups with nothing and keeps its own raw form.
+
+**Nothing is hidden automatically.** `granular_filter_dimensions` states which
+characteristics offer an option only ONE person carries — a group of one, not a
+chosen cut-off — and how many such options each has. It never names the option
+itself: «Giro: Notaría (1 persona)» on a review screen is naming the person. No
+count moves, `show_all` stays the default, and the operator removes the
+characteristic in Construcción or says they are keeping it.
+`inoperable_filter_panels` is its sibling for a panel no block is connected to.
+
+#### 6. Small correctness
+
+* «confirmaciónes» → «confirmaciones». Spanish drops the accent when the stress
+  stops falling on the last syllable, so a plural is not the singular plus «es»;
+  the old code built it that way and printed a misspelling on the one line that
+  tells an operator what is missing.
+* Every new warning's sentence names the CONSEQUENCE — «el cliente no los
+  recibe», «puede quedarse mirando las cifras de esa única persona» — rather
+  than the mechanism.
+* The pain-cloud omission is a **BLOCKER**. Blocks gain an authored
+  `requiredContent`; the approved blueprint marks that slot with it; and
+  `required_content_missing` cannot be acknowledged away. The two remedies —
+  supply the content, or remove the block — are in the sentence, and both are
+  proved to clear it. `configuration_required` stays a warning for every block
+  nobody marked, so the standing rule is intact.
+
+#### Consequences that must be stated
+
+* **The Cuicuilco canonical draft's binding will no longer match.** The results
+  contract moved to `3.0.0`, and the contract version is inside
+  `presentationBindingFingerprint`. The stored draft (binding `cf63bdca…`) will
+  raise `binding_drift`, which is the designed refusal: it must be reopened in
+  Construcción and re-bound. It is NOT a defect of this unit, and this unit did
+  not touch the hosted draft.
+* **Migration `0031` is applied to no project.** Until it is, the sign-off
+  cannot be recorded and the read fails closed — reported as «nobody has
+  reviewed these», which is the safe direction and is true.
+
 ### Unit 6B.4B1 — migration `0030` is applied to the hosted project, and NOTHING was published (EXECUTED, 2026-09-09)
 
 **One hosted mutation was authorized and exactly one happened: migration `0030`
