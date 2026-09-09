@@ -54,8 +54,10 @@
 -- quotation, never a name, never the free-text column that sits beside every
 -- coded category column and never enters the read model in any shape.
 --
--- The CHECK constraints below bound both arrays and every element of them, so a
--- caller cannot post a paragraph into a column meant for a category name.
+-- The CHECK constraints below bound each array's cardinality AND its total
+-- length, so a caller cannot post a paragraph into a column meant for a category
+-- name. Per-ELEMENT bounds are not possible: PostgreSQL refuses a subquery in a
+-- check constraint, and `unnest` is one.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -75,21 +77,25 @@ create table public.canonical_qualitative_signoff (
   evidence_digest text not null check (evidence_digest ~ '^[0-9a-f]{64}$'),
 
   -- WHAT WAS READ, in the reviewer's own vocabulary, so an auditor can see the
-  -- words rather than a hash of them. Bounded per element and in total.
+  -- words rather than a hash of them.
+  --
+  -- BOUNDED BY CARDINALITY AND BY TOTAL LENGTH, NOT PER ELEMENT, and that is a
+  -- limitation of CHECK rather than a choice: PostgreSQL refuses a subquery in a
+  -- check constraint (0A000), so `unnest` cannot be used to bound each label. It
+  -- was tried, and the disposable database said no.
+  --
+  -- The total is what actually protects the column. A category label is a short
+  -- closed-coded word; 512 of them inside 32 KiB is generous for every real
+  -- study and still refuses a caller posting a paragraph. `array_to_string`
+  -- with an empty delimiter is immutable and subquery-free, so it is legal here.
   category_labels text[] not null
                     check (cardinality(category_labels) between 1 and 512)
-                    check (array_length(array(
-                      select 1 from unnest(category_labels) as label
-                       where char_length(label) > 300
-                    ), 1) is null),
+                    check (octet_length(array_to_string(category_labels, '')) <= 32768),
 
   -- The authored titles of the blocks that draw them. «Página · Bloque».
   block_titles    text[] not null
                     check (cardinality(block_titles) between 0 and 256)
-                    check (array_length(array(
-                      select 1 from unnest(block_titles) as title
-                       where char_length(title) > 400
-                    ), 1) is null),
+                    check (octet_length(array_to_string(block_titles, '')) <= 32768),
 
   -- A BARE UUID, not a foreign key into `auth.users`.
   --
