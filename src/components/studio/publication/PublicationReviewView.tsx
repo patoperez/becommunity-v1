@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { PresentationRenderer } from "@/components/presentation/PresentationRenderer";
 import type { ViewerControls } from "@/components/presentation/viewer";
@@ -148,8 +148,20 @@ export function PublicationReviewView({
    * would ever be served.
    */
   const [session, setSession] = useState<ViewerSession>(openViewerSession);
+  /**
+   * The LIVE session, for the callbacks.
+   *
+   * A callback closes over the session of the render that created it, so two
+   * quick clicks would each start from the same «before» state and one choice
+   * would be lost. The ref is written in an effect rather than during render:
+   * mutating a ref while rendering is what makes a component fail to update,
+   * and the composer's own viewer session is kept the same way for the same
+   * reason.
+   */
   const sessionRef = useRef(session);
-  sessionRef.current = session;
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
   const [shown, setShown] = useState<{ model: PresentationRenderModel; visible: number }>({
     model: payload.model,
     visible: payload.visibleBlockCount,
