@@ -81,6 +81,11 @@ const OTHER_STUDY = "55555555-5555-4555-8555-555555555555";
 /** Deleted at the end, to prove a cascade still works past the immutability trigger. */
 const CASCADE_STUDY = "77777777-7777-4777-8777-777777777777";
 
+// EVERY IDEMPOTENCY KEY HERE IS AT LEAST EIGHT CHARACTERS, which is the
+// database's own CHECK (`^[A-Za-z0-9_.:-]{8,120}$`). A shorter one is refused as
+// a malformed key BEFORE the precondition a probe is actually testing — the
+// stale-draft probe passed that way once, reporting «rejected» for a reason
+// that had nothing to do with staleness.
 const q = (value) =>
   value === null || value === undefined ? "null" : `'${String(value).replace(/'/g, "''")}'`;
 const arr = (values) => `'{${values.map((v) => `"${String(v).replace(/"/g, '\\"')}"`).join(",")}}'::text[]`;
@@ -455,30 +460,30 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
 
   eq(
     "«current» sin nombrar la firma es rechazado",
-    attempt(publishSql({ signoff: null, revision: 1, key: "k-nosignoff" })).sqlstate,
+    attempt(publishSql({ signoff: null, revision: 1, key: "key-nosignoff-01" })).sqlstate,
     "22023",
   );
   eq(
     "«current» sin huella, también",
-    attempt(publishSql({ digest: null, revision: 1, key: "k-nodigest" })).sqlstate,
+    attempt(publishSql({ digest: null, revision: 1, key: "key-nodigest-001" })).sqlstate,
     "22023",
   );
   // A SIGN-OFF OF ANOTHER STUDY IS NOT THIS STUDY'S.
   const foreign = db.json(recordSql({ studyId: OTHER_STUDY, digest: DIGEST }));
   eq(
     "una firma de otro estudio es rechazada",
-    attempt(publishSql({ signoff: foreign.signoffId, revision: 1, key: "k-foreign" })).sqlstate,
+    attempt(publishSql({ signoff: foreign.signoffId, revision: 1, key: "key-foreign-0001" })).sqlstate,
     "22023",
   );
   // AND A SIGN-OFF OF OTHER WORDS IS NOT A SIGN-OFF OF THESE.
   eq(
     "una firma cuya huella no es ésta se rechaza como conflicto",
-    attempt(publishSql({ digest: OTHER_DIGEST, revision: 1, key: "k-moved" })).sqlstate,
+    attempt(publishSql({ digest: OTHER_DIGEST, revision: 1, key: "key-moved-0001" })).sqlstate,
     "55000",
   );
   eq(
     "un estado que no está en el vocabulario cerrado es rechazado",
-    attempt(publishSql({ state: "reviewed", revision: 1, key: "k-badstate" })).sqlstate,
+    attempt(publishSql({ state: "reviewed", revision: 1, key: "key-badstate-001" })).sqlstate,
     "22023",
   );
   eq("y ninguna de esas cinco publicó nada", countIn("canonical_presentation_revision"), 1);
@@ -498,7 +503,7 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
   // REFUSED publication leaves no qualitative record, whichever precondition
   // refused it. So the assertion is that it was refused at all, and the code is
   // printed rather than pinned.
-  const stale = attempt(publishSql({ revision: 99, key: "k-stale" }));
+  const stale = attempt(publishSql({ revision: 99, key: "key-stale-0001" }));
   check(
     !stale.ok,
     `una publicación con la revisión de borrador rancia es rechazada (${stale.sqlstate}: ${stale.message})`,
@@ -522,7 +527,7 @@ await withDisposableDatabase(target, "qualsignoff", async (db) => {
       state: "pending",
       signoff: null,
       revision: 2,
-      key: "k-pending",
+      key: "key-pending-0001",
       expectedActive: activeRevision,
     }),
   );
