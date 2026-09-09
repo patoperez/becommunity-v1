@@ -145,7 +145,12 @@ const run = (command, args, env, label) =>
 await withDisposableDatabase(target, "pubqa", async (db) => {
   console.log("\n[setup] bootstrap + migrations 0000-0030");
   const transport = psqlSuiteTransport(db);
-  transport.prepare(30);
+  // 0031 IS REQUIRED HERE, not optional. The product publishes through
+  // `publish_canonical_presentation_with_qualitative`, which 0031 creates; a
+  // target prepared to 0030 answers every publication with «no pudimos
+  // publicar», which is a truthful message about a target missing a
+  // migration and a useless one for QA.
+  transport.prepare(31);
 
   db.run(`
     insert into auth.users (id, email) values (${q(INTERNAL_ID)}, ${q(INTERNAL_EMAIL)});
@@ -819,10 +824,66 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     }
     check(!dom.includes(stack.serviceKey), "and no service key");
     check(!dom.includes(INTERNAL_PASSWORD), "and no password");
-    // A 64-hex digest anywhere in the DOM would be a binding or a definition
-    // hash, and neither belongs in a browser. This one IS asked of the whole
-    // document, because no part of a Studio page has any business carrying one.
-    check(!/[0-9a-f]{64}/.test(dom), "and no 64-character digest of any kind");
+    // ─────────────────────────────────────────────────────────────────────────
+    // DIGESTS: THE RULE IS NARROWED, DELIBERATELY, AND IT IS NOW STRONGER WHERE
+    // IT MATTERS.
+    //
+    // It read «no 64-character digest of any kind», and that was right while
+    // every digest in this unit was about STORAGE. Unit 6B.4B2 introduced one
+    // that is not: the QUALITATIVE EVIDENCE DIGEST is a SHA-256 of category
+    // labels a client is already shown in the term cloud, and it crosses so a
+    // sign-off can be provably about the words that were on screen — the
+    // browser echoes it, the server recomputes it from the study's current
+    // results and refuses if it has moved.
+    //
+    // THIS IS A HUMAN-REVIEW ZONE AND THE NARROWING IS RECORDED AS ONE. What
+    // replaces the blanket rule is checked against the ACTUAL VALUES rather
+    // than against a shape, which the old rule never did:
+    //
+    //   * the definition digest, the binding fingerprint and the render-model
+    //     digest must not appear — by value, and the harness holds all three;
+    //   * at most ONE distinct 64-hex value may appear at all;
+    //   * and it must be none of those three.
+    //
+    // A page that leaked a storage digest now fails by naming which one, and a
+    // page that grew a second unexplained digest fails on the count.
+    //
+    // READ FROM THE DATABASE, not from a fixture. These are the values this
+    // study's own storage actually holds at this moment, so the assertion is
+    // about what could leak rather than about what a harness happened to build.
+    const stored = db.json(`
+      select json_build_object(
+        'definition', d.definition_sha256,
+        'binding', d.binding_fingerprint,
+        'renderModel', (select r.render_model_sha256
+                          from public.canonical_presentation_revision r
+                         where r.study_id = ${q(STUDY)}
+                         order by r.version desc limit 1)
+      )::text
+        from public.canonical_presentation_draft d
+       where d.study_id = ${q(STUDY)};
+    `);
+    const storageDigests = {
+      "the definition digest": stored?.definition ?? null,
+      "the binding fingerprint": stored?.binding ?? null,
+      "the render-model digest": stored?.renderModel ?? null,
+    };
+    check(
+      Object.values(storageDigests).every((value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value)),
+      "the three storage digests were read back, so their absence below means something",
+    );
+    for (const [what, value] of Object.entries(storageDigests)) {
+      check(value !== null && !dom.includes(value), `the page carries no ${what}`);
+    }
+    const digests = [...new Set(dom.match(/[0-9a-f]{64}/g) ?? [])];
+    check(
+      digests.length <= 1,
+      `at most one digest crosses, and it is the qualitative evidence one (${digests.length} distinct)`,
+    );
+    check(
+      digests.every((digest) => !Object.values(storageDigests).includes(digest)),
+      "and whatever crossed is none of the three storage digests",
+    );
 
     // AND THE IDENTIFIER SCAN IS AIMED AT WHAT THIS UNIT RENDERS.
     //
@@ -846,6 +907,208 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
 
     writeFileSync(join(EVIDENCE, "dom-final.html"), dom, "utf8");
     console.log(`  (the final DOM is written to ${join(EVIDENCE, "dom-final.html")} for review)`);
+
+    /* ------------------------------------------------------------------ */
+    console.log("\n[18] Unit 6B.4B2: the count IS the picture, and the filters work");
+
+    /*
+     * THE DEFECT THIS SECTION PHOTOGRAPHS.
+     *
+     * The review screen reported «23 bloques los ve el cliente» over a preview
+     * that drew 20: three filter panels, counted by the inventory and dropped
+     * by the renderer. Every assertion below is taken from the RENDERED DOM of
+     * the real route in a real browser, which is the only place the two could
+     * ever have been compared.
+     */
+    // Captured BEFORE anything is driven, so «the draft did not move» is a
+    // comparison rather than a hope.
+    const draftRevisionBeforeFilters = db
+      .run(`select revision::text from public.canonical_presentation_draft where study_id = ${q(STUDY)};`)
+      .trim();
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision`);
+    const reviewNow = await waitFor((snapshot) => snapshot.revision !== null);
+    check(reviewNow.revision !== null, `the review is drawn again at revision ${reviewNow.revision}`);
+
+    const captureShot = async (name) => {
+      writeFileSync(join(EVIDENCE, `${name}.png`), await page.screenshot());
+      console.log(`  (screenshot: ${join(EVIDENCE, `${name}.png`)})`);
+    };
+    await captureShot("revision-corregida");
+
+    check(
+      reviewNow.hasPreview === true,
+      "and it draws the client's own view, so the count below has a picture to be compared against",
+    );
+    const reportedVisible = Number(
+      await page.evaluate(`document.querySelector('[data-testid="conteo-visibles"]').textContent.trim()`),
+    );
+    /*
+     * THE CARDS THE CLIENT PREVIEW ACTUALLY DREW.
+     *
+     * Counted inside `[data-testid="vista-cliente"]` and only there, and only
+     * the TOP-LEVEL block cards: `section` elements that are a block card and
+     * are not nested inside another one. Counting every `section` on the page
+     * would count the review screen's own cards, which is how a check like this
+     * passes for the wrong reason.
+     */
+    const drawnCards = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      if (!preview) return -1;
+      const cards = [...preview.querySelectorAll('section.rounded-2xl')];
+      return cards.filter((card) => !cards.some((other) => other !== card && other.contains(card))).length;
+    })()`);
+    eq("the preview draws block cards", drawnCards > 0, true);
+    eq(
+      `the review's «los ve el cliente» count IS the number of cards drawn (${reportedVisible} reported)`,
+      drawnCards,
+      reportedVisible,
+    );
+
+    // AND THE INVENTORY AGREES WITH BOTH. It is the third answer that used to
+    // be able to differ, and it is read from the DOM rather than from a payload.
+    const inventoryVisible = await page.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('[data-testid="inventario"] li')];
+      return rows.filter((row) => row.querySelector('.text-positive') !== null).length;
+    })()`);
+    eq("and the inventory marks exactly as many as visible", inventoryVisible, reportedVisible);
+
+    /* ---- the filter panelCount, and whether they actually move anything ------ */
+
+    const panelCount = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      if (!preview) return 0;
+      return preview.querySelectorAll('fieldset legend').length;
+    })()`);
+    const panelBoxes = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      if (!preview) return { total: 0, enabled: 0 };
+      const inputs = [...preview.querySelectorAll('input[type="checkbox"]')];
+      return { total: inputs.length, enabled: inputs.filter((input) => !input.disabled).length };
+    })()`);
+
+    if (panelBoxes.total === 0) {
+      // THE FIXTURE'S BLUEPRINT MAY CARRY NO PANEL, and a check that quietly
+      // passed on an empty page would be worse than one that says so.
+      console.log(
+        "  — OBSERVED, not asserted: this synthetic study's blueprint composes no filter panel, " +
+          "so the operability assertions below have nothing to drive. The approved Cuicuilco " +
+          "blueprint composes three; that is proved offline against the real registry.",
+      );
+      eq("no panel means no filter control at all", panelCount, 0);
+    } else {
+      eq(`the preview draws ${panelBoxes.total} filter option(s) in ${panelCount} characteristic(s)`, panelBoxes.total > 0, true);
+      // EVERY ONE OF THEM IS OPERABLE. A client's page carries a working panel
+      // or none, so a disabled box inside the client preview would be the exact
+      // deception this unit removed.
+      eq("and every one of them is operable, not a disabled decoration", panelBoxes.enabled, panelBoxes.total);
+
+      // A REAL CLICK, and the figures follow it. The count sentence is the
+      // server's own, so if it changes the server recomputed.
+      const sentenceBefore = await page.evaluate(`(() => {
+        const preview = document.querySelector('[data-testid="vista-cliente"]');
+        return preview.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? "";
+      })()`);
+      await page.evaluate(`(() => {
+        const preview = document.querySelector('[data-testid="vista-cliente"]');
+        preview.querySelector('input[type="checkbox"]:not([disabled])').click();
+      })()`);
+      await sleep(2500); // the server recomputes; there is no event to await
+      const sentenceAfter = await page.evaluate(`(() => {
+        const preview = document.querySelector('[data-testid="vista-cliente"]');
+        return preview.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? "";
+      })()`);
+      check(sentenceBefore !== sentenceAfter, `a real click recomputes on the server («${sentenceBefore}» → «${sentenceAfter}»)`);
+      await captureShot("filtros-operativos");
+
+      // AND THE SELECTION CHANGED NOTHING THAT IS STORED.
+      const draftAfterFilter = db.run(
+        `select revision::text from public.canonical_presentation_draft where study_id = ${q(STUDY)};`,
+      ).trim();
+      eq("and the draft revision did not move", draftAfterFilter, draftRevisionBeforeFilters);
+
+      const clearedBack = await page.evaluate(`(() => {
+        const control = document.querySelector('[data-testid="limpiar-filtros-vista"]');
+        if (!control) return false;
+        control.click();
+        return true;
+      })()`);
+      await sleep(2500);
+      const stillFiltered = await page.evaluate(
+        `document.querySelector('[data-testid="vista-cliente-filtrada"]') !== null`,
+      );
+      check(
+        clearedBack && !stillFiltered,
+        "and «ver el estudio completo» puts the whole study back",
+      );
+    }
+
+    /* ---- the qualitative sign-off card ---------------------------------- */
+
+    const qualitativePresent = await page.evaluate(
+      `document.querySelector('[data-testid="categorias-cualitativas"]') !== null`,
+    );
+    if (!qualitativePresent) {
+      console.log(
+        "  — OBSERVED, not asserted: this synthetic study's document binds no qualitative group, " +
+          "so there is no sign-off card to drive. The four states and the block naming are proved " +
+          "offline, and the storage is proved against a real PostgreSQL.",
+      );
+    } else {
+      const qualState = await page.evaluate(
+        `document.querySelector('[data-testid="estado-revision-cualitativa"]').textContent.trim()`,
+      );
+      check(/Nadie ha dejado constancia/.test(qualState), `it starts unreviewed («${qualState}»)`);
+      await captureShot("categorias-sin-revisar");
+
+      // RECORDING IT CLEARS IT, and the record is a real row.
+      await page.evaluate(`document.querySelector('[data-testid="lei-las-categorias"]').click()`);
+      await page.evaluate(
+        `document.querySelector('[data-testid="registrar-revision-cualitativa"]').click()`,
+      );
+      await sleep(3000); // the action re-reads, re-resolves and records
+      const signOffOutcome = await page.evaluate(
+        `document.querySelector('[data-testid="resultado-revision-cualitativa"]').textContent.trim()`,
+      );
+      check(/Revisión registrada/.test(signOffOutcome), `recording it succeeds («${signOffOutcome}»)`);
+      eq(
+        "and the database holds exactly one sign-off",
+        db.run(`select count(*)::text from public.canonical_qualitative_signoff where study_id = ${q(STUDY)};`).trim(),
+        "1",
+      );
+      // AND IT NAMES THE WORDS, not just a hash of them.
+      check(
+        Number(
+          db.run(
+            `select cardinality(category_labels)::text from public.canonical_qualitative_signoff where study_id = ${q(STUDY)};`,
+          ).trim(),
+        ) > 0,
+        "and it stored the category labels themselves, not only their digest",
+      );
+
+      await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision`);
+      await waitFor((snapshot) => snapshot.revision !== null);
+      const clearedState = await page.evaluate(
+        `document.querySelector('[data-testid="estado-revision-cualitativa"]').textContent.trim()`,
+      );
+      check(
+        /registró haber revisado exactamente estas categorías/.test(clearedState),
+        `and on reload the screen says so («${clearedState.slice(0, 70)}…»)`,
+      );
+      const warningsAfter = await page.evaluate(`(() => {
+        const box = document.querySelector('[data-testid="advertencias"]');
+        return box ? box.textContent : "";
+      })()`);
+      check(
+        !/Nadie ha dejado constancia/.test(warningsAfter),
+        "and the warning that could never be cleared is cleared",
+      );
+      await captureShot("categorias-revisadas");
+    }
+
+    /* ---- «confirmaciones», and the sentences a person reads -------------- */
+
+    const bodyText = await page.evaluate("document.body.innerText");
+    check(!/confirmaci[oó]nes/i.test(bodyText), "and nothing on the screen says «confirmaciónes»");
 
     /* ------------------------------------------------------------------ */
     console.log("\n[17] The legacy draft is byte-identical to how it started");

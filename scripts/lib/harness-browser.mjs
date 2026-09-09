@@ -288,6 +288,28 @@ export async function launchBrowser() {
       location: () => context.evaluate("location.pathname + location.search"),
 
       /**
+       * A REAL SCREENSHOT, taken by the browser itself.
+       *
+       * `Page.captureScreenshot` renders what the compositor actually produced,
+       * so it photographs the product rather than a description of it. It
+       * returns the PNG bytes; the caller decides where they go, because a
+       * harness that wrote files would need to know about evidence directories
+       * and this one deliberately does not.
+       *
+       * `captureBeyondViewport` is what makes a long review page usable as
+       * evidence: without it the image stops at the fold, and the half a
+       * reviewer scrolls to is exactly the half worth photographing.
+       */
+      async screenshot({ fullPage = true } = {}) {
+        const result = await cdp.send(
+          "Page.captureScreenshot",
+          { format: "png", captureBeyondViewport: fullPage },
+          sessionId,
+        );
+        return Buffer.from(result.data, "base64");
+      },
+
+      /**
        * A REAL KEY PRESS, dispatched by the browser.
        *
        * `element.click()` from inside the page proves a handler runs; it proves
