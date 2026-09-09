@@ -4483,6 +4483,74 @@ characteristic in Construcción or says they are keeping it.
   proved to clear it. `configuration_required` stays a warning for every block
   nobody marked, so the standing rule is intact.
 
+#### Human decisions still required — the precise unresolved mappings
+
+**Every one of the fifteen journey pain points needs a person.** Three of the
+eighteen curated stages carry no pain text at all («Bienvenida», «PEM»,
+«Reunión semanal presencial/en línea»), so they need no decision.
+
+The «candidate» column is the touchpoint a reader would GUESS at. It is printed
+so a person has somewhere to start, and it is **not** a proposal: nothing in the
+product acts on it, and the editor must make each one an explicit choice.
+
+| # | curated stage (has a pain point) | candidate touchpoint | why it is not proof |
+|---|---|---|---|
+| 1 | Invitación a visitantes | Invitación a visitantes al capítulo | the labels differ |
+| 2 | Selección | Proceso de selección de nuevos miembros | the labels differ |
+| 3 | Onboarding | Proceso de Onboarding | the labels differ |
+| 4 | Miércoles de capacitación | Miércoles de capacitación | **exact** in the bracketed prompt text — but see the note below |
+| 5 | Eventos regionales | Eventos regionales | **exact** in the bracketed text; the workbook's own short label carries a trailing space |
+| 6 | Chats de WA | Chats de Whats app | the labels differ |
+| 7 | Proceso de controversias /quejas | Proceso para presentar quejas o controversias | the same words in another order |
+| 8 | Entrevista de 7 meses | Entrevista de 7 meses | **exact** in the bracketed text |
+| 9 | Renovación de membresía | Proceso de renovación de membresía | the labels differ |
+| 10 | Proceso de salida | Proceso de salida | **exact** in the bracketed text |
+| 11 | Despedida | Despedida del capítulo (mensaje en whatsapp cuando alguien sale) | the labels differ |
+| 12 | BNI Connect | Plataforma BNI Connect (versión web) **or** App BNI Connect (celular) | **AMBIGUOUS between two touchpoints** |
+| 13 | Reporting2You | Plataforma Reporting2You | the labels differ; the workbook's own short label misspells it «Reporting2Yoy» |
+| 14 | Academy | Plataforma Academy | the labels differ |
+| 15 | App celular | App BNI Connect (celular) | the labels differ, **and it collides with row 12's second candidate** |
+
+**Why even the four exact matches are not proof.** «Exact» depends on which of
+three vocabularies you compare against, and the three disagree: against the
+canonical `survey_item.label` (the full survey prompt) **0 of 18** match;
+against the workbook's short label row **6**; against the bracketed text inside
+the prompt **5**. A rule that produces three different answers from three
+defensible readings of the same sources is not an authority — it is a choice
+about which reading to privilege, and that choice is a person's.
+
+**And one stage covers two touchpoints.** «Reunión semanal presencial/en línea»
+is a single curated stage over «Reunión semanal presencial» and «Reunión semanal
+en línea». It carries no pain text, so it needs no decision today — but it is
+proof that the relation is not one-to-one, and an editor that assumed it was
+would be unable to express next year's study.
+
+#### A second decision the mapping does not settle, and it is the larger one
+
+**All fifty hosted `pain_point` rows are `review_status = 'pending'`.** Nobody
+has reviewed any of them. So even a perfect stage-to-touchpoint mapping would
+not deliver «Puntos de dolor del recorrido»: the cloud's content is the curated
+PHRASES, those phrases are consultant prose nobody has cleared, and
+`pain_point.raw_text` / `normalized_text` are deliberately not in the canonical
+read model's row type at all — `docs/CANONICAL_RESULTS_MODEL.md` §12.
+
+That splits the editor into two surfaces that need separate authorization:
+
+1. **MAPPING** — curated entity to canonical touchpoint, stored as authored
+   presentation configuration with provenance. This is additive to the
+   presentation document and needs no new door.
+2. **PHRASE REVIEW** — moving a `pain_point` from `pending` to `confirmed`, and
+   widening the canonical read model to carry approved text. This is a WRITE
+   from Studio into a canonical table and a widening of what may cross the
+   client boundary. The architecture has no such door today, and opening one is
+   not a decision this unit may make on its own.
+
+**The blocker is therefore correct and load-bearing.** The approved blueprint
+marks the pain-cloud slot `requiredContent`, `required_content_missing` cannot
+be acknowledged away, and Cuicuilco is consequently unpublishable until a person
+decides both questions. That is the product decision working, not an obstruction
+to it.
+
 #### Consequences that must be stated
 
 * **The Cuicuilco canonical draft's binding will no longer match.** The results
