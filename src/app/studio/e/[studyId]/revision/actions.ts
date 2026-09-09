@@ -1,10 +1,10 @@
 "use server";
 
 /**
- * THE TWO PUBLICATION ACTIONS, AND THE ORDER THEY DO THINGS IN.
+ * THE FIVE PUBLICATION ACTIONS, AND THE ORDER THEY DO THINGS IN.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * BOTH REPEAT THE WHOLE AUTHORIZATION DANCE RATHER THAN INHERITING IT.
+ * EVERY ONE REPEATS THE WHOLE AUTHORIZATION DANCE RATHER THAN INHERITING IT.
  *
  * A Server Action is a public HTTP endpoint that happens to be written in
  * TypeScript, and the page's gate has never run for it. So the session is
@@ -15,7 +15,7 @@
  * the moment the answer might be "no".
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * NEITHER REDIRECTS.
+ * NONE OF THEM REDIRECTS.
  *
  * The review screen holds acknowledgements a person ticked and a confirmation
  * they gave. A redirect would remount it and throw both away, and the operator
@@ -23,7 +23,7 @@
  * these return, and the page does not navigate.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * WHAT THEY ACCEPT IS FOUR NUMBERS AND A LIST OF WORDS.
+ * WHAT THEY ACCEPT IS NUMBERS, CLOSED WORDS AND OPAQUE TOKENS.
  *
  * No document, no render model, no digest, no binding, no package identity — the
  * browser holds none of those and there is no parameter for one. Everything a
@@ -35,13 +35,30 @@
  * click is refused rather than trusted.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * AND NEITHER CAN REACH A LEGACY EXPERIENCE TABLE.
+ * NO DIGEST IS A PARAMETER ANYWHERE IN THIS FILE.
+ *
+ * The qualitative sign-off used to take one. It does not: a record written
+ * against a value the caller supplied has a subject the caller chose, and
+ * «the server recomputes and compares» is the browser's memory checked against
+ * itself. Every digest in this unit — evidence, definition, render model,
+ * binding fingerprint, plan fingerprint, package key, calculation version — is
+ * derived on the server, from the server's own read, and none of them has a
+ * parameter, a field or a return path that reaches a browser.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * AND NONE OF THEM CAN REACH A LEGACY EXPERIENCE TABLE, OR MUTATE THE
+ * CANONICAL SOURCE.
  *
  * `study_experience_draft`, `_revision`, `_event` and `_publication` are not
  * named in this file, not named in the module it calls, and not named in the
  * body of any function that module calls. Migration 0030's storage is separate
  * from all four, which is what makes that a structural fact rather than an
  * abstention.
+ *
+ * `pain_point` likewise. The journey pain decision writes through migration
+ * 0032's own function, into a table that holds no foreign key into `pain_point`
+ * and no column that could carry one — so a presentation decision can never be
+ * the reason canonical evidence changes.
  */
 
 import { z } from "zod";
@@ -52,9 +69,13 @@ import {
   previewStoredPresentationUnderSelection,
   publishStoredPresentation,
   recordQualitativeSignOff,
+  recordStoredJourneyPainDecision,
   restoreStoredPublication,
 } from "@/lib/studio/publication-workspace";
 import type {
+  PainDecisionInput,
+  PainDecisionResult,
+  PainDisposition,
   PublicationPreviewResult,
   PublishResult,
   RestoreResult,
@@ -101,14 +122,41 @@ const REASON = z.string().min(1).max(200);
 const MAX_VIEWER_BYTES = 64 * 1024;
 
 /**
- * A qualitative evidence digest, shaped before it is used.
+ * AN OPAQUE IDENTITY, AND THERE IS NO SCHEMA HERE FOR A DIGEST.
  *
- * The database's own CHECK admits exactly this, and repeating it here means a
- * malformed value is refused as «vuelve a cargar la pantalla» rather than
- * arriving as a generic storage failure that tells an operator their review was
- * not recorded without saying why.
+ * The sign-off used to accept a 64-hex evidence digest, and it does not any
+ * more: a record written against a value the browser supplied is a record whose
+ * subject the browser chose. What crosses now is a short base32 token per group,
+ * derived from words already printed on the page, which the server re-derives
+ * from its own read and compares. The alphabet contains letters past `f`, so
+ * nothing shaped like a storage digest can be spelled in it.
+ *
+ * The bound is what protects the comparison: a caller cannot post a thousand
+ * tokens into a set intersection. The approved layout binds two groups.
  */
-const EVIDENCE_DIGEST = z.string().regex(/^[0-9a-f]{64}$/);
+const OPAQUE_TOKEN = z.string().regex(/^[a-z][a-z2-7]{1,31}$/);
+const GROUP_TOKENS = z.array(OPAQUE_TOKEN).min(1).max(64);
+
+/** The opaque identity of one curated source pain item. Shape only. */
+const PAIN_ITEM_TOKEN = z.string().regex(/^pp[a-z2-7]{16}$/);
+
+/**
+ * One journey pain decision, bounded and shaped before anything is read.
+ *
+ * The disposition is a closed vocabulary; the phrase and the reason are bounded
+ * exactly as the columns are; the touchpoints are opaque handles which the
+ * SERVER then checks against the offer it built from this document — a shape
+ * that parses is never a handle that exists.
+ */
+const PAIN_DECISION = z
+  .object({
+    token: PAIN_ITEM_TOKEN,
+    disposition: z.enum(["approved", "rejected", "unresolved"]),
+    publicPhrase: z.string().max(300).nullable(),
+    touchpoints: z.array(z.string().max(128)).max(16),
+    rationale: z.string().max(300).nullable(),
+  })
+  .strict();
 
 /** Authorize, then — and only then — build the privileged client and the scope. */
 async function authorizedStudioScope(
@@ -331,37 +379,119 @@ export async function previewPublicationUnderSelection(
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT THE BROWSER MAY SAY, AND WHAT IT MAY NOT.
  *
- * One digest, of category labels a client is already shown. There is no
- * parameter for the categories themselves, for a note about a person, for a
- * quotation, or for who did the reviewing: the actor is the authenticated
- * session and is read from it, and the words are re-derived on the server from
- * the study's own results. So a caller cannot sign off on words it invented,
- * and cannot sign off AS somebody else.
+ * A REVIEW INTENT AND A LIST OF OPAQUE GROUP IDENTITIES. The draft revision
+ * names the review the person was doing; the tokens name the groups they were
+ * looking at. There is no parameter for the categories themselves, for a digest,
+ * for a note about a person, for a quotation, or for who did the reviewing: the
+ * actor is the authenticated session and is read from it, and the words are
+ * re-read on the server from the study's own results.
  *
- * The digest is an ASSERTION about what was on screen, and it is checked: the
- * server rebuilds the registry, resolves the stored draft, collects the bound
- * groups and recomputes the digest, and refuses if it has moved. A category set
- * that changed between the reading and the click is not signed.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE DIGEST USED TO BE A PARAMETER, AND ITS ABSENCE IS THE POINT.
+ *
+ * The browser held the qualitative evidence digest and echoed it back; the
+ * server recomputed and compared. The argument was that the digest covers only
+ * category labels a client already sees, so it discloses nothing — true, and
+ * beside the point. A record written against a value the caller supplied has a
+ * subject the caller chose, and comparing an echo against a fresh computation
+ * is comparing the browser's memory with itself.
+ *
+ * Now the server reloads the draft, verifies the REVISION, the STUDY and the
+ * BINDING, recomputes the digest from the study's current results, checks that
+ * the submitted tokens name exactly the groups it just read, and writes the
+ * record against ITS OWN digest. There is no parameter on this function by
+ * which that value could be supplied, influenced or observed.
  */
 export async function recordCanonicalQualitativeSignOff(
   studyId: string,
-  evidenceDigest: string,
+  reviewedDraftRevision: number,
+  groupTokens: readonly string[],
 ): Promise<SignOffResult> {
   const authorized = await authorizedStudioScope(studyId);
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }
-  if (!EVIDENCE_DIGEST.safeParse(evidenceDigest).success) {
+  const revision = REVISION.safeParse(reviewedDraftRevision);
+  if (!revision.success) {
+    return {
+      ok: false,
+      reason: "draft_moved",
+      detail: "Lo que se envió no describe una revisión de este estudio. Vuelve a cargar la pantalla.",
+    };
+  }
+  const tokens = GROUP_TOKENS.safeParse(groupTokens);
+  if (!tokens.success) {
     return {
       ok: false,
       reason: "evidence_moved",
-      detail: "Lo que se envió no es la huella de un conjunto de categorías. Vuelve a cargar la pantalla.",
+      detail: "Lo que se envió no nombra las categorías que había en pantalla. Vuelve a cargar la pantalla.",
     };
   }
   return recordQualitativeSignOff(
     authorized.admin,
     authorized.scope,
     authorized.userId,
-    evidenceDigest,
+    revision.data,
+    tokens.data,
+  );
+}
+
+/**
+ * Record one reviewer's decision about one curated journey pain phrase.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT WRITES PRESENTATION CONFIGURATION AND NEVER CANONICAL EVIDENCE.
+ *
+ * `pain_point` is not named in this file, not named in the module it calls, and
+ * not named in the body of any function that module calls in order to write.
+ * The one write goes through migration 0032's
+ * `record_canonical_journey_pain_decision`, into a table that holds no foreign
+ * key into `pain_point` at all — so «the source is not mutated» is a structural
+ * fact rather than an abstention.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT THE BROWSER MAY SAY.
+ *
+ * An opaque item token, one of three closed words, the public phrase a person
+ * typed, the opaque touchpoint handles they picked from a list this same server
+ * offered, and an optional reason. There is no parameter for a digest, for the
+ * source wording, for a tenant, or for who decided.
+ *
+ * Everything below is a SHAPE check. Whether the item exists, whether the words
+ * still say what they said, and whether each chosen touchpoint is one this
+ * document draws are all decided on the server against a fresh read.
+ */
+export async function recordCanonicalJourneyPainDecision(
+  studyId: string,
+  input: PainDecisionInput,
+): Promise<PainDecisionResult> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return { ok: false, reason: authorized.reason, detail: authorized.detail };
+  }
+  // A SERVER ACTION'S ARGUMENTS ARE DESERIALIZED BEFORE ANYTHING VALIDATES
+  // THEM, so the whole object is parsed as one — an unknown key, a wrong type or
+  // a missing field is refused here rather than reaching a function whose
+  // parameter types the runtime never checked.
+  const parsed = PAIN_DECISION.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: "decision_incomplete",
+      detail:
+        "Lo que se envió no describe una decisión sobre una frase de este estudio, o excede el tamaño que esta capa admite.",
+    };
+  }
+  return recordStoredJourneyPainDecision(
+    authorized.admin,
+    authorized.scope,
+    authorized.userId,
+    {
+      token: parsed.data.token,
+      disposition: parsed.data.disposition as PainDisposition,
+      publicPhrase: parsed.data.publicPhrase,
+      touchpoints: parsed.data.touchpoints,
+      rationale: parsed.data.rationale,
+    },
   );
 }

@@ -2000,6 +2000,21 @@ const APPROVED_PRESENTATION_DOORS = [
     entry: "src/app/studio/e/[studyId]/revision/actions.ts",
     loader: "src/lib/studio/presentation-workspace.ts",
   },
+  // UNIT 6B.4B2C — the journey pain editor, inside the review's own segment.
+  //
+  // A person deciding which curated phrases this study publishes has to be
+  // offered the touchpoints THIS document draws, which is a fact about the
+  // resolved presentation. Its declared loader is the same one, through the
+  // same single import statement: `journey-pain-workspace.ts` holds no reader
+  // of its own either, so this door's path runs through the composer's loader
+  // by construction rather than by which import happened to be written first.
+  //
+  // Its ACTION is the review's own `actions.ts`, already above: the editor adds
+  // no second action module and no second authorization path.
+  {
+    entry: "src/app/studio/e/[studyId]/revision/dolor/page.tsx",
+    loader: "src/lib/studio/presentation-workspace.ts",
+  },
 ];
 const appSourceFiles = [];
 const collectAppSources = (dir) => {

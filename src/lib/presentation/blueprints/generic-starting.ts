@@ -256,6 +256,77 @@ export function buildGenericStartingBlueprint(
     }
   }
 
+  /* ---- ONE FILTER PANEL, OFFERING WHAT EVERY CONNECTED BLOCK CAN ANSWER ---- */
+  //
+  // WHY A STARTING LAYOUT HAS ONE AT ALL. A study's results declare which
+  // characteristics they may be cut by; a layout that offers none of them hands
+  // a reader a report they cannot interrogate, and the approved layout offers
+  // three. «Nobody designed for this study» is a reason not to invent structure,
+  // not a reason to withhold the study's own instrument.
+  //
+  // WHY IT OFFERS THE INTERSECTION, AND CONNECTS EXACTLY THE BLOCKS IN IT.
+  // A block connected to a panel must support EVERY dimension that panel
+  // offers — `unsupported_filter_dimension` is a refusal, not a shrug — so the
+  // panel offers the characteristics that every filterable block on the page
+  // has in common, and connects exactly those blocks. Two consequences, and
+  // both are wanted:
+  //
+  //   * the document always resolves. A panel offering a dimension one of its
+  //     own connected blocks cannot answer would make the starting layout
+  //     refuse itself, which is a worse first screen than no panel;
+  //   * the panel always MOVES something, so it is never the dead control the
+  //     client surface drops as an unfinished edge.
+  //
+  // Retention is excluded by the contract itself — it is measured over a
+  // period's roster and accepts no participant filter — so it declares no
+  // supported dimension, takes no part in the intersection and is left
+  // unconnected. That is the rule working, not an omission.
+  const filterable = blocks.filter((block) => {
+    if (block.kind !== "result" && block.kind !== "journey_routes") return false;
+    const handle = block.kind === "result" ? block.binding : block.routes[0]?.sourceGroup;
+    const entry = handle ? registry.entries.find((candidate) => candidate.handle === handle) : undefined;
+    return entry !== undefined && entry.supportedFilters.length > 0;
+  });
+  const dimensionsOf = (block: PresentationBlock): readonly PresentationHandle[] => {
+    const handle =
+      block.kind === "result"
+        ? block.binding
+        : block.kind === "journey_routes"
+          ? block.routes[0]?.sourceGroup
+          : undefined;
+    const entry = handle ? registry.entries.find((candidate) => candidate.handle === handle) : undefined;
+    if (!entry) return [];
+    const forbidden = new Set<string>(entry.forbiddenFilters);
+    return entry.supportedFilters.filter((dimension) => !forbidden.has(dimension));
+  };
+  if (filterable.length > 0) {
+    let shared: PresentationHandle[] = [...dimensionsOf(filterable[0])];
+    for (const block of filterable.slice(1)) {
+      const own = new Set<string>(dimensionsOf(block));
+      shared = shared.filter((dimension) => own.has(dimension));
+    }
+    if (shared.length > 0) {
+      const panelId = "panel-filtros";
+      for (const block of filterable) block.connectedFilterPanelIds = [panelId];
+      // FIRST IN THE PAGE, because a control that moves the figures below it
+      // belongs above them. `order` is the only thing that decides position, and
+      // the schema requires it to be non-negative — so the page is RENUMBERED
+      // rather than given a block at −1. Renumbering keeps the relative order
+      // every section above chose, and keeps the document deterministic: the
+      // same registry still produces byte-identical bytes.
+      blocks.unshift({
+        ...common(0, GRID_COLUMNS),
+        kind: "filter_panel",
+        id: panelId,
+        copy: { title: "Filtrar por características", description: null, annotation: null },
+        dimensions: shared,
+      });
+      blocks.forEach((block, index) => {
+        block.placement = { ...block.placement, order: index };
+      });
+    }
+  }
+
   if (blocks.length === 0) {
     throw new PresentationError(
       "unknown_handle",

@@ -896,6 +896,36 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       loader: "src/lib/studio/presentation-workspace.ts",
       via: null,
     },
+    /**
+     * THE FOURTH DOOR, AND IT IS STILL NOT A FOURTH LOADER.
+     *
+     * Unit 6B.4B2C adds the journey pain editor, INSIDE the review's own route
+     * segment. It needs canonical data for a reason the review beside it does
+     * not quite cover: a person deciding which curated phrases this study
+     * publishes has to read those phrases, and has to be offered the
+     * touchpoints THIS document actually draws — both of which are facts about
+     * the study's current canonical results.
+     *
+     * It adds no loader. `publication-workspace.ts` still holds no canonical
+     * reader; `journey-pain-workspace.ts` holds none either — it imports
+     * `presentation-workspace.ts` through a single import statement, exactly as
+     * the publication module does — so this page's path to the canonical layer
+     * runs through the composer's declared loader by construction.
+     *
+     * THE CURATED PAIN READ IS A REAL CANONICAL READ, and that is why it
+     * matters more here than anywhere. `loadCuratedPainReviewEvidence` selects
+     * three columns of `pain_point`, three of `pain_point_journey_stage` and
+     * three of `journey_stage`; it adds nothing to `CanonicalResultSource`, so
+     * the canonical read model still excludes that table's text and golden
+     * parity is untouched. It arrives through the declared loader rather than
+     * through an edge of the publication module's own, which is what this row
+     * asserts.
+     */
+    {
+      page: "src/app/studio/e/[studyId]/revision/dolor/page.tsx",
+      loader: "src/lib/studio/presentation-workspace.ts",
+      via: null,
+    },
   ];
   /**
    * THE ONE SERVER ACTION THAT MAY REACH IT, and why the class stays closed.

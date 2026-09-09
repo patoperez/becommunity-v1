@@ -14,7 +14,7 @@ import {
 } from "@/lib/composer";
 import { viewerSelectionIsNeutral } from "@/lib/presentation";
 import type { PresentationRenderModel } from "@/lib/presentation";
-import { CODING_LABEL } from "@/lib/publication";
+import { CODING_LABEL, PAIN_GAP_DETAIL } from "@/lib/publication";
 import type {
   PreviewPublicationUnderSelection,
   RecordQualitativeSignOff,
@@ -233,12 +233,23 @@ export function PublicationReviewView({
   const [signOffOutcome, setSignOffOutcome] = useState<SignOffResult | null>(null);
   const [categoriesRead, setCategoriesRead] = useState(false);
   const qualitative = payload.qualitative;
+  /**
+   * WHAT THE SIGN-OFF SENDS: THE REVIEW, AND WHICH GROUPS WERE ON SCREEN.
+   *
+   * The draft revision this screen is reviewing, and one opaque token per group
+   * drawn below. No digest — there is no field on the payload for one and no
+   * parameter on the action to receive one. The server reloads the draft,
+   * recomputes the digest from the study's own results and records against that.
+   *
+   * The tokens are read from the groups THIS RENDER drew, so what is asserted is
+   * what is on the screen rather than what was on it when the page loaded.
+   */
   const onSignOff = () => {
-    if (qualitative.evidenceDigest === null) return;
-    const digest = qualitative.evidenceDigest;
+    if (qualitative.groups.length === 0) return;
+    const tokens = qualitative.groups.map((group) => group.token);
     setSignOffOutcome(null);
     startTransition(async () => {
-      setSignOffOutcome(await signOff(studyId, digest));
+      setSignOffOutcome(await signOff(studyId, payload.draftRevision, tokens));
     });
   };
 
@@ -520,7 +531,7 @@ export function PublicationReviewView({
               <button
                 type="button"
                 className={`${BUTTON} mt-3`}
-                disabled={!categoriesRead || pending || qualitative.evidenceDigest === null}
+                disabled={!categoriesRead || pending || qualitative.groups.length === 0}
                 onClick={onSignOff}
                 data-testid="registrar-revision-cualitativa"
               >
@@ -546,6 +557,70 @@ export function PublicationReviewView({
                 : signOffOutcome.detail}
             </p>
           ) : null}
+        </section>
+      ) : null}
+
+      {/* 3b ─ THE JOURNEY PAIN REVIEW, AND WHERE IT IS DONE. ------------------ */}
+      {payload.pain.applicable ? (
+        <section className={CARD} aria-labelledby="dolor-recorrido" data-testid="dolor-recorrido">
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-muted">
+            Sólo interno · no lo ve el cliente
+          </p>
+          <h2 id="dolor-recorrido" className="mt-1 text-base font-semibold text-strong">
+            Puntos de dolor del recorrido
+          </h2>
+          <p className="mt-1 max-w-prose text-sm text-muted">
+            Las frases del recorrido las aprueba, reescribe o excluye una persona, y cada frase
+            aprobada se asigna a los puntos de contacto que le corresponden. Nada de esto se deduce
+            solo: el material de origen y el recorrido del cliente no usan el mismo vocabulario.
+          </p>
+          {/*
+            THE FOUR COUNTS, AS THE SERVER MADE THEM. This component adds nothing
+            up: `payload.pain.counts` arrives finished, and a screen that
+            recomputed it would be a second place where «cuántas faltan» is
+            decided.
+          */}
+          <dl
+            className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(7.5rem,1fr))]"
+            data-testid="dolor-conteos"
+          >
+            {(
+              [
+                ["Sin revisar", payload.pain.counts.unreviewed],
+                ["Aprobadas", payload.pain.counts.approved],
+                ["Excluidas", payload.pain.counts.rejected],
+                ["Sin resolver", payload.pain.counts.unresolved],
+              ] as const
+            ).map(([label, count]) => (
+              <div key={label} className="rounded-md border border-line bg-surface-sunken px-3 py-2">
+                <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-muted">
+                  {label}
+                </dt>
+                <dd className="mt-0.5 font-display text-xl font-bold text-strong tabular">{count}</dd>
+              </div>
+            ))}
+          </dl>
+          {payload.pain.complete ? (
+            <p className="mt-3 text-sm text-positive" data-testid="dolor-completo">
+              La revisión está terminada: cada frase tiene una decisión y cada frase aprobada tiene
+              su texto público y sus puntos de contacto.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-1.5" data-testid="dolor-faltantes">
+              {payload.pain.gaps.map((gap) => (
+                <li key={gap} className="max-w-prose text-sm text-caution">
+                  {PAIN_GAP_DETAIL[gap]}
+                </li>
+              ))}
+            </ul>
+          )}
+          <a
+            href={`/studio/e/${studyId}/revision/dolor`}
+            className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken"
+            data-testid="ir-a-dolor"
+          >
+            {payload.pain.complete ? "Revisar las frases otra vez" : "Revisar las frases"}
+          </a>
         </section>
       ) : null}
 

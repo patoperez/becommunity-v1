@@ -957,6 +957,11 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `scripts/lib/secret-patterns.mjs` is security configuration, a declared
   human-review zone — so it is RECOMMENDED SEPARATELY and was not changed here.
   Do not "fix" this by renaming the local until it stops matching.
+- ⓘ **`0031` AND `0032` ARE AUTHORED AND APPLIED TO NO PROJECT.** The canonical
+  chain on disk is `0026`-`0032`; the hosted ledger ends at `0030`. Until both
+  are applied there, the qualitative sign-off cannot be recorded and the journey
+  pain review cannot be authored — and both read fail-closed, reporting «nobody
+  reviewed this», which is the safe direction and is true.
 - ⓘ **`0030` IS APPLIED to the hosted project** (2026-09-09, Unit 6B.4B1).
   **No experience was published.** Those are two facts and the second is the one
   people get wrong: the storage exists and all three publication tables are
@@ -1063,6 +1068,60 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   names that same app. The approved demo resolves all of it with a 38-entry
   hand-written alias table plus a phrase-splitting rule (`split(/[\n.]+/)`);
   both are implementation. **Do not copy either.**
+- ⓘ **THE QUALITATIVE SIGN-OFF SENDS NO DIGEST, AND THAT IS THE CORRECTION.**
+  The review panel used to carry `evidenceDigest` and the browser echoed it back
+  to record a sign-off. It does not any more: a record written against a value
+  the caller supplied has a subject the caller chose, and «the server recomputes
+  and compares» is the browser's memory checked against itself. The action now
+  takes a REVIEW INTENT — the draft revision — and one OPAQUE BASE32 TOKEN per
+  group. The server reloads the draft, verifies the revision, the study and the
+  binding, recomputes `qualitativeEvidenceDigest` from the study's current
+  results, checks that the submitted tokens name exactly the groups it just
+  read, and records against ITS OWN digest. The browser-boundary rule is
+  «no 64-hex value crosses», with **no exception**: the narrowing that admitted
+  one is gone, and §[16] of the QA asserts zero distinct 64-hex values in the
+  page plus the three storage digests absent by value.
+- ⓘ **THE JOURNEY PAIN MAPPING IS AUTHORED BY A PERSON, IN STUDIO, AND STORED
+  AS PRESENTATION CONFIGURATION.** `/studio/e/[studyId]/revision/dolor` is the
+  editor: it loads the curated phrase, the source's own stage wording, an
+  occurrence count and a disposition — and never a respondent, an identifier, a
+  survey comment, an adjacent free-text answer or a name, because `pain_point`
+  has no respondent column and the read selects three of its columns.
+  **Nothing preselects a touchpoint.** Not string similarity, not normalized
+  labels, not position, not workbook order, and not the approved demo's
+  38-entry alias table; the search box is a FILTER over a list already on
+  screen and starts empty. Mappings are ONE-TO-MANY because one source stage
+  legitimately covers two touchpoints. Migration `0032` stores the decisions and
+  is applied to **no project**; it never touches `pain_point` and holds no
+  foreign key into it.
+- ⓘ **THE PAIN CONTENT IS ALL-OR-NOTHING, AND THE BLOCKER IS UNACKNOWLEDGEABLE.**
+  `authoredPainContent` returns null unless every in-scope item has an explicit
+  disposition, every approved item has a public phrase and at least one
+  touchpoint, no source digest has moved, and no mapping targets a touchpoint
+  the document no longer draws. So a partial review cannot produce a partial
+  cloud. `journey_pain_review_incomplete` is its own blocker code — separate
+  from `required_content_missing` because it names WHICH of five things is
+  unfinished — and it is raised only when the document's author marked the slot
+  required.
+- ⓘ **THE CLOUD COUNTS PHRASES, NOT (PHRASE, POINT) PAIRS.** One approved item
+  mapped to three touchpoints contributes ONE to the cloud total and appears on
+  all three points. Counting it per point would inflate the headline figure by a
+  reviewer's mapping decision. All of it is computed in
+  `src/lib/presentation/journey-pain.ts`, called by the resolver on the server;
+  the React components lay out finished terms and finished counts and count
+  nothing.
+- ⓘ **A CURATED PAIN READ IS NOT A WIDER `CanonicalResultSource`.**
+  `src/lib/canonical-source/curated-review.ts` is a SEPARATE read for the
+  internal editor. The canonical read model still excludes `pain_point`'s text
+  columns (`docs/CANONICAL_RESULTS_MODEL.md` §12), the results contract does not
+  move, and golden parity is still 531/531. What a client eventually reads is
+  the phrase the reviewer APPROVED, not the phrase read here.
+- ⓘ **THERE ARE NOW FOUR DOORS TO THE CANONICAL LAYER AND STILL TWO LOADERS.**
+  Unit 6B.4B2C added `/studio/e/[studyId]/revision/dolor`, inside the review's
+  own route segment, using that route's own `actions.ts`.
+  `journey-pain-workspace.ts` holds no canonical reader either: it imports
+  `presentation-workspace.ts` through a SINGLE import statement, exactly as
+  `publication-workspace.ts` does. **Do not add a fifth door.**
 - `readXlsx()`/`parseXlsx()` are the LEGACY reader and their behaviour is
   frozen — every existing study was imported through them. The canonical
   multi-sheet reader is `readXlsxWorkbook()` in the same module; both must stay

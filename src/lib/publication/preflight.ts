@@ -41,6 +41,7 @@ import {
   type QualitativeCategorySet,
   type QualitativeReviewState,
 } from "./qualitative-signoff";
+import { PAIN_GAP_DETAIL, type PainReviewGap } from "./journey-pain-review";
 import {
   WARNINGS_REQUIRING_ACKNOWLEDGEMENT,
   warningRequiresAcknowledgement,
@@ -140,6 +141,43 @@ export type PublicationSubject = {
   requiredBlockIds: readonly string[];
   /** The qualitative groups this document's blocks bind, with their words. */
   qualitative: readonly QualitativeBinding[];
+  /**
+   * Whether this study has any curated journey pain material at all.
+   *
+   * SEPARATE FROM AN EMPTY GAP LIST. «This study's workbook carries no pain
+   * rows» and «its pain rows are all decided» both produce no gaps, and only
+   * one of them is a review somebody did. Nothing in this file acts on the
+   * distinction today — the gaps decide the blocker — and it is carried because
+   * a preflight that cannot tell those apart is one sentence away from claiming
+   * a review that never happened.
+   */
+  painApplicable: boolean;
+  /**
+   * Whether THIS DOCUMENT publishes the journey pain cloud as required content.
+   *
+   * NOT `requiredBlockIds.length > 0`, and the difference is a false blocker.
+   * That test asks «does this layout require ANY content», so a document that
+   * marked some other block required and had an unfinished pain review was
+   * blocked for a reason that had nothing to do with the block it named. It
+   * happened to be right for the approved Cuicuilco layout — whose only
+   * required block IS the pain slot — which is exactly the kind of accident
+   * that survives review.
+   *
+   * The workspace decides it, because deciding needs the DOCUMENT and the
+   * REGISTRY: a block is the pain slot when it is an editorial block, marked
+   * required, whose slot addresses the contract's `curated_journey_pain_cloud`
+   * requirement. This file has neither, and is client-safe by construction.
+   */
+  painContentRequired: boolean;
+  /**
+   * Every reason the journey pain review is unfinished, in a closed vocabulary.
+   *
+   * DECIDED BY THE WORKSPACE, NOT HERE, and for the same reason
+   * `qualitativeReviewState` is: deciding needs the curated evidence, the stored
+   * decisions and two SHA-256 digests, and this file is client-safe by
+   * construction. What arrives here is a list of codes, already decided.
+   */
+  painGaps: readonly PainReviewGap[];
   /**
    * Which of the four states the qualitative review is in.
    *
@@ -389,6 +427,35 @@ export function runPublicationPreflight(subject: PublicationSubject): Publicatio
           "falta, o quita el bloque del documento en Construcción si ya no forma parte de la " +
           "entrega. No se puede publicar confirmando que desaparecerá.",
         inspected.requiredMissing,
+      ),
+    );
+  }
+
+  // [8b] THE JOURNEY PAIN REVIEW, WHEN THE LAYOUT REQUIRES ITS CONTENT.
+  //
+  // The gaps arrive already decided and every one of them names a thing a
+  // person can go and do, so they are emitted as ONE blocker carrying every
+  // sentence rather than as one blocker per gap: a reviewer with four separate
+  // red boxes about the same queue reads them as four problems.
+  //
+  // IT IS RAISED ONLY WHEN THIS DOCUMENT ASKS FOR THIS CONTENT. A layout that
+  // does not draw the pain cloud is not blocked by an unfinished review of
+  // material it never publishes — the review is then internal work, not a
+  // publication condition.
+  //
+  // `painContentRequired`, NOT `requiredBlockIds.length > 0`: the second asks
+  // whether the layout requires ANY content, so a document requiring some other
+  // block was blocked by a review that had nothing to do with it. See the field.
+  if (subject.painGaps.length > 0 && subject.painContentRequired) {
+    blockers.push(
+      blocker(
+        "journey_pain_review_incomplete",
+        "La revisión de los puntos de dolor del recorrido no está terminada, y este " +
+          "documento publica esa nube. " +
+          subject.painGaps.map((gap) => PAIN_GAP_DETAIL[gap]).join(" ") +
+          " Termina la revisión en «Puntos de dolor», o quita el bloque del documento en " +
+          "Construcción si ya no forma parte de la entrega. No se puede publicar " +
+          "confirmando que saldrá a medias.",
       ),
     );
   }

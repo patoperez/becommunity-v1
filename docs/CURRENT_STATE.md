@@ -4306,6 +4306,275 @@ approved value moved; no AI was added; and shadow mode is still off everywhere.
 
 ---
 
+### Unit 6B.4B2C — the journey-pain editorial workflow, and the sign-off boundary closed (source only, 2026-09-09)
+
+> **NOTHING WAS PUBLISHED, AND NOTHING HOSTED WAS WRITTEN.** Hosted access in
+> this unit was READ-ONLY: the fingerprint gate before and after, and one
+> read-only decision inventory over the fifty real `pain_point` rows. Migrations
+> `0031` and `0032` are authored here and applied to **no project**. The
+> Cuicuilco canonical draft is still at **revision 1**, and all three
+> publication tables are still **empty**.
+
+Two decisions, and the second is most of the unit.
+
+#### 1. The qualitative sign-off sends no digest, and the boundary rule has no
+   exception again
+
+Unit 6B.4B2 put `qualitativeEvidenceDigest` on the review payload and had the
+browser echo it back to record a sign-off. The argument for it was that the
+digest covers only category labels a client is already shown, so it discloses
+nothing — which is true, and is not the point:
+
+* a record written against a value the CALLER supplied has a subject the caller
+  chose. «The server recomputes and compares» does not fix that; it compares the
+  browser's memory with itself;
+* and the browser-boundary assertion had to be NARROWED to admit it — from
+  «no 64-character hex value crosses» to «at most one, and not one of these
+  three». A rule with an exception is a rule with somewhere to hide a second
+  one.
+
+**What replaces it.** `recordCanonicalQualitativeSignOff(studyId,
+reviewedDraftRevision, groupTokens)`. There is no digest parameter, no digest
+field on `QualitativeReviewPanel`, and no digest anywhere on the wire. The
+authorized action:
+
+1. reloads the stored canonical draft and the study's current canonical results,
+   rebuilds the registry and resolves the document;
+2. computes `qualitativeEvidenceDigest` **server-side** from what it just read;
+3. verifies the **revision** (`draft_moved` if it moved), the **study** (the
+   tenant is read from the study row and never received), the **binding** (a
+   document that no longer resolves is refused), and **evidence freshness**;
+4. records the sign-off against **that** digest.
+
+Freshness is proved by an opaque per-group identity — `qualitativeGroupToken`,
+five bytes of a domain-separated hash, spelled in base32. It moves when the
+group's label, coding or category list moves; the server mints the same tokens
+from its own read and compares the sets; and nothing derived from a submitted
+token is stored, compared against storage, or written into a publication record.
+The alphabet contains `w`, `x`, `y` and `z`, so no token of any length can match
+`[0-9a-f]{64}`.
+
+**The assertion is restored and is stronger than the one it replaces.** §[16] of
+`qa:canonical-publication` now requires **zero** distinct 64-hex values in the
+rendered page, AND that the definition digest, the binding fingerprint and the
+render-model digest — read from the database, by value — are absent. The old
+blanket rule checked a shape; this checks the shape and the values.
+
+#### 2. A real human pain-mapping workflow, because the mapping is unprovable
+
+`/studio/e/[studyId]/revision/dolor` — inside the publication review's own route
+segment, using that route's own `actions.ts`, behind the same `requireInternal()`
+guard. It adds a fourth DOOR and no third loader.
+
+**What is loaded for review.** The curated phrase (`normalized_text`), the stage
+wording the source gave it, how many source items carry that phrase, the current
+disposition, an opaque item token, and a short opaque source-version marker.
+
+**What has no field to be loaded.** A respondent, a respondent identifier, a
+survey comment, an adjacent free-text answer, a name — and the SHA-256 source
+digest itself. `pain_point` carries no respondent column in any shape: its
+provenance is a workbook cell through `visual_annotation`. So «no PII crosses» is
+a fact about which tables are read rather than a redaction somebody has to
+remember. `raw_text` is not selected either; `normalized_text` is the same
+sentence with its whitespace regularised, and putting two spellings of one phrase
+in front of a person deciding which is «the» phrase helps nobody.
+
+**What a reviewer may do,** per item: approve the public phrase; EDIT it without
+touching the source; reject it with a reason; map an approved phrase to one or
+more canonical touchpoints; or deliberately mark it unresolved — which is a
+different fact from nobody having looked, and is stored as one.
+
+**Nothing preselects a match.** Not string similarity, not normalized labels, not
+position, not workbook order, and not the approved demo's 38-entry alias table.
+The whole touchpoint list is shown, grouped under the five visible routes, in the
+order the client's page draws them. There is a neutral search box; it filters a
+list already on screen, by what the reviewer types, and it starts empty and is
+never pre-filled from the source phrase — a search box that typed the source's
+words into itself would be a proposal wearing a filter's clothes.
+
+**One-to-many is the normal case.** «Reunión semanal presencial/en línea» is one
+curated stage over two touchpoints, so the control is checkboxes rather than a
+select, and the storage is an array rather than a column.
+
+**Where the decisions live.** `canonical_journey_pain_decision`, migration
+`0032`, applied to no project. Append-only; newest row per item is the decision
+in force. It identifies its source item by an OPAQUE TOKEN and holds **no foreign
+key into `pain_point`** — so «the canonical source is not mutated» is a
+structural fact rather than an abstention, and a re-import that mints different
+rows moves every token, reopening the review visibly rather than re-attaching an
+approval to a phrase nobody read.
+
+#### The completion rule, and why it cannot be acknowledged away
+
+`authoredPainContent` returns **null** unless all five hold:
+
+| condition | code when it fails |
+|---|---|
+| every in-scope item has an explicit disposition | `undecided_items` |
+| every approved item has a public phrase | `approved_without_phrase` |
+| every approved item is mapped to ≥ 1 touchpoint | `approved_without_touchpoint` |
+| the source digest still matches | `stale_source` |
+| no mapping targets a missing touchpoint | `unknown_touchpoint` |
+
+So a partial review cannot produce a partial cloud — there is no best-effort
+branch. `journey_pain_review_incomplete` is its own blocker, separate from
+`required_content_missing` because it names WHICH of the five is unfinished and
+each is a different action by a different person, and it is raised only when the
+document's author marked the slot required.
+
+A stale source digest reopens the review by demoting that item to `unreviewed`
+and saying why, rather than by silently keeping an approval attached to words
+that changed.
+
+#### What the client gets after a complete review
+
+1. the «Puntos de dolor del recorrido» word cloud, resolved from the editorial
+   slot — the block's drawing follows its PAYLOAD SHAPE, so the slot resolves as
+   `word_cloud` when it carries terms and stays `narrative` when it carries
+   prose;
+2. a badge on every mapped touchpoint, with the approved phrases in the reviewer's
+   own order, in the SVG node and in its accessible name;
+3. counts made on the server. **One phrase mapped to three points contributes ONE
+   to the cloud total** and appears on all three — counting it per point would
+   inflate the headline figure by a reviewer's mapping decision;
+4. no raw source text and no review metadata in the render model: there is no
+   field for a token, a disposition, a source status, a rationale or a digest.
+
+Terms carry `share: null` deliberately. A share is a proportion of a measured
+base, and these phrases are editorial content approved by a consultant — no
+population said them, and printing `count / total` as a percentage would spell an
+opinion as a statistic.
+
+#### What was executed, and what each number is
+
+Every figure below was produced on 2026-09-09 in the WSL verifier
+(`/home/patop/becommunity-software`, Node 24.11.1, npm 10.9.2). Windows was used
+for editing only.
+
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint` | 0 errors, 55 warnings (the standing baseline) |
+| `npm test` (the whole offline chain) | every gate green except the one below |
+| `npm run test:journey-pain-review` (**new**, in `npm test`) | **261 checks, 261 passed** |
+| `npm run test:canonical-journey-pain-live` (**new**, disposable PG 17) | **68 checks, 68 passed** |
+| `npm run test:canonical-qualitative-signoff-live` | 0 failures |
+| `npm run test:canonical-publication-live` | 0 failures |
+| `npm run test:canonical-presentation-draft-live` | 0 failures |
+| `npm run qa:canonical-publication` (real browser, disposable target) | **213 checks, 213 passed** |
+| `canonical-results-parity` against the real workbooks | **531 / 531**, unchanged |
+| `canonical-presentation-parity` against the real workbooks | **59 / 59**, unchanged |
+
+**`npm run test:hosted-target-guard` §[8] fails in the WSL verifier and always
+has.** It builds `<root>/../becommunity-software/evidence` expecting a sibling
+main repository, and the WSL checkout is a plain clone AT that path. It was
+re-run at the baseline commit `d6a3d3c` in a throwaway worktree and failed there
+too (two assertions rather than one), so it is an environment artifact of the
+verifier's layout and not a regression of this unit.
+
+**Two parity numbers are preserved and one expectation is new.** The 531 and the
+59 are the *unconfigured* approved draft — no pain content is authored for the
+real study, so the approved blueprint resolves exactly as it did. The
+*intentionally configured* synthetic presentation has its own expectations, in
+§[12] of the new offline gate and §[19] of the browser QA: the slot resolves as
+`word_cloud` carrying terms, the mapped touchpoints carry badges, and the same
+model with no authored content resolves to `configuration_required` and no badge.
+
+#### What the browser proved, in a real browser, against a disposable target
+
+The filter proof is no longer an observation. The disposable fixture carries a
+real filter panel now — `buildGenericStartingBlueprint` composes one, offering
+the characteristics every filterable block on the page has in common and
+connecting exactly those blocks — so §[18] asserts rather than reports:
+
+* the review's «los ve el cliente» count IS the number of cards drawn (21 = 21),
+  and the inventory marks exactly as many;
+* the inventory counts exactly the panels the preview draws;
+* 57 filter options across 17 characteristics, every one of them operable;
+* a real click recomputes on the server («Todas las personas · 60» → «Cohorte:
+  Miembros activos · quedan 28 de 60»);
+* **18 connected cards changed and 1 unconnected card did not** — the retention
+  series, which declares no supported filter because it is measured over a
+  period's roster;
+* clearing restores the exact neutral model: the same 19 titled cards, every one
+  of them saying exactly what it said before;
+* a reload comes back neutral, so the selection was never stored;
+* and the draft revision, the publication event count and the sign-off count are
+  all unchanged after every one of those.
+
+And §[19] drives the whole pain workflow through the real route: 13 phrases in
+the queue, each with an opaque identity and no digest, no uuid and no canonical
+table name anywhere on the screen; 55 touchpoints offered across 4 routes with
+**not one preselected** and the search box empty; an approval refused for having
+no touchpoint; a one-to-many approval recorded against two points; an exclusion
+with its reason; every remaining phrase decided; the cloud then drawn in the
+client preview with the approved wording and **not** the source's own; a badge on
+a mapped touchpoint; keyboard focus and 44-layout-pixel targets on every control;
+a 390 px phone composing inside its width; and then the source words moved in
+SQL — 13 items marked as changed, every decision back to «sin revisar», the cloud
+gone from the preview, and **not one decision row deleted**.
+
+`pain_point` ends the run with 43 rows, all `pending`, nobody recorded as having
+reviewed one.
+
+#### Hosted access was READ-ONLY, and the before and after are identical
+
+`npm run test:canonical-presentation-hosted-fingerprint` was run before and after
+— **65 checks, 65 passed** both times — and the two fingerprint files are
+byte-identical apart from their timestamps. It gained a section, `[3b]`, that
+pins `0031` and `0032` as NOT applied: the three tables absent, the five
+functions unexposed, with a control read first so an absence is known to mean
+absence.
+
+| fact | before | after |
+|---|---|---|
+| `canonical_presentation_revision` / `_publication` / `_publication_event` | 0 / 0 / 0 | 0 / 0 / 0 |
+| Cuicuilco canonical draft | revision 1, one `draft_created` | revision 1, one `draft_created` |
+| `canonical_qualitative_signoff` (0031) | absent | absent |
+| `canonical_journey_pain_decision` (0032) | absent | absent |
+| `study_experience_event` | 86 | 86 |
+| `study_experience_revision` / `_publication` | 0 / 0 | 0 / 0 |
+| `pain_point` | 50 | 50 |
+| `quant_response` / `survey_response` / `qual_observation` | 3364 / 1685 / 33 | 3364 / 1685 / 33 |
+
+The only other hosted contact was the decision inventory, which is `select`-only
+and writes outside every checkout.
+
+#### The real study's decision inventory
+
+`npm run journey-pain-inventory -- <clean.xlsx> <curated.xlsx>` produced it,
+read-only, into `~/becommunity-evidence/6b4b2c/` — outside every git repository,
+because it carries a real client's curated prose and that does not enter this
+repository. It refuses to run if `CANONICAL_HOSTED_EVIDENCE` names a path inside
+a checkout.
+
+* **all 50 real `pain_point` rows**, in the source's own order, with the wording
+  their own curated entity gave them: **15 journey**, 8 organizational, 7
+  performance, 20 culture — the same four counts the read-only audit measured;
+* the 15 journey ones are marked in scope and the other 35 are marked out of it,
+  so «out of scope» cannot be misread as «missing»;
+* every row's status is `pending`, which is what the hosted table holds;
+* 46 distinct phrases across the 50 rows, with an occurrence count per phrase;
+* a second sheet of the **55 touchpoints across 5 visible routes** a reviewer may
+  choose from, derived from the two real workbooks through the product's own
+  registry and approved blueprint — the same list the Studio editor offers;
+* and **all four decision columns are empty in all 50 rows**, verified by reading
+  the file back. Nothing proposes a touchpoint, a wording or a verdict.
+
+#### Consequences that must be stated
+
+* **`0032` is applied to no project, and neither is `0031`.** Until both are,
+  the sign-off cannot be recorded and the pain review cannot be authored. Both
+  reads fail closed — reported as «nobody has reviewed this» — which is the safe
+  direction and is true.
+* **The Cuicuilco draft's binding still will not match**, for the reason Unit
+  6B.4B2 records: the results contract moved to `3.0.0` and the contract version
+  is inside `presentationBindingFingerprint`. That is the designed refusal and
+  this unit did not touch the hosted draft.
+* **The real fifty rows are still all `pending` and still unmapped.** This unit
+  built the surface and produced an external decision inventory; it filled in
+  nothing. The mapping is a person's work and remains to be done.
+
 ### Unit 6B.4B2 — publication-readiness corrections (source only, 2026-09-09)
 
 > **NOTHING WAS PUBLISHED, AND NOTHING HOSTED WAS WRITTEN.** Hosted access in

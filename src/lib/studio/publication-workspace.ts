@@ -69,7 +69,12 @@ import {
   type PublicationSubject,
   type PublicationUnavailable,
   type PublicationUnavailableReason,
+  type PainReviewPanel,
+  type PainReviewSummary,
+  type PainDecisionInput,
+  type PainDecisionResult,
   type QualitativeCategorySet,
+  type QualitativeReviewGroup,
   type QualitativeReviewPanel,
   type QualitativeSignOff,
   type SignOffResult,
@@ -108,7 +113,9 @@ import {
   decodeStoredDraft,
   encodePresentationForStorage,
   qualitativeEvidenceDigest,
+  qualitativeGroupToken,
   qualitativeReviewState,
+  qualitativeTokensMatch,
   readAndBuild,
   readStoredDraftRow,
   refusalFor,
@@ -118,6 +125,16 @@ import {
   type ComposerScope,
   type DraftRow,
 } from "./presentation-workspace";
+// THE PAIN REVIEW IS ITS OWN MODULE AND REACHES THE CANONICAL LAYER THROUGH THE
+// SAME ONE DOOR. It imports `./presentation-workspace` and nothing else that
+// touches canonical data, so this file taking an import of it adds no edge to
+// the graph the boundary gate's door table walks.
+import {
+  authoredPainContent,
+  loadJourneyPainReview,
+  recordJourneyPainDecision,
+  PAIN_REVIEW_NOT_APPLICABLE,
+} from "./journey-pain-workspace";
 
 /* -------------------------------------------------------------------------- */
 /* the tables this module owns                                                 */
@@ -174,6 +191,8 @@ type Assembled = {
   subject: PublicationSubject;
   /** The sign-off row behind `subject.qualitativeSignOff`, with its id. */
   storedSignOff: StoredSignOff | null;
+  /** The journey pain review, and the content it authorizes when complete. */
+  pain: PainReviewPanel;
   built: CanonicalPresentationRead | null;
   document: PresentationDocument | null;
   model: PresentationRenderModel | null;
@@ -220,6 +239,45 @@ function requiredBlockIdsOf(document: PresentationDocument): string[] {
     for (const block of page.blocks) if (block.requiredContent === true) ids.push(block.id);
   }
   return ids;
+}
+
+/**
+ * The contract's own key for the editorial slot a pain review fills.
+ *
+ * The same constant the resolver matches on, and matched on the KEY rather than
+ * on the handle for the same reason: the handle is built from the requirement's
+ * section and kind, and would collide with any future editorial slot in the
+ * qualitative section.
+ */
+const JOURNEY_PAIN_REQUIREMENT_KEY = "curated_journey_pain_cloud";
+
+/**
+ * Does THIS document publish the journey pain cloud, and require its content?
+ *
+ * BOTH HALVES, and neither implies the other. A layout may draw the slot without
+ * marking it required — in which case an unfinished review is a warning about a
+ * block a client will not see, not a refusal to publish — and a layout may mark
+ * some OTHER block required while drawing no pain cloud at all, in which case
+ * the pain review is internal work with no bearing on publication.
+ *
+ * The preflight used to test `requiredBlockIds.length > 0`, which conflated the
+ * second case with this one. It was right for the approved Cuicuilco layout by
+ * accident, because that layout's only required block is this slot.
+ */
+function painContentIsRequired(
+  built: CanonicalPresentationRead,
+  document: PresentationDocument,
+): boolean {
+  for (const page of document.pages) {
+    for (const block of page.blocks) {
+      if (block.kind !== "editorial" || block.requiredContent !== true || block.slot === null) continue;
+      const address = built.registry.addresses.get(block.slot);
+      if (!address || address.at !== "configuration.requirement") continue;
+      const requirement = built.results.configurationRequired[address.requirementIndex];
+      if (requirement?.key === JOURNEY_PAIN_REQUIREMENT_KEY) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -449,6 +507,13 @@ async function assemble(
       requiredBlockIds: [],
       qualitative: [],
       qualitativeReviewState: "not_applicable",
+      // A SUBJECT THAT COULD NOT BE ASSEMBLED HAS NO PAIN QUEUE, and the honest
+      // answer is «not applicable, no gaps» rather than «incomplete»: there is
+      // no resolved document to require the content, so there is nothing to be
+      // incomplete about. The blockers above say what is actually wrong.
+      painApplicable: false,
+      painGaps: [],
+      painContentRequired: false,
       expectedActiveVersion: asserted.expectedActiveVersion,
       actualActiveVersion: null,
       structureChanged: false,
@@ -456,6 +521,11 @@ async function assemble(
       ...over,
     },
     storedSignOff: null,
+    // A REVIEW THAT COULD NOT BE ASSEMBLED HAS NO PAIN QUEUE EITHER, and the
+    // honest answer is «not applicable» rather than «incomplete»: there is no
+    // document to require the content, so there is nothing to be incomplete
+    // about. The blockers above say what is actually wrong.
+    pain: PAIN_REVIEW_NOT_APPLICABLE,
     built: null,
     document: null,
     model: null,
@@ -542,13 +612,46 @@ async function assemble(
     return { ...assembled, built, row, identity, document, current: currentRow, history };
   }
 
+  // ── THE JOURNEY PAIN REVIEW, AND THE SECOND RESOLUTION IT MAY EARN ────────
+  //
+  // THE ORDER IS FORCED AND IT IS NOT A LOOP. The review needs to know which
+  // touchpoints this document DRAWS, so it needs a resolved model; the model
+  // needs the authored content, which only a complete review produces. So:
+  // resolve once WITHOUT content to learn the offer, build the review against
+  // that, and — only if it comes out complete — resolve again WITH the content.
+  //
+  // The choices are read from a model resolved without pain content, and adding
+  // pain content changes no route and no touchpoint: it fills one editorial
+  // slot and attaches badges to points that already exist. So the offer the
+  // review was checked against is the offer the second model makes.
+  const pain = await loadJourneyPainReview(client, scope, first.model);
+  const authored = authoredPainContent(pain);
+  const withContent = authored
+    ? resolveUnderSelection(built, document, EMPTY_VIEWER_SELECTION, authored)
+    : first;
+  // A DOCUMENT THAT RESOLVED WITHOUT THE CONTENT AND REFUSES WITH IT IS A
+  // REFUSAL, not a reason to fall back. Falling back would publish the empty
+  // slot under a review that says it is filled.
+  if (!withContent.ok) {
+    const assembled = empty({
+      ...base,
+      bound: document.binding !== null,
+      resolutionIssues: withContent.issues,
+    });
+    return { ...assembled, built, row, identity, document, current: currentRow, history };
+  }
+  const resolved = withContent;
+
   // REPRODUCIBILITY, CHECKED RATHER THAN ASSUMED. The resolver is pure and the
   // serialization is deterministic, so this cannot fail — which is precisely why
   // it is worth one more call: a publication is a promise that what was approved
-  // is what will be served, and a promise nobody tests is a hope.
-  const second = resolveUnderSelection(built, document, EMPTY_VIEWER_SELECTION);
+  // is what will be served, and a promise nobody tests is a hope. It is resolved
+  // with the SAME inputs as the model actually used, authored content included.
+  const second = authored
+    ? resolveUnderSelection(built, document, EMPTY_VIEWER_SELECTION, authored)
+    : resolveUnderSelection(built, document, EMPTY_VIEWER_SELECTION);
   const reproducible =
-    second.ok && serializeDeterministic(second.model) === serializeDeterministic(first.model);
+    second.ok && serializeDeterministic(second.model) === serializeDeterministic(resolved.model);
 
   const publishedModel = currentRow ? (currentRow.render_model as PresentationRenderModel) : null;
 
@@ -557,7 +660,7 @@ async function assemble(
   // In that order, because the digest is a fact about the categories and the
   // sign-off is a fact about the digest. Reading the sign-off first would mean
   // choosing which review to believe before knowing what it had to be about.
-  const qualitative = qualitativeBindings(built, document, first.model);
+  const qualitative = qualitativeBindings(built, document, resolved.model);
   const qualitativeSignOff = await readQualitativeSignOff(
     client,
     scope,
@@ -573,7 +676,7 @@ async function assemble(
     decodeIssues: null,
     bound: document.binding !== null,
     resolutionIssues: null,
-    model: first.model,
+    model: resolved.model,
     reproducible,
     // READ FROM THE DOCUMENT, WHICH IS THE ONLY PLACE IT EXISTS. A required
     // block is an authoring decision, and the resolved render model carries no
@@ -582,20 +685,28 @@ async function assemble(
     requiredBlockIds: requiredBlockIdsOf(document),
     qualitative,
     qualitativeReviewState: qualitativeReviewState(qualitative, qualitativeSignOff),
+    // WHAT THE JOURNEY PAIN REVIEW LEFT UNFINISHED, in the preflight's own
+    // closed vocabulary. `painApplicable` is separate from an empty gap list
+    // because «this study has no pain material» and «its pain material is all
+    // decided» are different facts that need different sentences.
+    painApplicable: pain.applicable,
+    painGaps: pain.gaps,
+    painContentRequired: painContentIsRequired(built, document),
     expectedActiveVersion: asserted.expectedActiveVersion,
     structureChanged:
       publishedModel === null
         ? false
-        : !structuralDifference(publishedModel, first.model).identical,
+        : !structuralDifference(publishedModel, resolved.model).identical,
     acknowledged: asserted.acknowledged,
   };
 
   return {
     subject,
     storedSignOff: qualitativeSignOff,
+    pain,
     built,
     document,
-    model: first.model,
+    model: resolved.model,
     row,
     identity,
     publishedModel,
@@ -706,11 +817,29 @@ export async function loadPublicationReview(
     // preflight's warning above names the same blocks from the same source.
     qualitative: {
       state: subject.qualitativeReviewState,
-      evidenceDigest:
-        subject.qualitative.length === 0 ? null : qualitativeEvidenceDigest(subject.qualitative),
       reviewedAt: assembled.storedSignOff?.reviewedAt ?? null,
-      groups: subject.qualitative,
+      // THE WORDS AND AN OPAQUE IDENTITY PER GROUP, and no digest.
+      //
+      // The panel used to carry `evidenceDigest` and the browser echoed it back
+      // to sign off. It does not any more: a sign-off recorded against a value
+      // the browser supplied is a sign-off whose subject the browser chose, and
+      // recomputing before comparing does not fix that — it compares the
+      // client's memory with itself. The token below is per group, is base32
+      // rather than hexadecimal, and is CHECKED against tokens the server mints
+      // from its own read rather than kept.
+      groups: subject.qualitative.map(
+        (group): QualitativeReviewGroup => ({ ...group, token: qualitativeGroupToken(group) }),
+      ),
     } satisfies QualitativeReviewPanel,
+    // HOW FAR THE PAIN REVIEW HAS GOT, in counts and closed codes. The queue
+    // itself is loaded by the editor screen, so a curated phrase reaches a
+    // browser exactly where somebody is deciding about it.
+    pain: {
+      applicable: assembled.pain.applicable,
+      complete: assembled.pain.complete,
+      gaps: assembled.pain.gaps,
+      counts: assembled.pain.counts,
+    } satisfies PainReviewSummary,
   };
 
   return { ok: true, payload };
@@ -853,13 +982,54 @@ export async function recordQualitativeSignOff(
   client: SupabaseClient,
   scope: ComposerScope,
   actorUserId: string,
-  assertedDigest: string,
+  reviewedDraftRevision: number,
+  groupTokens: readonly string[],
 ): Promise<SignOffResult> {
+  // 1. RELOAD. The draft, the canonical results, the registry, the resolution
+  //    and the bound groups — all of it, here, now. Nothing the browser sent
+  //    takes part in producing any of it.
   const assembled = await assemble(client, scope, {
-    reviewedRevision: null,
+    reviewedRevision: reviewedDraftRevision,
     expectedActiveVersion: null,
     acknowledged: [],
   });
+
+  // 2. THE REVIEW HAS TO BE OF A DRAFT THAT EXISTS, AND OF THIS ONE.
+  //
+  // A revision that moved means somebody saved while the screen was open, so
+  // the categories on that screen may belong to a different document. Refusing
+  // is «look again» rather than «something is wrong»: the two need different
+  // sentences and this is the first.
+  if (assembled.subject.stored === null || assembled.row === null) {
+    return {
+      ok: false,
+      reason: "draft_moved",
+      detail:
+        "Este estudio ya no tiene un borrador canónico guardado, así que no hay categorías que revisar. Vuelve a cargar la pantalla.",
+    };
+  }
+  if (assembled.subject.stored.revision !== reviewedDraftRevision) {
+    return {
+      ok: false,
+      reason: "draft_moved",
+      detail:
+        "El borrador cambió mientras leías. No se registra una revisión de una versión que ya no es la actual: vuelve a cargar la pantalla y míralas otra vez.",
+    };
+  }
+
+  // 3. AND THE DOCUMENT HAS TO STILL DESCRIBE THIS STUDY. A binding that no
+  //    longer matches the registry built from the study's CURRENT results means
+  //    the categories on screen were addressed through a map that has moved, and
+  //    `assemble` has already refused to produce a model for it.
+  if (assembled.subject.bound !== true || assembled.model === null) {
+    return {
+      ok: false,
+      reason: "evidence_moved",
+      detail:
+        "La presentación ya no se resuelve contra los resultados actuales del estudio, así que no está claro qué categorías se estarían revisando. Vuelve a cargar la pantalla.",
+    };
+  }
+
   const groups = assembled.subject.qualitative;
   if (groups.length === 0) {
     return {
@@ -869,8 +1039,16 @@ export async function recordQualitativeSignOff(
         "Esta presentación ya no publica ninguna categoría cualitativa, así que no hay nada que revisar. Vuelve a cargar la pantalla.",
     };
   }
-  const digest = qualitativeEvidenceDigest(groups);
-  if (digest !== assertedDigest) {
+
+  // 4. FRESHNESS, DECIDED BY COMPARING WHAT THE REVIEWER SAW WITH WHAT IS HERE.
+  //
+  // The browser named the groups it was showing, in opaque tokens derived from
+  // those groups' own words. The server mints the same tokens from the groups it
+  // has just read, and the two sets must match exactly. A category added,
+  // removed or renamed moves a token, the sets differ, and the sign-off is
+  // refused — which is the same fact the digest comparison used to establish,
+  // established without the digest ever crossing.
+  if (!qualitativeTokensMatch(groups, groupTokens)) {
     return {
       ok: false,
       reason: "evidence_moved",
@@ -878,6 +1056,14 @@ export async function recordQualitativeSignOff(
         "Las categorías cambiaron mientras las leías, así que no se registra una revisión de algo que no viste. Vuelve a cargar la pantalla y míralas otra vez.",
     };
   }
+
+  // 5. THE DIGEST, DERIVED HERE, FROM WHAT WAS JUST READ.
+  //
+  // This is the value the record is written against, and it exists only on this
+  // side of the wire. There is no parameter on this function, on the Server
+  // Action above it, or on the type the browser calls, by which a caller could
+  // supply, influence or observe it.
+  const digest = qualitativeEvidenceDigest(groups);
 
   const { data, error } = await client.rpc("record_canonical_qualitative_signoff", {
     p_study_id: scope.studyId,
@@ -909,6 +1095,70 @@ export async function recordQualitativeSignOff(
     };
   }
   return { ok: true, reviewedAt: answer.reviewedAt, replayed: answer.created !== true };
+}
+
+/* -------------------------------------------------------------------------- */
+/* the journey pain editor                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Load the pain review queue for the editor screen.
+ *
+ * IT GOES THROUGH `assemble` RATHER THAN READING ON ITS OWN, so the touchpoints
+ * a reviewer is offered are the ones THIS document draws, checked against the
+ * study's current results — and so the editor and the publication screen can
+ * never disagree about which points exist or about how far the review has got.
+ */
+export async function loadJourneyPainEditor(
+  client: SupabaseClient,
+  scope: ComposerScope,
+): Promise<
+  { ok: true; panel: PainReviewPanel } | { ok: false; unavailable: PublicationUnavailable }
+> {
+  const assembled = await assemble(client, scope, {
+    reviewedRevision: null,
+    expectedActiveVersion: null,
+    acknowledged: [],
+  });
+  if (assembled.subject.readRefusal !== null) {
+    return { ok: false, unavailable: unavailable(assembled.subject.readRefusal) };
+  }
+  if (assembled.subject.stored === null || assembled.row === null) {
+    return { ok: false, unavailable: unavailable("no_stored_draft") };
+  }
+  return { ok: true, panel: assembled.pain };
+}
+
+/**
+ * Record one reviewer's decision about one curated pain item.
+ *
+ * IT RE-READS EVERYTHING FIRST, exactly as the sign-off does: the draft, the
+ * study's current results, the resolved document and the curated evidence. The
+ * touchpoints the decision may name are the ones THIS document draws right now,
+ * and the source digest the decision is stored against is computed on this side
+ * from the rows that are here. The browser named an item and a choice; it did
+ * not name the words, the digest, or the offer.
+ */
+export async function recordStoredJourneyPainDecision(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  actorUserId: string,
+  input: PainDecisionInput,
+): Promise<PainDecisionResult> {
+  const assembled = await assemble(client, scope, {
+    reviewedRevision: null,
+    expectedActiveVersion: null,
+    acknowledged: [],
+  });
+  if (assembled.subject.stored === null || assembled.model === null) {
+    return {
+      ok: false,
+      reason: "invalid_scope",
+      detail:
+        "Este estudio todavía no tiene una presentación canónica resuelta, así que no hay puntos de contacto a los que asignar nada.",
+    };
+  }
+  return recordJourneyPainDecision(client, scope, actorUserId, assembled.model, input);
 }
 
 /* -------------------------------------------------------------------------- */

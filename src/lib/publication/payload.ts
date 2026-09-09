@@ -36,6 +36,7 @@
  */
 
 import type { PresentationRenderModel } from "../presentation";
+import type { PainItemState, PainReviewGap } from "./journey-pain-review";
 import type {
   QualitativeCategorySet,
   QualitativeReviewState,
@@ -98,6 +99,31 @@ export type PublicationReviewPayload = {
   history: readonly PublicationHistoryEntry[];
   /** The qualitative categories this document publishes, and who read them. */
   qualitative: QualitativeReviewPanel;
+  /**
+   * The journey pain review: what a person has decided, and what is left.
+   *
+   * A SUMMARY, not the queue. The editor is its own screen and loads the items
+   * itself; this panel carries the counts and the closed gap codes the review
+   * screen needs to say «faltan 12» and to link there. Keeping the whole queue
+   * out of this payload keeps the review screen's own contract small and means
+   * a curated phrase is loaded exactly where somebody is editing it.
+   */
+  pain: PainReviewSummary;
+};
+
+/**
+ * How far the journey pain review has got, as the publication screen says it.
+ *
+ * FINISHED FACTS ONLY: four counts the server made, a closed list of gap codes,
+ * and one boolean. No phrase, no token, no source wording — the review screen
+ * links to the editor rather than reproducing it, and a curated phrase belongs
+ * on the screen where somebody is deciding about it.
+ */
+export type PainReviewSummary = {
+  applicable: boolean;
+  complete: boolean;
+  gaps: readonly PainReviewGap[];
+  counts: Record<PainItemState, number>;
 };
 
 /**
@@ -108,27 +134,56 @@ export type PublicationReviewPayload = {
  * «pending», which is what this replaced.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * THE DIGEST DOES CROSS, AND IT IS THE ONE THAT MAY.
+ * NO DIGEST CROSSES. IT USED TO, AND THAT WAS THE DEFECT.
  *
- * Every other digest in this unit stays on the server: a definition digest and
- * a binding fingerprint are about STORAGE, and a browser holding one is a
- * browser one step from naming a row. This one is a SHA-256 of category labels
- * a client is already shown in the term cloud — it discloses nothing that is
- * not on the page beneath it.
+ * The first version of this panel carried the qualitative evidence digest and
+ * the browser echoed it back to sign off. The argument for it was that the
+ * digest covers only category labels a client is already shown, so it discloses
+ * nothing — which is true, and is not the point. The point is that a sign-off
+ * recorded against a value the browser supplied is a sign-off whose subject the
+ * browser chose, and «the server recomputes and compares» does not change that:
+ * a comparison against an echo is the client's memory checked against itself.
+ * The browser-boundary gate had to be NARROWED to admit that one value, and a
+ * rule with an exception is a rule with a place to hide a second one.
  *
- * It crosses because a sign-off has to be provably about the words that were on
- * screen. The browser echoes it back, the server recomputes it from the study's
- * current results and compares, and a category set that changed between the
- * reading and the click is refused rather than signed.
+ * SO THE DIGEST IS GONE FROM THE WIRE AND FROM THIS TYPE. There is no field for
+ * it, so there is nothing to echo. The server reloads the draft, recomputes the
+ * digest from the study's own current results, and records the sign-off against
+ * THAT — the value it derived, never a value it was handed.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT DOES CROSS IS AN OPAQUE GROUP IDENTITY, AND WHAT IT IS FOR.
+ *
+ * A sign-off still has to be about the groups that were on screen, so each
+ * group carries a short opaque `token`. It is derived from that group's own
+ * label, coding and category list — every one of which is printed in full on
+ * the page beneath it, so it discloses strictly nothing — and it MOVES when
+ * those words move.
+ *
+ * It is an ASSERTION THE SERVER CHECKS, never a value the server keeps. The
+ * server mints the same tokens from what it just read; a submitted set that
+ * does not match exactly means the categories changed between the reading and
+ * the click, and the sign-off is refused rather than recorded. Nothing derived
+ * from a submitted token is ever stored, compared against storage, or written
+ * into a publication record.
  */
+export type QualitativeReviewGroup = QualitativeCategorySet & {
+  /**
+   * The opaque identity of this group's exact words. Echoed to sign off.
+   *
+   * Short, base32, and never hexadecimal — so no scan of a rendered page can
+   * confuse it with a storage digest, and neither can a person reading the
+   * page's source.
+   */
+  token: string;
+};
+
 export type QualitativeReviewPanel = {
   state: QualitativeReviewState;
-  /** The digest of the categories on screen. Echoed back to sign off. */
-  evidenceDigest: string | null;
   /** When the sign-off in force was recorded. Null when there is none. */
   reviewedAt: string | null;
-  /** One entry per bound group: its words, and the blocks that draw them. */
-  groups: readonly QualitativeCategorySet[];
+  /** One entry per bound group: its words, the blocks that draw them, its token. */
+  groups: readonly QualitativeReviewGroup[];
 };
 
 /**
@@ -207,6 +262,8 @@ export type SignOffRefusalReason =
   | "invalid_scope"
   /** The categories changed between the reading and the click. */
   | "evidence_moved"
+  /** The draft moved between the screen and the click. */
+  | "draft_moved"
   | "storage_refused";
 
 export type SignOffResult =
@@ -222,13 +279,16 @@ export type SignOffResult =
 /**
  * Record that a person read one exact set of categories.
  *
- * The digest is an ASSERTION about what was on screen. The server recomputes
- * it from the study's current results and refuses if it has moved, so a
- * sign-off is always about words somebody actually saw.
+ * WHAT IT TAKES IS AN INTENT AND A LIST OF OPAQUE TOKENS, and nothing else.
+ * The draft revision names the review the person was doing; the tokens name the
+ * groups they were looking at. Both are checked against what the server reads
+ * for itself, and the digest the record is written against is derived there —
+ * there is no parameter by which a caller could supply one.
  */
 export type RecordQualitativeSignOff = (
   studyId: string,
-  evidenceDigest: string,
+  reviewedDraftRevision: number,
+  groupTokens: readonly string[],
 ) => Promise<SignOffResult>;
 
 /* -------------------------------------------------------------------------- */

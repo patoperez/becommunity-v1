@@ -64,10 +64,39 @@ export type {
   QualitativeReviewState,
   QualitativeSignOff,
 } from "./qualitative-signoff";
+/**
+ * THE JOURNEY PAIN REVIEW — the vocabulary a reviewer's screen decides in.
+ *
+ * Client-safe: a curated phrase, the source's own stage wording, a count the
+ * projector already made, closed dispositions, and OPAQUE tokens. There is no
+ * field here for a respondent, an identifier, a survey comment, an adjacent
+ * free-text answer or a name — nor for the SHA-256 source digest, which stays
+ * on the server so freshness is decided by comparing two server-computed values
+ * rather than by believing a browser about one.
+ */
+// THE TOKEN AND THE DIGEST ARE NOT HERE, AND THAT IS THE SAME BOUNDARY.
+// `./journey-pain-digest` imports the product's SHA-256 from under
+// `canonical-commit`. Server modules and offline gates import it directly.
+export { PAIN_GAP_DETAIL, PAIN_REVIEW_LIMITS, PAIN_STATE_LABEL } from "./journey-pain-review";
+export type {
+  PainDecisionInput,
+  PainDecisionRefusalReason,
+  PainDecisionResult,
+  PainDisposition,
+  PainItemState,
+  PainReviewGap,
+  PainReviewItem,
+  PainReviewPanel,
+  PainTouchpointChoice,
+  RecordJourneyPainDecision,
+} from "./journey-pain-review";
+
 export { structuralDifference } from "./difference";
 
 export type {
+  PainReviewSummary,
   PreviewPublicationUnderSelection,
+  QualitativeReviewGroup,
   QualitativeReviewPanel,
   RecordQualitativeSignOff,
   SignOffRefusalReason,

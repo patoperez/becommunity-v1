@@ -70,7 +70,7 @@ console.log(`  postgrest binary: ${BINARY}`);
 let exitCode = 1;
 
 await withDisposableDatabase(target, "localstack", async (db) => {
-  console.log("\n[stack] applying the bootstrap and migrations 0000-0031");
+  console.log("\n[stack] applying the bootstrap and migrations 0000-0032");
   psqlSuiteTransport(db).prepare();
 
   console.log("[stack] starting PostgREST and the /rest/v1 path shim");

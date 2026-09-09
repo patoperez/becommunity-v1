@@ -19,5 +19,15 @@ import "server-only";
  * integration is separately authorized. The application still reads through
  * `src/lib/dashboard/view.ts`.
  */
-export { loadCanonicalResultSource, loadCanonicalStudyResults } from "./adapter";
+export {
+  loadCanonicalResultSource,
+  loadCanonicalStudyResults,
+  loadCuratedPainReviewEvidence,
+} from "./adapter";
 export type { LoadCanonicalSourceParams } from "./adapter";
+export type {
+  CuratedPainEvidence,
+  CuratedPainRow,
+  CuratedPainStageLink,
+  CuratedStageRow,
+} from "./curated-review";

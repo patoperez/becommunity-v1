@@ -55,6 +55,16 @@ export const studioStudyConstruction = (studyId: string) => `/studio/e/${studyId
  * invisible.
  */
 export const studioStudyReview = (studyId: string) => `/studio/e/${studyId}/revision`;
+/**
+ * The journey pain editor (Unit 6B.4B2C).
+ *
+ * INSIDE the review's own segment, and declared immediately after it, because
+ * it is a part of that review rather than a sixth process step: a person opens
+ * it from the review, decides, and comes back. It is deliberately NOT in the
+ * study's process navigation — adding a step there would tell every study it
+ * has journey pain material, and most do not.
+ */
+export const studioStudyJourneyPain = (studyId: string) => `/studio/e/${studyId}/revision/dolor`;
 export const studioStudyPreview = (studyId: string) => `/studio/e/${studyId}/vista-cliente`;
 export const studioStudyPublish = (studyId: string) => `/studio/e/${studyId}/publicar`;
 

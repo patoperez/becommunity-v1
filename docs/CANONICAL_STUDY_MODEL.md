@@ -398,6 +398,116 @@ review surface will report every study's categories as reviewed by nobody, which
 will be true again. **Publications survive** — dropping the record of what the
 qualitative state was does not unpublish anything and must not.
 
+## Migration 0032: the journey pain review
+
+`0032_canonical_journey_pain_review.sql` is the seventh canonical migration, and
+like `0031` it is **applied to no project**. It creates ONE table and THREE
+functions, alters no existing table, drops nothing, rewrites no row, and changes
+no policy, grant or function outside its own objects.
+
+**In particular it does not touch `public.pain_point`** — no column, no
+constraint, no trigger, no grant, and no foreign key pointing at it.
+
+### Why a person decides, and why no code may
+
+The approved dashboard draws a cloud of journey pain phrases and a badge on each
+touchpoint that carries one. Neither is derivable, and that was **measured**
+against the hosted project rather than argued (read-only, 2026-09-09):
+
+| fact | value |
+|---|---|
+| curated stage labels matching a canonical `survey_item.label` | **0 of 18** |
+| matching the workbook's short label row | 6 of 18 |
+| matching the bracketed text inside the prompt | 5 of 18 |
+| `journey_stage_evidence_link` rows | **0** |
+| `pain_point` rows, all `review_status = 'pending'` | 50 |
+
+Three defensible readings of the same two sources give three different answers,
+which is itself the proof that label identity is not an authority. Beyond that,
+«Reunión semanal presencial/en línea» is ONE curated stage over TWO touchpoints,
+and «BNI Connect» is ambiguous between the web platform and the phone app while
+«App celular» names that same app. The approved demo resolves all of it with a
+38-entry hand-written alias table and a phrase-splitting rule; both are
+implementation, and neither is copied.
+
+### The table
+
+`canonical_journey_pain_decision` is an **append-only log**, and the newest row
+per `(study_id, item_key)` is the decision in force. A reviewer who approves a
+phrase, changes its wording and approves it again has made three decisions and
+the third is the one that counts — which a log can say and a single row cannot.
+
+It identifies its source item by an **opaque token** — `painItemToken` in
+`src/lib/publication/journey-pain-digest.ts`, derived from the study and the row
+together — and **not** by a foreign key into `pain_point`. Three consequences,
+all of them wanted:
+
+1. this table cannot cascade-delete, lock or otherwise reach a canonical row, so
+   a presentation decision can never be the reason canonical evidence changes;
+2. a re-import that mints different rows moves every token, every stored
+   decision stops matching an item, and the review **reopens** — visibly, rather
+   than silently re-attaching a person's approval to a phrase they never read;
+3. the configuration outlives a canonical row's identity without pretending to be
+   a fact about it.
+
+Two CHECK constraints carry the completion rule into the database: an approval
+must have BOTH a public phrase and at least one touchpoint, and anything that is
+not an approval may have neither.
+
+### What a row may hold, and what it may never hold
+
+An opaque item token, a SHA-256 of the source words the decision was made about,
+a closed disposition, the public phrase a reviewer approved or edited, the
+opaque presentation handles they chose, an optional short reason, and who
+decided and when.
+
+Never a respondent, never a respondent identifier, never a survey comment, never
+an adjacent free-text answer, never a name. `pain_point` carries no respondent
+column in any shape — its provenance is a workbook cell, through
+`visual_annotation` — so there is nothing of that kind on the path in the first
+place, and no column here that could receive one if there were.
+
+### The source digest, and what it deliberately excludes
+
+`painSourceDigest` covers the item token, the curated phrase, the source stage
+wording and the source review status. It excludes the **occurrence count**, for
+the identical reason `qualitativeEvidenceDigest` excludes counts: another
+workbook cell repeating a phrase somebody already approved adds no word to read,
+and expiring the decision for it would make the review go stale on almost every
+import for a reason nobody could act on.
+
+It is computed on the server, stored, and compared against a fresh recomputation
+on every load. It never crosses to a browser. What a browser is shown instead is
+`sourceVersion`, five bytes of it in base32 — enough to SEE that an item moved,
+never enough to assert that it did not.
+
+### Least privilege
+
+`grant select` and nothing else to `service_role`; RLS and FORCE RLS;
+`deny_browser_roles` for `anon` and `authenticated`; the write path is
+`SECURITY DEFINER` with `search_path = ''`, authorizes the actor before reading
+anything, derives the tenant from the study row, and takes
+`pg_advisory_xact_lock` on the study before the first read a decision depends on.
+`decided_by` is a **bare uuid**, for the reason `0030` and `0031` record.
+
+The function does NOT validate a mapping against the presentation, and cannot:
+touchpoint handles are a presentation-layer vocabulary derived from the study's
+canonical results by code, and the database has no way to compute one. The
+application checks every handle against the offer IT built before calling, and
+the publication preflight checks the whole set again against the resolved
+document — so a handle that stops existing is reported as `unknown_touchpoint`
+and blocks publication rather than being stored wrong.
+
+### The rollback
+
+`supabase/rollbacks/0032_drop_canonical_journey_pain_review.sql`. It destroys
+every journey pain decision, said plainly: each row is a named person approving,
+excluding or deliberately leaving unresolved one curated phrase, there is no
+other copy, and after it every study's review reopens from nothing.
+**Publications survive and keep their phrases** — a publication stores the
+resolved render model, so approved phrases inside an already-published snapshot
+are bytes in `canonical_presentation_revision` and are not reachable from there.
+
 ## Security boundary
 
 All 36 new tables — 18 in `0026`, 16 in `0027` and 2 in `0028` — are

@@ -171,6 +171,60 @@ export type PublicationBlockerCode =
    * which are in the sentence. Neither is a checkbox.
    */
   | "required_content_missing"
+  /**
+   * The journey pain review is not finished, and the layout requires it.
+   *
+   * SEPARATE FROM `required_content_missing`, AND THE SENTENCE IS WHY. That one
+   * says «this block is empty; write it or remove it». This one says WHICH of
+   * five things is unfinished — items nobody decided, an approved phrase with no
+   * public wording, an approved phrase mapped to no touchpoint, a decision about
+   * words that have since changed, or a mapping pointing at a touchpoint the
+   * document no longer draws — and every one of them is a different action by a
+   * different person. Folding them into one sentence would tell a reviewer to go
+   * and do something without saying what.
+   *
+   * It is likewise NOT ACKNOWLEDGEABLE. «Entiendo que la nube saldrá a medias»
+   * is not a decision anybody approved: a cloud built from half a queue is not a
+   * smaller version of the approved experience, it is a different one, and the
+   * number beneath it would be quoted.
+   */
+  | "journey_pain_review_incomplete"
+  /**
+   * The journey pain review is not finished, and the layout requires it.
+   *
+   * SEPARATE FROM `required_content_missing`, AND THE SENTENCE IS WHY. That one
+   * says «this block is empty; write it or remove it». This one says WHICH of
+   * five things is unfinished — items nobody decided, an approved phrase with no
+   * public wording, an approved phrase mapped to no touchpoint, a decision about
+   * words that have since changed, or a mapping pointing at a touchpoint the
+   * document no longer draws — and every one of them is a different action by a
+   * different person. Folding them into one sentence would tell a reviewer to go
+   * and do something without saying what.
+   *
+   * It is likewise NOT ACKNOWLEDGEABLE. «Entiendo que la nube saldrá a medias»
+   * is not a decision anybody approved: a cloud built from half a queue is not a
+   * smaller version of the approved experience, it is a different one, and the
+   * number beneath it would be quoted.
+   */
+  | "journey_pain_review_incomplete"
+  /**
+   * The journey pain review is not finished, and the layout requires it.
+   *
+   * SEPARATE FROM `required_content_missing`, AND THE SENTENCE IS WHY. That one
+   * says «this block is empty; write it or remove it». This one says WHICH of
+   * five things is unfinished — items nobody decided, an approved phrase with no
+   * public wording, an approved phrase mapped to no touchpoint, a decision about
+   * words that have since changed, or a mapping pointing at a touchpoint the
+   * document no longer draws — and every one of them is a different action by a
+   * different person. Folding them into one sentence would tell a reviewer to go
+   * and do something without saying what.
+   *
+   * It is likewise NOT ACKNOWLEDGEABLE. «Entiendo que la nube saldrá a medias»
+   * is not a decision anybody approved: a cloud built from half a queue is not a
+   * smaller version of the approved experience, it is a different one, and the
+   * number beneath it would be quoted.
+   */
+  | "journey_pain_review_incomplete"
 
   /* -------- UNAUTHORIZED, and the state of the world -------- */
   | "not_authorized"

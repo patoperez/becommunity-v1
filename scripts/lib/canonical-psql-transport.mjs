@@ -248,7 +248,7 @@ export function psqlSuiteTransport(db, journal) {
      * apply, because a migration edited for the test would prove the edit, not
      * the migration.
      */
-    prepare(upTo = 31) {
+    prepare(upTo = 32) {
       db.applyFile(join(LIB, "disposable-bootstrap.sql"));
       for (const name of MIGRATION_FILES) {
         const number = Number(name.slice(0, 4));

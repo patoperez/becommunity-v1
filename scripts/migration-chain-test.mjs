@@ -305,6 +305,14 @@ const CANONICAL_ORDER = [
   // `publish_canonical_presentation` stays byte-identical applied history;
   // 0031 wraps it rather than rewriting it.
   "canonical_qualitative_signoff",
+  // Unit 6B.4B2C. The journey pain review: a person's decisions about which
+  // curated phrases this study publishes, in what public wording, at which
+  // canonical touchpoints. Last because it presupposes the presentation draft
+  // it configures and the publication it unblocks, and additive to all of them:
+  // it creates one table and three functions, alters no existing table and — in
+  // particular — never touches `pain_point`, which it identifies only by an
+  // opaque derived token and never by a foreign key.
+  "canonical_journey_pain_review",
 ];
 
 /**

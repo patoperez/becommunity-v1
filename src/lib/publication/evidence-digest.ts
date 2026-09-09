@@ -32,6 +32,7 @@
  */
 
 import { sha256Hex } from "../ingestion/canonical-commit/sha256";
+import { opaqueIdentity } from "./opaque";
 import type {
   QualitativeCategorySet,
   QualitativeReviewState,
@@ -84,4 +85,69 @@ export function qualitativeReviewState(
   if (sets.length === 0) return "not_applicable";
   if (signOff === null) return "pending";
   return signOff.evidenceDigest === qualitativeEvidenceDigest(sets) ? "current" : "stale";
+}
+
+
+/**
+ * The opaque identity of ONE group's exact words.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT IT IS FOR, AND WHY IT IS NOT THE EVIDENCE DIGEST.
+ *
+ * A sign-off has to be about the groups that were on screen, so a reviewer's
+ * browser has to be able to say WHICH ONES. It says it with these: short,
+ * base32, derived from the group's own label, coding and ordered category and
+ * excluded labels — every one of which is printed in full on the page beneath
+ * it, so a token discloses strictly nothing.
+ *
+ * IT IS NOT AND MUST NOT BECOME THE EVIDENCE DIGEST. Three differences, and
+ * each of them is load-bearing:
+ *
+ *   * it is PER GROUP, so it can never stand for the whole set a sign-off is
+ *     recorded against;
+ *   * it is NOT HEXADECIMAL, so the browser boundary needs no exception for it
+ *     — the rule is «no 64-hex value crosses», with no allowance, again;
+ *   * and it is CHECKED, NEVER KEPT. The server mints the same tokens from the
+ *     categories it just read and compares the sets; nothing derived from a
+ *     submitted token is stored, compared against storage, or written into a
+ *     publication record. What is recorded is `qualitativeEvidenceDigest` over
+ *     the server's own read.
+ *
+ * The seed is domain-separated from the evidence digest's, so the two can never
+ * be derived from one another even by accident.
+ */
+export function qualitativeGroupToken(set: QualitativeCategorySet): string {
+  const UNIT = "\u001f";
+  const RECORD = "\u001e";
+  return opaqueIdentity(
+    "q",
+    [
+      "qualitative-group-v1",
+      set.groupLabel,
+      set.coding,
+      set.categories.join(UNIT),
+      set.excluded.join(UNIT),
+    ].join(RECORD),
+    5,
+  );
+}
+
+/**
+ * Do these submitted tokens name EXACTLY the groups the server just read?
+ *
+ * Set equality, both directions, and duplicates collapse. A submitted set that
+ * is missing a group means the reviewer did not see one that is bound now; a
+ * submitted set with an extra means they saw one that is not. Either way the
+ * categories moved between the reading and the click, and a sign-off about the
+ * words on a screen nobody is looking at any more is not recorded.
+ */
+export function qualitativeTokensMatch(
+  sets: readonly QualitativeCategorySet[],
+  submitted: readonly string[],
+): boolean {
+  const expected = new Set(sets.map((set) => qualitativeGroupToken(set)));
+  const given = new Set(submitted);
+  if (expected.size !== given.size) return false;
+  for (const token of expected) if (!given.has(token)) return false;
+  return true;
 }

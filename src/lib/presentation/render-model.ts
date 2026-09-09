@@ -196,6 +196,19 @@ export type RenderRoute = {
   points: RenderRoutePoint[];
 };
 
+/**
+ * The approved journey-pain phrases one touchpoint carries.
+ *
+ * AUTHORED, NOT MEASURED, and both fields are finished. `phrases` is what a
+ * named reviewer approved and mapped here — their own public wording, never a
+ * source row's text — and `count` is how many approved source items they mapped,
+ * counted on the server. A component draws these and counts nothing.
+ */
+export type RenderPainBadge = {
+  phrases: string[];
+  count: number;
+};
+
 /** One touchpoint as a route draws it. */
 export type RenderRoutePoint = {
   handle: string;
@@ -206,6 +219,15 @@ export type RenderRoutePoint = {
   processUnawareness: RenderValue | null;
   base: ResponseContext | null;
   absence: RenderAbsence | null;
+  /**
+   * The approved pain phrases mapped here, or null when nobody mapped any.
+   *
+   * NULL AND AN EMPTY BADGE ARE THE SAME PICTURE and only one of them may be
+   * produced: a point nobody mapped carries `null`, and a badge is drawn only
+   * for a point somebody chose. There is no state in which this is present and
+   * empty, so a renderer never has to decide what an empty badge means.
+   */
+  pain: RenderPainBadge | null;
 };
 
 /** What a block actually carries, by shape. */

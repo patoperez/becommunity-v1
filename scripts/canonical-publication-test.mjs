@@ -211,6 +211,13 @@ const healthy = (over = {}) => ({
   },
   lastPublished: null,
   qualitative: [],
+  // A HEALTHY SUBJECT HAS NOTHING LEFT TO DECIDE ABOUT ITS PAIN QUEUE. Whether
+  // the study HAS one is a separate fact from whether it is finished, and the
+  // baseline says «no material», so a single field can be varied at a time in
+  // §[16] without every other assertion changing meaning.
+  painApplicable: false,
+  painGaps: [],
+  painContentRequired: false,
   expectedActiveVersion: null,
   actualActiveVersion: null,
   structureChanged: false,

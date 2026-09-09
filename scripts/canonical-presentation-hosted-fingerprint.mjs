@@ -370,6 +370,84 @@ for (const [table, what] of [
 }
 
 /* -------------------------------------------------------------------------- */
+console.log("\n[3b] Migrations 0031 and 0032 are NOT applied there, and their storage is absent");
+
+/*
+ * THE MIRROR THE OTHER WAY ROUND, AND IT IS THE ONE THIS UNIT NEEDS.
+ *
+ * §[3] above asserts that 0030's storage EXISTS, because it was applied. `0031`
+ * (the qualitative sign-off) and `0032` (the journey pain review) are authored
+ * and applied to NO project, so the finding worth catching here is a table that
+ * has APPEARED — which would mean somebody applied a migration this line of
+ * work has not authorized.
+ *
+ * WHEN EITHER IS APPLIED, THIS SECTION IS INVERTED RATHER THAN DELETED, exactly
+ * as §[3] was on 2026-09-09: a target that has LOST the storage is as much a
+ * finding as one that gained it unexpectedly, and the only moment a check
+ * nobody has seen fail can be shown to work is immediately after the change
+ * that flips it.
+ *
+ * A CONTROL COMES FIRST. `pain_point` is a canonical table that IS there, read
+ * through the same client, so «not found» below is known to mean absence rather
+ * than a broken read.
+ */
+{
+  const control = await client.from("pain_point").select("id").limit(1);
+  check(
+    control.error === null,
+    `a canonical table that IS there reads cleanly, so an absence below means something${control.error ? ` — ${control.error.code}` : ""}`,
+  );
+}
+for (const [table, migration] of [
+  ["canonical_qualitative_signoff", "0031"],
+  ["canonical_publication_qualitative_signoff", "0031"],
+  ["canonical_journey_pain_decision", "0032"],
+]) {
+  const { error } = await client.from(table).select("study_id").limit(1);
+  const absent = error !== null;
+  record.present[table] = absent ? `absent (${error.code})` : "PRESENT";
+  check(
+    absent,
+    `${table} is absent, so ${migration} is not applied${absent ? "" : " — IT IS THERE. A migration was applied that this unit did not authorize. Stop and investigate."}`,
+  );
+}
+
+/*
+ * AND NEITHER MIGRATION'S FUNCTIONS ARE EXPOSED.
+ *
+ * A table can be dropped and leave a function behind, and a function is the
+ * thing that could actually write — so the two are asserted separately. Read
+ * out of the API description, never called, for the reason §[3] records: this
+ * file contains no `.insert(`, `.upsert(`, `.delete(` or `.rpc(` at all, and an
+ * unmatched call would still be a call.
+ */
+{
+  const description = await fetch(target.restUrl, {
+    headers: { apikey: target.serviceKey, Authorization: `Bearer ${target.serviceKey}` },
+  });
+  check(description.ok, `the API description reads again (${description.status})`);
+  const paths = description.ok ? Object.keys((await description.json())?.paths ?? {}) : [];
+  check(
+    paths.includes("/rpc/save_canonical_presentation_draft"),
+    "and still lists a function that IS there, so the absences below are not an empty answer",
+  );
+  for (const fn of [
+    "record_canonical_qualitative_signoff",
+    "publish_canonical_presentation_with_qualitative",
+    "read_canonical_qualitative_signoffs",
+    "record_canonical_journey_pain_decision",
+    "read_canonical_journey_pain_decisions",
+  ]) {
+    const present = paths.includes(`/rpc/${fn}`);
+    record.present[fn] = present ? "PRESENT" : "absent";
+    check(
+      !present,
+      `${fn} is not exposed${present ? " — IT IS THERE. Stop and investigate." : ""}`,
+    );
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 console.log("\n[4] The canonical and legacy row counts");
 
 const COUNTED = [

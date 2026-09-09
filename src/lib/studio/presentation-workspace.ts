@@ -543,7 +543,34 @@ export { encodePresentationForStorage } from "@/lib/presentation/server";
  * and `encodePresentationForStorage` are here for exactly the same reason. One
  * import statement, one path, one door.
  */
-export { qualitativeEvidenceDigest, qualitativeReviewState } from "@/lib/publication/evidence-digest";
+export {
+  qualitativeEvidenceDigest,
+  qualitativeGroupToken,
+  qualitativeReviewState,
+  qualitativeTokensMatch,
+} from "@/lib/publication/evidence-digest";
+/**
+ * THE JOURNEY-PAIN IDENTITIES AND DIGESTS, re-exported for the same reason.
+ *
+ * `src/lib/publication/journey-pain-digest.ts` mints an item token and hashes
+ * the source words with the same SHA-256, so importing it directly from
+ * `publication-workspace.ts` would give that module its own edge into the
+ * canonical graph — exactly what the evidence digest above was moved here to
+ * avoid. One import statement, one path, one door.
+ */
+export { painItemToken, painSourceDigest, painSourceVersion } from "@/lib/publication/journey-pain-digest";
+/**
+ * THE CURATED PAIN EVIDENCE READER, likewise, and it is the one that matters
+ * most: it is a genuine canonical read, so it MUST arrive through the declared
+ * loader rather than through an edge of the publication module's own.
+ *
+ * It is a separate read from `loadCanonicalResultSource` and adds nothing to
+ * it: the canonical read model still excludes `pain_point`'s text columns, the
+ * results contract does not move, and golden parity is untouched. What it adds
+ * is the internal editorial read a named reviewer needs in order to decide.
+ */
+export { loadCuratedPainReviewEvidence } from "@/lib/canonical-source/server";
+export type { CuratedPainEvidence } from "@/lib/canonical-source/server";
 
 /**
  * SHA-256 over the canonical, key-sorted serialization of a render model.

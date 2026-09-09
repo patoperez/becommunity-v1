@@ -69,6 +69,7 @@ import {
   type PresentationOutcome,
 } from "./errors";
 import { handleFacet, type PresentationHandle } from "./handles";
+import type { JourneyPainContent } from "./journey-pain";
 import type { RegistryEntry, ResponseContext } from "./catalog";
 import type { CanonicalAddress, CanonicalPresentationRegistry } from "./registry";
 import type {
@@ -82,6 +83,7 @@ import type {
   RenderMeasure,
   RenderMethodology,
   RenderPage,
+  RenderPainBadge,
   RenderPayload,
   RenderRoute,
   RenderRoutePoint,
@@ -145,6 +147,21 @@ export type ResolveInput = {
    * identical" true by construction rather than by comparison.
    */
   viewer?: ResolveViewerInput;
+  /**
+   * The journey-pain decisions a named person made, already finished.
+   *
+   * OMITTED IS THE NORMAL CASE and means «nobody has authored this», which
+   * resolves the pain slot as `configuration_required` and draws no badge —
+   * exactly what happened before this input existed, so every document already
+   * saved resolves to the same bytes it always did.
+   *
+   * It is CONTENT, not a rule: the caller has already loaded the reviewer's
+   * decisions, checked them against the source they were made about, and
+   * refused to supply anything at all unless the review is complete. Nothing
+   * here infers a mapping, and nothing here decides whether the review is good
+   * enough to publish.
+   */
+  journeyPain?: JourneyPainContent;
 };
 
 /**
@@ -895,6 +912,7 @@ export function resolvePresentation(input: ResolveInput): PresentationOutcome<Pr
         // sentence. `null` here is the signal to refuse, not to guess.
         panelResults: block.kind === "filter_panel" ? panelResultsFor(block.id) : null,
         movesBlocks: block.kind === "filter_panel" ? movesBlocks.get(block.id) ?? 0 : 0,
+        journeyPain: input.journeyPain ?? null,
       });
       if (rendered) renderedBlocks.push(reconcileSampleDisplay(rendered, policy));
     }
@@ -942,6 +960,16 @@ type BlockContext = {
   panelResults: CanonicalStudyResults | null;
   /** For a filter panel: how many blocks it moves. */
   movesBlocks: number;
+  /**
+   * The journey-pain content a person authored, or null when nobody has.
+   *
+   * IT IS NOT AFFECTED BY THE VIEWER SELECTION, and deliberately. A filter is a
+   * cut of the MEASURED population; an approved editorial phrase is not a
+   * measurement of anybody and has no respondents to cut. Recomputing it under
+   * a selection would mean inventing which of a consultant's sentences a
+   * generation said, which nothing in the study records.
+   */
+  journeyPain: JourneyPainContent | null;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1088,6 +1116,32 @@ function reconcileSampleDisplay(block: RenderBlock, policy: SampleDisplayPolicy)
   };
 }
 
+/**
+ * The contract's own key for the editorial slot a pain review fills.
+ *
+ * Declared here rather than imported from the results contract's builder,
+ * because it is the ONE requirement this layer treats specially and the
+ * relationship deserves a name in the file that acts on it. A key that stopped
+ * existing would make the slot resolve as `configuration_required` again, which
+ * is the safe direction, and §[16] of the offline gate pins the two together so
+ * the drift is reported rather than silently tolerated.
+ */
+const JOURNEY_PAIN_REQUIREMENT_KEY = "curated_journey_pain_cloud";
+
+/**
+ * The approved pain badge for one touchpoint, or null when nobody mapped it.
+ *
+ * A LOOKUP, NOT A MATCH. The only thing consulted is the handle a reviewer
+ * explicitly chose; no label is compared, no string is normalized, and no
+ * position is consulted. An empty badge is never produced — see
+ * `RenderRoutePoint.pain`.
+ */
+function painFor(context: BlockContext, handle: PresentationHandle): RenderPainBadge | null {
+  const entry = context.journeyPain?.byTouchpoint.get(handle);
+  if (!entry || entry.phrases.length === 0) return null;
+  return { phrases: [...entry.phrases], count: entry.count };
+}
+
 function resolveBlock(context: BlockContext): RenderBlock | null {
   const { block, path, policy, level, byHandle, registry, results, errors } = context;
 
@@ -1193,6 +1247,24 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
   if (block.kind === "editorial") {
     let availability: PresentationAvailability = "available";
     let payload: RenderPayload = { shape: "editorial", body: block.content?.body ?? null, absence: null };
+    /**
+     * WHICH DRAWING AN EDITORIAL BLOCK GETS, and why one of them is not
+     * `narrative`.
+     *
+     * `narrative` draws prose, and it is the right answer for every editorial
+     * block including an empty slot — an empty one draws the contract's
+     * «esto lo escribe una persona» sentence. But an authored pain slot no
+     * longer carries prose: it carries counted terms, and `Narrative` returns
+     * null for a payload it does not recognise, which is a heading over a
+     * blank. The variant follows the PAYLOAD SHAPE, which is the same rule the
+     * renderer registry is built on.
+     *
+     * It is decided here rather than authored because an editorial block has no
+     * `chartVariant` field to author — adding one would move every stored
+     * document's bytes for a value that means nothing on the other editorial
+     * blocks in the same layout.
+     */
+    let variant: ChartVariant = "narrative";
     if (block.slot !== null) {
       const entry = byHandle.get(block.slot);
       if (!entry) {
@@ -1207,15 +1279,56 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
         // The contract says a human supplies this and nobody has yet. That is a
         // STATE, reported honestly — never invented, never quietly dropped.
         const address = registry.addresses.get(block.slot);
-        const resolved = address ? payloadFor(address, results, entry, policy, block.displayFormat, spell) : null;
-        payload = resolved ?? { shape: "editorial", body: null, absence: null };
-        availability = "configuration_required";
+        // ── UNLESS A PERSON AUTHORED IT, AND THIS IS THE SLOT THEY AUTHORED.
+        //
+        // The pain cloud is the one editorial slot with a real authoring
+        // surface behind it. The caller supplies `journeyPain` only after it has
+        // loaded a reviewer's decisions AND found the review complete against
+        // the source they were made about; there is no path by which partial or
+        // stale decisions arrive here. So when it is supplied, this slot stops
+        // waiting for a human — a human came.
+        //
+        // MATCHED ON THE REQUIREMENT'S OWN KEY, never on the handle. The handle
+        // is built from the requirement's section and kind and would collide
+        // with any future editorial slot in the qualitative section; the key is
+        // the contract's own identity for this requirement.
+        const requirement =
+          address && address.at === "configuration.requirement"
+            ? results.configurationRequired[address.requirementIndex]
+            : undefined;
+        if (
+          context.journeyPain !== null &&
+          requirement !== undefined &&
+          requirement.key === JOURNEY_PAIN_REQUIREMENT_KEY
+        ) {
+          payload = {
+            shape: "terms",
+            total: context.journeyPain.total,
+            terms: context.journeyPain.terms.map((term) => ({
+              label: term.label,
+              count: term.count,
+              // NO SHARE, AND THAT IS NOT AN OMISSION. A share is a proportion
+              // of a measured base, and these phrases are editorial content
+              // approved by a consultant — there is no population that said
+              // them. Printing `count / total` as a percentage would spell an
+              // opinion as a statistic.
+              share: null,
+            })),
+            excluded: [],
+          };
+          availability = "available";
+          variant = "word_cloud";
+        } else {
+          const resolved = address ? payloadFor(address, results, entry, policy, block.displayFormat, spell) : null;
+          payload = resolved ?? { shape: "editorial", body: null, absence: null };
+          availability = "configuration_required";
+        }
       }
     }
     return {
       ...shell,
       semantic: "editorial_slot",
-      chartVariant: block.kind === "editorial" ? "narrative" : null,
+      chartVariant: variant,
       availability,
       provenance: "editorial",
       payload,
@@ -1304,6 +1417,11 @@ function resolveBlock(context: BlockContext): RenderBlock | null {
           processUnawareness: spell(guardedTdp.value),
           base,
           absence: guarded.absence,
+          // THE BADGE, IF A PERSON PUT ONE HERE. Read by handle from the index
+          // the caller already built, so a point carries a badge only because a
+          // named reviewer chose that point — never because a label looked
+          // similar, a position lined up, or a workbook listed them in order.
+          pain: painFor(context, handle),
         });
       });
 

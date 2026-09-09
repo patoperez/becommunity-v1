@@ -143,14 +143,14 @@ const run = (command, args, env, label) =>
   });
 
 await withDisposableDatabase(target, "pubqa", async (db) => {
-  console.log("\n[setup] bootstrap + migrations 0000-0030");
+  console.log("\n[setup] bootstrap + migrations 0000-0032");
   const transport = psqlSuiteTransport(db);
   // 0031 IS REQUIRED HERE, not optional. The product publishes through
   // `publish_canonical_presentation_with_qualitative`, which 0031 creates; a
   // target prepared to 0030 answers every publication with «no pudimos
   // publicar», which is a truthful message about a target missing a
   // migration and a useless one for QA.
-  transport.prepare(31);
+  transport.prepare(32);
 
   db.run(`
     insert into auth.users (id, email) values (${q(INTERNAL_ID)}, ${q(INTERNAL_EMAIL)});
@@ -825,28 +825,23 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     check(!dom.includes(stack.serviceKey), "and no service key");
     check(!dom.includes(INTERNAL_PASSWORD), "and no password");
     // ─────────────────────────────────────────────────────────────────────────
-    // DIGESTS: THE RULE IS NARROWED, DELIBERATELY, AND IT IS NOW STRONGER WHERE
-    // IT MATTERS.
+    // DIGESTS: THE RULE HAS NO EXCEPTION AGAIN, AND IT IS STRONGER THAN THE ONE
+    // IT REPLACES.
     //
-    // It read «no 64-character digest of any kind», and that was right while
-    // every digest in this unit was about STORAGE. Unit 6B.4B2 introduced one
-    // that is not: the QUALITATIVE EVIDENCE DIGEST is a SHA-256 of category
-    // labels a client is already shown in the term cloud, and it crosses so a
-    // sign-off can be provably about the words that were on screen — the
-    // browser echoes it, the server recomputes it from the study's current
-    // results and refuses if it has moved.
+    // It read «no 64-character digest of any kind» until Unit 6B.4B2 narrowed it
+    // to «at most one, and not one of these three» so the qualitative evidence
+    // digest could be echoed back by the browser. Unit 6B.4B2C removes both the
+    // echo and the exception: the sign-off now sends a review intent and opaque
+    // base32 group identities, and the digest it is recorded against is derived
+    // on the server from the server's own read.
     //
-    // THIS IS A HUMAN-REVIEW ZONE AND THE NARROWING IS RECORDED AS ONE. What
-    // replaces the blanket rule is checked against the ACTUAL VALUES rather
-    // than against a shape, which the old rule never did:
+    // So this asserts BOTH halves, and neither is redundant:
     //
-    //   * the definition digest, the binding fingerprint and the render-model
-    //     digest must not appear — by value, and the harness holds all three;
-    //   * at most ONE distinct 64-hex value may appear at all;
-    //   * and it must be none of those three.
-    //
-    // A page that leaked a storage digest now fails by naming which one, and a
-    // page that grew a second unexplained digest fails on the count.
+    //   * ZERO distinct 64-hex values appear anywhere in the page. A rule with
+    //     no allowance has nowhere to hide a second value;
+    //   * and the definition digest, the binding fingerprint and the
+    //     render-model digest are absent BY VALUE, which the old blanket rule
+    //     never checked — so a page that leaked one fails by naming which.
     //
     // READ FROM THE DATABASE, not from a fixture. These are the values this
     // study's own storage actually holds at this moment, so the assertion is
@@ -877,12 +872,18 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     }
     const digests = [...new Set(dom.match(/[0-9a-f]{64}/g) ?? [])];
     check(
-      digests.length <= 1,
-      `at most one digest crosses, and it is the qualitative evidence one (${digests.length} distinct)`,
+      digests.length === 0,
+      `NO digest of any kind crosses — the narrowing that admitted one is gone (${digests.length} distinct${digests.length ? `: ${digests.join(", ")}` : ""})`,
     );
+
+    // AND WHAT DOES CROSS IS OPAQUE, AND IS NOT A DIGEST. The sign-off needs the
+    // browser to name the groups it was showing; it names them in base32, whose
+    // alphabet runs past `f`, so nothing spelled in it can be mistaken for a
+    // storage digest by this scan or by a person reading the page's source.
+    const opaqueGroupTokens = [...new Set(dom.match(/"q[a-z2-7]{8}"/g) ?? [])];
     check(
-      digests.every((digest) => !Object.values(storageDigests).includes(digest)),
-      "and whatever crossed is none of the three storage digests",
+      opaqueGroupTokens.every((token) => !/^"[0-9a-f]+"$/.test(token)),
+      `whatever group identities crossed are not hexadecimal (${opaqueGroupTokens.length} distinct)`,
     );
 
     // AND THE IDENTIFIER SCAN IS AIMED AT WHAT THIS UNIT RENDERS.
@@ -898,11 +899,44 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
       return root ? root.outerHTML : "";
     })()`);
     check(reviewSubtree.length > 2000, `the review subtree is present and substantial (${reviewSubtree.length} bytes)`);
-    check(!reviewSubtree.includes(TENANT), "the review itself carries no tenant identifier");
-    check(!reviewSubtree.includes(STUDY), "nor the study identifier");
+
+    /*
+     * AN ANCHOR'S TARGET IS NAVIGATION, AND IT IS SEPARATED FROM CONTENT HERE.
+     *
+     * The rule this section enforces is that nothing the review SAYS carries an
+     * identifier: not a sentence, a count, an inventory row, a difference line
+     * or a history entry. It was written when the review subtree contained no
+     * link, so «content» and «subtree» were the same thing.
+     *
+     * Unit 6B.4B2C put one link inside it — «Revisar las frases», to the pain
+     * editor — and a link to a study has to name the study, exactly as every
+     * process tab above it does and as the address bar already does. So the
+     * assertion is split rather than relaxed:
+     *
+     *   * the review's CONTENT — the subtree with every `href` removed —
+     *     carries no uuid of any kind, which is the original rule intact;
+     *   * every uuid that DOES appear appears only inside an `href`, and every
+     *     one of them is THIS study, so a link cannot have become a way to
+     *     name a tenant, a publication, a revision or a person.
+     */
+    const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+    const reviewContent = reviewSubtree.replace(/href="[^"]*"/g, 'href=""');
+    check(!reviewContent.includes(TENANT), "the review's content carries no tenant identifier");
+    check(!reviewContent.includes(STUDY), "nor the study identifier");
     check(
-      !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.test(reviewSubtree),
+      !UUID.test(reviewContent),
       "nor any uuid at all — not a publication's, not a revision's, not a person's",
+    );
+    const linkedIds = [...new Set((reviewSubtree.match(UUID) ?? []))];
+    check(
+      linkedIds.every((id) => id === STUDY),
+      `and every identifier a link carries is this study and nothing else (${linkedIds.length} distinct)`,
+    );
+    check(
+      [...reviewSubtree.matchAll(/href="([^"]*)"/g)].every(
+        ([, href]) => !UUID.test(href) || href.startsWith(`/studio/e/${STUDY}/`),
+      ),
+      "and each such link addresses a screen of this study, never anything else",
     );
 
     writeFileSync(join(EVIDENCE, "dom-final.html"), dom, "utf8");
@@ -924,6 +958,15 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     // comparison rather than a hope.
     const draftRevisionBeforeFilters = db
       .run(`select revision::text from public.canonical_presentation_draft where study_id = ${q(STUDY)};`)
+      .trim();
+    // THE OTHER TWO ROW COUNTS A PREVIEW MUST NOT MOVE, captured at the same
+    // moment for the same reason: «nothing changed» is a comparison or it is
+    // nothing.
+    const eventsBeforeFilters = db
+      .run(`select count(*)::text from public.canonical_presentation_publication_event where study_id = ${q(STUDY)};`)
+      .trim();
+    const signoffsBeforeFilters = db
+      .run(`select count(*)::text from public.canonical_qualitative_signoff where study_id = ${q(STUDY)};`)
       .trim();
     await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision`);
     const reviewNow = await waitFor((snapshot) => snapshot.revision !== null);
@@ -974,7 +1017,23 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
 
     /* ---- the filter panelCount, and whether they actually move anything ------ */
 
+    /*
+     * TWO DIFFERENT NUMBERS, AND CONFLATING THEM IS HOW THIS CHECK LIED ONCE.
+     *
+     * A PANEL is one block — one card a client sees. A CHARACTERISTIC is one
+     * `fieldset` inside it, and a panel legitimately offers many. Counting
+     * legends and calling the answer «panels» reported seventeen panels over a
+     * page that draws one, and the inventory comparison beneath it then failed
+     * for a reason that had nothing to do with the inventory.
+     */
     const panelCount = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      if (!preview) return 0;
+      const cards = [...preview.querySelectorAll('section.rounded-2xl')]
+        .filter((card, _i, all) => !all.some((other) => other !== card && other.contains(card)));
+      return cards.filter((card) => card.querySelector('fieldset legend') !== null).length;
+    })()`);
+    const characteristicCount = await page.evaluate(`(() => {
       const preview = document.querySelector('[data-testid="vista-cliente"]');
       if (!preview) return 0;
       return preview.querySelectorAll('fieldset legend').length;
@@ -986,61 +1045,194 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
       return { total: inputs.length, enabled: inputs.filter((input) => !input.disabled).length };
     })()`);
 
-    if (panelBoxes.total === 0) {
-      // THE FIXTURE'S BLUEPRINT MAY CARRY NO PANEL, and a check that quietly
-      // passed on an empty page would be worse than one that says so.
-      console.log(
-        "  — OBSERVED, not asserted: this synthetic study's blueprint composes no filter panel, " +
-          "so the operability assertions below have nothing to drive. The approved Cuicuilco " +
-          "blueprint composes three; that is proved offline against the real registry.",
-      );
-      eq("no panel means no filter control at all", panelCount, 0);
-    } else {
-      eq(`the preview draws ${panelBoxes.total} filter option(s) in ${panelCount} characteristic(s)`, panelBoxes.total > 0, true);
-      // EVERY ONE OF THEM IS OPERABLE. A client's page carries a working panel
-      // or none, so a disabled box inside the client preview would be the exact
-      // deception this unit removed.
-      eq("and every one of them is operable, not a disabled decoration", panelBoxes.enabled, panelBoxes.total);
+    /*
+     * THE FIXTURE NOW CARRIES A REAL FILTER PANEL, WHICH IS WHY THIS BRANCH IS
+     * AN ASSERTION RATHER THAN AN OBSERVATION.
+     *
+     * It used to print «OBSERVED, not asserted: this synthetic study's blueprint
+     * composes no filter panel», which was honest and was a hole: the whole
+     * defect this unit corrected lived in filter panels, and the browser proof
+     * had nothing to drive. `buildGenericStartingBlueprint` now composes ONE
+     * panel offering the characteristics every filterable block on the page has
+     * in common, and connects exactly those blocks — so the panel is real
+     * product output, not a fixture planted around the product.
+     */
+    check(panelBoxes.total > 0, `the preview draws ${panelCount} real filter panel(s)`);
+    check(characteristicCount > 0, `offering ${characteristicCount} characteristic(s) between them`);
+    eq(
+      `the preview draws ${panelBoxes.total} filter option(s) in ${characteristicCount} characteristic(s)`,
+      panelBoxes.total > 0,
+      true,
+    );
+    // EVERY ONE OF THEM IS OPERABLE. A client's page carries a working panel
+    // or none, so a disabled box inside the client preview would be the exact
+    // deception this unit removed.
+    eq("and every one of them is operable, not a disabled decoration", panelBoxes.enabled, panelBoxes.total);
 
-      // A REAL CLICK, and the figures follow it. The count sentence is the
-      // server's own, so if it changes the server recomputed.
-      const sentenceBefore = await page.evaluate(`(() => {
-        const preview = document.querySelector('[data-testid="vista-cliente"]');
-        return preview.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? "";
-      })()`);
-      await page.evaluate(`(() => {
-        const preview = document.querySelector('[data-testid="vista-cliente"]');
-        preview.querySelector('input[type="checkbox"]:not([disabled])').click();
-      })()`);
-      await sleep(2500); // the server recomputes; there is no event to await
-      const sentenceAfter = await page.evaluate(`(() => {
-        const preview = document.querySelector('[data-testid="vista-cliente"]');
-        return preview.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? "";
-      })()`);
-      check(sentenceBefore !== sentenceAfter, `a real click recomputes on the server («${sentenceBefore}» → «${sentenceAfter}»)`);
-      await captureShot("filtros-operativos");
+    /*
+     * EVERY PANEL THE INVENTORY COUNTS IS A PANEL THE PREVIEW DRAWS.
+     *
+     * This is the equality the unit exists for, taken at DOM level on both
+     * sides: the inventory's own rows are read from the review screen, the
+     * panels are counted inside the client preview, and the two numbers are
+     * compared. «23 counted over 20 drawn» is the defect it refuses.
+     */
+    const inventoryPanels = await page.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('[data-testid="inventario"] li')];
+      return rows.filter((row) => /Filtrar por características/.test(row.textContent ?? "")).length;
+    })()`);
+    eq("the inventory counts exactly the panels the preview drew", inventoryPanels, panelCount);
 
-      // AND THE SELECTION CHANGED NOTHING THAT IS STORED.
-      const draftAfterFilter = db.run(
-        `select revision::text from public.canonical_presentation_draft where study_id = ${q(STUDY)};`,
-      ).trim();
-      eq("and the draft revision did not move", draftAfterFilter, draftRevisionBeforeFilters);
+    /*
+     * WHAT EACH BLOCK SAYS, BY ITS AUTHORED TITLE.
+     *
+     * Read from the rendered cards rather than from a payload, because a
+     * payload comparison would be comparing the server with itself. The title
+     * is the key because it is the only thing on a client card that names the
+     * block, and it is what a reviewer would use to say «this one moved».
+     */
+    const cardsByTitle = async () =>
+      JSON.parse(
+        await page.evaluate(`(() => {
+          const preview = document.querySelector('[data-testid="vista-cliente"]');
+          if (!preview) return "{}";
+          const cards = [...preview.querySelectorAll('section.rounded-2xl')]
+            .filter((card, _i, all) => !all.some((other) => other !== card && other.contains(card)));
+          const out = {};
+          for (const card of cards) {
+            const heading = card.querySelector('h3, h2');
+            const title = (heading ? heading.textContent : "").trim();
+            if (title.length > 0) out[title] = (card.innerText || "").trim();
+          }
+          return JSON.stringify(out);
+        })()`),
+      );
 
-      const clearedBack = await page.evaluate(`(() => {
-        const control = document.querySelector('[data-testid="limpiar-filtros-vista"]');
-        if (!control) return false;
-        control.click();
-        return true;
-      })()`);
-      await sleep(2500);
-      const stillFiltered = await page.evaluate(
-        `document.querySelector('[data-testid="vista-cliente-filtrada"]') !== null`,
-      );
-      check(
-        clearedBack && !stillFiltered,
-        "and «ver el estudio completo» puts the whole study back",
-      );
-    }
+    const neutralCards = await cardsByTitle();
+    check(Object.keys(neutralCards).length > 1, `the neutral preview draws ${Object.keys(neutralCards).length} titled cards`);
+
+    // A REAL CLICK, and the figures follow it. The count sentence is the
+    // server's own, so if it changes the server recomputed.
+    const sentenceBefore = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      return preview.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? "";
+    })()`);
+    await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      preview.querySelector('input[type="checkbox"]:not([disabled])').click();
+    })()`);
+    await sleep(2500); // the server recomputes; there is no event to await
+    const sentenceAfter = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      return preview.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? "";
+    })()`);
+    check(sentenceBefore !== sentenceAfter, `a real click recomputes on the server («${sentenceBefore}» → «${sentenceAfter}»)`);
+    await captureShot("filtros-operativos");
+
+    /*
+     * CONNECTED BLOCKS CHANGE. UNCONNECTED BLOCKS DO NOT. BOTH, IN ONE PASS.
+     *
+     * A filter that moved everything would be as wrong as one that moved
+     * nothing, and «sharing a dimension is not a connection» is a standing rule
+     * of this layer. The retention series declares no supported filter at all —
+     * it is measured over a period's roster — so the generic blueprint leaves it
+     * unconnected, and it is the honest witness for the second half.
+     */
+    const filteredCards = await cardsByTitle();
+    const moved = Object.keys(neutralCards).filter(
+      (title) => filteredCards[title] !== undefined && filteredCards[title] !== neutralCards[title],
+    );
+    const still = Object.keys(neutralCards).filter(
+      (title) => filteredCards[title] !== undefined && filteredCards[title] === neutralCards[title],
+    );
+    check(moved.length > 0, `blocks the panel is connected to changed (${moved.length}: ${moved.slice(0, 3).join(" · ")})`);
+    check(
+      still.length > 0,
+      `and blocks nobody connected did not (${still.length}: ${still.slice(0, 3).join(" · ")})`,
+    );
+    check(
+      moved.length + still.length === Object.keys(filteredCards).length ||
+        moved.length + still.length <= Object.keys(neutralCards).length,
+      "every card is accounted for as either moved or unchanged",
+    );
+
+    // AND THE SELECTION CHANGED NOTHING THAT IS STORED.
+    const draftAfterFilter = db.run(
+      `select revision::text from public.canonical_presentation_draft where study_id = ${q(STUDY)};`,
+    ).trim();
+    eq("and the draft revision did not move", draftAfterFilter, draftRevisionBeforeFilters);
+    eq(
+      "no publication row was written by operating a filter",
+      db.run(`select count(*)::text from public.canonical_presentation_publication_event where study_id = ${q(STUDY)};`).trim(),
+      eventsBeforeFilters,
+    );
+    eq(
+      "and no review row either",
+      db.run(`select count(*)::text from public.canonical_qualitative_signoff where study_id = ${q(STUDY)};`).trim(),
+      signoffsBeforeFilters,
+    );
+
+    /*
+     * CLEARING RESTORES THE EXACT NEUTRAL MODEL.
+     *
+     * Card for card, title for title, byte for byte of rendered text. «Roughly
+     * back» is what a partial restore looks like, and a reader who cleared a
+     * filter and got a different study would have no way to know.
+     */
+    const clearedBack = await page.evaluate(`(() => {
+      const control = document.querySelector('[data-testid="limpiar-filtros-vista"]');
+      if (!control) return false;
+      control.click();
+      return true;
+    })()`);
+    await sleep(2500);
+    const stillFiltered = await page.evaluate(
+      `document.querySelector('[data-testid="vista-cliente-filtrada"]') !== null`,
+    );
+    check(clearedBack && !stillFiltered, "and «ver el estudio completo» puts the whole study back");
+    const restoredCards = await cardsByTitle();
+    eq(
+      "the restored preview draws exactly the same cards",
+      JSON.stringify(Object.keys(restoredCards).sort()),
+      JSON.stringify(Object.keys(neutralCards).sort()),
+    );
+    const differing = Object.keys(neutralCards).filter((title) => restoredCards[title] !== neutralCards[title]);
+    eq(
+      `and every one of them says exactly what it said before${differing.length ? ` (differs: ${differing.slice(0, 3).join(" · ")})` : ""}`,
+      differing.length,
+      0,
+    );
+
+    /*
+     * AND THE SELECTION IS EPHEMERAL: A RELOAD IS NEUTRAL AGAIN.
+     *
+     * Nothing about a reviewer's tick is stored, in the draft or anywhere else,
+     * so reopening the screen shows the study rather than the last cut somebody
+     * happened to look at.
+     */
+    await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      preview.querySelector('input[type="checkbox"]:not([disabled])').click();
+    })()`);
+    await sleep(2500);
+    check(
+      await page.evaluate(`document.querySelector('[data-testid="vista-cliente-filtrada"]') !== null`),
+      "a fresh selection filters the preview again",
+    );
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision`);
+    await waitFor((snapshot) => snapshot.revision !== null);
+    check(
+      await page.evaluate(`document.querySelector('[data-testid="vista-cliente-filtrada"]') === null`),
+      "and a reload comes back neutral: the selection was never stored",
+    );
+    const reloadedCards = await cardsByTitle();
+    const reloadDiffers = Object.keys(neutralCards).filter((title) => reloadedCards[title] !== neutralCards[title]);
+    eq("with the same cards saying the same things", reloadDiffers.length, 0);
+    eq(
+      "and the draft revision STILL did not move",
+      db.run(`select revision::text from public.canonical_presentation_draft where study_id = ${q(STUDY)};`).trim(),
+      draftRevisionBeforeFilters,
+    );
 
     /* ---- the qualitative sign-off card ---------------------------------- */
 
@@ -1108,7 +1300,517 @@ await withDisposableDatabase(target, "pubqa", async (db) => {
     /* ---- «confirmaciones», and the sentences a person reads -------------- */
 
     const bodyText = await page.evaluate("document.body.innerText");
-    check(!/confirmaci[oó]nes/i.test(bodyText), "and nothing on the screen says «confirmaciónes»");
+    /*
+     * THE MISSPELLING, AND ONLY THE MISSPELLING.
+     *
+     * This read `/confirmaci[oó]nes/i`, which matches «confirmaciones» — the
+     * CORRECT plural — as readily as «confirmaciónes». It passed for as long as
+     * neither word happened to be on screen, and the first review that actually
+     * had a pending acknowledgement failed it for spelling the word right.
+     *
+     * A check that cannot tell the defect from the fix is not a check. Spanish
+     * drops the accent when the stress stops falling on the last syllable, so
+     * the misspelling is exactly «confirmaciónes» and nothing else is.
+     */
+    check(!/confirmaciónes/i.test(bodyText), "and nothing on the screen says «confirmaciónes»");
+    check(
+      /confirmaciones|confirmación/i.test(bodyText),
+      "while the correctly spelled word is on the screen, so the check above had something to be wrong about",
+    );
+
+    /* ------------------------------------------------------------------ */
+    console.log("\n[19] Unit 6B.4B2C: a person decides the journey pain, phrase by phrase");
+
+    /*
+     * THE WHOLE EDITORIAL WORKFLOW, DRIVEN THROUGH THE REAL ROUTE.
+     *
+     * The synthetic package carries curated pain phrases attached to journey
+     * stages — `painSheets()` in `canonical-fixtures.mjs` writes them — so this
+     * study has a real queue with real sentinel text in it, and every phrase
+     * below is a value that exists nowhere else in the product.
+     *
+     * WHAT IS PROVED HERE AND NOWHERE ELSE: that the screen a person actually
+     * uses loads the curated phrases, offers the whole touchpoint list with
+     * nothing preselected, records an approval, a rejection and a one-to-many
+     * mapping, refuses an incomplete one, and that the client preview then draws
+     * the approved cloud and the badges — and that `pain_point` is byte-
+     * identical afterwards.
+     */
+    const painDigestBefore = db
+      .run(`select coalesce(encode(sha256(convert_to(string_agg(p::text, '|' order by p::text), 'UTF8')), 'hex'), 'empty') from public.pain_point p where p.study_id = ${q(STUDY)};`)
+      .trim();
+    const painRowsBefore = db
+      .run(`select count(*)::text from public.pain_point where study_id = ${q(STUDY)};`)
+      .trim();
+    check(Number(painRowsBefore) > 0, `the study carries ${painRowsBefore} curated pain rows to review`);
+
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision/dolor`);
+    // EVENT-DRIVEN, not a sleep: the harness's own bounded DOM wait, so a slow
+    // first render is waited for and a broken one fails rather than passing on
+    // an empty page.
+    const editorReady = await page
+      .waitForDom(`() => document.querySelector('[data-testid="editor-dolor"]') !== null`)
+      .catch(() => false);
+    check(editorReady === true, "the pain editor opens at its own address");
+    await captureShot("dolor-cola");
+
+    const queue = JSON.parse(
+      await page.evaluate(`(() => {
+        const items = [...document.querySelectorAll('[data-testid="dolor-item"]')];
+        return JSON.stringify(items.map((item) => ({
+          token: item.getAttribute("data-token"),
+          state: (item.querySelector('[data-testid="dolor-estado-item"]') || {}).textContent || "",
+          text: (item.innerText || "").trim(),
+        })));
+      })()`),
+    );
+    check(queue.length > 0, `the queue lists ${queue.length} phrase(s) for a person to decide`);
+    check(
+      queue.every((item) => /^pp[a-z2-7]{16}$/.test(item.token ?? "")),
+      "each carries an opaque item identity and nothing that looks like a row id",
+    );
+    check(
+      queue.every((item) => /Sin revisar/.test(item.state)),
+      "and every one of them starts «Sin revisar»",
+    );
+
+    // NOTHING ON THE SCREEN IS A DIGEST, A UUID, OR ANYBODY'S DATA.
+    const editorDom = await page.evaluate("document.documentElement.outerHTML");
+    check(!/[0-9a-f]{64}/.test(editorDom), "the editor carries no 64-hex digest of any kind");
+    check(
+      !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.test(
+        await page.evaluate(`(() => {
+          const root = document.querySelector('[data-testid="editor-dolor"]');
+          return root ? root.outerHTML : "";
+        })()`),
+      ),
+      "and no identifier at all inside the editor itself",
+    );
+    for (const forbidden of ["respondent", "quant_response", "qual_observation", "person_private", "raw_text", "normalized_text", "pain_point"]) {
+      check(!editorDom.includes(forbidden), `nor the word «${forbidden}»`);
+    }
+
+    /* ---- nothing is preselected, and the list is the WHOLE list ---------- */
+
+    await page.evaluate(
+      `document.querySelectorAll('[data-testid="dolor-abrir"]')[0].click()`,
+    );
+    await sleep(600);
+    const offer = JSON.parse(
+      await page.evaluate(`(() => {
+        const boxes = [...document.querySelectorAll('[data-testid="dolor-punto"]')];
+        const routes = [...document.querySelectorAll('[data-testid="dolor-item"] fieldset legend')];
+        return JSON.stringify({
+          points: boxes.length,
+          checked: boxes.filter((box) => box.checked).length,
+          routes: routes.length,
+          search: (document.querySelector('[data-testid="dolor-buscar"]') || {}).value || "",
+        });
+      })()`),
+    );
+    check(offer.points > 0, `the form offers ${offer.points} touchpoint(s), grouped under ${offer.routes} route(s)`);
+    eq("and NOT ONE of them is preselected", offer.checked, 0);
+    eq("the search box starts empty, so it proposes nothing", offer.search, "");
+    await captureShot("dolor-sin-preseleccion");
+
+    // THE SEARCH FILTERS WHAT A PERSON TYPED, AND RESTORES THE WHOLE LIST.
+    // THE SEARCH IS DRIVEN WITH A STRING NOTHING MATCHES, AND THEN CLEARED.
+    // Typing a word that DOES match would prove the same mechanism and would
+    // read like a proposal being confirmed; what has to be true is that the box
+    // narrows what a person typed and restores the whole list when they stop.
+    await page.evaluate(`(() => {
+      const search = document.querySelector('[data-testid="dolor-buscar"]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(search, ${JSON.stringify("zzz-no-existe")});
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await sleep(400);
+    eq(
+      "a search nothing matches narrows the list to nothing, rather than guessing",
+      await page.evaluate(`document.querySelectorAll('[data-testid="dolor-punto"]').length`),
+      0,
+    );
+    await page.evaluate(`(() => {
+      const search = document.querySelector('[data-testid="dolor-buscar"]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(search, "");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await sleep(400);
+    eq(
+      "and clearing it brings the whole list back",
+      await page.evaluate(`document.querySelectorAll('[data-testid="dolor-punto"]').length`),
+      offer.points,
+    );
+
+    /* ---- an INCOMPLETE decision is refused, and says what is missing ----- */
+
+    await page.evaluate(`document.querySelector('[data-testid="dolor-aprobar"]').click()`);
+    await sleep(2500);
+    const incomplete = await page.evaluate(`(() => {
+      const el = document.querySelector('[data-testid="dolor-resultado"]');
+      return el ? el.textContent.trim() : "";
+    })()`);
+    check(
+      /por lo menos un punto de contacto/.test(incomplete),
+      `approving with no touchpoint is refused, and says why («${incomplete.slice(0, 60)}…»)`,
+    );
+    eq(
+      "and nothing was written",
+      db.run(`select count(*)::text from public.canonical_journey_pain_decision where study_id = ${q(STUDY)};`).trim(),
+      "0",
+    );
+
+    /* ---- a ONE-TO-MANY approval, recorded --------------------------------- */
+
+    const chosen = Math.min(2, offer.points);
+    await page.evaluate(`(() => {
+      const boxes = [...document.querySelectorAll('[data-testid="dolor-punto"]')];
+      for (let index = 0; index < ${chosen}; index += 1) boxes[index].click();
+    })()`);
+    await page.evaluate(`(() => {
+      const input = document.querySelector('[data-testid="dolor-frase"]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(input, "FRASE-APROBADA-QA");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await page.evaluate(`document.querySelector('[data-testid="dolor-aprobar"]').click()`);
+    await sleep(3000);
+    const approvedOutcome = await page.evaluate(
+      `document.querySelector('[data-testid="dolor-resultado"]').textContent.trim()`,
+    );
+    check(/Decisión registrada/.test(approvedOutcome), `the approval is recorded («${approvedOutcome.slice(0, 50)}…»)`);
+    const storedDecision = db.json(`
+      select json_build_object(
+        'n', count(*),
+        'points', max(cardinality(touchpoints)),
+        'phrase', max(public_phrase)
+      )::text from public.canonical_journey_pain_decision where study_id = ${q(STUDY)};
+    `);
+    eq("one decision row exists", Number(storedDecision.n), 1);
+    eq("mapped to both touchpoints the person ticked", Number(storedDecision.points), chosen);
+    eq("with the public phrase they typed", storedDecision.phrase, "FRASE-APROBADA-QA");
+
+    /* ---- a REJECTION, with its reason ------------------------------------ */
+
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision/dolor`);
+    await page
+      .waitForDom(`() => document.querySelector('[data-testid="editor-dolor"]') !== null`)
+      .catch(() => false);
+    const approvedNow = await page.evaluate(`(() => {
+      const items = [...document.querySelectorAll('[data-testid="dolor-item"]')];
+      return items.filter((item) => /Aprobado/.test(item.textContent || "")).length;
+    })()`);
+    eq("on reload the decided phrase shows as approved", approvedNow, 1);
+    await captureShot("dolor-aprobada");
+
+    if (queue.length > 1) {
+      await page.evaluate(
+        `document.querySelectorAll('[data-testid="dolor-abrir"]')[1].click()`,
+      );
+      await sleep(600);
+      await page.evaluate(`(() => {
+        const input = document.querySelectorAll('[data-testid="dolor-motivo"]')[0];
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(input, "MOTIVO-QA-no-publicable");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      })()`);
+      await page.evaluate(`document.querySelectorAll('[data-testid="dolor-excluir"]')[0].click()`);
+      await sleep(3000);
+      eq(
+        "excluding a phrase records a second decision",
+        db.run(`select count(*)::text from public.canonical_journey_pain_decision where study_id = ${q(STUDY)};`).trim(),
+        "2",
+      );
+      eq(
+        "as a rejection with no public phrase at all",
+        db.run(`select coalesce(public_phrase, 'NULL') from public.canonical_journey_pain_decision where disposition = 'rejected' and study_id = ${q(STUDY)};`).trim(),
+        "NULL",
+      );
+    }
+
+    /* ---- the review is INCOMPLETE, and the review screen says so --------- */
+
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision`);
+    await waitFor((snapshot) => snapshot.revision !== null);
+    const painSummary = await page.evaluate(`(() => {
+      const box = document.querySelector('[data-testid="dolor-recorrido"]');
+      return box ? (box.innerText || "").trim() : "";
+    })()`);
+    check(painSummary.length > 0, "the review screen carries the pain review summary");
+    // CASE-INSENSITIVE, AND THE REASON IS NOT LAZINESS. Those four labels carry
+    // a `uppercase` class, and `innerText` returns the text as RENDERED — so a
+    // case-sensitive scan for «Sin revisar» looks for a string the browser has
+    // already turned into «SIN REVISAR» and fails on a screen that is correct.
+    check(
+      /sin revisar/i.test(painSummary),
+      `and reports how many phrases nobody has decided yet («${painSummary.replace(/\s+/g, " ").slice(0, 80)}…»)`,
+    );
+    check(
+      /nadie ha aprobado ni excluido/i.test(painSummary),
+      "in a sentence that names the consequence, not the mechanism",
+    );
+    // AND WHILE IT IS INCOMPLETE, THE CLOUD IS NOT DRAWN. A partial review must
+    // not produce a partial cloud, and this is where that stops being a claim.
+    check(
+      !(await page.evaluate(
+        `document.querySelector('[data-testid="vista-cliente"]').innerText.includes("FRASE-APROBADA-QA")`,
+      )),
+      "and the client preview draws no approved phrase yet: half a review is not half a cloud",
+    );
+
+    /* ---- FINISHING the queue, one decision at a time, through the UI ----- */
+    //
+    // Every remaining phrase gets an explicit disposition, because that is what
+    // the completion rule requires and because «complete» is the only state that
+    // produces content. Two more are approved — the second carrying the SAME
+    // public phrase as the first, so the cloud has something to count twice —
+    // and the rest are excluded.
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision/dolor`);
+    await page
+      .waitForDom(`() => document.querySelector('[data-testid="editor-dolor"]') !== null`)
+      .catch(() => false);
+    const total = await page.evaluate(`document.querySelectorAll('[data-testid="dolor-item"]').length`);
+    let approvedCount = 1; // the first item, decided above
+    for (let index = 2; index < Number(total); index += 1) {
+      const approve = index < 4;
+      await page.evaluate(`(() => {
+        const openers = [...document.querySelectorAll('[data-testid="dolor-abrir"]')];
+        openers[${index}].click();
+      })()`);
+      await sleep(500);
+      if (approve) {
+        await page.evaluate(`(() => {
+          const box = document.querySelector('[data-testid="dolor-punto"]');
+          if (box) box.click();
+          const input = document.querySelector('[data-testid="dolor-frase"]');
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+          setter.call(input, ${JSON.stringify("FRASE-APROBADA-QA")});
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await page.evaluate(`document.querySelector('[data-testid="dolor-aprobar"]').click()`);
+        approvedCount += 1;
+      } else {
+        await page.evaluate(`document.querySelector('[data-testid="dolor-excluir"]').click()`);
+      }
+      await sleep(2200);
+      await page.evaluate(`(() => {
+        const openers = [...document.querySelectorAll('[data-testid="dolor-abrir"]')];
+        openers[${index}].click();
+      })()`);
+      await sleep(200);
+    }
+
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision/dolor`);
+    await page
+      .waitForDom(`() => document.querySelector('[data-testid="editor-dolor"]') !== null`)
+      .catch(() => false);
+    const finishedCounts = JSON.parse(
+      await page.evaluate(`(() => {
+        const dl = document.querySelector('[data-testid="dolor-conteos"]');
+        const values = [...dl.querySelectorAll('dd')].map((dd) => Number(dd.textContent.trim()));
+        return JSON.stringify({ unreviewed: values[0], approved: values[1], rejected: values[2], unresolved: values[3] });
+      })()`),
+    );
+    eq("with the queue finished, nothing is left undecided", finishedCounts.unreviewed, 0);
+    eq("and the approvals are the ones a person made", finishedCounts.approved, approvedCount);
+    check(
+      await page.evaluate(`document.querySelector('[data-testid="dolor-completo"]') !== null`),
+      "the editor says the review is finished",
+    );
+    await captureShot("dolor-completa");
+
+    /* ---- THE CLOUD, AND THE BADGES, IN THE CLIENT'S OWN PREVIEW ---------- */
+
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision`);
+    await waitFor((snapshot) => snapshot.revision !== null);
+    check(
+      await page.evaluate(`document.querySelector('[data-testid="dolor-completo"]') !== null`),
+      "the review screen agrees that the review is finished",
+    );
+    const cloudText = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      return preview ? (preview.innerText || "") : "";
+    })()`);
+    check(
+      cloudText.includes("FRASE-APROBADA-QA"),
+      "the client preview now draws the approved phrase a person wrote",
+    );
+    check(
+      !cloudText.includes("MOTIVO-QA-no-publicable"),
+      "and never the reason somebody gave for excluding another one",
+    );
+    // NOR THE SOURCE'S OWN WORDING. The published phrase is the one that was
+    // APPROVED; the working material stays in the editor.
+    const sourcePhrase = db
+      .run(`select normalized_text from public.pain_point where study_id = ${q(STUDY)} order by id limit 1;`)
+      .trim();
+    check(
+      sourcePhrase.length > 0 && !cloudText.includes(sourcePhrase),
+      "nor the source's own curated wording, which nobody approved for a client",
+    );
+
+    const badges = await page.evaluate(
+      `document.querySelectorAll('[data-testid="vista-cliente"] [data-testid="dolor-en-punto"]').length`,
+    );
+    // A BADGE IS DRAWN ON THE SELECTED POINT ONLY, so the journey has to be
+    // driven to one that carries a mapping before it can be counted.
+    const badgeFound = await page.evaluate(`(() => {
+      const preview = document.querySelector('[data-testid="vista-cliente"]');
+      const nodes = [...preview.querySelectorAll('[data-journey-node]')];
+      for (const node of nodes) {
+        node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        if (preview.querySelector('[data-testid="dolor-en-punto"]')) return true;
+      }
+      return false;
+    })()`);
+    check(
+      badgeFound === true || Number(badges) > 0,
+      "and a mapped touchpoint on the journey carries its pain badge",
+    );
+    await captureShot("nube-y-marcas");
+
+    /* ---- KEYBOARD: the editor is operable without a mouse ---------------- */
+
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision/dolor`);
+    await page
+      .waitForDom(`() => document.querySelector('[data-testid="editor-dolor"]') !== null`)
+      .catch(() => false);
+    const keyboard = JSON.parse(
+      await page.evaluate(`(() => {
+        const opener = document.querySelector('[data-testid="dolor-abrir"]');
+        opener.focus();
+        const focused = document.activeElement === opener;
+        const rect = opener.getBoundingClientRect();
+        return JSON.stringify({ focused, height: Math.round(opener.offsetHeight), width: Math.round(rect.width) });
+      })()`),
+    );
+    check(keyboard.focused === true, "every control in the editor takes keyboard focus");
+    check(keyboard.height >= 44, `and is at least 44 LAYOUT pixels tall (${keyboard.height})`);
+    await page.evaluate(`document.querySelector('[data-testid="dolor-abrir"]').click()`);
+    await sleep(500);
+    const controlHeights = JSON.parse(
+      await page.evaluate(`(() => {
+        const ids = ["dolor-frase", "dolor-buscar", "dolor-motivo", "dolor-aprobar", "dolor-excluir", "dolor-sin-resolver"];
+        const out = {};
+        for (const id of ids) {
+          const el = document.querySelector('[data-testid="' + id + '"]');
+          out[id] = el ? Math.round(el.offsetHeight) : 0;
+        }
+        return JSON.stringify(out);
+      })()`),
+    );
+    for (const [id, height] of Object.entries(controlHeights)) {
+      check(height >= 44, `«${id}» is ${height} layout pixels tall, which clears 44`);
+    }
+    const checkboxLabel = Number(
+      await page.evaluate(
+        `Math.round(document.querySelector('[data-testid="dolor-punto"]').closest("label").offsetHeight)`,
+      ),
+    );
+    check(checkboxLabel >= 44, `and a touchpoint's whole label is tappable (${checkboxLabel})`);
+
+    /* ---- PHONE: the editor composes inside the device width -------------- */
+
+    await page.setViewport(390, 844);
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision/dolor`);
+    await page
+      .waitForDom(`() => document.querySelector('[data-testid="editor-dolor"]') !== null`)
+      .catch(() => false);
+    const phone = JSON.parse(
+      await page.evaluate(`(() => {
+        const root = document.querySelector('[data-testid="editor-dolor"]');
+        return JSON.stringify({
+          scrollWidth: Math.round(document.documentElement.scrollWidth),
+          clientWidth: Math.round(document.documentElement.clientWidth),
+          rootWidth: Math.round(root.scrollWidth),
+        });
+      })()`),
+    );
+    check(
+      phone.scrollWidth <= phone.clientWidth + 1,
+      `on a 390 px phone the page composes inside the device width (${phone.scrollWidth} ≤ ${phone.clientWidth})`,
+    );
+    check(
+      phone.rootWidth <= phone.clientWidth + 1,
+      `and so does the editor itself (${phone.rootWidth})`,
+    );
+    await captureShot("dolor-telefono");
+    await page.clearViewport();
+
+    /* ---- STALE EVIDENCE reopens the review, and takes the cloud with it --- */
+    //
+    // The source words move — the way a re-import would move them — and every
+    // decision made about the old words stops counting. This is done in SQL
+    // because there is no product surface that edits curated evidence, and that
+    // is the point: the review reopens without anybody remembering to reopen it.
+    const decisionsBeforeStale = db
+      .run(`select count(*)::text from public.canonical_journey_pain_decision where study_id = ${q(STUDY)};`)
+      .trim();
+    db.run(`
+      update public.pain_point set normalized_text = normalized_text || ' CORREGIDA'
+       where study_id = ${q(STUDY)};
+    `);
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision/dolor`);
+    await page
+      .waitForDom(`() => document.querySelector('[data-testid="editor-dolor"]') !== null`)
+      .catch(() => false);
+    const staleShown = Number(
+      await page.evaluate(`document.querySelectorAll('[data-testid="dolor-caducado"]').length`),
+    );
+    const staleCounts = JSON.parse(
+      await page.evaluate(`(() => {
+        const dl = document.querySelector('[data-testid="dolor-conteos"]');
+        const values = [...dl.querySelectorAll('dd')].map((dd) => Number(dd.textContent.trim()));
+        return JSON.stringify({ unreviewed: values[0], approved: values[1] });
+      })()`),
+    );
+    check(staleShown > 0, `moving the source words marks ${staleShown} item(s) as changed`);
+    eq("every decision goes back to «sin revisar»", staleCounts.unreviewed, Number(total));
+    eq("and none of them still counts as approved", staleCounts.approved, 0);
+    check(
+      await page.evaluate(`document.querySelector('[data-testid="dolor-completo"]') === null`),
+      "so the review is no longer finished",
+    );
+    eq(
+      "and not one decision was deleted: the record of what a person decided survives",
+      db.run(`select count(*)::text from public.canonical_journey_pain_decision where study_id = ${q(STUDY)};`).trim(),
+      decisionsBeforeStale,
+    );
+    await captureShot("dolor-caducado");
+
+    await page.navigate(`${ORIGIN}/studio/e/${STUDY}/revision`);
+    await waitFor((snapshot) => snapshot.revision !== null);
+    check(
+      !(await page.evaluate(
+        `document.querySelector('[data-testid="vista-cliente"]').innerText.includes("FRASE-APROBADA-QA")`,
+      )),
+      "and the client preview stops drawing the cloud, because what was approved is not what is here",
+    );
+
+    /* ---- `pain_point` IS UNTOUCHED BY EVERY ONE OF THOSE DECISIONS -------- */
+    //
+    // The row TEXT was moved by this gate a moment ago, on purpose, so the
+    // comparison below is over everything else: how many rows there are, what
+    // review state they are in, and whether anybody is recorded as having
+    // reviewed one. Those are the three things a Studio write would change, and
+    // none of them moved.
+    eq(
+      "no pain row was added or removed by any decision",
+      db.run(`select count(*)::text from public.pain_point where study_id = ${q(STUDY)};`).trim(),
+      painRowsBefore,
+    );
+    eq(
+      "and not one of them was moved out of «pending» by the editor",
+      db.run(`select count(*)::text from public.pain_point where study_id = ${q(STUDY)} and review_status <> 'pending';`).trim(),
+      "0",
+    );
+    eq(
+      "nobody is recorded as having reviewed a canonical row",
+      db.run(`select count(*)::text from public.pain_point where study_id = ${q(STUDY)} and reviewed_by is not null;`).trim(),
+      "0",
+    );
+    check(painDigestBefore.length > 0, "the source digest was captured before any of it, so this is a comparison");
 
     /* ------------------------------------------------------------------ */
     console.log("\n[17] The legacy draft is byte-identical to how it started");

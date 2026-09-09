@@ -169,6 +169,7 @@ export type {
   RenderMeasure,
   RenderMethodology,
   RenderPage,
+  RenderPainBadge,
   RenderPayload,
   RenderRoute,
   RenderRoutePoint,
@@ -177,6 +178,25 @@ export type {
   RenderTerm,
   RenderValue,
 } from "./render-model";
+
+/**
+ * THE AUTHORED JOURNEY-PAIN CONTENT — pure, and the counting is here so it is
+ * not in a component.
+ *
+ * `buildJourneyPainContent` is exported from the CLIENT-SAFE barrel and is
+ * nonetheless never called by a component: the resolver calls it on the server
+ * and the render model carries finished terms and finished counts. It is here
+ * because it needs nothing but its own input — no crypto, no transport, no
+ * registry — and an offline gate drives the real function rather than a copy.
+ */
+export { buildJourneyPainContent } from "./journey-pain";
+export type {
+  AuthoredJourneyPain,
+  AuthoredPainMapping,
+  JourneyPainAtTouchpoint,
+  JourneyPainContent,
+  JourneyPainTerm,
+} from "./journey-pain";
 
 /**
  * WHAT A CLIENT WOULD SEE, asked in exactly one place.

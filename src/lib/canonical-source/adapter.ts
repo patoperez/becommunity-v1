@@ -7,6 +7,7 @@ import type { CanonicalResultSource } from "../results/source";
 import { CANONICAL_RESULTS_SPECS } from "../results/spec";
 import type { StudyResultsSpec } from "../results/spec";
 import { canonicalResultSourceFromRows } from "./assemble";
+import { loadCuratedPainEvidence, type CuratedPainEvidence } from "./curated-review";
 import { postgrestReadTransport } from "./postgrest";
 import type { PostgrestReadClient } from "./postgrest";
 import { CanonicalReadError, loadCanonicalRowSet } from "./read";
@@ -99,4 +100,36 @@ export async function loadCanonicalStudyResults(
 ): Promise<CanonicalStudyResults> {
   const source = await loadCanonicalResultSource(client, params);
   return buildCanonicalStudyResults(source, { ...params.results, spec: params.spec ?? params.results?.spec });
+}
+
+
+/**
+ * One study's CURATED PAIN EVIDENCE, for an internal editorial review.
+ *
+ * SEPARATE FROM THE RESULT SOURCE ON PURPOSE, and it must stay separate. The
+ * canonical read model deliberately excludes `pain_point`'s text columns
+ * (`docs/CANONICAL_RESULTS_MODEL.md` §12), because that model is what a client
+ * is eventually served from and a consultant's prose is not cleared for it.
+ * Widening it would be a different decision with a different authorization.
+ *
+ * This is the internal editorial read instead: the phrase a NAMED INTERNAL
+ * REVIEWER must be able to see to approve, edit, exclude or map it. It returns
+ * three tables' worth of curated fields and reaches no table that holds a
+ * respondent, an answer or a name — see `curated-review.ts` for the column
+ * list and for why there is nothing of that kind on the path to redact.
+ *
+ * Nothing it returns reaches a client render model. What a client eventually
+ * reads is the phrase the reviewer APPROVED, stored as presentation
+ * configuration by migration 0032.
+ */
+export async function loadCuratedPainReviewEvidence(
+  client: SupabaseClient,
+  params: { tenantId: string; studyId: string; signal?: AbortSignal },
+): Promise<CuratedPainEvidence> {
+  const transport = postgrestReadTransport(client as unknown as PostgrestReadClient);
+  return loadCuratedPainEvidence(
+    transport,
+    { tenantId: params.tenantId, studyId: params.studyId },
+    params.signal,
+  );
 }

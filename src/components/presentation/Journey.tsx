@@ -249,9 +249,14 @@ export function JourneyRouteMap({ block, audience }: LeafProps) {
               {layout.nodes.map((node) => {
                 const active = node.index === selected;
                 const mark = bandMark(node.point);
+                // THE BADGE IS IN THE ACCESSIBLE NAME TOO. A coloured disc a
+                // screen reader cannot see is a fact only sighted readers get.
+                const painReading = node.point.pain
+                  ? `, ${node.point.pain.count} ${node.point.pain.count === 1 ? "punto de dolor" : "puntos de dolor"}`
+                  : "";
                 const reading = node.point.satisfaction
-                  ? `${node.point.label}: ${node.point.satisfaction.formatted}`
-                  : `${node.point.label}: sin dato`;
+                  ? `${node.point.label}: ${node.point.satisfaction.formatted}${painReading}`
+                  : `${node.point.label}: sin dato${painReading}`;
                 return (
                   <g
                     key={node.point.handle}
@@ -286,6 +291,25 @@ export function JourneyRouteMap({ block, audience }: LeafProps) {
                     >
                       {node.index + 1}
                     </text>
+                    {/*
+                      THE PAIN BADGE. Drawn only where a named reviewer mapped a
+                      phrase, and it draws the COUNT THE SERVER SENT — this
+                      component reads `node.point.pain.count` and never measures
+                      the array beside it, because two ways to say how many is
+                      one way and one thing that can disagree with it.
+                    */}
+                    {node.point.pain ? (
+                      <g transform="translate(14 -14)" aria-hidden="true">
+                        <circle r={9} fill="var(--color-caution)" />
+                        <text
+                          y={3.5}
+                          textAnchor="middle"
+                          className="tabular fill-[var(--color-caution-surface)] text-[0.6rem] font-bold"
+                        >
+                          {node.point.pain.count}
+                        </text>
+                      </g>
+                    ) : null}
                     <text
                       x={layout.vertical ? 32 : 0}
                       y={layout.vertical ? 4 : 38}
@@ -334,6 +358,31 @@ export function JourneyRouteMap({ block, audience }: LeafProps) {
                 </dd>
               </div>
             </dl>
+            {/*
+              THE APPROVED PHRASES A PERSON MAPPED HERE, in the order the server
+              sent them. No sorting, no grouping, no counting: the reviewer's
+              wording, laid out.
+            */}
+            {point.pain ? (
+              <div
+                className="mt-3 rounded-md border border-caution-line bg-caution-surface px-3 py-2"
+                data-testid="dolor-en-punto"
+              >
+                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-caution">
+                  Puntos de dolor del recorrido
+                </p>
+                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                  {point.pain.phrases.map((phrase) => (
+                    <li
+                      key={phrase}
+                      className="rounded border border-caution-line bg-surface px-2 py-1 text-xs text-body [overflow-wrap:anywhere]"
+                    >
+                      {phrase}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {point.base ? <BaseLine base={point.base} className="mt-2" /> : null}
             {point.absence ? (
               audience === "internal" ? (

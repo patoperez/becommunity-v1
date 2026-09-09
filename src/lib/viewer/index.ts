@@ -75,6 +75,7 @@ import {
   viewerOfferFor,
   type CanonicalPresentationRegistry,
 } from "../presentation/registry";
+import type { JourneyPainContent } from "../presentation/journey-pain";
 import { resolvePresentation } from "../presentation/resolve";
 import type { PresentationRenderModel } from "../presentation/render-model";
 
@@ -116,11 +117,17 @@ export type ViewerResolution =
  * decided this layout describes this registry, and a binding made on the read
  * path would agree by construction and prove nothing. This function refuses an
  * unbound document by delegating to the resolver, which has always refused one.
+ *
+ * `journeyPain` is the journey-pain content a named person authored, already
+ * loaded and already checked complete by the caller. Omitted — the normal case
+ * — the pain slot resolves as `configuration_required` and no touchpoint gets a
+ * badge, which is what every stored document resolved to before this existed.
  */
 export function resolveUnderSelection(
   read: CanonicalPresentationRead,
   bound: PresentationDocument,
   candidate: unknown,
+  journeyPain?: JourneyPainContent,
 ): ViewerResolution {
   // 1. THE SELECTION, checked against the offer and never against itself.
   const validated = validateViewerSelection(candidate, viewerOfferFor(bound, read.registry));
@@ -159,6 +166,12 @@ export function resolveUnderSelection(
     registry: read.registry,
     results: read.results,
     viewer: { selection, views },
+    // ALREADY-FINISHED AUTHORED CONTENT, passed straight through and never
+    // recomputed per view. A filter is a cut of the MEASURED population; an
+    // approved editorial phrase is not a measurement of anybody and has no
+    // respondents to cut, so filtering it would mean inventing which of a
+    // consultant's sentences a generation said.
+    journeyPain,
   });
   if (!resolved.ok) return { ok: false, issues: issuesOf(resolved.errors) };
   return { ok: true, model: resolved.value, selection, recomputations: required.length };
