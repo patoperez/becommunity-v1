@@ -1074,6 +1074,12 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   that blocking «would make the approved blueprint unpublishable forever» was
   answering a different question: «the client sees nothing» and «the deliverable
   is finished» are two facts, and the approved north-star SHOWS that cloud.
+  ⓘ **That is true of the BLUEPRINT CODE, not of every stored document.** The
+  hosted Cuicuilco draft was saved before `requiredContent` existed and carries
+  the key zero times, so ITS empty pain slot raised the acknowledgeable
+  `configuration_required_blocks` warning and never a blocker. Check the stored
+  definition before asserting what a given study's review screen will do —
+  `docs/CURRENT_STATE.md` §"What actually stops a publication" has the reading.
 - ⓘ **`reviewStatus: "pending"` IS GONE FROM `QualitativeGroupResult`, AND THAT
   IS WHY THE RESULTS CONTRACT IS `3.0.0`.** It was a literal, written on every
   group of every study for ever, and the preflight read it as «nobody at Be

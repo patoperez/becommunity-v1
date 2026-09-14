@@ -5733,20 +5733,84 @@ were run individually and all 30 passed** — `import-center`, `templates`,
 repository's ordinary gate and this phase forbids deployment; `npm run build`
 is what the offline chain and the other units use, and it passes.
 
-#### Remaining blockers, stated plainly
+#### Remaining editorial work, stated plainly
 
-Publication stays blocked, and only a person can unblock it:
+> ⓘ **THIS SECTION WAS WRONG AND UNIT 6B.4B2G CORRECTED IT.** It said
+> «Publication stays blocked… the blocker it raises cannot be acknowledged
+> away». Driving the real authenticated review screen showed **no blocker at
+> all**: both editorial gaps appear as acknowledgeable warnings. The mechanism
+> is a version skew between the blueprint code and the stored draft, established
+> read-only and written out in §"What actually stops a publication" below.
+> Nothing about the product changed and nothing in it is defective; only this
+> description was false.
 
-1. **the qualitative sign-off has not been recorded** — nobody has left evidence
+Two editorial acts were outstanding, and only a person could perform them:
+
+1. **the qualitative sign-off had not been recorded** — nobody had left evidence
    of having read the category set, and the digest that would make such a record
-   go stale by itself does not exist yet;
-2. **the fifteen journey pain items are all undecided** — none approved, none
+   go stale by itself did not exist yet;
+2. **the fifteen journey pain items were all undecided** — none approved, none
    excluded, none mapped to a touchpoint. `authoredPainContent` is all-or-nothing,
-   so a partial review produces no pain content at all, and the blocker it raises
-   cannot be acknowledged away.
+   so a partial review produces no pain content at all.
 
-Both are editorial acts this unit was forbidden to perform, and both remain to be
-done by a person in Studio.
+Both were editorial acts that unit was forbidden to perform. Both have since been
+done — see §"Unit 6B.4B2G" below for by whom, from what evidence, and with what
+remaining limits.
+
+#### What actually stops a publication — measured, not assumed
+
+Read off the real authenticated review screen at
+`/studio/e/cd4d6acd…/revision`, 2026-09-14, and asserted by
+`test:canonical-publication`:
+
+- **No hard blocker is raised for either editorial gap.** The `bloqueos` section
+  is not rendered at all.
+
+ⓘ **WHY, EXACTLY — AND IT IS NOT WHAT EITHER DOCUMENT SAID.** The reason is a
+version skew between the code and the stored document, and it was measured
+read-only on the hosted draft rather than reasoned about:
+
+- `required_content_missing` and `journey_pain_review_incomplete` are genuinely
+  NON-acknowledgeable blockers in `contract.ts`, and both fire only when **the
+  document being published marks the pain slot `requiredContent: true`**
+  (`requiredBlockIdsOf` / `painContentIsRequired` in `publication-workspace.ts`).
+- **Today's blueprint code DOES mark it** — `cuicuilco-approved.ts` passes
+  `required = true` for `temas-recorrido`. CLAUDE.md's «REQUIRED CONTENT IS A
+  BLOCKER… the approved blueprint marks the journey pain-cloud slot with it» is
+  therefore true **of the code**.
+- **The STORED Cuicuilco draft does not carry the field at all.** Read from
+  `canonical_presentation_draft.definition` on 2026-09-14: the whole definition
+  contains the string `requiredContent` **zero** times, and the stored
+  `temas-recorrido` block has `slot`, `content: null`, `visible: true` and no
+  such key. The draft was saved on 2026-09-08, before the field existed, and the
+  6B.4B2E rebind changed **only** the binding — which is exactly what its
+  byte-identity proof established.
+- So for THIS document `requiredBlockIds` is empty, `painContentIsRequired` is
+  false, and the preflight correctly classifies the empty slot as the
+  acknowledgeable warning `configuration_required_blocks`. **The product is
+  behaving correctly; the old sentence described the code while the screen was
+  showing the stored document.**
+- **Consequence, and it is a live one:** re-saving this draft from today's
+  blueprint would import `requiredContent: true`, and an empty pain slot would
+  then become a hard, unacknowledgeable blocker. After 6B.4B2G the slot is no
+  longer empty, so that transition is now safe — but it must not be assumed to
+  have been safe before.
+- The two gaps surface instead as **acknowledgeable warnings**:
+  `qualitative_review_pending` and `configuration_required_blocks`, the latter
+  naming «Panorama del estudio · Puntos de dolor del recorrido» by its authored
+  title. Each carries its own confirmation box.
+- **Accidental publication is not possible.** Nothing is pre-ticked, every
+  acknowledgement is a separate deliberate act, the screen states «Faltan N
+  confirmaciones de arriba», and `Publicar para el cliente` stays `disabled`
+  until every required acknowledgement AND the final confirmation are ticked.
+- **Deliberate publication with unresolved warnings remains technically
+  possible**, and the screen says so rather than hiding it. That is the designed
+  boundary: showing a client the source's own coding, or a layout slot left
+  empty, are decisions somebody may legitimately make — and Contract C11 means an
+  unfinished section renders as nothing on the client side, not as a placeholder.
+- **No acknowledgement and no publication occurred in 6B.4B2G.** Verified after
+  the transcription: 1 warning present, 0 ticked; final confirmation unticked;
+  publish control still `disabled`; all five publication tables empty.
 
 #### Still deferred, and deliberately so
 
@@ -5757,3 +5821,199 @@ was deployed, no application code was promoted, the client route was not
 switched, no legacy draft was converted, no formula or approved value moved, no
 credential was rotated, and shadow mode is still off everywhere. `main` is
 unchanged.
+
+---
+
+## Unit 6B.4B2G — evidence-based editorial transcription from the CEO-approved dashboard
+
+**2026-09-14, from commit `5176416`.** The fifteen journey-pain decisions were
+transcribed mechanically from the committed CEO-approved emergency dashboard,
+through the real authenticated Studio routes. No publication was created.
+
+#### The artifact this is transcribed FROM
+
+| | |
+|---|---|
+| repository | `C:\dev\becommunity-software\becommunity-bni-cuicuilco-demo` |
+| commit | **`a7248fdbccd139da80ed7c09daa70f006a62b9cf`** |
+| refs | exactly one — `refs/heads/master` at that commit; nothing newer exists |
+| worktree | clean *ignoring line endings*: Windows checked it out CRLF, so twelve files read as modified from WSL and every one is byte-identical to its blob with CR stripped. Evidence was read with `git show <commit>:<path>`, never from the working tree |
+| clean workbook | `sha256:8d7afdb479208d47e4cd2b08fac5d480f3f945edcf448f52eb588a41e167bca5` — the copy the dashboard reads and the copy the canonical pipeline reads are **the same bytes** |
+
+The approved dashboard repository was **not modified**.
+
+#### How each mapping was proved — column identity, never resemblance
+
+1. The approved dashboard reads the CSAT sheet in **column pairs**: the question
+   in column `c`, its classification in `c+1`. Its touchpoint label is row 2 of
+   `c+1`; its id is `slug(layer)--slug(label)`. The layer comes from row 1, which
+   the sheet carries in **four merged ranges** (`D1:BI1`, `BJ1:BU1`, `BV1:CO1`,
+   `CP1:DI1`) — resolved from the workbook's own declared ranges.
+2. The canonical registry addresses the **same column `c`** by its full survey
+   prompt. Two readers of one spreadsheet column describe one thing. All **55**
+   dashboard touchpoints resolved to exactly one canonical handle each.
+3. **Self-check:** re-reading the sheet reproduced all 55 committed touchpoint
+   ids and labels in `public/data/snapshot.json` exactly.
+4. The stage-to-touchpoint association is the approved artifact's **own committed
+   configuration** — `PAIN_ALIAS` (38 entries), `PAIN_SOURCE`, `TEAM_ROUTE` in
+   `scripts/lib/extract.ts` — **parsed out of that file, not retyped**.
+5. The approved wording was compared with the canonical curated phrase letter by
+   letter. The dashboard's cloud splits a workbook cell into sentences; rejoining
+   them is the identity of the cell.
+
+ⓘ **`BNI Connect` and `App celular` are NOT ambiguous under this artifact.** The
+phrase «Mayor entrenamiento.» is identical on both, but they are two different
+canonical rows with two different stages, and `PAIN_ALIAS` declares
+`Plataforma BNI Connect → BNI Connect` and `App BNI Connect (Celular) → App
+celular`. One touchpoint each, from the artifact's own table — not from
+similarity, position or colour.
+
+ⓘ **The Journey worksheet's stages-with-pain and the canonical fifteen are a
+bijection.** «Bienvenida» and «Reunión semanal presencial/en línea» carry no pain
+in the approved snapshot, so the one stage that spans two touchpoints never
+arises among the fifteen.
+
+#### Evidence classification — all fifteen
+
+| classification | n |
+|---|---:|
+| EXACT_PROVEN | **15** |
+| PROVEN_EXCLUDED | 0 |
+| PROVEN_GLOBAL_ONLY | 0 |
+| AMBIGUOUS | 0 |
+| ABSENT_FROM_APPROVED_ARTIFACT | 0 |
+| CONFLICT_WITH_CANONICAL_SOURCE | 0 |
+
+Dry-validated before any write through the product's own rules — the same
+`buildPainReviewItems`, `painSourceDigest`, `painTouchpointChoices` and
+`PAIN_REVIEW_LIMITS` the server uses: **135 checks, 0 failed**, simulated
+completion `gaps = none`.
+
+#### What was written, and how
+
+**Through the real authenticated application only** — `/login`, then
+`/studio/e/cd4d6acd…/revision/dolor`, opening each item, typing the approved
+public text, ticking the touchpoint and pressing «Aprobar y asignar». No SQL, no
+RPC, no direct table write. **142 checks, 142 passed.** Each decision was
+verified on a **fresh page load** before the next was attempted.
+
+- **15 of 15** journey items now read «Aprobado», each mapped to **exactly one**
+  canonical touchpoint, each public phrase byte-identical to the plan, each
+  stored `source_digest` equal to the digest the plan predicted, no rationale
+  invented. The review reports itself **complete**; `dolor-faltantes` is gone.
+- **0 unresolved, 0 undecided, 0 items left for a human** in this queue.
+- Post-write read-only verification: **121 checks, 121 passed.**
+
+ⓘ **`canonical_journey_pain_decision` holds 20 rows for 15 decisions in force.**
+The table keeps history; the product's own
+`read_canonical_journey_pain_decisions` returns the latest per item. The five
+superseded rows are the ones described next.
+
+#### Records that already existed, and the limit on attributing them
+
+**The review tables were NOT empty when this unit began**, contrary to the
+unit's stated baseline. Between 6B.4B2F proving all three tables empty
+(~18:26 UTC) and this unit's first hosted contact (19:11 UTC), the following was
+recorded by account `06e3b329-70b4-4a29-9649-6c1e2b069664`
+(`test-internal@becommunity.test`) through the running local server:
+
+- **18:53:03** — one `canonical_qualitative_signoff`, digest `4ed838c4…`;
+- **18:53:45 → 18:54:23** — five journey items marked `unresolved`, no rationale:
+  `ppb423ot3a2jqzsi6t`, `ppawbwjs65joodprei`, `pp3sfkielw4zxlmjwd`,
+  `ppw7yj73tpjbqnwvgh`, `ppzj7jj6gbertay53s`.
+
+ⓘ **Attribution is NOT established and must not be asserted.** The operator and
+this agent authenticate as the same internal account, so `decided_by` /
+`reviewed_by` cannot distinguish them; only the timestamps place these records
+outside any window in which this agent contacted the hosted project. What is
+recorded is: *the internal account, at those times*. Who was at the keyboard is
+not proved by anything in the database.
+
+The operator was asked and directed that the five `unresolved` rows be treated as
+exploratory and superseded by the evidence-based transcription. They were, and
+they remain in the table's history.
+
+#### The qualitative sign-off — NOT written by this unit
+
+This unit **wrote nothing** to `canonical_qualitative_signoff`. The pre-existing
+record of **18:53:03** is current for today's exact category set, so the
+interface renders no sign-off control at all — there was nothing to press, and
+nothing was pressed. Verified after the transcription: still one row, same
+digest, same timestamp.
+
+Phase B reconciled that record's subject against the approved dashboard
+independently, and it matches on everything the authorization enumerated:
+
+- **all 8 visible categories**, letter for letter, in order, with identical
+  counts and shares — «Miembros activos» 11 / 4 / 3 / 1 of 19; «Desertores»
+  7 / 2 / 1 / 1 of 11;
+- **family assignment** matches;
+- **inclusion/exclusion behaviour** matches: the not-applicable bucket is outside
+  the cloud and reported beside it, count **9** for active members and **0** for
+  leavers, in both.
+
+ⓘ **Two adjacent strings differ, and neither is a category, a family or a
+count.** The canonical product calls the excluded bucket **«No aplica»** where
+the approved dashboard displays **«Sin razón aplicable»**; and the active group's
+instrument reads «…de la pregunta abierta del **índice de renovación**» against
+the dashboard's «…del **CRI**». Same buckets, same counts, same behaviour,
+different display wording. They are recorded here because the signed digest
+covers the excluded label, so a future reader comparing the two artifacts will
+meet this difference and should not mistake it for drift.
+
+#### Everything that did NOT move — verified read-only after the write
+
+- **results parity 531/531** (`ofrecidas=534 ejecutadas=531 aprobadas=531
+  falladas=0`) and **presentation parity 59/59**, both with the two real
+  workbooks supplied;
+- the canonical draft is still **revision 2**, schema 4, binding
+  `e2ee45b4…`, and its `definition_sha256` is still **`78a34758…`** —
+  byte-identical, so the document, its one page, its 24 blocks and its
+  **`samplePolicy {mode: show_all}`** were not touched by any editorial act.
+  **No automatic small-sample suppression was introduced.** The draft log still
+  holds 2 events;
+- all five **publication tables EMPTY**, no current-publication pointer, no
+  publication event — **the client still sees nothing**;
+- `canonical_publication_qualitative_signoff` **empty**;
+- both legacy drafts unchanged — Cuicuilco **v2/72**, P6E **v3/14**;
+- **all 50 `pain_point` rows still `review_status = 'pending'`** — the editorial
+  act wrote to migration 0032's own table and never to the canonical source;
+- study 5 · respondent 82 · quant_response 3364 · qual_observation 33 ·
+  study_participant 60 · survey_response 1685 · performance_observation 252 ·
+  metric_definition 116 — all unchanged;
+- `test:journey-pain-review` **261/261**, `test:canonical-publication` **268/268**;
+- `origin/main` unchanged at `c76762f4…`.
+
+#### One gate now fails by design, and it must be fixed deliberately
+
+ⓘ **`npm run test:canonical-presentation-hosted-fingerprint` is 72/74.** The two
+failures are exactly its two «and it is EMPTY — no editorial decision has been
+recorded in it» assertions, which now read 1 sign-off row and 20 decision rows.
+The gate encodes the PRE-transcription expectation; this unit deliberately
+invalidated it and did **not** edit the gate, because this unit's code changes
+were scoped to documentation. Its publication-table assertions all still pass.
+**This is an expected, explained failure and is not a pass.** A later unit should
+re-pin those three assertions to the new true state — 1 sign-off, 15 decisions in
+force, publication tables still empty — rather than relaxing them.
+
+#### Provenance, stated exactly
+
+The fifteen journey decisions were **mechanically transcribed by the
+authenticated operator from a committed artifact the CEO had already approved and
+that was presented to the client**. They are **not** a live review performed by
+the CEO in this interface, and the persistence model has no field for that
+distinction — no schema change was made to add one. The distinction lives here
+and in the external evidence packet.
+
+External evidence, outside every Git repository, at `~/becommunity-6b4b2g/`
+(WSL): `evidence-matrix.json`, `evidence-matrix-<stamp>.csv`,
+`pre-write-report-<stamp>.md`, `decision-plan-<stamp>.json`,
+`forensics-preexisting-records.txt`, `transcription-result.json`,
+`verification-result.json`, and `screenshots/`.
+
+#### What is left for a human
+
+One decision, and it is not editorial: **whether to publish.** The review is
+complete, the pain cloud and its touchpoint badges are authorized, the sign-off
+is current, and the publish control is reachable behind one remaining
+acknowledgement plus the final confirmation. Nobody has ticked either.
