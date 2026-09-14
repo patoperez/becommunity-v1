@@ -128,10 +128,14 @@ import {
   buildGenericStartingBlueprint,
   decodePresentationFromStorage,
   encodePresentationForStorage,
+  presentationBindingFingerprint,
   projectPresentationCatalog,
   type CanonicalPresentationRegistry,
+  type StoredPresentation,
 } from "@/lib/presentation/server";
 import { validatePresentationDocument } from "@/lib/presentation";
+// The search space of the rebind's exhibition proof — see `assessPresentationRebind`.
+import { SUPERSEDED_RESULTS_CONTRACT_VERSIONS } from "@/lib/results/contract";
 
 /* -------------------------------------------------------------------------- */
 /* blueprint selection — by what a study IS, never by which study it is        */
@@ -585,6 +589,13 @@ export function renderModelDigest(model: PresentationRenderModel): string {
 }
 
 const DRAFT_TABLE = "canonical_presentation_draft";
+/**
+ * The append-only log 0029 writes beside every draft revision.
+ *
+ * Read — never written — by the rebind, to tell a RETRY apart from a CONFLICT.
+ * The save RPC owns the writes to it.
+ */
+const DRAFT_EVENT_TABLE = "canonical_presentation_draft_event";
 
 /** The row shape read back. Every column is named; none is a respondent's. */
 export type DraftRow = {
@@ -768,16 +779,50 @@ export async function storeEditedPresentation(
     };
   }
 
+  return saveEncodedPresentation(
+    client,
+    scope,
+    actorUserId,
+    encoded.value,
+    expectedRevision,
+    idempotencyKey,
+    null,
+  );
+}
+
+/**
+ * The WRITE, extracted so there is exactly one of it.
+ *
+ * Unit 6B.4B2E added a second caller — the explicit rebind — and the tempting
+ * shape was a second `client.rpc(...)` beside this one. Two call sites would be
+ * two places to keep the conflict code, the replay flags and the shape of the
+ * answer true, and the second would be the one nobody re-read. So the envelope
+ * is produced by whoever owns the document, and the write is here, once.
+ *
+ * `note` is the one thing the two callers differ on: a composed save has
+ * nothing to add beyond the event itself, and a rebind records which contract
+ * versions it moved between, which is the fact an auditor will want and cannot
+ * reconstruct from the row.
+ */
+async function saveEncodedPresentation(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  actorUserId: string,
+  encoded: StoredPresentation,
+  expectedRevision: number | null,
+  idempotencyKey: string,
+  note: string | null,
+): Promise<SaveResult> {
   const { data, error } = await client.rpc("save_canonical_presentation_draft", {
     p_study_id: scope.studyId,
     p_actor: actorUserId,
-    p_definition: encoded.value.definition,
-    p_registry_version: encoded.value.registryVersion,
-    p_binding_fingerprint: encoded.value.binding,
-    p_definition_sha256: encoded.value.definitionSha256,
+    p_definition: encoded.definition,
+    p_registry_version: encoded.registryVersion,
+    p_binding_fingerprint: encoded.binding,
+    p_definition_sha256: encoded.definitionSha256,
     p_expected_revision: expectedRevision,
     p_idempotency_key: idempotencyKey,
-    p_note: null,
+    p_note: note,
   });
 
   if (error) {
@@ -842,4 +887,456 @@ export async function storeEditedPresentation(
     created: answer.created === true,
     replayed: answer.replayed === true,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* THE EXPLICIT REBIND — Unit 6B.4B2E                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * WHY A REBIND IS A SEPARATE ACT, AND WHY IT IS NOT A REGENERATION.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE SITUATION IT EXISTS FOR.
+ *
+ * A stored draft names its handles against the registry it was authored under,
+ * and pins that registry by fingerprint. When the RESULTS CONTRACT VERSION is
+ * raised — `CANONICAL_RESULTS_CONTRACT_VERSION`, which is one of the nine
+ * inputs to `presentationBindingFingerprint` — every stored binding stops
+ * matching at once, on every study, without a single number, handle or address
+ * having moved. The composer then refuses to open the draft at all
+ * (`binding_fingerprint_mismatch`), which is correct and is also a dead end:
+ * the save path deliberately does not re-bind, so there is no sequence of
+ * clicks that gets an author out of it.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THE SAVE PATH STILL MUST NOT RE-BIND, AND THIS MAY.
+ *
+ * Re-binding ON SAVE would take a layout authored against one package and file
+ * it as though it had been authored against another, permanently, as a side
+ * effect of an unrelated act. That is the retargeting the fingerprint exists to
+ * prevent and the reason `storeEditedPresentation` resolves the document AS IT
+ * ARRIVED.
+ *
+ * This function is the opposite in every way that matters: it is asked for on
+ * purpose, it changes NOTHING an author wrote, and it refuses unless it can
+ * PROVE that the only input which moved is the contract version.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * HOW "ONLY THE CONTRACT VERSION MOVED" IS PROVED RATHER THAN ASSUMED.
+ *
+ * A digest says that something moved, never which thing. So the stored binding
+ * is EXHIBITED: recomputed from today's registry — today's address map, today's
+ * seven source-identity fields, today's registry version — with nothing
+ * substituted but the contract version, once per version this product has
+ * shipped (`SUPERSEDED_RESULTS_CONTRACT_VERSIONS`). If one of them reproduces
+ * the stored fingerprint, then every other input is identical bit for bit: the
+ * tenant, the study, the spec, the mapping version, the calculation version,
+ * the package key, the plan fingerprint and all 279 handle-to-address entries.
+ * That is a proof, not an inference.
+ *
+ * If NONE reproduces it, something else moved — a package, a mapping, a
+ * calculation, a renamed label, a reordered group — and this refuses. A rebind
+ * is then the wrong instrument, and saying so is the entire point.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * AND THE AUTHORED CONTENT IS COMPARED BYTE FOR BYTE ANYWAY.
+ *
+ * The exhibition proves the REGISTRY did not move. A separate, independent
+ * check proves the DOCUMENT did not: the authored projection — every field
+ * except `binding` and `registryVersion` — is serialized deterministically
+ * before and after and must be byte-identical. Two proofs of two different
+ * facts, because a single check that happened to cover both would stop covering
+ * one of them the day it changed.
+ */
+
+/** Why a rebind cannot proceed. Closed, and every member is reachable. */
+export type RebindRefusalReason =
+  | "no_stored_draft"
+  | "storage_refused"
+  | "document_refused"
+  | "source_identity_differs"
+  | "authored_content_would_change"
+  | "does_not_resolve_after_rebind"
+  | "conflict";
+
+/** The one field a rebind moves, and what it moves it from and to. */
+export type RebindChange = {
+  field: "binding" | "registryVersion";
+  from: string;
+  to: string;
+};
+
+/**
+ * What a rebind would do, in the words an operator needs.
+ *
+ * IT CARRIES NO DATABASE IDENTIFIER. No tenant, no study, no package key, no
+ * plan fingerprint: this value is rendered in a browser, and the boundary gate
+ * scans client-reachable output for exactly those. What it carries instead are
+ * the two opaque digests the operator is being asked to approve the change
+ * between, and counts of what survives untouched.
+ */
+export type RebindPlan = {
+  status: "ready";
+  storedRevision: number;
+  /** The contract version the stored binding was computed under — PROVED, not guessed. */
+  supersededContractVersion: string;
+  currentContractVersion: string;
+  /** Exactly the fields that move. Anything else here would be a defect. */
+  changes: RebindChange[];
+  /** What does NOT move, so the screen can say so in specifics rather than in promises. */
+  preserved: {
+    title: string;
+    pages: number;
+    blocks: number;
+    samplePolicyMode: string;
+    methodologyDisclosure: string;
+    /** Bytes of the authored projection — identical before and after, by construction. */
+    authoredBytes: number;
+    /** Digest of that projection. The same value appears in the post-write proof. */
+    authoredDigest: string;
+  };
+};
+
+export type RebindUnavailable = {
+  status: "not_needed" | "refused";
+  reason: RebindRefusalReason | "already_current";
+  detail: string;
+  /**
+   * Code and path only, exactly as `ComposerUnavailable` carries them.
+   *
+   * A `PresentationIssue` also holds a `detail` sentence written for this
+   * layer's own diagnostics; this value is rendered in a browser, and the
+   * screen already has a sentence of its own to show. Narrowing here rather
+   * than at the component keeps the two refusal surfaces the same shape.
+   */
+  issues?: { code: string; path: string }[];
+};
+
+export type RebindAssessment = RebindPlan | RebindUnavailable;
+
+/**
+ * Everything except the two binding fields, serialized deterministically.
+ *
+ * This is what "the authored document did not change" MEANS here, and it is
+ * compared as bytes rather than by walking fields, so a field added to the
+ * schema tomorrow is covered on the day it is added rather than on the day
+ * somebody remembers to extend a comparison.
+ */
+function authoredProjection(document: PresentationDocument): string {
+  const copy = { ...document } as Record<string, unknown>;
+  delete copy.binding;
+  delete copy.registryVersion;
+  return serializeDeterministic(copy);
+}
+
+/**
+ * Decide what a rebind would do to THIS stored row against THIS registry.
+ *
+ * Pure over its inputs: it reads nothing and writes nothing, so the page can
+ * call it to describe the change and the action can call it again to perform
+ * one, and the two cannot disagree about what was approved.
+ */
+export function assessPresentationRebind(
+  built: CanonicalPresentationRead,
+  row: DraftRow,
+  scope: ComposerScope,
+): RebindAssessment {
+  const registry = built.registry;
+
+  // ALREADY CURRENT is not a failure and must not be reported as one. A second
+  // press of the button, a reload, a colleague who got there first: all three
+  // arrive here, and all three are answered with "there is nothing to do".
+  if (row.binding_fingerprint === registry.binding && row.registry_version === registry.registryVersion) {
+    return {
+      status: "not_needed",
+      reason: "already_current",
+      detail:
+        "El vínculo de este borrador ya corresponde al contrato vigente. No hay nada que actualizar y no se escribe nada.",
+    };
+  }
+
+  const decoded = decodeStoredDraft(row, scope);
+  if (!decoded.ok) {
+    return {
+      status: "refused",
+      reason: "document_refused",
+      detail:
+        "El borrador almacenado no se puede leer como documento canónico, así que no se vuelve a vincular.",
+      issues: decoded.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+
+  // [1] THE EXHIBITION. Which shipped contract version, and only the contract
+  //     version, reproduces the stored fingerprint from today's registry?
+  const supersededContractVersion =
+    SUPERSEDED_RESULTS_CONTRACT_VERSIONS.find(
+      (candidate) =>
+        presentationBindingFingerprint({
+          registryVersion: registry.registryVersion,
+          contractVersion: candidate,
+          source: registry.source,
+          addresses: registry.addresses,
+        }) === row.binding_fingerprint,
+    ) ?? null;
+
+  if (supersededContractVersion === null) {
+    return {
+      status: "refused",
+      reason: "source_identity_differs",
+      detail:
+        "El vínculo guardado no se reproduce cambiando únicamente la versión del contrato, así que " +
+        "lo que se movió no es el contrato: puede ser el paquete importado, la versión de cálculo, " +
+        "el mapeo o las direcciones de los resultados. Actualizar el vínculo archivaría una " +
+        "presentación hecha sobre unos números como si se hubiera hecho sobre otros, así que no se " +
+        "hace. Este borrador tiene que revisarse a mano.",
+    };
+  }
+
+  // [2] THE REBIND ITSELF — the whole of it. Two fields, from the registry
+  //     built here, on the server, from this request's own canonical read.
+  const rebound = bindPresentationDocument(decoded.value, registry);
+
+  // [3] THE AUTHORED CONTENT, COMPARED AS BYTES. Independent of [1].
+  const before = authoredProjection(decoded.value);
+  const after = authoredProjection(rebound);
+  if (before !== after) {
+    return {
+      status: "refused",
+      reason: "authored_content_would_change",
+      detail:
+        "Actualizar el vínculo cambiaría algo que alguien escribió, y eso no es lo que esta acción " +
+        "hace. No se escribe nada.",
+    };
+  }
+
+  // [4] AND IT HAS TO WORK AFTERWARDS. The exhibition proves the registry did
+  //     not move; this proves the document still resolves against the results
+  //     the registry was built from — which is what the author will see.
+  const resolved = resolveUnderSelection(built, rebound, EMPTY_VIEWER_SELECTION);
+  if (!resolved.ok) {
+    return {
+      status: "refused",
+      reason: "does_not_resolve_after_rebind",
+      detail:
+        "Con el vínculo actualizado el documento todavía no corresponde a los resultados de este " +
+        "estudio, así que no se guarda: quedaría un borrador que no se puede abrir.",
+      issues: resolved.issues,
+    };
+  }
+
+  const blocks = decoded.value.pages.reduce((total, page) => total + page.blocks.length, 0);
+  const changes: RebindChange[] = [];
+  if (decoded.value.binding !== rebound.binding) {
+    changes.push({ field: "binding", from: decoded.value.binding ?? "", to: rebound.binding ?? "" });
+  }
+  if (decoded.value.registryVersion !== rebound.registryVersion) {
+    changes.push({
+      field: "registryVersion",
+      from: decoded.value.registryVersion,
+      to: rebound.registryVersion,
+    });
+  }
+
+  return {
+    status: "ready",
+    storedRevision: row.revision,
+    supersededContractVersion,
+    currentContractVersion: registry.contractVersion,
+    changes,
+    preserved: {
+      title: decoded.value.title,
+      pages: decoded.value.pages.length,
+      blocks,
+      samplePolicyMode: decoded.value.samplePolicy.mode,
+      methodologyDisclosure: decoded.value.methodologyDisclosure,
+      authoredBytes: new TextEncoder().encode(before).length,
+      authoredDigest: sha256Hex(before),
+    },
+  };
+}
+
+/** Read the row and assess, for a screen that wants to DESCRIBE the change. */
+export async function describePresentationRebind(
+  client: SupabaseClient,
+  scope: ComposerScope,
+): Promise<RebindAssessment> {
+  const stored = await readStoredDraftRow(client, scope);
+  if (!stored.ok) {
+    return { status: "refused", reason: "storage_refused", detail: stored.unavailable.detail };
+  }
+  if (!stored.row) {
+    return {
+      status: "refused",
+      reason: "no_stored_draft",
+      detail: "Este estudio no tiene un borrador canónico guardado, así que no hay vínculo que actualizar.",
+    };
+  }
+  let built;
+  try {
+    built = await readAndBuild(client, scope);
+  } catch (caught) {
+    return { status: "refused", reason: "storage_refused", detail: refusalFor(caught).detail };
+  }
+  return assessPresentationRebind(built, stored.row, scope);
+}
+
+/**
+ * Perform the rebind — the only function here that writes.
+ *
+ * IT RE-ASSESSES RATHER THAN TRUSTING WHAT THE SCREEN WAS SHOWN. The plan the
+ * operator approved was computed from a read that is now seconds or minutes
+ * old; everything is recomputed here, from this request's own canonical read,
+ * and the write is refused on exactly the same terms. Nothing the client sent
+ * is used as a binding, a digest or an identity — the client sends a study, an
+ * expected revision and a retry key, and nothing else.
+ *
+ * IT GOES THROUGH `save_canonical_presentation_draft`, the same RPC the composer
+ * saves through. No new function, no migration, no direct SQL: the expected
+ * revision, the advisory lock, the idempotency replay and the append-only event
+ * are the ones the product already has, and a second path would be a second set
+ * of guarantees to keep true.
+ */
+export async function rebindStoredPresentation(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  actorUserId: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<SaveResult> {
+  const stored = await readStoredDraftRow(client, scope);
+  if (!stored.ok) {
+    return { ok: false, reason: "storage_refused", detail: stored.unavailable.detail };
+  }
+  if (!stored.row) {
+    return {
+      ok: false,
+      reason: "storage_refused",
+      detail: "Este estudio no tiene un borrador canónico guardado, así que no hay vínculo que actualizar.",
+    };
+  }
+
+  // A REPLAY IS ANSWERED BEFORE A CONFLICT IS, AND THE ORDER IS THE WHOLE POINT.
+  //
+  // The first draft of this function checked the expected revision first, and
+  // that is wrong in the one case idempotency exists for: an operator whose
+  // first attempt SUCCEEDED but whose answer never arrived presses the button
+  // again with the same key. The row has moved to 2 — moved by their own write —
+  // so a revision-first check calls their retry a conflict and tells them
+  // somebody else edited the draft. Nobody did.
+  //
+  // `save_canonical_presentation_draft` gets this right internally: the
+  // idempotency short-circuit runs before the expected-revision comparison. The
+  // same order is reproduced here rather than inverted, by asking the event log
+  // whether this key has already been recorded for this study.
+  const { data: replayed } = await client
+    .from(DRAFT_EVENT_TABLE)
+    .select("revision")
+    .eq("study_id", scope.studyId)
+    .eq("tenant_id", scope.tenantId)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle<{ revision: number }>();
+  if (replayed) {
+    return {
+      ok: true,
+      revision: replayed.revision,
+      currentRevision: stored.row.revision,
+      created: false,
+      replayed: true,
+    };
+  }
+
+  // ONLY NOW is a stale revision a conflict. The RPC refuses it too and its
+  // refusal is the authoritative one — it holds the advisory lock — but
+  // refusing here means an operator looking at a stale screen is told so
+  // without a write being attempted, and the two refusals agree by
+  // construction because they compare the same two numbers.
+  if (stored.row.revision !== expectedRevision) {
+    return {
+      ok: false,
+      reason: "conflict",
+      detail:
+        "Alguien guardó este borrador después de que se abrió esta pantalla, así que no se " +
+        "actualiza el vínculo sobre una revisión que ya no es la última.",
+      storedRevision: stored.row.revision,
+    };
+  }
+
+  let built;
+  try {
+    built = await readAndBuild(client, scope);
+  } catch (caught) {
+    return { ok: false, reason: "storage_refused", detail: refusalFor(caught).detail };
+  }
+
+  const assessment = assessPresentationRebind(built, stored.row, scope);
+  if (assessment.status !== "ready") {
+    // `not_needed` is not an error, and it is also not a write. The caller is
+    // told the revision that is already current, which is what a second press
+    // of the button needs to hear.
+    if (assessment.status === "not_needed") {
+      return {
+        ok: true,
+        revision: stored.row.revision,
+        currentRevision: stored.row.revision,
+        created: false,
+        replayed: true,
+      };
+    }
+    return {
+      ok: false,
+      reason: assessment.reason === "conflict" ? "conflict" : "document_refused",
+      detail: assessment.detail,
+      issues: assessment.issues,
+    };
+  }
+
+  const decoded = decodeStoredDraft(stored.row, scope);
+  if (!decoded.ok) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "El borrador almacenado dejó de leerse entre la evaluación y la escritura.",
+      issues: decoded.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+  const rebound = bindPresentationDocument(decoded.value, built.registry);
+
+  // THE SUBTITLE IS CARRIED ACROSS BY HAND, and it has to be.
+  //
+  // `decodePresentationFromStorage` returns a `PresentationDocument`, and the
+  // subtitle does not live in one — it lives in the envelope's `metadata`. So a
+  // decode-then-encode round trip drops it, and `encodePresentationForStorage`
+  // would stamp `subtitle: null` over an authored line nobody asked to remove.
+  // It happens to be null on the only stored draft that exists today, which is
+  // exactly why it would have gone unnoticed.
+  const definition = stored.row.definition as { metadata?: { subtitle?: unknown } } | null;
+  const storedSubtitle =
+    definition && typeof definition.metadata === "object" && definition.metadata !== null
+      ? definition.metadata.subtitle
+      : null;
+
+  const encoded = encodePresentationForStorage(
+    rebound,
+    { tenantId: scope.tenantId, studyId: scope.studyId },
+    { subtitle: typeof storedSubtitle === "string" ? storedSubtitle : null },
+  );
+  if (!encoded.ok) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "El documento re-vinculado no se puede almacenar en la forma que exige la columna.",
+      issues: encoded.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+
+  return saveEncodedPresentation(
+    client,
+    scope,
+    actorUserId,
+    encoded.value,
+    expectedRevision,
+    idempotencyKey,
+    `vínculo actualizado ${assessment.supersededContractVersion} → ${assessment.currentContractVersion}`,
+  );
 }

@@ -81,6 +81,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   loadStoredPresentation,
+  rebindStoredPresentation,
   resolveEditedPresentation,
   storeEditedPresentation,
 } from "@/lib/studio/presentation-workspace";
@@ -371,4 +372,81 @@ export async function loadCanonicalPresentationDraft(studyId: string): Promise<L
     };
   }
   return loadStoredPresentation(authorized.admin, authorized.scope);
+}
+
+/**
+ * Update the stored draft's BINDING, and nothing else — Unit 6B.4B2E.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THIS ACTION EXISTS AT ALL.
+ *
+ * Raising `CANONICAL_RESULTS_CONTRACT_VERSION` invalidates every stored
+ * binding at once, because the contract version is one of the nine inputs to
+ * `presentationBindingFingerprint`. The composer then refuses to open the draft
+ * — correctly, with `binding_fingerprint_mismatch` — and the save path
+ * deliberately does not re-bind, so there was no sequence of clicks that got an
+ * author out of it. This is that sequence, and it is a separate, explicit act
+ * rather than something a page load does quietly.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT THE CLIENT IS ALLOWED TO SEND, AND IT IS ALMOST NOTHING.
+ *
+ * A study id, the revision it believes is current, and a retry key. NO
+ * DOCUMENT, NO BINDING, NO DIGEST, NO REGISTRY VERSION, NO TENANT. Everything
+ * that ends up in the row is derived on the server from this request's own
+ * canonical read, so there is no value a hostile caller could supply that would
+ * become part of a stored identity.
+ *
+ * That is the whole reason this takes three scalars instead of a document the
+ * way `saveCanonicalPresentationDraft` does: the save is an author sending
+ * their work, and this is an operator asking the server to recompute one field
+ * of work that is already stored.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT RETURNS RATHER THAN REDIRECTS, for the reason this file's header gives at
+ * length about the preview: a redirect remounts the page, and the screen has a
+ * refusal to show and a plan the operator was looking at.
+ */
+export async function rebindCanonicalPresentationDraft(
+  studyId: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<SaveResult> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return { ok: false, reason: authorized.reason, detail: authorized.detail };
+  }
+
+  if (!IDEMPOTENCY_KEY.safeParse(idempotencyKey).success) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "La clave de reintento enviada no tiene la forma que esta capa admite.",
+    };
+  }
+
+  // A REBIND ALWAYS HAS AN EXPECTED REVISION, and `null` is not one.
+  //
+  // `EXPECTED_REVISION` admits null because a first composed save legitimately
+  // has no stored revision to expect. A rebind is defined only over a row that
+  // already exists, so null here is not "create it" — it is a caller who did
+  // not read the row, and letting it through would turn an optimistic-
+  // concurrency check into no check at all.
+  const revision = EXPECTED_REVISION.safeParse(expectedRevision);
+  if (!revision.success || revision.data === null) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail:
+        "Actualizar el vínculo exige decir sobre qué revisión se hace, y no se recibió una.",
+    };
+  }
+
+  return rebindStoredPresentation(
+    authorized.admin,
+    authorized.scope,
+    authorized.userId,
+    revision.data,
+    idempotencyKey,
+  );
 }

@@ -23,9 +23,15 @@
 // applied to no project. 6B.3B applied it and created Cuicuilco's first
 // canonical draft, so the assertion is INVERTED rather than removed: the
 // storage must exist, it must hold exactly one draft, that draft must be
-// Cuicuilco's at revision 1 with the digest the encoder produced before the
-// write, exactly one `draft_created` event must describe it, and no other study
-// may have acquired one.
+// Cuicuilco's with the digest the encoder produced before the write, the event
+// log must describe it, and no other study may have acquired one.
+//
+// IT IS AT REVISION 2 SINCE 2026-09-14, not 1. Unit 6B.4B2E rebound it: raising
+// the results contract to `3.0.0` moved the binding digest, the composer
+// refused to open the draft, and one explicit «Actualizar vínculo» recomputed
+// the binding on the server. Only that field changed — the proof is that the
+// old binding put back into the current definition reproduces the old digest —
+// so the pinned pair moved and everything the pin exists to protect did not.
 //
 // AND WHAT UNIT 6B.4B1 PUT THERE, WITH THE OPPOSITE EMPHASIS. Until 2026-09-09
 // §[3b] proved the three canonical PUBLICATION tables did not exist, because
@@ -97,10 +103,29 @@ const EXPECTED = {
    */
   canonicalDraft: {
     studyId: "cd4d6acd-88b9-4804-829f-75b6d91a32b7",
-    revision: 1,
+    /**
+     * REVISION 2 SINCE 2026-09-14 — Unit 6B.4B2E's explicit rebind.
+     *
+     * It was 1, bound to `cf63bdca…` under results contract `2.2.0`. Raising
+     * the contract to `3.0.0` moved the binding digest — the contract version
+     * is one of its nine inputs — and the composer then refused to open the
+     * draft at all. One explicit «Actualizar vínculo» recomputed the binding on
+     * the server and saved revision 2.
+     *
+     * NOTHING AN AUTHOR WROTE MOVED WITH IT, and that is checked rather than
+     * asserted: putting the OLD binding back into the CURRENT definition
+     * reproduces `511d7f54…` exactly, so `binding` is the only field that
+     * differs between the two revisions. The document is still the same one
+     * page and twenty-four blocks, still `show_all`, still titled «La voz de
+     * las y los Nets de Cuicuilco».
+     */
+    revision: 2,
     registryVersion: "1.0.0",
-    binding: "cf63bdca71e842fb0f6af50665348567a7b5a0f14f21b62683d2b0d0b5ca2037",
-    definitionSha256: "511d7f54f3ec0a391b45db259f64d57f9d415a9b2f5711c6f5fc551cdb67809d",
+    binding: "e2ee45b43fe99102776d4617e12d9a7584d764ddd792199c0dbb96b08a25e2d2",
+    definitionSha256: "78a34758eca3b3d59349fd1dd09ae24114122a2d27575b9c35d852823b25a52d",
+    /** What it was before the rebind, kept so a regression can be recognised. */
+    supersededBinding: "cf63bdca71e842fb0f6af50665348567a7b5a0f14f21b62683d2b0d0b5ca2037",
+    supersededDefinitionSha256: "511d7f54f3ec0a391b45db259f64d57f9d415a9b2f5711c6f5fc551cdb67809d",
   },
 };
 
@@ -258,6 +283,14 @@ if (canonicalDrafts) {
       `its definition still hashes to ${expected.definitionSha256.slice(0, 16)}…` +
         `${row.definition_sha256 === expected.definitionSha256 ? "" : ` — IT IS NOW ${row.definition_sha256.slice(0, 16)}…`}`,
     );
+    // AND IT HAS NOT SLID BACK. A row carrying the pre-rebind binding again
+    // would mean something restored an older revision over the current one,
+    // which the checks above cannot distinguish from a fresh edit.
+    check(
+      row.binding_fingerprint !== expected.supersededBinding &&
+        row.definition_sha256 !== expected.supersededDefinitionSha256,
+      "and it is not the superseded revision-1 pair, so nothing rolled the rebind back",
+    );
   }
   // NO STUDY BUT THIS ONE. A second canonical draft would mean something wrote
   // where this phase authorized nothing.
@@ -273,13 +306,26 @@ const { data: canonicalEvents, error: canonicalEventError } = await client
 check(canonicalEventError === null, `the canonical draft event log reads${canonicalEventError ? ` — ${canonicalEventError.code}` : ""}`);
 if (canonicalEvents) {
   record.canonicalEvents = canonicalEvents.length;
-  check(canonicalEvents.length === 1, `it holds exactly one event (${canonicalEvents.length})`);
-  const first = canonicalEvents[0];
+  // TWO SINCE 2026-09-14, and the second one is named rather than merely
+  // counted. The rebind is a SAVE — it goes through the same RPC the composer
+  // saves through — so it appends a `draft_saved`, and an event log that gained
+  // anything else would mean a write nobody authorized.
+  check(canonicalEvents.length === 2, `it holds exactly two events (${canonicalEvents.length})`);
+  const [first, second] = canonicalEvents;
   if (first) {
-    check(first.action === "draft_created", `and it is a ${first.action} at revision ${first.revision}`);
-    check(first.revision === 1, `the first and only revision (${first.revision})`);
+    check(first.action === "draft_created", `the first is a ${first.action} at revision ${first.revision}`);
+    check(first.revision === 1, `at revision 1 (${first.revision})`);
     check(first.study_id === EXPECTED.canonicalDraft.studyId, "for Cuicuilco and no one else");
   }
+  if (second) {
+    check(second.action === "draft_saved", `the second is a ${second.action} — Unit 6B.4B2E's rebind`);
+    check(second.revision === 2, `at revision 2 (${second.revision})`);
+    check(second.study_id === EXPECTED.canonicalDraft.studyId, "for Cuicuilco too, and no one else");
+  }
+  check(
+    canonicalEvents.every((e) => e.study_id === EXPECTED.canonicalDraft.studyId),
+    "and no other study has a canonical draft event at all",
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -516,7 +562,8 @@ console.log(
   "RESULT: both legacy experience drafts are at the versions and revisions the previous unit\n" +
     "        recorded, neither is schema version 4, the experience log is unchanged, migration\n" +
     "        0029's storage exists and holds exactly ONE canonical draft — Cuicuilco's, at\n" +
-    "        revision 1, under one draft_created event — no other study has acquired one,\n" +
+    "        revision 2 after the explicit rebind, under a draft_created and a draft_saved and\n" +
+    "        nothing else — no other study has acquired one,\n" +
     "        migration 0030's storage exists and is EMPTY in all three tables so no experience\n" +
     "        has been published, migrations 0031 and 0032 are applied and their three review\n" +
     "        tables are EMPTY so no qualitative sign-off and no pain-item decision has been\n" +

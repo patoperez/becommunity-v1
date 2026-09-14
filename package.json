@@ -110,7 +110,8 @@
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "test:cloudflare-calc": "tsx scripts/cloudflare-calc-compat-test.mjs",
     "test:workers-runtime": "tsx scripts/workers-runtime-safety-test.mjs",
-    "test:workers-ingestion": "tsx scripts/workers-ingestion-runtime-test.mjs"
+    "test:workers-ingestion": "tsx scripts/workers-ingestion-runtime-test.mjs",
+    "test:canonical-presentation-rebind": "node --conditions=react-server --import tsx scripts/canonical-presentation-rebind-test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",

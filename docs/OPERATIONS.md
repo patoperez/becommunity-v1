@@ -43,6 +43,37 @@ sha256 `411037a406029fdbe555c0546217085e6dff7a4a243699304085116b105f0e63`
 > any of the three means a human judgement was recorded that nobody authorized —
 > the same fingerprint gate fails on it.
 
+### The Cuicuilco draft was rebound to revision 2 (2026-09-14, Unit 6B.4B2E)
+
+Not a migration — an **application** mutation, through the real authenticated
+route, and the only one that unit authorized.
+
+| | |
+|---|---|
+| what | the stored canonical presentation draft for `cd4d6acd…` |
+| revision | **1 → 2** |
+| binding | `cf63bdca71e842fb0f6af50665348567a7b5a0f14f21b62683d2b0d0b5ca2037` → `e2ee45b43fe99102776d4617e12d9a7584d764ddd792199c0dbb96b08a25e2d2` |
+| definition digest | `511d7f54f3ec0a391b45db259f64d57f9d415a9b2f5711c6f5fc551cdb67809d` → `78a34758eca3b3d59349fd1dd09ae24114122a2d27575b9c35d852823b25a52d` |
+| why | `CANONICAL_RESULTS_CONTRACT_VERSION` moved `2.2.0` → `3.0.0`, and it is one of the nine inputs to the binding fingerprint |
+| event | one `draft_saved` at revision 2, note `vínculo actualizado 2.2.0 → 3.0.0` |
+
+**Exactly one document field changed.** Putting the old binding back into the
+current definition reproduces the old digest byte for byte, so `binding` is the
+only difference between the two revisions. The document is still 1 page, 24
+blocks, 17 803 bytes, `samplePolicy {mode: show_all}`.
+
+> **No editorial decision was recorded.** The three review tables are still
+> empty, all 50 `pain_point` rows are still `pending`, nothing was published and
+> nothing was deployed. The qualitative sign-off and the fifteen journey-pain
+> decisions remain a person's work, and publication stays blocked until both are
+> done.
+
+**To undo it**, rebind is not the instrument — it only ever moves a binding
+forward to the current registry. Restoring revision 1 means restoring from the
+backup below, or saving the previous definition through the ordinary save path
+with revision 2 as the expected revision. Neither is authorized by any phase so
+far.
+
 ### What `0031` and `0032` changed, and what they did not (2026-09-14)
 
 A full structural fingerprint of `public` was taken before and after and diffed

@@ -186,6 +186,24 @@ confirmed ranges gray 0–29, red 30–49, yellow 50–69 and green 70–100.
 
 ## Migration 0029: the durable canonical presentation draft
 
+> **The stored Cuicuilco draft is at revision 2 since 2026-09-14.** Raising
+> `CANONICAL_RESULTS_CONTRACT_VERSION` from `2.2.0` to `3.0.0` moved every stored
+> binding at once — the contract version is one of the nine inputs to
+> `presentationBindingFingerprint` — so the composer refused to open the draft
+> with `binding_fingerprint_mismatch` and the save path, which deliberately does
+> not re-bind, could not repair it. Unit 6B.4B2E added an explicit
+> **rebind**: a server-only, tenant-scoped act that takes a study, an expected
+> revision and a retry key, recomputes the binding from its own canonical read,
+> and refuses unless it can PROVE that only the contract version moved — by
+> exhibiting the stored fingerprint from today's registry with nothing
+> substituted but that version, over `SUPERSEDED_RESULTS_CONTRACT_VERSIONS`.
+> It writes through `save_canonical_presentation_draft` like any other save, so
+> the advisory lock, the expected-revision refusal, the idempotency replay and
+> the append-only event are the ones described below. **Exactly one document
+> field changes** — `binding` — and that is proved by reproducing the previous
+> `definition_sha256` from the current definition with the old binding put back.
+> See `docs/CURRENT_STATE.md` §"Unit 6B.4B2E".
+
 `0029_canonical_presentation_draft.sql` is the fourth canonical migration and
 the only one that is not about ingesting or calculating. It exists because the
 question "can a canonical schema-v4 presentation draft coexist with the two

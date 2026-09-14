@@ -4313,8 +4313,9 @@ approved value moved; no AI was added; and shadow mode is still off everywhere.
 > read-only decision inventory over the fifty real `pain_point` rows. Migrations
 > `0031` and `0032` are authored here and, **when this unit ran, neither had
 > been applied anywhere** — both were applied on 2026-09-14, with their storage
-> left empty; see §"Unit 6B.4B2D". The Cuicuilco canonical draft is still at
-> **revision 1**, and all three publication tables are still **empty**.
+> left empty; see §"Unit 6B.4B2D". The Cuicuilco canonical draft was at
+> **revision 1** while this unit ran — Unit 6B.4B2E rebound it to revision 2 on
+> 2026-09-14 — and all three publication tables are still **empty**.
 
 Two decisions, and the second is most of the unit.
 
@@ -4588,7 +4589,8 @@ a checkout.
 > read-only pain-point audit. Migration `0031` is authored here and **had not
 > been applied anywhere when this unit ran** — it was applied on 2026-09-14,
 > with its storage left empty; see §"Unit 6B.4B2D". The Cuicuilco canonical
-> draft is still at **revision 1**, and all three publication tables are still
+> draft was at **revision 1** while this unit ran — Unit 6B.4B2E rebound it to
+> revision 2 on 2026-09-14 — and all three publication tables are still
 > **empty**.
 
 The snapshot Unit 6B.4B1 left was mechanically publishable and materially
@@ -5473,3 +5475,285 @@ no publication event was written; no warning was acknowledged. Nothing was
 deployed, no application code was promoted, the client route was not switched, no
 legacy draft was converted, no formula or approved value moved, no credential was
 rotated, and shadow mode is still off everywhere. `main` is unchanged.
+
+### Unit 6B.4B2E — the Cuicuilco canonical draft is explicitly rebound to revision 2, and no editorial decision was made (EXECUTED, 2026-09-14)
+
+**One hosted application mutation was authorized and exactly one happened: the
+stored canonical draft was rebound from revision 1 to revision 2.** Its binding
+now answers for the current results contract; everything an author wrote is
+byte-identical. **No qualitative sign-off was recorded, no pain item was
+approved, rejected, edited or mapped, no warning was acknowledged, nothing was
+published and nothing was deployed.**
+
+#### Why revision 1 had drifted, measured rather than assumed
+
+`presentationBindingFingerprint` digests nine things: the registry version, the
+results **contract version**, seven source-identity fields, and the complete
+handle-to-address map. `CANONICAL_RESULTS_CONTRACT_VERSION` was `2.2.0` when the
+draft was written on 2026-09-08 and is `3.0.0` now, so every stored binding on
+every study stopped matching at once without a single number moving.
+
+That was proved, not inferred. Recomputing the fingerprint from **today's**
+registry — today's 279 addresses, today's seven identity fields, today's registry
+version — with nothing substituted but the contract version reproduces the stored
+`cf63bdca…` **exactly** at `contractVersion = "2.2.0"`:
+
+| substituted contract version | fingerprint |
+|---|---|
+| `1.0.0` | `20fc5186…` |
+| `2.0.0` | `29771984…` |
+| `2.1.0` | `9e677da1…` |
+| **`2.2.0`** | **`cf63bdca…` — the stored binding** |
+| `3.0.0` (current) | `e2ee45b4…` |
+
+Because only the contract version varied, every other input is identical bit for
+bit: tenant, study, `specId = cuicuilco`, `mappingVersion = 1`,
+`calculationVersion = catalogo-2026-08-19`, package
+`sha256:bb9a4a98…`, plan `sha256:099863e8…`, and the whole address map. The
+resolver's verdict on the stored document was a single issue,
+`binding_fingerprint_mismatch` at `$.binding`.
+
+#### Field-level classification
+
+| class | fields |
+|---|---|
+| **must change** | `definition.binding`; the `binding_fingerprint` column; the `definition_sha256` column (the definition bytes moved); `revision`; `updated_at`; one appended event row |
+| **contract metadata that must change** | **none.** `registryVersion` stays `1.0.0` — the results contract version is an INPUT to the fingerprint and is not stored in the document |
+| **must NOT change** | `schemaVersion` (4), `documentKind`, `id`, `title`, `locale`, `samplePolicy`, `methodologyDisclosure`, `pages` (the whole tree: order, blocks, filters, visibility, text, titles, visual configuration), and the envelope `metadata` — `studyId`, `tenantId`, `subtitle` |
+| **could not be proven safe by inspection** | `metadata.subtitle`. It is authored text that lives in the ENVELOPE, not the document, so `decodePresentationFromStorage` drops it and a decode-then-encode round trip would silently write `null` over it. It is carried across by hand, and the disposable gate plants a NON-NULL subtitle so the preservation is actually tested — Cuicuilco's happens to be null, which is exactly why a fixture matching it would have proved nothing |
+
+#### The explicit rebind, and why the save path still must not do it
+
+No safe rebind action existed. `storeEditedPresentation` resolves the document AS
+IT ARRIVED and refuses a stale binding on purpose — re-binding on save would file
+a layout authored over one package as though it had been authored over another,
+permanently, as a side effect of an unrelated act. And the composer refuses to
+OPEN a drifted draft, so there was no sequence of clicks out of it at all.
+
+`rebindStoredPresentation` is the way out and is a different act in every way
+that matters:
+
+- **server-only**, in the route's declared canonical loader, so the boundary
+  gate's door table is unchanged;
+- **authenticated and tenant-scoped** — the action re-validates the session with
+  `getUser()`, reads the role from the database, and reads the tenant from the
+  study row. A caller does not get to name a tenant;
+- **the client sends a study id, an expected revision and a retry key, and
+  NOTHING else.** No document, no binding, no digest, no registry version. Every
+  stored value is derived on the server from that request's own canonical read;
+- **it refuses unless it can prove only the contract moved** — the exhibition
+  above, run against `SUPERSEDED_RESULTS_CONTRACT_VERSIONS`. A binding no shipped
+  version reproduces is `source_identity_differs` and nothing is written;
+- **it compares the authored projection byte for byte** — every field except
+  `binding` and `registryVersion`, serialized deterministically — as a second,
+  independent proof, because one check covering two facts stops covering one of
+  them the day it changes;
+- **it refuses if the rebound document would not resolve**;
+- **it answers a REPLAY before a CONFLICT.** The first draft checked the revision
+  first, which calls an operator's own retry a conflict and tells them somebody
+  else edited the draft. Nobody did. The event log is consulted for the key
+  first, exactly as `save_canonical_presentation_draft` does internally;
+- **it writes through that same RPC.** No new function, no migration, no direct
+  SQL: the advisory lock, the expected-revision refusal, the idempotency replay
+  and the append-only event are the ones the product already has;
+- **it never runs on a read.** The page only DESCRIBES the change; the write
+  happens when a person presses «Actualizar vínculo».
+
+The panel says «vínculo» and never «resultados» or «recalcular», shows both
+digests so the change can be refused, and states what is preserved in specifics
+(«1 página, 24 bloques, política de muestra show_all») rather than in promises.
+
+#### The disposable proof, before anything hosted was touched
+
+`npm run test:canonical-presentation-rebind` — **78 assertions, 78 passed**,
+against a disposable PostgreSQL + PostgREST with a synthetic canonical package
+committed through the product's own commit flow. The fixture is the real
+situation: a draft whose binding is the one this product WOULD have computed
+under a superseded contract version, not an arbitrary digest.
+
+It proves revision 1 becomes 2 exactly once; that replaying the same key returns
+revision 2 and creates no revision 3; that a stale expected revision is refused
+with `conflict` and the row does not move; that another tenant is refused on both
+the read and the write; that the stored binding is the SERVER-derived one; that
+the authored projection and the envelope — subtitle included — are byte-identical
+after; that the composer, which refused to open the drifted draft, opens revision
+2; that a binding no contract version explains is refused and its row is left at
+revision 1; and that no publication, sign-off or pain-review row is created and
+no canonical result count moves.
+
+**Four failure modes were reintroduced and the gate caught all four**, each file
+restored byte-identically afterwards (digests compared):
+
+| mutation | caught by |
+|---|---|
+| the rebind also rewrites the title | 28 assertions, starting at the plan |
+| the exhibition accepts any binding | 4 — the foreign-bound row was repaired to revision 2 |
+| a stale revision is checked BEFORE a replay | 3 — the replay became a conflict |
+| the subtitle is not carried across | 2 — the envelope and the subtitle both moved |
+
+ⓘ **Two of those four were NOT caught on the first attempt, and both misses were
+in the gate rather than the product.** The title mutation was first applied to
+`bindPresentationDocument`, which the fixture also uses, so it moved both sides
+and cancelled itself; it was retargeted at the rebind's own call. The subtitle
+mutation was invisible because the fixture's subtitle was `null` — the same value
+the hosted draft carries. A fixture that matches production exactly is the one
+that cannot detect losing it.
+
+#### The hosted mutation
+
+| | |
+|---|---|
+| project | ref `ontvqazsqiwisdddblif`, PostgreSQL 17.6 |
+| path | the real authenticated route — signed in through the product's own `/login` as the internal test account, `/studio/e/cd4d6acd…/construccion`, one press of «Actualizar vínculo» |
+| performed at | **2026-09-14**, from commit `3ed5588` |
+| expected revision presented | **1** |
+| idempotency key | `rebind-r1-mu13s9rg-t8sthoy9` (one, fresh) |
+| revision | **1 → 2** |
+| binding | `cf63bdca71e842fb0f6af50665348567a7b5a0f14f21b62683d2b0d0b5ca2037` → `e2ee45b43fe99102776d4617e12d9a7584d764ddd792199c0dbb96b08a25e2d2` |
+| definition digest | `511d7f54f3ec0a391b45db259f64d57f9d415a9b2f5711c6f5fc551cdb67809d` → `78a34758eca3b3d59349fd1dd09ae24114122a2d27575b9c35d852823b25a52d` |
+| event written | one `draft_saved` at revision 2, note `vínculo actualizado 2.2.0 → 3.0.0` |
+
+#### THE PROOF THAT ONE FIELD MOVED
+
+The pre-rebind definition was not archived and does not need to be. **Putting the
+OLD binding back into the CURRENT definition reproduces the OLD definition digest
+exactly** — `511d7f54…` — so the two revisions differ in `binding` and in nothing
+else. A digest cannot be fooled by a compensating change elsewhere.
+
+Verified field by field on top of that: `schemaVersion` 4, `documentKind`
+`canonical_presentation`, `id` `cuicuilco-aprobado`, `title` «La voz de las y los
+Nets de Cuicuilco», `locale` `es-MX`, `methodologyDisclosure`
+`plain_language_with_base`, `samplePolicy {mode: show_all}`, 1 page, 24 blocks,
+`metadata` unchanged with `subtitle: null`, definition still **17 803 bytes**.
+And it RESOLVES: today's registry produces exactly the stored binding under
+contract `3.0.0`, and the document resolves with no issues. **27 assertions, 27
+passed.**
+
+#### Mandatory unchanged-state proof — 30 assertions, 30 passed
+
+Exactly ONE table changed in the whole database, and it is
+`canonical_presentation_draft_event` (1 → 2 rows).
+
+- both legacy drafts byte-identical — Cuicuilco **v2/72**, P6E **v3/14**;
+- `study_experience_event` still 86 rows under the same content digest;
+- all five publication tables **empty**; no publication event exists;
+- all three review tables **empty** — no sign-off, no pain decision;
+- all 50 `pain_point` rows still `review_status = 'pending'` under the same
+  content digest;
+- all 45 canonical evidence/result families unchanged, **15 642 rows**;
+- the five studies unchanged; the migration ledger byte-identical at 33 rows;
+- 67 tables / 62 policies / 41 functions / 215 indexes / 8 triggers, all
+  unchanged, and no function changed in any respect;
+- **results parity 531/531**, **presentation parity 59/59**, both re-run after
+  the mutation with the two real workbooks supplied;
+- `origin/main` untouched at `c76762f4…`.
+
+#### Human-review readiness — verified, and deliberately not completed
+
+Through the real authenticated routes, read-only. **22 assertions, 22 passed.**
+The draft was at revision 2 before this pass and at revision 2 after it, still
+under two events: browsing the screens wrote nothing. (It cannot: `autosaveIsDue`
+requires unsaved changes, and a RESTORED draft is by definition identical to what
+is stored.)
+
+- **Construcción loads revision 2**, the rebind panel is gone, the authored title
+  is intact, and nothing claims results or data were recalculated;
+- **the qualitative sign-off interface opens and is PENDING** — «Nadie ha dejado
+  constancia de haber revisado estas categorías», the categories are listed for a
+  person to read, «Registrar mi revisión» exists but is **disabled**, and the «I
+  read them» confirmation is **not** pre-ticked;
+- **publication is rendered but DISABLED**, and the screen says «Este estudio no
+  tiene ninguna publicación todavía: el cliente no ve nada»;
+- **the journey pain review opens** with **15 items**, every one «Sin revisar»,
+  counters reading `Sin revisar 15 · Aprobadas 0 · Excluidas 0 · Sin resolver 0`;
+- **nothing is preselected** — zero checked checkboxes, zero checked radios — and
+  each item offers an explicit «Decidir» a person must press;
+- **an ambiguous phrase stays visibly ambiguous** («esta frase aparece 2 veces en
+  el material»), and the screen says «la correspondencia la eliges tú»;
+- **no small-sample suppression is offered or implied.** Privacy remains
+  operator-controlled and the default is show-all.
+
+ⓘ **FIFTEEN, NOT FIFTY, AND THAT IS CORRECT.** All 50 `pain_point` rows exist and
+are all `pending`; **15 of them are journey pain** and the other 35 are
+organizational (8), performance (7) and culture (20), which this screen does not
+scope. §"The real study's decision inventory" records the same 15/8/7/20 split.
+The fifty rows are the canonical source; the fifteen are the decisions this
+review asks a person to make.
+
+Screenshots (outside every Git repository, alongside the run):
+`~/becommunity-6b4b2e/screenshots/` — `qa-1-construccion-revision-2.png`,
+`qa-2-revision-cualitativa-pendiente.png`, `qa-3-dolor-pendiente.png`, plus
+`1-construccion-vinculo-pendiente.png` and `2-vinculo-actualizado.png` from the
+mutation itself. The second and third are also the proof that no review decision
+and no publication exist.
+
+#### A pre-existing gate defect this unit fixed, because it blocked a required gate
+
+`scripts/journey-pain-review-test.mjs` §[16] looped over four module names as
+`file` and then referenced **`module`** — CommonJS's own global — in the body. The
+assertion never looked at any of the four names: it built one regex out of
+whatever `module` stringified to and reported four passes while testing nothing.
+Under Node 24 that identifier beside the file's top-level `await` makes the
+module format ambiguous, and the gate died with `ERR_AMBIGUOUS_MODULE_SYNTAX`.
+
+**That failure was reproduced at the baseline commit `3ed5588` in a throwaway
+worktree with this unit's files absent**, so it is not a regression. It is fixed
+here rather than deferred because a gate that cannot run cannot be reported as
+passing, and the four assertions now genuinely test the four names.
+`test:journey-pain-review` is **261/261**.
+
+#### Gates, and one honest failure
+
+`typecheck`, `lint` (0 errors, 54 warnings — one fewer than the baseline's 55,
+because the fix above removed a reference), `test:canonical-presentation`,
+`test:canonical-presentation-persistence`, `test:canonical-publication`,
+`test:journey-pain-review` (261/261), `test:publication-boundary`,
+`test:migration-chain`, `test:canonical-presentation-hosted-fingerprint`
+(**74/74**), `test:canonical-presentation-rebind` (**78/78**), results parity
+**531/531**, presentation parity **59/59**, and `npm run build` — all pass.
+
+ⓘ **`npm test` exits 1 on `test:hosted-target-guard`, which fails ONE assertion:**
+§[8], «the refusal names the main-repository rule, so the worktree rule did not
+answer for it». It builds `<root>/../becommunity-software/evidence` expecting a
+sibling main repository, and the WSL verifier is a plain clone AT that path. It
+is the same single failure Unit 6B.4B2D recorded, byte-identical.
+
+ⓘ **That gate is number 23 of 53, so the chain stops there and 30 gates never
+run.** They are not therefore covered, and were not reported as such: **all 30
+were run individually and all 30 passed** — `import-center`, `templates`,
+`bi-filters`, `qualitative`, `confirmed-qualitative`, `client-boundary`,
+`publication-boundary`, `data-scope`, `client-admin`, `study-config`,
+`client-preview`, `longitudinal`, `narrative-home`, `server-pdf`,
+`tenant-branding`, `validation`, `pivot`, `suite-a-selftest`,
+`suite-bc-selftest`, `design-tokens`, `studio-workflows`, `studio-completion`,
+`insights-story`, `p8-qualitative`, `p8-acceptance`, `private-metadata`,
+`data-completeness`, `segments`, `periods`, `xlsx-hardening`.
+
+ⓘ **The Cloudflare build was NOT run.** `npm run cf:build` is not part of this
+repository's ordinary gate and this phase forbids deployment; `npm run build`
+is what the offline chain and the other units use, and it passes.
+
+#### Remaining blockers, stated plainly
+
+Publication stays blocked, and only a person can unblock it:
+
+1. **the qualitative sign-off has not been recorded** — nobody has left evidence
+   of having read the category set, and the digest that would make such a record
+   go stale by itself does not exist yet;
+2. **the fifteen journey pain items are all undecided** — none approved, none
+   excluded, none mapped to a touchpoint. `authoredPainContent` is all-or-nothing,
+   so a partial review produces no pain content at all, and the blocker it raises
+   cannot be acknowledged away.
+
+Both are editorial acts this unit was forbidden to perform, and both remain to be
+done by a person in Studio.
+
+#### Still deferred, and deliberately so
+
+No publication was created, prepared, published, restored or archived; no
+current-publication pointer exists; no publication event was written. No
+qualitative sign-off was recorded and no journey pain decision was made. Nothing
+was deployed, no application code was promoted, the client route was not
+switched, no legacy draft was converted, no formula or approved value moved, no
+credential was rotated, and shadow mode is still off everywhere. `main` is
+unchanged.

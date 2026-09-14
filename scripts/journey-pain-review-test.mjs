@@ -969,10 +969,24 @@ console.log("\n[16] La frontera del barril: nada de esto es alcanzable desde el 
  * the boundary gate refused by name.
  */
 const barrel = read("src/lib/publication/index.ts");
+// ⓘ THE LOOP BODY USED TO SAY `module`, NOT `file`.
+//
+// `module` is CommonJS's own global, so this assertion never looked at any of
+// the four names it iterates — it built one regex out of whatever `module`
+// stringified to and checked that four times. It reported four passes and
+// tested nothing, which is worse than a missing check because it occupied the
+// place where a real one would have gone.
+//
+// Node 24 is what exposed it: referencing `module` beside this file's top-level
+// `await` makes the module format ambiguous, and the gate stopped at
+// ERR_AMBIGUOUS_MODULE_SYNTAX rather than passing vacuously. That failure was
+// present at the baseline commit and is not a consequence of Unit 6B.4B2E; it
+// is fixed here because a gate that cannot run cannot be reported as passing.
 for (const file of ["journey-pain-digest", "journey-pain-model", "./opaque", "evidence-digest"]) {
+  const name = file.replace("./", "");
   check(
-    !new RegExp(`from "\\.\\/${module.replace("./", "")}"`).test(barrel),
-    `el barril cliente-seguro no reexporta «${module}»`,
+    !new RegExp(`from "\\.\\/${name}"`).test(barrel),
+    `el barril cliente-seguro no reexporta «${name}»`,
   );
 }
 check(

@@ -112,6 +112,51 @@
 export const CANONICAL_RESULTS_CONTRACT_VERSION = "3.0.0";
 
 /**
+ * Every contract version this product has SHIPPED, newest first, excluding the
+ * current one.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY A LIST OF OLD VERSION STRINGS IS WORTH MAINTAINING.
+ *
+ * `presentationBindingFingerprint` digests nine things together: the registry
+ * version, THIS contract version, seven source-identity fields (tenant, study,
+ * spec, mapping version, calculation version, package key, plan fingerprint)
+ * and the complete handle-to-address map. When a stored draft's binding stops
+ * matching, the digest says only THAT something moved — never WHICH thing.
+ *
+ * That distinction is the whole safety of a rebind. Re-binding a document whose
+ * CONTRACT version moved is a formality: the same handles address the same
+ * results and nothing an author wrote means anything different. Re-binding a
+ * document whose PACKAGE, MAPPING, CALCULATION or ADDRESS MAP moved is a
+ * retargeting — it files a layout authored against one set of numbers as though
+ * it had been authored against another, which is precisely what the fingerprint
+ * exists to prevent.
+ *
+ * A hash cannot be inverted, so the only way to tell those two apart is to
+ * EXHIBIT the old digest: recompute it from today's registry with nothing
+ * substituted but the contract version, and see whether one of the versions
+ * this product has actually shipped reproduces it. If one does, every other
+ * input is proved identical, bit for bit. If none does, something else moved
+ * and the rebind must refuse — which it does.
+ *
+ * So this list is not documentation. It is the search space of that proof, and
+ * a version missing from it makes a legitimate rebind refuse rather than a
+ * dangerous one succeed: the failure is closed, and it names itself.
+ *
+ * APPEND THE OUTGOING VERSION HERE whenever
+ * `CANONICAL_RESULTS_CONTRACT_VERSION` is raised. An offline gate asserts the
+ * current version is not a member, that every member is well-formed, and that
+ * there are no duplicates.
+ */
+export const SUPERSEDED_RESULTS_CONTRACT_VERSIONS: readonly string[] = Object.freeze([
+  "2.3.0",
+  "2.2.0",
+  "2.1.0",
+  "2.0.0",
+  "1.0.0",
+]);
+
+/**
  * The unit a number lives in. Presentation may style it; it may not change it.
  *
  * A unit exists per DECLARED PRECISION, not per pretty name: each one below is

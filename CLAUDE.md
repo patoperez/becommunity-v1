@@ -195,9 +195,10 @@ npm run test:canonical-presentation-hosted-fingerprint # READ-ONLY. Proves the t
                                     #   experience drafts are still v2/72 and v3/14, that neither
                                     #   is v4, that the experience log is unchanged, that 0029's
                                     #   storage EXISTS on the hosted project, and that it holds
-                                    #   exactly one canonical draft — Cuicuilco's, at revision 1,
-                                    #   with its pinned binding and definition digest, under one
-                                    #   draft_created event — and that no other study has one.
+                                    #   exactly one canonical draft — Cuicuilco's, at revision 2
+                                    #   since the 6B.4B2E rebind, with its pinned binding and
+                                    #   definition digest, under a draft_created and a draft_saved
+                                    #   — and that no other study has one.
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)
@@ -625,6 +626,39 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `study_experience_event` still holds 86 rows. Read `docs/CURRENT_STATE.md`
   §"Unit 6B.3B" before touching any of it, and do not create a second revision
   of that draft to test something a disposable target can answer.
+  ⓘ **IT IS AT REVISION 2 SINCE 2026-09-14** — see the 6B.4B2E entry below. The
+  digests quoted above are revision 1's and are kept because they are what the
+  rebind's proof reproduces.
+- ⓘ **UNIT 6B.4B2E: THE CUICUILCO DRAFT WAS EXPLICITLY REBOUND, AND IS NOW AT
+  REVISION 2.** Raising `CANONICAL_RESULTS_CONTRACT_VERSION` from `2.2.0` to
+  `3.0.0` moved every stored binding at once — the contract version is one of the
+  nine inputs to `presentationBindingFingerprint` — so the composer refused to
+  open the draft with `binding_fingerprint_mismatch`, and the save path
+  deliberately does not re-bind. `rebindCanonicalPresentationDraft` is the way
+  out: an explicit, server-only, tenant-scoped act that takes a study, an
+  expected revision and a retry key and **nothing else** — no document, no
+  binding, no digest — and recomputes the binding from its own canonical read.
+  Performed through the real authenticated route on **2026-09-14**: revision
+  1 → 2, binding `cf63bdca…` → `e2ee45b4…`, definition digest `511d7f54…` →
+  `78a34758…`, one new `draft_saved` event noting `2.2.0 → 3.0.0`.
+  **EXACTLY ONE FIELD CHANGED, and that is proved rather than asserted**: putting
+  the old binding back into the current definition reproduces `511d7f54…` byte
+  for byte. Still 1 page, 24 blocks, `samplePolicy {mode: show_all}`, the same
+  title, the same envelope subtitle. **No editorial decision was made** — the
+  three review tables are still empty and all 50 `pain_point` rows are still
+  `pending`.
+- ⓘ **A REBIND REFUSES UNLESS IT CAN PROVE ONLY THE CONTRACT MOVED.** A digest
+  says something moved, never which thing, so the stored binding is EXHIBITED:
+  recomputed from today's registry with nothing substituted but the contract
+  version, once per member of `SUPERSEDED_RESULTS_CONTRACT_VERSIONS`. One
+  reproducing it proves every other input identical — tenant, study, spec,
+  mapping version, calculation version, package key, plan fingerprint and all 279
+  handle-to-address entries. None reproducing it means a package, mapping,
+  calculation or address map moved, and re-binding would file a layout authored
+  over one set of numbers as though it had been authored over another — so it
+  refuses with `source_identity_differs`. **Append the outgoing version to that
+  list whenever the contract is raised**; a missing member makes a legitimate
+  rebind refuse, which is the safe direction.
 - ⓘ **`0029` grants `service_role` SELECT and nothing else**, which is stricter
   than `0026`-`0028` and deliberately so. Its only legitimate writer is the
   `SECURITY DEFINER` save function; a `service_role` that could `UPDATE` the
@@ -961,9 +995,11 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   6B.4B2D, both in one `db push`). **No qualitative sign-off exists and no pain
   item was decided.** Those are two facts and the second is the one people get
   wrong: the review storage exists and all three of its tables are EMPTY, all 50
-  `pain_point` rows are still `pending`, no canonical draft was saved or rebound,
-  no warning was acknowledged and nothing was published. The canonical chain on
-  disk is `0026`-`0032` and the hosted ledger now ends at `0032`.
+  `pain_point` rows are still `pending`, no warning was acknowledged and nothing
+  was published. The canonical chain on disk is `0026`-`0032` and the hosted
+  ledger now ends at `0032`. (That unit also saved no draft and rebound none;
+  Unit 6B.4B2E rebound the Cuicuilco draft the next day, which is a draft save
+  and still not an editorial decision.)
   `npm run test:canonical-presentation-hosted-fingerprint` §[3c] pins both halves
   — the three tables must exist and the five functions be exposed, AND every one
   of the three must hold zero rows. The section previously asserted the exact

@@ -4,11 +4,16 @@ import { z } from "zod";
 import { presentationErrorLabel } from "@/lib/presentation";
 import { requireInternal } from "@/lib/studio/guard";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
-import { loadPresentationComposerWorkspace } from "@/lib/studio/presentation-workspace";
+import {
+  describePresentationRebind,
+  loadPresentationComposerWorkspace,
+} from "@/lib/studio/presentation-workspace";
 import { StudyWorkSurface } from "@/components/studio/StudyWorkSurface";
 import { ComposerWorkspace } from "@/components/studio/composer/ComposerWorkspace";
+import { RebindPanel } from "@/components/studio/composer/RebindPanel";
 import {
   loadCanonicalPresentationDraft,
+  rebindCanonicalPresentationDraft,
   refreshPresentationPreview,
   saveCanonicalPresentationDraft,
 } from "./actions";
@@ -93,6 +98,24 @@ export default async function StudioStudyConstructionPage({
     { restoreStoredDraft: true },
   );
 
+  // WHEN THE COMPOSER CANNOT OPEN, ASK WHY — Unit 6B.4B2E.
+  //
+  // A stale binding is the one unavailable state a person can actually resolve,
+  // and before this it was a dead end: the composer refused the stored draft,
+  // and the save path deliberately does not re-bind, so there was no sequence of
+  // clicks out of it.
+  //
+  // THIS IS A DESCRIPTION AND NOT A REPAIR. `describePresentationRebind` reads
+  // and computes; it never writes. The rebind happens only when a person presses
+  // the button, which is the whole distinction between this and a page load that
+  // quietly fixes things up — the second kind cannot be refused, reviewed, or
+  // found afterwards in an event log.
+  const rebind = composer.ok ? null : await describePresentationRebind(admin, {
+    tenantId: study.tenantId,
+    studyId: study.id,
+    studyName: study.name,
+  });
+
   return (
     <StudyWorkSurface
       workspace={workspace}
@@ -137,8 +160,26 @@ export default async function StudioStudyConstructionPage({
             No se dibuja una aproximación con el cálculo heredado: un número correcto por accidente es peor
             que ninguno.
           </p>
+          {rebind && rebind.status === "refused" ? (
+            <p className="mt-2 text-xs text-caution">{rebind.detail}</p>
+          ) : null}
         </section>
       )}
+      {/* The panel sits OUTSIDE the refusal box, because it is not part of the
+          refusal: it is the one thing a person can do about it. */}
+      {rebind && rebind.status === "ready" ? (
+        <RebindPanel
+          studyId={study.id}
+          plan={{
+            storedRevision: rebind.storedRevision,
+            supersededContractVersion: rebind.supersededContractVersion,
+            currentContractVersion: rebind.currentContractVersion,
+            changes: rebind.changes,
+            preserved: rebind.preserved,
+          }}
+          rebind={rebindCanonicalPresentationDraft}
+        />
+      ) : null}
     </StudyWorkSurface>
   );
 }
