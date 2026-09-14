@@ -11,17 +11,100 @@ is here so an incident restore does not have to read that document first.
 | 2026-09-06 | `0026`-`0028` canonical chain | see `docs/CANONICAL_STUDY_MODEL.md` | `~/becommunity-backups/u4p4-pre-0026-20260906T055119Z` |
 | 2026-09-08 19:14:40-19:14:45 | `0029_canonical_presentation_draft.sql` | `7c49867a…` | `~/becommunity-backups/u6b3b-pre-0029-20260908T190837Z` (`database.dump` `a73dad0f…`) |
 | 2026-09-09 00:20:33-00:20:43 | `0030_canonical_publication.sql` | `4cf35320407f68f60d1329a3004468426bb9e278f4982657cd4dd8d2643bb1e9` | `~/becommunity-backups/u6b4b1-pre-0030-20260909T001339Z` (`database.dump` `a22ddd33…`, 1 169 629 bytes) |
+| 2026-09-14 09:38:26-09:38:32 | `0031_canonical_qualitative_signoff.sql` | `4e6922d31e6d96e8559c2bd4284081ff6e612c53b863efa31d65a11d6955d86d` | `~/becommunity-backups/u6b4b2d-pre-0031-20260914T093223Z` (`database.dump` `768d2d95…`, 1 231 514 bytes) |
+| 2026-09-14 09:38:26-09:38:32 | `0032_canonical_journey_pain_review.sql` | `df0a77775f495cdac528991e27f2b081ae00bafc4cf37fd07f4aeccc5eff7dcd` | same backup — both were applied in ONE `db push` |
 
-All three were applied with `supabase db push` (CLI `2.115.0`) over the **session**
+All five were applied with `supabase db push` (CLI `2.115.0`) over the **session**
 pooler at `aws-0-us-east-2.pooler.supabase.com:5432`, each after a dry run that
-proposed that one file and nothing else. The ledger is now **31 rows,
-`0000`-`0030`**.
+proposed exactly the intended file or files and nothing else. The ledger is now
+**33 rows, `0000`-`0032`**.
+
+Rollback digests for the newest pair, recorded so an incident does not have to
+re-derive them: `supabase/rollbacks/0031_drop_canonical_qualitative_signoff.sql`
+sha256 `37c2c31446524b7848158b347f8e4c5b22f0209891a37e09b473a65610685984`
+(2 126 bytes), `supabase/rollbacks/0032_drop_canonical_journey_pain_review.sql`
+sha256 `411037a406029fdbe555c0546217085e6dff7a4a243699304085116b105f0e63`
+(1 961 bytes).
 
 > **`0030` created publication STORAGE and nothing was published into it.** All
 > three canonical publication tables are empty, no study points at a current
 > publication, and no publication event exists. A non-zero count in any of them
 > means something happened that was never authorized —
 > `npm run test:canonical-presentation-hosted-fingerprint` fails on it.
+
+> **`0031` and `0032` created review STORAGE and no editorial decision was
+> recorded into it.** All three review tables —
+> `canonical_qualitative_signoff`, `canonical_publication_qualitative_signoff`
+> and `canonical_journey_pain_decision` — are empty. **No qualitative sign-off
+> exists, no pain item was approved, rejected, edited or mapped, no canonical
+> draft was saved or rebound, no warning was acknowledged, nothing was published
+> and nothing was deployed.** All 50 `pain_point` rows are still
+> `review_status = 'pending'`, exactly as they were before. A non-zero count in
+> any of the three means a human judgement was recorded that nobody authorized —
+> the same fingerprint gate fails on it.
+
+### What `0031` and `0032` changed, and what they did not (2026-09-14)
+
+A full structural fingerprint of `public` was taken before and after and diffed
+object by object. The delta was also **predicted in advance** by applying both
+migrations to the restored backup in a disposable PostgreSQL, and the hosted
+result matched that prediction exactly.
+
+| | before | after |
+|---|---|---|
+| tables | 64 | 67 (+3) |
+| policies | 59 | 62 (+3) |
+| functions | 34 | 41 (+7) |
+| indexes | 207 | 215 (+8) |
+| triggers | 5 | 8 (+3) |
+| RLS / FORCE RLS | 64 / 64 | 67 / 67 |
+| ledger rows | 31 (`0000`-`0030`) | 33 (`0000`-`0032`) |
+
+**Zero pre-existing tables and zero pre-existing functions changed in any
+respect** — not a column, constraint, index, policy, trigger or grant. In
+particular `publish_canonical_presentation`, the applied `0030` implementation,
+is byte-identical: `0031` adds
+`publish_canonical_presentation_with_qualitative` **beside** it and does not
+replace it. The ledger rows for `0031` (27 statements, recorded body sha256
+`951a92ee…`) and `0032` (24 statements, `567238a6…`) were appended; no earlier
+row's name or recorded body moved.
+
+**Least privilege, executed rather than asserted.** Every one of the three new
+tables is RLS-enabled and FORCE RLS, carries one `deny_browser_roles` policy
+`using (false) with check (false)` for `anon` and `authenticated`, and grants
+`select` — not `all` — to `service_role` only. Executed probes, each inside a
+transaction that was rolled back:
+
+- `anon` and `authenticated` were refused `SELECT` on all three tables and
+  refused `INSERT` on all three — **12 attempts, 12 refusals, all `42501`**.
+- `service_role` could `SELECT` all three but was refused `INSERT`, `UPDATE`
+  and `DELETE` on every one — **9 attempts, 9 refusals, all `42501`**.
+- `EXECUTE` on the four new callable RPCs is granted to `service_role` and
+  denied to `anon` and `authenticated`; both trigger functions are executable by
+  none of the three.
+- **No sign-off or mapping RPC was invoked.** Their existence was read from
+  PostgREST's own API description, never by calling one — calling
+  `record_canonical_qualitative_signoff` to prove it exists would have been the
+  exact editorial act this phase forbade.
+
+ⓘ **Unlike `0026`-`0030`, neither `0031` nor `0032` carries its own `begin;` /
+`commit;`.** That was verified to be safe rather than assumed: a throwaway
+migration that creates a table and then divides by zero was pushed at a
+disposable database with the same CLI, and neither the table nor a ledger row
+survived. **`supabase db push` wraps each migration file in one transaction**, so
+a mid-file failure rolls the whole file back and cannot leave a partial
+migration. This matters because the two rollback files use bare `drop`, not
+`drop … if exists`, and so would not cleanly reverse a partial apply.
+
+**Restoring from the 2026-09-14 backup.** Identical to the procedure below and in
+`docs/CURRENT_STATE.md`; the artifact was restored and verified before the
+migrations were applied — **28 assertions, 28 passed**, including every table's
+row count, both legacy drafts, the canonical draft, both event logs and all 45
+canonical evidence families. To undo THIS unit specifically, the rollbacks are
+`supabase/rollbacks/0031_drop_canonical_qualitative_signoff.sql` and
+`0032_drop_canonical_journey_pain_review.sql`, applied in that reverse order —
+`0032` first, then `0031`. Each touches only its own migration's objects, and
+today both would destroy nothing but empty tables.
 
 **Restoring from one of these backups.** The artifacts live outside every Git
 repository, `0700` on the directory and `0600` on the files, and each carries a

@@ -4311,9 +4311,10 @@ approved value moved; no AI was added; and shadow mode is still off everywhere.
 > **NOTHING WAS PUBLISHED, AND NOTHING HOSTED WAS WRITTEN.** Hosted access in
 > this unit was READ-ONLY: the fingerprint gate before and after, and one
 > read-only decision inventory over the fifty real `pain_point` rows. Migrations
-> `0031` and `0032` are authored here and applied to **no project**. The
-> Cuicuilco canonical draft is still at **revision 1**, and all three
-> publication tables are still **empty**.
+> `0031` and `0032` are authored here and, **when this unit ran, neither had
+> been applied anywhere** — both were applied on 2026-09-14, with their storage
+> left empty; see §"Unit 6B.4B2D". The Cuicuilco canonical draft is still at
+> **revision 1**, and all three publication tables are still **empty**.
 
 Two decisions, and the second is most of the unit.
 
@@ -4397,7 +4398,8 @@ curated stage over two touchpoints, so the control is checkboxes rather than a
 select, and the storage is an array rather than a column.
 
 **Where the decisions live.** `canonical_journey_pain_decision`, migration
-`0032`, applied to no project. Append-only; newest row per item is the decision
+`0032` — not yet applied anywhere when this unit ran, applied on 2026-09-14 and
+still holding zero rows. Append-only; newest row per item is the decision
 in force. It identifies its source item by an OPAQUE TOKEN and holds **no foreign
 key into `pain_point`** — so «the canonical source is not mutated» is a
 structural fact rather than an abstention, and a re-import that mints different
@@ -4521,10 +4523,12 @@ reviewed one.
 
 `npm run test:canonical-presentation-hosted-fingerprint` was run before and after
 — **65 checks, 65 passed** both times — and the two fingerprint files are
-byte-identical apart from their timestamps. It gained a section, `[3b]`, that
-pins `0031` and `0032` as NOT applied: the three tables absent, the five
-functions unexposed, with a control read first so an absence is known to mean
-absence.
+byte-identical apart from their timestamps. It gained a section that pinned
+`0031` and `0032` as NOT applied: the three tables absent, the five functions
+unexposed, with a control read first so an absence is known to mean absence.
+(That section was INVERTED, not deleted, on 2026-09-14 when both migrations were
+applied — it is now `[3c]` and requires the same objects to EXIST and their three
+tables to be EMPTY. See §"Unit 6B.4B2D".)
 
 | fact | before | after |
 |---|---|---|
@@ -4563,10 +4567,12 @@ a checkout.
 
 #### Consequences that must be stated
 
-* **`0032` is applied to no project, and neither is `0031`.** Until both are,
-  the sign-off cannot be recorded and the pain review cannot be authored. Both
-  reads fail closed — reported as «nobody has reviewed this» — which is the safe
-  direction and is true.
+* **Neither `0032` nor `0031` had been applied anywhere when this unit ran.**
+  Until they were, the sign-off could not be recorded and the pain review could
+  not be authored, and both reads failed closed — reported as «nobody has
+  reviewed this», the safe direction. Both were applied on 2026-09-14 (§"Unit
+  6B.4B2D"); the storage now exists and is empty, so the reads still fail closed
+  and the statement is still true for the reason that matters.
 * **The Cuicuilco draft's binding still will not match**, for the reason Unit
   6B.4B2 records: the results contract moved to `3.0.0` and the contract version
   is inside `presentationBindingFingerprint`. That is the designed refusal and
@@ -4579,9 +4585,11 @@ a checkout.
 
 > **NOTHING WAS PUBLISHED, AND NOTHING HOSTED WAS WRITTEN.** Hosted access in
 > this unit was READ-ONLY: the fingerprint gate before and after, and one
-> read-only pain-point audit. Migration `0031` is authored here and applied to
-> **no project**. The Cuicuilco canonical draft is still at **revision 1**, and
-> all three publication tables are still **empty**.
+> read-only pain-point audit. Migration `0031` is authored here and **had not
+> been applied anywhere when this unit ran** — it was applied on 2026-09-14,
+> with its storage left empty; see §"Unit 6B.4B2D". The Cuicuilco canonical
+> draft is still at **revision 1**, and all three publication tables are still
+> **empty**.
 
 The snapshot Unit 6B.4B1 left was mechanically publishable and materially
 different from the approved north-star. Six corrections, each traceable to a
@@ -4664,8 +4672,9 @@ active group as «Miembros activos».
   labels crosses: there is no field anywhere on the path for a quotation, a name
   or a respondent's words.
 
-`0031_canonical_qualitative_signoff.sql` stores it and is applied to **no
-project**. It WRAPS `publish_canonical_presentation` rather than replacing it —
+`0031_canonical_qualitative_signoff.sql` stores it, and **had not been applied
+anywhere when this unit ran** (applied 2026-09-14, storage still empty — see
+§"Unit 6B.4B2D"). It WRAPS `publish_canonical_presentation` rather than replacing it —
 `publish_canonical_presentation_with_qualitative` calls it and writes the record
 in the same transaction — so 295 lines of applied history stay byte-identical
 and a publication without a qualitative record cannot exist.
@@ -4828,9 +4837,11 @@ to it.
   raise `binding_drift`, which is the designed refusal: it must be reopened in
   Construcción and re-bound. It is NOT a defect of this unit, and this unit did
   not touch the hosted draft.
-* **Migration `0031` is applied to no project.** Until it is, the sign-off
-  cannot be recorded and the read fails closed — reported as «nobody has
-  reviewed these», which is the safe direction and is true.
+* **Migration `0031` had not been applied anywhere when this unit ran.** Until
+  it was, the sign-off could not be recorded and the read failed closed —
+  reported as «nobody has reviewed these», the safe direction. It was applied on
+  2026-09-14 (§"Unit 6B.4B2D") and its storage is still empty, so the read
+  still fails closed.
 
 ### Unit 6B.4B1 — migration `0030` is applied to the hosted project, and NOTHING was published (EXECUTED, 2026-09-09)
 
@@ -5175,3 +5186,290 @@ publication event was written. Nothing was deployed, no application code was
 promoted, the client route was not switched, no legacy draft was converted, no
 formula or approved value moved, no credential was rotated, and shadow mode is
 still off everywhere. `main` is unchanged.
+
+### Unit 6B.4B2D — migrations `0031` and `0032` are applied to the hosted project, and NO editorial decision was recorded (EXECUTED, 2026-09-14)
+
+**Three hosted mutations were authorized and exactly three happened: migration
+`0031` was applied, migration `0032` was applied, and the ledger recorded them.**
+The qualitative sign-off storage and the journey-pain review storage now exist on
+`ontvqazsqiwisdddblif` and **all three of their tables are empty**. Applying the
+storage and recording a person's judgement into it are different acts; this phase
+authorized the first and forbade the second, and the proof below is evidence
+rather than assertion.
+
+**Nothing editorial happened.** No qualitative sign-off was recorded. No pain
+item was approved, rejected, edited or mapped — all 50 `pain_point` rows are
+still `review_status = 'pending'`. No canonical draft was saved or rebound. No
+warning was acknowledged. Nothing was published, and nothing was deployed.
+
+#### The migrations, exactly
+
+| | |
+|---|---|
+| project | ref `ontvqazsqiwisdddblif`, PostgreSQL **17.6** |
+| connection | **session** pooler, `aws-0-us-east-2.pooler.supabase.com:5432` — never the transaction pooler |
+| commit applied from | `84d65e3a84a361a8b704a7f76f555fbf29230a09` |
+| migration | `supabase/migrations/0031_canonical_qualitative_signoff.sql`, sha256 `4e6922d31e6d96e8559c2bd4284081ff6e612c53b863efa31d65a11d6955d86d`, 27 586 bytes |
+| migration | `supabase/migrations/0032_canonical_journey_pain_review.sql`, sha256 `df0a77775f495cdac528991e27f2b081ae00bafc4cf37fd07f4aeccc5eff7dcd`, 22 586 bytes |
+| rollback | `supabase/rollbacks/0031_drop_canonical_qualitative_signoff.sql`, sha256 `37c2c31446524b7848158b347f8e4c5b22f0209891a37e09b473a65610685984`, 2 126 bytes |
+| rollback | `supabase/rollbacks/0032_drop_canonical_journey_pain_review.sql`, sha256 `411037a406029fdbe555c0546217085e6dff7a4a243699304085116b105f0e63`, 1 961 bytes |
+| tool | `supabase db push`, CLI **2.115.0** — the same version that applied `0026`-`0030` |
+| applied at | **2026-09-14 09:38:26 to 09:38:32 UTC** (6 s, exit 0), both files in ONE push, `0031` then `0032` |
+| ledger rows written | `0031` `canonical_qualitative_signoff`, 27 statements, recorded body sha256 `951a92ee1bb32baf621f8c6723bab3634886c0a87c23f10228f03adaa81253e5`; `0032` `canonical_journey_pain_review`, 24 statements, recorded body sha256 `567238a64dfbd0a0294b5a65eaf3d5b0c226871da028496c14824a07fbd2a6fa` |
+
+**The bytes applied are the bytes the previous units proved.** All four files
+digest identically to their committed blobs at `84d65e3`, with no CR byte in any
+copy: `0031` blob `783d59a4`, `0032` blob `5b13b6e5`, and the two rollbacks
+`7c99a339` and `6d618a11`. `0031` has not been touched since `493462c`, and
+`0032` and both rollbacks were last written at the baseline commit itself.
+
+ⓘ **The migration files were NOT edited, and their headers still say they are
+applied to no project.** That is deliberate and it is the decision `0029` and
+`0030` each recorded: they are now applied migrations whose bytes the hosted
+ledger records, and editing an applied migration to correct a comment would make
+the repository and the ledger disagree about what ran. The correction lives here,
+in `CLAUDE.md`, in `docs/OPERATIONS.md`, in `docs/CANONICAL_STUDY_MODEL.md` and
+in the gates.
+
+ⓘ **NEITHER FILE CARRIES ITS OWN `begin;`/`commit;`, unlike `0026`-`0030`**, and
+the repository's chain gate does not require them to — its transaction contract
+covers the five older canonical migrations by name. That difference was not
+assumed safe; it was tested. A throwaway migration that creates a table and then
+divides by zero was pushed at a disposable database with the same CLI: it failed
+at the second statement, **the table did not survive and no ledger row was
+written**. `supabase db push` wraps each migration file in one transaction, so a
+mid-file failure rolls the whole file back. This matters because both rollback
+files use bare `drop`, not `drop ... if exists`, and would therefore NOT cleanly
+reverse a partial apply — the tool's atomicity is what makes that irrelevant.
+
+#### Before anything: the pre-application safety gate
+
+Every item was read-only and every one passed.
+
+- **The target was verified without printing a credential.** The connection URI
+  resolves to `postgres.ontvqazsqiwisdddblif` on the session pooler at port 5432,
+  the API URL names the same ref, and the server answered PostgreSQL **17.6**.
+  Only host, port, database, the user's non-secret prefix and a 12-character
+  digest of each secret were ever printed.
+- **The ledger held 31 rows, `0000`-`0030`**, contiguous, no duplicate, with a
+  SHA-256 taken over each recorded body. ⓘ Two rows (`0020` and `0022`) carry a
+  NULL `statements` array and therefore have no recorded body — the same
+  pre-existing property Units 6B.3B and 6B.4B1 recorded, not a new one.
+- **Every `0031` and `0032` object was absent**: all three tables, all seven
+  functions and all five named indexes — 15 objects, 15 absences.
+- **The full inventory was recorded**: 64 tables, all 64 RLS-enabled and FORCE
+  RLS, 59 policies, 34 functions, 207 indexes, 5 triggers, and a row count plus a
+  column/constraint/index/policy/trigger/grant digest for every table.
+- **The before-state data fingerprints were recorded**: Cuicuilco's legacy draft
+  at **v2 revision 72** (`b7127081...`, 27 051 bytes), P6E's at **v3 revision 14**
+  (`8ea44dea...`, 1 403 bytes), Cuicuilco's canonical draft at **revision 1**
+  (definition `511d7f54...`, binding `cf63bdca...`, registry `1.0.0`),
+  `study_experience_event` at 86 rows under a content digest,
+  `canonical_presentation_draft_event` at 1, all five publication tables empty,
+  50 `pain_point` rows all `pending` under a content digest, and a row count for
+  45 canonical evidence/result families totalling 15 642 rows.
+- **The repository's own gates passed on the same bytes**: `typecheck`, `lint`,
+  `test:migration-chain`, the hosted fingerprint gate (**65/65**), results parity
+  **531/531** and presentation parity **59/59**.
+
+ⓘ **`npm run test:hosted-target-guard` failed 1 of its assertions before AND
+after, identically**, on §[8] — the refusal names the main-repository rule, so
+the worktree rule did not answer for it. It builds
+`<root>/../becommunity-software/evidence` expecting a sibling main repository,
+and the WSL verifier is a plain clone AT that path. It is a pre-existing
+environment fact, it was failing before this unit touched anything, and the two
+failure sets are byte-identical. It is not fixed here: this phase authorizes no
+unrelated cleanup.
+
+#### The backup, and its restore rehearsal
+
+```
+/home/patop/becommunity-backups/u6b4b2d-pre-0031-20260914T093223Z
+  database.dump  1 231 514 bytes  sha256=768d2d95d80b86ba24c61de9a5009ce6c92695c46bfde7d5b09f5cc2d5bccd90
+  schema.sql       414 922 bytes  sha256=f4706d8abd9fe34a8362f88d312d1006471637a863d69af64fea9ffc879bc986
+  toc.txt           74 748 bytes  sha256=1d98c731f41907d720869c7ecad64a2d5331aaf3d03e2d238dc95d962485c106
+```
+
+`pg_dump` **17.11** custom format, compress 9, `--no-owner` (GRANTs and POLICYs
+kept deliberately), schemas `public` and `supabase_migrations`, over the session
+pooler. Directory `0700`, files `0600`, outside every Git repository, with a
+`SHA256SUMS`. TOC: 855 entries — 130 TABLE entries, 121 constraints and 207
+foreign keys, 87 indexes, 59 policies, 64 row-security entries, 5 triggers, 34
+functions, 1 view.
+
+**Restored into a disposable PostgreSQL 17.11 and compared against the source:
+28 assertions, 28 passed.** 64 tables with zero row-count mismatches, policies
+59 = 59, functions 34 = 34, RLS and FORCE RLS 64/64 on both sides, the ledger
+identical at 31 rows with no earlier body changed, and **both legacy drafts, the
+canonical draft, every event log, all five publication tables and all 45
+canonical evidence families byte-identical**. The three false differences Unit
+6B.4B1 documented were corrected rather than excused: the `--no-owner` owner name
+is normalised, `PGTZ=UTC` is pinned on the local client, and the policy digest
+sorts `polroles`.
+
+ⓘ **`pg_restore` reported exactly one error and it is not data:** `schema
+"public" already exists`. **That restore has not been executed against a real
+Supabase project and must not be described as if it had.**
+
+ⓘ **26 foreign keys to `auth.users`** were derived from `schema.sql` — not from
+`pg_constraint`, which is empty of them between the data and post-data sections —
+and 4 distinct identities were synthesised, after which post-data restored with
+zero errors.
+
+#### The delta was PREDICTED before it was produced
+
+Both migrations were applied to the restored disposable copy first, so the change
+they make to a copy of the real database was known in advance rather than
+asserted from the SQL. **The hosted result matched that prediction exactly**,
+object for object, modulo the owner name (`patop` locally, `postgres` hosted).
+A hand-written expectation can be wrong in the same direction twice; a
+measurement taken from a copy of the same data cannot.
+
+**The dry run proposed exactly two files, in order** — `0031` then `0032` — and
+nothing else: no reapplication of `0000`-`0030`, no history repair, no seed.
+
+#### After the migrations: what the database gained, and nothing else
+
+A full structural fingerprint of `public` was taken before and after and diffed
+object by object. **28 assertions, 28 passed.**
+
+| | before | after |
+|---|---|---|
+| tables | 64 | 67 (+3) |
+| policies | 59 | 62 (+3) |
+| functions | 34 | 41 (+7) |
+| indexes | 207 | 215 (+8) |
+| triggers | 5 | 8 (+3) |
+| RLS / FORCE RLS | 64 / 64 | 67 / 67 |
+| ledger rows | 31 (`0000`-`0030`) | 33 (`0000`-`0032`) |
+
+- **Tables 64 to 67.** Added: `canonical_qualitative_signoff`,
+  `canonical_publication_qualitative_signoff` (both `0031`) and
+  `canonical_journey_pain_decision` (`0032`). Removed: none. **Zero pre-existing
+  tables changed** in columns, constraints, indexes, policies, triggers or
+  grants, each compared by digest.
+- **Functions 34 to 41.** Added: `record_canonical_qualitative_signoff`,
+  `read_canonical_qualitative_signoffs`,
+  `publish_canonical_presentation_with_qualitative`,
+  `refuse_canonical_qualitative_signoff_change` (`0031`),
+  `record_canonical_journey_pain_decision`,
+  `read_canonical_journey_pain_decisions` and
+  `refuse_canonical_journey_pain_change` (`0032`). Removed: none. **Zero
+  pre-existing functions changed**, compared by a digest over
+  `pg_get_functiondef`, and none changed its EXECUTE grants or security settings.
+- **`publish_canonical_presentation` is byte-identical.** `0031` adds its
+  wrapper BESIDE the `0030` implementation and does not replace it — the
+  applied history stays exactly as the ledger records it. The fingerprint gate
+  now asserts both functions exist, because a project where the wrapper appeared
+  and the original vanished would be a different and worse database.
+- **The ledger is 33 rows, `0000`-`0032`**, contiguous, no duplicate, and the
+  recorded body of every one of the 31 earlier migrations digests to what it
+  digested before, under the name it had before.
+
+#### Least privilege, executed rather than asserted
+
+Each new table is RLS-enabled and FORCE RLS, carries one `deny_browser_roles`
+policy `using (false) with check (false)` scoped to `anon, authenticated`, and
+grants `select` — not `all` — to `service_role` alone. Every write probe ran
+inside a transaction that was rolled back, so even an escape could not have left
+a row.
+
+| probe | attempts | result |
+|---|---|---|
+| `anon` / `authenticated` `SELECT` on the three tables | 6 | 6 refused, all `42501` |
+| `anon` / `authenticated` `INSERT` on the three tables | 6 | 6 refused, all `42501` |
+| `service_role` `SELECT` on the three tables | 3 | 3 allowed, 0 rows |
+| `service_role` `INSERT` / `UPDATE` / `DELETE` | 9 | 9 refused, all `42501` |
+| `EXECUTE` on the four callable RPCs, per role | 12 | granted to `service_role` only |
+| `EXECUTE` on the two trigger functions, per role | 6 | denied to all three roles |
+
+ⓘ **One probe initially answered `42703` rather than a privilege verdict** —
+`update canonical_publication_qualitative_signoff set id = id`, because that
+table has no `id` column, so the column check fired before the privilege check.
+It was re-run against a column that exists (`revision_id`) and refused `42501`,
+permission denied for table. A probe that fails for the wrong reason proves
+nothing, and it was not counted until it failed for the right one.
+
+**No sign-off or mapping RPC was invoked.** Their existence is read from
+PostgREST's own API description — a GET — and never by calling one. Calling
+`record_canonical_qualitative_signoff` to prove it exists would have been exactly
+the editorial act this phase forbade, and an unmatched call would still be a
+call.
+
+#### The review state is EMPTY — the half that matters most
+
+`canonical_qualitative_signoff` **0 rows**,
+`canonical_publication_qualitative_signoff` **0 rows**,
+`canonical_journey_pain_decision` **0 rows**.
+
+#### Mandatory unchanged-state proof
+
+Before and after, over the same query. **28 assertions, 28 passed.**
+
+- **Cuicuilco's canonical draft is still revision 1 and byte-identical** —
+  definition digest unchanged, recorded `definition_sha256` still `511d7f54...`,
+  registry still `1.0.0`, and exactly one canonical draft exists.
+- **Its binding fingerprint is unchanged at `cf63bdca...`**, so the expected
+  binding drift is still merely REPORTED and was not repaired. This unit did not
+  touch the draft.
+- **Both legacy drafts are byte-identical**: Cuicuilco v2 revision 72
+  (`b7127081...`), P6E v3 revision 14 (`8ea44dea...`).
+- **Every draft and publication event log is unchanged** by count and content
+  digest: `study_experience_event` 86, `canonical_presentation_draft_event` 1,
+  `study_interpretation_event` 0, `canonical_presentation_publication_event` 0.
+- **All five publication tables are still empty** — three canonical, two legacy.
+  No experience has been published.
+- **All 50 pain points are still `review_status = 'pending'`** under an unchanged
+  content digest: all 50 pain-point decisions remain absent, and the new decision
+  table holds zero rows.
+- **No qualitative sign-off exists**, and no publication carries one.
+- **All 45 canonical evidence/result families are unchanged**, 15 642 rows in
+  total, and the five studies are unchanged in name, status and id.
+- **Results parity remains 531/531** and **presentation parity remains 59/59**,
+  both re-run after the migrations with the two real workbooks supplied.
+
+#### The old gate was watched failing, once, before it was inverted
+
+`npm run test:canonical-presentation-hosted-fingerprint` was run against the
+applied project BEFORE its expectations were changed. It failed **8 of 65**
+assertions — the three tables reported as present when the gate demanded absence,
+and the five functions reported as exposed when it demanded they were not — **and
+nothing else**, while the other 57 still passed. That is the only moment a check
+nobody has seen fail can be shown to work, and it is why the section was inverted
+rather than deleted.
+
+The bound was then moved in the three places that must move together:
+`HOSTED_APPLIED_SLUG` in `scripts/migration-chain-test.mjs` (now
+`canonical_journey_pain_review`), the `prepare(upTo = 32)` default and its
+refusal bound in `scripts/lib/canonical-rest-transport.mjs` (which now also
+requires a table from each migration, because a target carrying one and not the
+other is half-migrated), and §`[3c]` of the fingerprint gate, which now requires
+the three tables to EXIST **and** to be EMPTY. The chain gate additionally
+requires every governing document to record that `0031` and `0032` are applied
+AND that no sign-off or pain-item decision was recorded, and withdraws the
+present-tense claims that said otherwise.
+
+#### Known limitations, stated rather than implied
+
+- **The rollbacks are atomic but not idempotent.** Both carry `begin;`/`commit;`
+  and both use bare `drop`, so neither would cleanly reverse a partial apply.
+  The CLI's per-file transaction is what makes a partial apply impossible on this
+  path; a rollback run against a half-dropped schema would still need hand
+  repair.
+- **`0031`'s and `0032`'s own headers remain wrong on purpose**, as `0029`'s and
+  `0030`'s do. The ledger records the bytes that ran.
+- **The parity gates are offline.** They read the two real workbooks and the
+  canonical model from disk and touch no database, so they are evidence that the
+  approved numbers still reproduce — not evidence about the hosted project.
+- **`test:hosted-target-guard` §[8] still fails in the WSL verifier**, before and
+  after, for the environment reason recorded above.
+
+#### Still deferred, and deliberately so
+
+No qualitative sign-off was recorded; no pain item was approved, rejected, edited
+or mapped; no canonical draft was saved or rebound; no publication was created,
+prepared, published, restored or archived; no current-publication pointer exists;
+no publication event was written; no warning was acknowledged. Nothing was
+deployed, no application code was promoted, the client route was not switched, no
+legacy draft was converted, no formula or approved value moved, no credential was
+rotated, and shadow mode is still off everywhere. `main` is unchanged.

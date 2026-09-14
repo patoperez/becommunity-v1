@@ -957,11 +957,27 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `scripts/lib/secret-patterns.mjs` is security configuration, a declared
   human-review zone — so it is RECOMMENDED SEPARATELY and was not changed here.
   Do not "fix" this by renaming the local until it stops matching.
-- ⓘ **`0031` AND `0032` ARE AUTHORED AND APPLIED TO NO PROJECT.** The canonical
-  chain on disk is `0026`-`0032`; the hosted ledger ends at `0030`. Until both
-  are applied there, the qualitative sign-off cannot be recorded and the journey
-  pain review cannot be authored — and both read fail-closed, reporting «nobody
-  reviewed this», which is the safe direction and is true.
+- ⓘ **`0031` AND `0032` ARE APPLIED to the hosted project** (2026-09-14, Unit
+  6B.4B2D, both in one `db push`). **No qualitative sign-off exists and no pain
+  item was decided.** Those are two facts and the second is the one people get
+  wrong: the review storage exists and all three of its tables are EMPTY, all 50
+  `pain_point` rows are still `pending`, no canonical draft was saved or rebound,
+  no warning was acknowledged and nothing was published. The canonical chain on
+  disk is `0026`-`0032` and the hosted ledger now ends at `0032`.
+  `npm run test:canonical-presentation-hosted-fingerprint` §[3c] pins both halves
+  — the three tables must exist and the five functions be exposed, AND every one
+  of the three must hold zero rows. The section previously asserted the exact
+  opposite; it was INVERTED rather than deleted, exactly as `0029`'s and `0030`'s
+  were, and it was watched failing **all eight** of its old assertions — and only
+  those eight, while the other 57 still passed — immediately after the migrations
+  were applied.
+- ⓘ **NEITHER `0031` NOR `0032` CARRIES ITS OWN `begin;`/`commit;`**, unlike
+  `0026`-`0030`. That is safe on this path and it was proved, not assumed: a
+  throwaway migration that creates a table then divides by zero was pushed at a
+  disposable database, and neither the table nor a ledger row survived, so
+  `supabase db push` wraps each file in one transaction. It matters because both
+  rollback files use bare `drop`, not `drop … if exists`, and so would not
+  cleanly reverse a partial apply.
 - ⓘ **`0030` IS APPLIED to the hosted project** (2026-09-09, Unit 6B.4B1).
   **No experience was published.** Those are two facts and the second is the one
   people get wrong: the storage exists and all three publication tables are
@@ -1038,7 +1054,8 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   person choosing a category that already existed changes no word anybody read.
   Four states: `not_applicable`, `pending`, `stale`, `current`. The warning
   names every VISIBLE BLOCK that draws the categories, «Razones declaradas de
-  riesgo» included. Migration `0031` stores it, and is applied to NO project.
+  riesgo» included. Migration `0031` stores it; it is applied (2026-09-14) and its
+  storage is EMPTY — no qualitative sign-off has been recorded.
 - ⓘ **`0031` WRAPS THE PUBLISH FUNCTION RATHER THAN REPLACING IT.**
   `publish_canonical_presentation_with_qualitative` CALLS
   `publish_canonical_presentation`, so every refusal that function makes still
@@ -1091,9 +1108,10 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   labels, not position, not workbook order, and not the approved demo's
   38-entry alias table; the search box is a FILTER over a list already on
   screen and starts empty. Mappings are ONE-TO-MANY because one source stage
-  legitimately covers two touchpoints. Migration `0032` stores the decisions and
-  is applied to **no project**; it never touches `pain_point` and holds no
-  foreign key into it.
+  legitimately covers two touchpoints. Migration `0032` stores the decisions; it
+  is applied (2026-09-14) and `canonical_journey_pain_decision` is EMPTY — all
+  50 pain-point decisions remain absent. It never touches `pain_point` and holds
+  no foreign key into it.
 - ⓘ **THE PAIN CONTENT IS ALL-OR-NOTHING, AND THE BLOCKER IS UNACKNOWLEDGEABLE.**
   `authoredPainContent` returns null unless every in-scope item has an explicit
   disposition, every approved item has a public phrase and at least one

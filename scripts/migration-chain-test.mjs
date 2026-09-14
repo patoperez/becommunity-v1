@@ -336,10 +336,12 @@ const COMMIT_SLUG = "canonical_commit_and_rollback";
  * project has", which is exactly the failure the note above records for the
  * commit migration. It moved from `canonical_commit_and_rollback` to
  * `canonical_presentation_draft` on 2026-09-08, when Unit 6B.3B applied 0029,
- * and to `canonical_publication` on 2026-09-09, when Unit 6B.4B1 applied 0030.
- * It must be moved BY HAND again, after a migration is applied there.
+ * to `canonical_publication` on 2026-09-09, when Unit 6B.4B1 applied 0030, and
+ * to `canonical_journey_pain_review` on 2026-09-14, when Unit 6B.4B2D applied
+ * 0031 and 0032 together. It must be moved BY HAND again, after a migration is
+ * applied there.
  */
-const HOSTED_APPLIED_SLUG = "canonical_publication";
+const HOSTED_APPLIED_SLUG = "canonical_journey_pain_review";
 const canonical = parsed.filter((e) => e.slug.startsWith("canonical_"));
 
 {
@@ -937,6 +939,48 @@ console.log("\n[7] The documentation does not claim an application that never ha
     );
 
   /**
+   * Sentences asserting the REVIEW migrations are applied — now required.
+   *
+   * A fourth separate requirement, for the same reason the second and third
+   * exist: the facts became true on four different days — `0026`-`0028` on
+   * 2026-09-06, `0029` on 2026-09-08, `0030` on 2026-09-09 and `0031` together
+   * with `0032` on 2026-09-14 — and a document recording only the older ones is
+   * out of date in a way the older rules cannot see.
+   *
+   * ONE RULE COVERS BOTH MIGRATIONS BECAUSE THEY WERE APPLIED IN ONE ACT, in
+   * that order, in a single `db push`. Splitting them would demand a sentence
+   * about each in every governing document without pinning anything the joint
+   * rule does not.
+   *
+   * The lookaround form is used for the same reason it is above: `\b0031\b`
+   * does not match `0031_canonical_qualitative_signoff.sql`, because `_` is a
+   * word character and there is no boundary after the digits.
+   */
+  const REVIEW_APPLIED_SUBJECT =
+    /(?<![0-9])003[12](?![0-9])|\bcanonical_qualitative_signoff\b|\bcanonical_journey_pain_decision\b|\bqualitative sign-?off (?:migration|storage)\b|\bjourney[- ]pain review (?:migration|storage)\b/i;
+  const assertsReviewApplied = (text) =>
+    sentences(text).filter(
+      (s) => REVIEW_APPLIED_SUBJECT.test(s) && APPLIED_VERB.test(s) && !NEGATOR.test(s),
+    );
+
+  /**
+   * And that NO EDITORIAL DECISION WAS RECORDED — required in the same breath.
+   *
+   * The exact counterpart of `assertsNothingPublished`, and it exists for the
+   * identical reason: applying the review storage and recording a person's
+   * judgement into it are different acts. Unit 6B.4B2D applied both migrations,
+   * signed nothing off and approved no pain item; a document that records the
+   * first without the second invites the next reader to assume a human decision
+   * exists that does not.
+   */
+  const assertsNoReviewRecorded = (text) =>
+    sentences(text).filter(
+      (s) =>
+        /\bsign-?off\b|\bpain[- ]item\b|\bpain[- ]point decisions?\b|\breview (?:storage|tables?)\b/i.test(s) &&
+        /\bno (?:qualitative )?sign-?off[^.]{0,40}\b(?:was|were|has been|have been|exists?)\b|\bnothing (?:was|has been) signed off\b|\breview (?:storage|tables?) (?:remain|remains|are|is) empty\b|\bno (?:pain-?item|pain-?point|editorial) decisions? (?:was|were|has been|have been|exists?)\b|\ball (?:50|fifty) pain-?point decisions remain absent\b/i.test(s),
+    );
+
+  /**
    * (a) Sentences RECORDING the real workbook import — now required.
    *
    * The subject deliberately tolerates a word between "real" and the noun,
@@ -1070,6 +1114,28 @@ console.log("\n[7] The documentation does not claim an application that never ha
     [/\bpublication migration is applied to no project\b/i, "the publication migration IS applied"],
     [/\bcanonical_presentation_revision\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
       "canonical_presentation_revision EXISTS on the hosted project"],
+    // Withdrawn by Unit 6B.4B2D on 2026-09-14. Each was true while 0031 and
+    // 0032 existed only in git; leaving one in place tells the next session the
+    // hosted project has no qualitative sign-off and no journey-pain review
+    // storage, which is the single fact this unit changed.
+    //
+    // DELIBERATELY NARROW, for the reason the 0030 block records at length: a
+    // rule that forbids this repository's own way of keeping history teaches
+    // people to delete the history. `0031`'s and `0032`'s own migration headers
+    // still say they are applied to no project, and they are NOT scanned here —
+    // an applied migration is never edited, because the hosted ledger records
+    // the bytes that ran.
+    //
+    // NOTHING HERE WITHDRAWS "no sign-off exists" or "all 50 pain-point
+    // decisions remain absent" — both are still true, both are REQUIRED above,
+    // and neither may be confused with "the storage does not exist".
+    [/(?<![0-9])003[12](?![0-9])[^.]{0,120}\bapplied to no project\b/i,
+      "0031 and 0032 ARE applied to the hosted project (2026-09-14)"],
+    [/\b(?:qualitative sign-?off|journey[- ]pain review) migration is applied to no project\b/i,
+      "that migration IS applied"],
+    [/\bthe hosted ledger ends at 0030\b/i, "the hosted ledger ends at 0032"],
+    [/\b(?:canonical_qualitative_signoff|canonical_journey_pain_decision)\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
+      "that table EXISTS on the hosted project"],
     // Withdrawn on 2026-09-06 by Unit 5 Phase 2, and guarded here only from
     // 2026-09-08 — this section spent five weeks asserting the opposite.
     //
@@ -1116,6 +1182,19 @@ console.log("\n[7] The documentation does not claim an application that never ha
       nothingPublished.length > 0,
       `${doc} records that applying it published NOTHING` +
         `${nothingPublished.length ? "" : " — it does not, and a reader could take applied storage for a served experience"}`,
+    );
+
+    const reviewApplied = assertsReviewApplied(text);
+    check(
+      reviewApplied.length > 0,
+      `${doc} records that the REVIEW migrations 0031 and 0032 are applied too${reviewApplied.length ? "" : " — it does not, and they are, since 2026-09-14"}`,
+    );
+
+    const noReviewRecorded = assertsNoReviewRecorded(text);
+    check(
+      noReviewRecorded.length > 0,
+      `${doc} records that applying them recorded NO sign-off and NO pain-item decision` +
+        `${noReviewRecorded.length ? "" : " — it does not, and a reader could take applied storage for a human judgement"}`,
     );
 
     const stillPending = sentences(text).filter((s) =>

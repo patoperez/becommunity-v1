@@ -35,6 +35,14 @@
 // migration and using it are different acts; this gate now fails if either the
 // tables have gone or a publication has appeared.
 //
+// AND WHAT UNIT 6B.4B2D PUT THERE, THE SAME WAY AGAIN. Until 2026-09-14 §[3c]
+// proved that the qualitative sign-off and journey-pain review storage did not
+// exist, because `0031` and `0032` were applied to no project. 6B.4B2D applied
+// both — and recorded no sign-off and no pain-item decision — so that section is
+// inverted into the same two claims: the three tables must EXIST, and all three
+// must be EMPTY. The emptiness is the half that matters: the storage was
+// authorized, the editorial acts that fill it were not.
+//
 // -----------------------------------------------------------------------------
 // IT WRITES NOTHING, AND THAT IS STRUCTURAL
 // -----------------------------------------------------------------------------
@@ -370,32 +378,39 @@ for (const [table, what] of [
 }
 
 /* -------------------------------------------------------------------------- */
-console.log("\n[3b] Migrations 0031 and 0032 are NOT applied there, and their storage is absent");
+console.log("\n[3c] Migrations 0031 and 0032 ARE applied there, and their storage is EMPTY");
 
 /*
- * THE MIRROR THE OTHER WAY ROUND, AND IT IS THE ONE THIS UNIT NEEDS.
+ * INVERTED ON 2026-09-14, WHEN UNIT 6B.4B2D APPLIED `0031` AND `0032`.
  *
- * §[3] above asserts that 0030's storage EXISTS, because it was applied. `0031`
- * (the qualitative sign-off) and `0032` (the journey pain review) are authored
- * and applied to NO project, so the finding worth catching here is a table that
- * has APPEARED — which would mean somebody applied a migration this line of
- * work has not authorized.
+ * Until that day this section asserted the opposite — that neither migration's
+ * storage existed — because neither had been applied anywhere. It was INVERTED
+ * RATHER THAN DELETED, exactly as §[3] was on 2026-09-09: a target that has
+ * LOST the storage is as much a finding as one that gained it unexpectedly, and
+ * deleting the section would have left both directions unguarded.
  *
- * WHEN EITHER IS APPLIED, THIS SECTION IS INVERTED RATHER THAN DELETED, exactly
- * as §[3] was on 2026-09-09: a target that has LOST the storage is as much a
- * finding as one that gained it unexpectedly, and the only moment a check
- * nobody has seen fail can be shown to work is immediately after the change
- * that flips it.
+ * ⓘ THE OLD SECTION WAS RUN ONCE AGAINST THE APPLIED PROJECT BEFORE IT WAS
+ * CHANGED, and it failed on exactly eight assertions — the three tables and the
+ * five functions below — and on nothing else, while the other 57 in this file
+ * still passed. That is the only moment a check nobody has seen fail can be
+ * shown to work, and it is recorded in `docs/CURRENT_STATE.md` §"Unit 6B.4B2D".
+ *
+ * THE HALF THAT MATTERS MOST IS THE EMPTINESS, NOT THE EXISTENCE. Applying the
+ * storage and writing an editorial decision into it are different acts; Unit
+ * 6B.4B2D authorized the first and forbade the second. A non-zero count in any
+ * of these three tables means a qualitative sign-off or a pain-item decision was
+ * recorded that nobody has authorized, so each table is asserted EMPTY as well
+ * as present.
  *
  * A CONTROL COMES FIRST. `pain_point` is a canonical table that IS there, read
- * through the same client, so «not found» below is known to mean absence rather
- * than a broken read.
+ * through the same client, so a clean read below is known to mean presence
+ * rather than a permissive client.
  */
 {
   const control = await client.from("pain_point").select("id").limit(1);
   check(
     control.error === null,
-    `a canonical table that IS there reads cleanly, so an absence below means something${control.error ? ` — ${control.error.code}` : ""}`,
+    `a canonical table that IS there reads cleanly, so the reads below mean something${control.error ? ` — ${control.error.code}` : ""}`,
   );
 }
 for (const [table, migration] of [
@@ -403,23 +418,33 @@ for (const [table, migration] of [
   ["canonical_publication_qualitative_signoff", "0031"],
   ["canonical_journey_pain_decision", "0032"],
 ]) {
-  const { error } = await client.from(table).select("study_id").limit(1);
-  const absent = error !== null;
-  record.present[table] = absent ? `absent (${error.code})` : "PRESENT";
+  const { count, error } = await client.from(table).select("*", { count: "exact", head: true });
+  const present = error === null;
+  record.present[table] = present ? `present (${count} rows)` : `ABSENT (${error.code})`;
   check(
-    absent,
-    `${table} is absent, so ${migration} is not applied${absent ? "" : " — IT IS THERE. A migration was applied that this unit did not authorize. Stop and investigate."}`,
+    present,
+    `${table} is present, so ${migration} is applied${present ? "" : " — IT IS GONE, WHICH MEANS THE MIGRATION WAS REVERSED. Stop and investigate."}`,
+  );
+  check(
+    present && count === 0,
+    `and it is EMPTY — no editorial decision has been recorded in it${
+      present && count !== 0
+        ? ` — IT HOLDS ${count} ROW(S). Something was written that nobody authorized. Stop and investigate.`
+        : ""
+    }`,
   );
 }
 
 /*
- * AND NEITHER MIGRATION'S FUNCTIONS ARE EXPOSED.
+ * AND BOTH MIGRATIONS' FUNCTIONS ARE EXPOSED.
  *
  * A table can be dropped and leave a function behind, and a function is the
  * thing that could actually write — so the two are asserted separately. Read
- * out of the API description, never called, for the reason §[3] records: this
+ * out of the API description, NEVER CALLED, for the reason §[3] records: this
  * file contains no `.insert(`, `.upsert(`, `.delete(` or `.rpc(` at all, and an
- * unmatched call would still be a call.
+ * unmatched call would still be a call. That reason has not changed just
+ * because the expected answer has — calling `record_canonical_qualitative_signoff`
+ * to prove it exists would be the exact editorial act this unit forbade.
  */
 {
   const description = await fetch(target.restUrl, {
@@ -429,7 +454,7 @@ for (const [table, migration] of [
   const paths = description.ok ? Object.keys((await description.json())?.paths ?? {}) : [];
   check(
     paths.includes("/rpc/save_canonical_presentation_draft"),
-    "and still lists a function that IS there, so the absences below are not an empty answer",
+    "and still lists a function that IS there, so the readings below are not an empty answer",
   );
   for (const fn of [
     "record_canonical_qualitative_signoff",
@@ -439,12 +464,20 @@ for (const [table, migration] of [
     "read_canonical_journey_pain_decisions",
   ]) {
     const present = paths.includes(`/rpc/${fn}`);
-    record.present[fn] = present ? "PRESENT" : "absent";
+    record.present[fn] = present ? "present" : "ABSENT";
     check(
-      !present,
-      `${fn} is not exposed${present ? " — IT IS THERE. Stop and investigate." : ""}`,
+      present,
+      `${fn} is exposed${present ? "" : " — IT IS GONE, WHICH MEANS THE MIGRATION WAS REVERSED. Stop and investigate."}`,
     );
   }
+  // AND THE 0030 PUBLISH FUNCTION IS STILL THERE BESIDE ITS WRAPPER. `0031`
+  // adds `publish_canonical_presentation_with_qualitative`; it does not replace
+  // `publish_canonical_presentation`, and a project where the wrapper appeared
+  // and the original vanished would be a different, and worse, database.
+  check(
+    paths.includes("/rpc/publish_canonical_presentation"),
+    "and the 0030 publish function still exists BESIDE the 0031 wrapper, not replaced by it",
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -485,5 +518,8 @@ console.log(
     "        0029's storage exists and holds exactly ONE canonical draft — Cuicuilco's, at\n" +
     "        revision 1, under one draft_created event — no other study has acquired one,\n" +
     "        migration 0030's storage exists and is EMPTY in all three tables so no experience\n" +
-    "        has been published, and every protected table was counted. Nothing was written.",
+    "        has been published, migrations 0031 and 0032 are applied and their three review\n" +
+    "        tables are EMPTY so no qualitative sign-off and no pain-item decision has been\n" +
+    "        recorded, the 0030 publish function still stands beside its 0031 wrapper, and\n" +
+    "        every protected table was counted. Nothing was written.",
 );

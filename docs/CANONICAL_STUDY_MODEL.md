@@ -307,11 +307,22 @@ publication that appeared each fail a gate rather than pass unnoticed.
 it exists because a review state that could never change was being read as one
 that had.
 
-**NOT APPLIED TO ANY PROJECT.** It is proved against a disposable PostgreSQL and
-applied nowhere else. Until it is applied, the review surface cannot record a
-sign-off and a publication cannot carry one — the read fails closed and the
-preflight reports «nobody has reviewed these», which is the safe direction and
-is true.
+Migration `0031` is applied to the hosted project, on 2026-09-14, by Unit
+6B.4B2D, after being proved against a disposable PostgreSQL. **Its storage is
+EMPTY**:
+`canonical_qualitative_signoff` and `canonical_publication_qualitative_signoff`
+both hold zero rows, so no sign-off has been recorded and no publication carries
+one. Applying the storage and recording a person's judgement into it are
+different acts, and only the first was authorized. Until a sign-off is recorded
+the read still fails closed and the preflight still reports «nobody has reviewed
+these», which is the safe direction and is true.
+
+ⓘ **The migration file was NOT edited and its header still says "NOT APPLIED TO
+THE HOSTED PROJECT".** That is the same deliberate decision `0029` and `0030`
+record: it is now an applied migration whose bytes the hosted ledger records, and
+editing an applied migration to correct a comment would make the repository and
+the ledger disagree about what ran. The correction lives here, in `CLAUDE.md`, in
+`docs/OPERATIONS.md`, in `docs/CURRENT_STATE.md` and in the gates.
 
 ### What was wrong
 
@@ -400,10 +411,18 @@ qualitative state was does not unpublish anything and must not.
 
 ## Migration 0032: the journey pain review
 
-`0032_canonical_journey_pain_review.sql` is the seventh canonical migration, and
-like `0031` it is **applied to no project**. It creates ONE table and THREE
+`0032_canonical_journey_pain_review.sql` is the seventh canonical migration.
+Migration `0032` is applied to the hosted project, on 2026-09-14, in the same
+`db push` that carried `0031`, in that order. It creates ONE table and THREE
 functions, alters no existing table, drops nothing, rewrites no row, and changes
 no policy, grant or function outside its own objects.
+
+**Its storage is EMPTY.** `canonical_journey_pain_decision` holds zero rows and
+all 50 `pain_point` rows are still `review_status = 'pending'`: **all 50
+pain-point decisions remain absent.** No item was approved, rejected, edited or
+mapped. As with `0031`, the migration file itself was left byte-identical, so its
+own header still describes the pre-application world; the hosted ledger records
+the bytes that ran, and an applied migration is never rewritten.
 
 **In particular it does not touch `public.pain_point`** — no column, no
 constraint, no trigger, no grant, and no foreign key pointing at it.
@@ -1336,11 +1355,13 @@ one would have been an invocation of a publication function, which is precisely
 what that phase did not authorize; the catalogue answers the same question
 without it.
 
-**The ledger is now 31 rows, 0000-0030, no duplicate**, and the recorded body of
-every earlier migration digests to what it digested before. The full record — the
-backup and its digest, the restore rehearsal into a disposable PostgreSQL 17.11,
-the least-privilege probes, the empty-publication proof and the unchanged-data
-proof — is `docs/CURRENT_STATE.md` §"Unit 6B.4B1".
+**The ledger is now 33 rows, 0000-0032, no duplicate**, and the recorded body of
+every earlier migration digests to what it digested before. The full record for
+`0030` — the backup and its digest, the restore rehearsal into a disposable
+PostgreSQL 17.11, the least-privilege probes, the empty-publication proof and the
+unchanged-data proof — is `docs/CURRENT_STATE.md` §"Unit 6B.4B1"; the same record
+for `0031` and `0032`, applied on 2026-09-14 with their review storage left
+empty, is §"Unit 6B.4B2D".
 
 ### Hosted synthetic acceptance
 
