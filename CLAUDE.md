@@ -1404,3 +1404,48 @@ cheaper than a leak or a wrong number shipped to a client.
   (same active version `e691ecd8…`, same 10 deployments, same served-asset
   fingerprint); hosted untouched (15 791 rows, fingerprint gate 136/136);
   **Cuicuilco still `draft`, still unpublished**.
+- ⓘ **«REVISAR CATEGORÍAS» IS REPLACED CANONICALLY — UNIT 6B.4B2L.** The
+  capability the five production-only commits build is preserved and the
+  CANONICAL implementation is authoritative; none of those commits was
+  cherry-picked. `src/lib/category-review/` is the pure domain — the measured
+  comparison rules were ported verbatim from `022513e` because the evaluation
+  they carry (false-merge 0/12, with the digit and negation guards) is evidence
+  about exactly that code — and the surface is
+  `/studio/e/<id>/revision/categorias`, the FIFTH door, inside the review's own
+  segment and through the same one loader.
+
+  **THE SCOPE IS NARROWER ON PURPOSE.** Legacy offered all thirteen LEGACY
+  segment dimensions; canonically those are filter attributes with named
+  methodological authorities, and merging two of them changes who is inside a
+  cut rather than what a client reads. The canonical surface covers the
+  QUALITATIVE families the layer publishes as term clouds. Exclusion is shown and
+  not editable: «No aplica» is excluded by methodology §6.1 under a registered
+  authority. **There is no AI on this path at all** — no model, no provider, no
+  key, no prompt, and no import that could reach one.
+- ⓘ **MIGRATION `0034` IS THE FIRST CANONICAL MIGRATION THIS REPOSITORY CARRIES
+  THAT IS *NOT* APPLIED TO THE HOSTED PROJECT.** It is proved against a
+  disposable PostgreSQL and applied nowhere else. Until it is applied the review
+  reads as NOT PROVISIONED — categories and counts shown, deciding disabled with
+  a sentence saying why, and the projection the empty one, which is exactly what
+  a study with no decisions already has. **That is a third state, not a
+  fallback**, and a FAILED read is a fourth that refuses rather than showing an
+  empty review. Do not apply `0034` without a separate authorization.
+- ⓘ **THE PRE-CANONICAL `category_decision` LEDGER IS NOT REUSED, AND THE REASON
+  WAS READ OFF THE APPLIED SQL.** `record_category_decision` ends by writing
+  `segment_dimension.config.aliases` and INSERTS a `segment_dimension` row when
+  the dimension does not exist; `capture_study_category_snapshot` folds EVERY
+  decision of a study into the LEGACY publication's projection whatever its
+  `dimension_key`; and both are live in production against this same database.
+  Measured read-only: that ledger holds **2 rows, both `separate`**, the same
+  decision written twice, `study_category_snapshot` holds **0**, and the single
+  `aliases` object is empty — **so the legacy feature changes no number today**,
+  and deploying the canonical release removes a screen rather than a result.
+- ⓘ **A CATEGORY DECISION INVALIDATES THE QUALITATIVE SIGN-OFF BY ITSELF.**
+  `qualitativeEvidenceDigest` digests the exact category LABELS somebody signed
+  for; a grouping moves them, so the digest moves and the publication review
+  reports `stale` on its next load. There is no invalidation step to forget and
+  no second store to keep in sync. **The category screen deliberately does not
+  render the sign-off state itself** — that state is computed from the stored
+  draft's BOUND groups, and a second computation of one fact is how the review's
+  preview and its inventory once came to disagree; it links to the review
+  instead.

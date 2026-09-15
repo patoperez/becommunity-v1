@@ -6839,3 +6839,238 @@ External evidence, outside every Git repository: `~/becommunity-6b4b2k/`
 `hosted-after-qa.json`, `before.json`, `after.json`, `cf-deployments-*.txt`,
 `dryrun.txt`, `screenshots/`) and the backup at
 `~/becommunity-backups/u6b4b2k-pre-0033-20260915T054937Z/`.
+
+---
+
+## Unit 6B.4B2L — «Revisar categorías», replaced canonically
+
+The last genuine product decision Unit 6B.4B2K left open is answered: the
+capability is **preserved**, and the canonical implementation — not the legacy
+one — is authoritative. None of the five production-only commits was
+cherry-picked, and none of their ~4 000 lines was copied wholesale; what was
+carried across is the part that was measured, and it is named below.
+
+**For Cuicuilco nothing changed.** No category was renamed, merged, split,
+excluded or reassigned; no decision was recorded; the qualitative sign-off is
+untouched; the draft is still at revision 3; the publication tables are still
+empty; the study is still `draft` and still unpublished.
+
+### Phase A — what the deployed feature actually does
+
+Read off the five commits AND off the **deployed production screen**, opened
+read-only as an internal operator and with nothing pressed.
+
+| Capability | Legacy | Canonically |
+| --- | --- | --- |
+| Entry point | `/studio/e/<id>/categorias`, a tab on every study | `/studio/e/<id>/revision/categorias`, inside the review's own segment |
+| Authorized role | `internal`, in the action AND in SQL | identical |
+| Source data | `respondent.segments`, keyset-paged, all 13 legacy dimensions | the canonical qualitative families' closed-coded labels |
+| Editable | the FINAL NAME of a group of 2-12 values | identical |
+| Merge | yes, 2-12 values under one chosen name | yes |
+| Rename | only of a merged group, by recording a new version | identical |
+| Split | **not supported** — the only split is undo | identical |
+| Reassign / move | **not supported** — a value belongs to one category | identical |
+| Exclude / re-include | **not supported** | shown, not editable — see below |
+| Count recomputation | server-side, through the alias projection | server-side, in the results builder |
+| Evidence shown | raw spellings, counts, before/after, affected surfaces | raw spellings, counts, before/after, share of the family |
+| Save | one form per candidate, full POST, redirect with a message | one card per candidate, Server Action, the screen re-reads |
+| Audit | append-only ledger, version chain, actor, time, reason | identical, plus a storage-level unique version |
+| Stale write | workspace re-derived before the write | identical, plus an **expected-version pin** |
+| Idempotent | **no** — the same decision twice wrote two versions | **yes** — the identical decision in force is returned |
+| Publication | blocked by an unresolved high-confidence difference | identical, plus the sign-off going stale by itself |
+| Client | the pinned snapshot; a later decision waits for a re-publish | the immutable publication; identical consequence |
+| AI advisor | present, behind a flag whose acceptance criteria were never met | **absent, structurally** |
+
+Two facts were measured on the hosted project rather than inferred:
+
+* `category_decision` holds **2 rows**, both `separate`, both for
+  `roi_membresia` / «No he recuperado nada» + «No recuperé nada», recorded
+  2026-08-28 as version 1 and version 2 — the same decision written twice,
+  which is the idempotency defect in the table itself.
+  `study_category_snapshot` holds **0 rows**, and the one `segment_dimension`
+  row carrying an `aliases` key carries the empty object. **So the legacy
+  feature currently changes no number anywhere**, and deploying the canonical
+  release removes a screen rather than a result.
+* Those two spellings exist only in the LEGACY segment map. No canonical
+  closed-coded item carries either, so there is nothing for a canonical
+  decision to inherit.
+
+### The scope line, and why it is where it is
+
+Legacy offered all thirteen legacy segment dimensions — `giro`, `rango_edad`,
+`estado_membresia`, `respondio_encuesta` and the rest. Canonically those are
+**filter attributes** with named methodological authorities behind them, and
+merging two of them changes who is inside a cut of the population rather than
+what a client reads as a finding. The explicit product requirement is editorial
+control over QUALITATIVE categorization, so the canonical surface covers the
+qualitative families the canonical layer publishes as term clouds — for
+Cuicuilco, «Miembros activos» and «Desertores» — and says so on screen.
+
+Exclusion is shown and not editable for the same kind of reason: «No aplica» is
+excluded by methodology §6.1 under a registered authority, and an editorial
+screen that could overrule a registered authority would make the authority
+decorative.
+
+### Phase B — the data model, and the migration that is NOT applied
+
+`0034_canonical_category_review.sql`. Its contract, the three measured reasons
+the pre-canonical ledger cannot carry a canonical decision, and its rollback are
+in `docs/CANONICAL_STUDY_MODEL.md`. It is proved against disposable
+infrastructure and **deliberately not applied to the hosted project**.
+
+Until it is applied, the screen reads as **not provisioned**: the categories and
+their counts are shown, deciding is disabled with a sentence saying why, and the
+projection is the empty one. That is a third state, not a fallback — a failed
+READ is a fourth, and it refuses instead of showing an empty review, which is
+the defect Unit 6B.4B2K removed from the screen next door.
+
+### How a change invalidates the sign-off, and why nothing has to remember
+
+`qualitativeEvidenceDigest` is a digest of the exact category LABELS a person
+signed for. A grouping changes those labels, so the digest moves and the
+publication review reports `stale` on its next load. There is no invalidation
+step to forget, no second store to keep in sync, and no code that could be
+refactored into skipping it.
+
+### Phase C — the surface, and the two things it deliberately does not do
+
+`/studio/e/<id>/revision/categorias`, reached from the qualitative sign-off
+panel of «Revisión y publicación». It is the FIFTH door and still not a fifth
+loader: `category-review-workspace.ts` holds no canonical reader and imports
+everything that touches one from `presentation-workspace.ts` through a single
+import statement, exactly as the publication and journey-pain workspaces do.
+Both door tables — the dependency gate's and the presentation gate's — carry the
+argument rather than the registration.
+
+Per family it shows the family's own title and provenance, an opaque version
+marker for its vocabulary, how the categories are counted NOW with their shares,
+the documented exclusions with their counts, what the scanner noticed, the
+before/after of each proposal, the manual grouping escape hatch over the full
+label list, everything already decided with its version and date, and what
+another study of the same client decided about the same question.
+
+It does NOT render the qualitative sign-off's own state. That state is computed
+from the STORED draft's BOUND groups — only the groups a block actually draws —
+and computing it a second time here would be a second answer to one question,
+which is precisely how the review's preview and its inventory once came to
+disagree (Unit 6B.4B2). The screen links to the review and says what a change
+will do to the signature.
+
+And it does NOT let anybody type a count. There is no field for one anywhere on
+the path: the write function's arguments are labels, a disposition, a name, a
+reason and a version, and a gate reads `pg_get_function_arguments` to prove it.
+
+### Phase E — proved against a real PostgreSQL and a real PostgREST
+
+`npm run test:category-review-live` — **88 checks, 88 passed**. RLS enabled and
+forced with an explicit browser-role denial and `service_role` holding SELECT
+only, read off `pg_catalog`; a non-internal actor, an unsorted member list, a
+single category, a nameless grouping, a reasonless postponement, an undo of
+nothing and a malformed digest all refused by the database; the three flat-
+grouping rules refused in SQL; a replay returning `created: false` and writing
+no row; a decision against a moved version refused with 55000; UPDATE and DELETE
+both refused with 2F002; every other table's row count identical before and
+after — `segment_dimension` included; a grouping changing the number of
+categories while the total, the base and every absence state stay identical; the
+qualitative digest moving and `qualitativeReviewState` becoming `stale` with
+nobody invalidating anything; and over real HTTP `anon` and an authenticated
+client refused the read, the write, the table and a direct insert into it.
+
+`npm run test:category-review` — **216 checks, 216 passed**, offline, driving the
+real modules. Its §[9] is the discrimination proof: a failed ledger read
+produces a value with **no `resolution`, no `decisions` and no `memory` field at
+all**, so nothing downstream can read a projection off a read that never
+happened.
+
+### Phase F — the request budget, measured
+
+Counted at the transport, against the hosted project, read-only:
+
+| page | before | after |
+| --- | --- | --- |
+| `/studio/e/<id>/revision` | 26 | **26** |
+| `/studio/e/<id>/revision/dolor` | 26 | **26** |
+| `/studio/e/<id>/revision/categorias` | — | **18** |
+
+The category ledger read costs exactly one request on every canonical path,
+whether or not the migration is applied and whether or not the study has
+decisions — it is read at the door so no surface can forget it. That would have
+taken the review page to 27, so one request was given back where nobody was
+reading it: `loadStudioStudy` counted `staged` and `failed` import batches
+separately and then added them together, and nothing has ever reported them
+apart. One `in` filter, one request, the same number, and the shell costs 14
+instead of 15 for every Studio page in the product.
+
+### Phase D — Cuicuilco, read-only, unchanged
+
+Measured through the real loaders against the hosted project on 2026-09-15, with
+no write of any kind:
+
+```
+Miembros activos   · v-marker vivs5jffg · 19 answers · 4 categories, 0 candidates
+  Malos resultados financieros        11
+  Mala actitud que no abre negocios    4
+  Tiempo                               3
+  Situaciones personales               1
+  No aplica — out of the cloud         9
+Desertores         · v-marker vpjbye6ac · 11 answers · 4 categories, 0 candidates
+  Malos resultados financieros         7
+  Mala actitud que no abre negocios    2
+  Cambio de titular                    1
+  Otra oportunidad                     1
+```
+
+**The scanner finds nothing in either family — zero candidates, zero findings,
+zero blockers — so this study's publication verdict cannot move.** The ledger
+read answers `PGRST202` on the hosted project, which is `not_provisioned`: the
+screen shows exactly the counts above and disables deciding with a sentence
+saying why.
+
+### Gates
+
+`npm test` green · typecheck 0 · lint 0 errors / 58 warnings · build and
+`cf:build` OK · `test:secrets` PASSED · golden parity
+**`ofrecidas=534 ejecutadas=531 aprobadas=531 falladas=0`** · presentation
+parity PASSED · `test:category-review` 216/216 ·
+`test:category-review-live` 88/88 · `test:canonical-publication-live` 188/188 ·
+`test:canonical-qualitative-signoff-live` 63/63 ·
+`test:canonical-journey-pain-live` 68/68 · `test:canonical-row-set-live` 56/56 ·
+hosted fingerprint **136/136**.
+
+### Phase H — the fourteen production-only commits, closed
+
+| classification | count | where they stand |
+| --- | --- | --- |
+| ported verbatim (6B.4B2K) | 6 | 17 files byte-identical to production, `keep_vars = true` among them |
+| documentation only | 3 | folded into this repository's own documents |
+| **«Revisar categorías» (5)** | 5 | **replaced canonically by this unit** — not cherry-picked, not dropped |
+
+**Nothing a merge would remove is unaccounted for.** The five commits build a
+screen, a ~3 500-line detection/ledger/impact layer, a ~960-line optional AI
+advisor whose own acceptance criteria were never met, and three gates. What a
+person could DO with them is preserved: merge two or more differently written
+answers under a name they choose, keep them apart deliberately, postpone with a
+written reason, undo, and see what each would change before deciding.
+
+Three user-visible differences, each deliberate:
+
+1. **The vocabulary it covers.** Legacy offered thirteen legacy segment
+   dimensions; the canonical surface covers the qualitative families the layer
+   publishes as term clouds. Attribute vocabularies are filter dimensions with
+   registered methodological authorities behind them, and an editorial screen
+   that could overrule a registered authority would make the authority
+   decorative. **No recorded decision has ever used the wider reach**: the
+   hosted ledger holds two rows, both `separate`, and their projection is the
+   empty object — so the narrowing removes a capability nobody exercised, and
+   removes no number at all.
+2. **There is no assistant.** The legacy advisor shipped disabled behind
+   `EVALUATION_APPROVED = false`, with §11 of its own document recording «NOT
+   RUN» for its measured results. It is not ported, and the absence is
+   structural rather than configured: a gate reads this folder's imports.
+3. **A replay is not a second decision.** The legacy ledger's own hosted rows
+   show the defect — the same `separate` decision written as version 1 and
+   version 2. The canonical write returns the record in force instead.
+
+And one thing the canonical version has that legacy does not: a decision is
+refused if the version the screen displayed has moved, under the study's
+advisory lock, with a unique index behind it.

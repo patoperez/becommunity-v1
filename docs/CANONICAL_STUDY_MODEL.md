@@ -649,6 +649,71 @@ fifty-subrequest Worker is over budget for the internal review screens. The
 failure is then reported as `SUBREQUEST_BUDGET_EXHAUSTED`, a named refusal, not
 an empty review.
 
+## Migration 0034: a canonical ledger for «Revisar categorías»
+
+`0034_canonical_category_review.sql` is the ninth canonical migration and the
+first one this repository carries that is **NOT APPLIED to the hosted project**.
+Unit 6B.4B2L wrote it, proved it against a disposable PostgreSQL 17 and a real
+PostgREST, and deliberately stopped before applying it. Until it is applied, the
+canonical category review reads as **not provisioned**: the categories are shown
+with their real counts, no decision can be recorded, and the projection every
+calculation applies is the empty one — which is exactly what a study with no
+decisions already has, so no number moves.
+
+### What it creates
+
+One table, `public.canonical_category_decision`, and three functions:
+`refuse_canonical_category_change` (the immutability trigger),
+`record_canonical_category_decision` (the only write path) and
+`read_canonical_category_decisions` (one round trip for the decisions in force
+plus what another study of the same client decided about the same question).
+
+It alters no existing table, adds no column to one, drops nothing, rewrites no
+row and changes no policy, grant, function or index outside its own objects.
+
+### Why it is not the pre-canonical `category_decision` table
+
+That ledger is a good one — append-only at the privilege level, identity by
+folded member list, three grouping rules enforced in SQL — and none of that is
+re-litigated. It cannot carry a canonical decision because of what it is WIRED
+TO, and all three reasons were read off the applied SQL rather than argued:
+
+1. `record_category_decision`, the only write path that enforces those rules,
+   ends by writing `segment_dimension.config.aliases` and INSERTS a
+   `segment_dimension` row when the dimension does not exist. A canonical family
+   key names no legacy dimension, so a canonical decision written through it
+   would manufacture one and put a grouping into the legacy read path.
+2. `capture_study_category_snapshot` folds EVERY decision of a study into
+   `study_category_snapshot.resolution`, whatever its `dimension_key`, and the
+   legacy publication applies that resolution as aliases — so a canonical
+   decision would silently change legacy published numbers.
+3. Both functions are live in production right now, against this same database,
+   from the deployed legacy «Revisar categorías» screen.
+
+Writing rows directly with `service_role` would avoid (1) and (2) and lose the
+only thing that makes a ledger evidence: the rules would live in the application
+alone, and the version chain would have no storage-level guard.
+
+### What the projection may change, and what it may never
+
+A decision contributes one entry to a map from folded label to the name it counts
+under. `buildQualitativeGroups` consults that map while counting, AFTER the
+documented exclusion test, so a grouping can never reach into a methodological
+exclusion from the side. Raw evidence is untouched: nothing in `0034` writes to
+`survey_response`, `survey_item` or `response_option`, the number of answers
+cannot move, and revoking a decision simply makes the next build group
+differently.
+
+### The rollback
+
+`supabase/rollbacks/0034_drop_canonical_category_review.sql`. It destroys every
+canonical category decision — there is no other copy, because raw evidence was
+never rewritten — and after it every study's categories read exactly as the
+source coded them, which is what they read today on any project where `0034` is
+not applied. Publications survive unchanged: a publication stores the resolved
+render model, so the labels and counts inside an already-published snapshot are
+bytes in `canonical_presentation_revision` and are not reachable from there.
+
 ## Security boundary
 
 All 36 new tables — 18 in `0026`, 16 in `0027` and 2 in `0028` — are
