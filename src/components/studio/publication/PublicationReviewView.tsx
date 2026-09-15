@@ -656,7 +656,15 @@ export function PublicationReviewView({
               </button>
             </div>
           ) : null}
-          <div className="mt-4 overflow-x-auto rounded-lg border border-line bg-surface-sunken p-4">
+          {/* `presentacion-canonica` is the SAME hook the client's own published
+              surface puts around its renderer, so the two can be compared as
+              text rather than by eye. «Revisé la vista del cliente» is a claim
+              about this exact subtree; a comparison of whole pages would include
+              this screen's own chrome and could never agree. */}
+          <div
+            className="mt-4 overflow-x-auto rounded-lg border border-line bg-surface-sunken p-4"
+            data-testid="presentacion-canonica"
+          >
             <PresentationRenderer model={shown.model} audience="client" viewer={viewer} />
           </div>
         </section>

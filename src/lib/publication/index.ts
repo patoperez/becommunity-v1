@@ -114,3 +114,19 @@ export type {
   RestoreRefusalReason,
   RestoreResult,
 } from "./payload";
+
+/**
+ * WHAT A CLIENT IS SERVED — pure, and re-exported here for the same reason the
+ * review vocabulary is: the reading surface is a `"use client"` component and
+ * has to be able to name the shapes it draws. The server-only module that FILLS
+ * them is `src/lib/studies/published-presentation.ts`.
+ */
+export { PUBLISHED_READ_DETAIL, PUBLISHED_SELECTION_DETAIL } from "./client-read";
+export type {
+  PreviewPublishedUnderSelection,
+  PublishedClientRead,
+  PublishedPreviewResult,
+  PublishedReadRefusal,
+  PublishedSelectionRefusal,
+  PublishedStudyPayload,
+} from "./client-read";

@@ -6268,3 +6268,147 @@ and the client still sees nothing.
 External evidence, outside every Git repository, at `~/becommunity-6b4b2h/`
 (WSL) and `C:\dev\becommunity-review-6b4b2h\`: `upgrade-result.json`,
 `post-upgrade-verification.json`, `rehearsal-result.json`, and `screenshots/`.
+
+---
+
+## Unit 6B.4B2I — the canonical published client read path
+
+Baseline `1a5385de6724ee4721f470e768a5012f0ed76f93`; `origin/main` unchanged at
+`c76762f428834b7401118b7d2ad7f0d40158d56a`.
+
+**The full route and data-flow audit, the read contract, the fallback rules, the
+immutability guarantees, the authorization boundary and the release ordering are
+in [`docs/CANONICAL_CLIENT_READ_PATH.md`](CANONICAL_CLIENT_READ_PATH.md).** What
+follows is the summary and the state that changed.
+
+### The finding this unit exists to close
+
+**«Publicar para el cliente» did not mean a client route was connected.** The
+publication storage existed (0030), the review existed, the publish path existed
+and the database's own client projection existed — and `/insights/e/[studyId]`,
+the only client-facing study route, called `loadStudyDashboard` and rendered the
+**legacy P8 dashboard**. The canonical publication tables were unreachable from
+it by any import path. A publication would have written an immutable snapshot,
+moved a pointer and recorded a named person's acknowledgement, and no client
+could have seen any of it.
+
+Production made that worse rather than better: the deployed Worker is built from
+`main`, whose tree stops at migration `0021` and contains none of the canonical
+code — so the deployed app has no code that could read a canonical publication
+even though the hosted database has the tables.
+
+### What changed — one route, one reader, one action
+
+| File | |
+|---|---|
+| `src/lib/studies/published-presentation.ts` | **New.** The server-only client reader. Holds no canonical reader of its own |
+| `src/lib/publication/client-read.ts` | **New.** Its pure, client-safe vocabulary |
+| `src/app/insights/e/[studyId]/page.tsx` | Serves the active canonical publication when there is one; otherwise the legacy behaviour, unchanged |
+| `src/app/insights/e/[studyId]/actions.ts` | **New.** One Server Action so a reader's filters recompute on the server |
+| `src/components/insights/PublishedStudyView.tsx` | **New.** The reading surface. Mounts the same renderer with the same audience |
+
+`readPublishedPresentation` **moved** out of `publication-workspace.ts` rather
+than being copied: two implementations of «what a client is served» would be two
+chances for the served thing and the reviewed thing to drift, and a client route
+must not have a module that can publish in its import graph.
+
+### The contract, in four sentences
+
+1. A client is served the **immutable stored snapshot**, byte for byte — never
+   the draft, never a recomputation of it, never the legacy engine.
+2. No publication → the documented legacy behaviour, preserved exactly. A
+   publication that cannot be read → a sentence, and **never** a silent fallback
+   to different numbers from a different engine.
+3. A filter is applied only when **recomputing the whole publication under the
+   neutral selection reproduces `render_model_sha256` exactly**; otherwise the
+   selection is refused, the snapshot is served unchanged, and the filter panels
+   are not mounted at all rather than offered and refused on every click.
+4. Authorization is done by the reader, with the **reader's own session**, and
+   the tenant comes from the authorized row. The privileged client is
+   constructed only after that has succeeded.
+
+The reproduction check is deliberately stricter than a binding comparison, and
+the difference is executed rather than argued: deleting one answered
+`survey_response` leaves the frozen document **still resolving** — same binding,
+same registry, same addresses — while the model it produces no longer digests to
+what was published.
+
+### Proof
+
+| | |
+|---|---|
+| `test:canonical-client-publication` | **99/99** offline |
+| `test:canonical-client-publication-live` | **78/78** against a real PostgreSQL behind a real PostgREST |
+| `qa:canonical-client-publication` | **64/64** real routes, real browser, real package, disposable target |
+| `test:shadow-boundary` | **98/98**, and its door check is now a **cut** |
+| discrimination | **5/5** perturbations caught, every file restored byte-identically |
+
+The QA's strongest line: the client's own screen and the internal review's
+preview of the same publication are **character-for-character identical**
+(15 692 characters), read from the same `presentacion-canonica` hook on both
+surfaces. That is what makes «revisé la vista del cliente» a true statement, and
+it carries 6B.4B2H's approved-dashboard comparison forward to the client's screen.
+On the real package the client's surface draws **24 client-visible blocks** and
+**15 pain-badged touchpoints**, at 1440, 834 and 390 layout pixels, with no
+horizontal overflow and nothing internal in the page.
+
+### The dependency gate got stronger, not looser
+
+The door table's `loader` became `loaders`, and the check became a **cut**:
+remove the declared loaders from the import graph and the canonical layer must
+become unreachable from the page. That is «every path goes through a declared
+door»; the earlier check only ever measured the shortest of several paths, which
+mattered the moment the insights page acquired a second legitimate reason to
+reach the canonical layer.
+
+The cut immediately surfaced something the old check had never been able to see:
+the two review pages reach `canonical-commit/sha256.ts` — a pure hash helper —
+without passing through a loader, because the journey-pain digest imports it.
+That is excluded by name and the exclusion is **proved**: the check requires each
+named helper to import **nothing at all**.
+
+### Hosted, read-only — nothing was published and nothing changed
+
+`~/becommunity-6b4b2i/hosted-readonly.json`, **24/24**:
+
+- the Cuicuilco canonical draft is still **revision 3**, digest
+  `5f1ec0349f81a155e97f52a4aeea5f555fb02e5054b6d8c1da084e3ff057f4da`, binding
+  `e2ee45b43fe99102776d4617e12d9a7584d764ddd792199c0dbb96b08a25e2d2`;
+- all four canonical publication tables **empty**, and the legacy
+  `study_experience_publication` **empty** as well;
+- **the new client reader, executed for real against hosted data, serves
+  `not_published` and carries no payload** — so it cannot expose the draft even
+  now, before any deployment;
+- 15 decisions in force, all approved, 20 rows total; one qualitative sign-off at
+  `4ed838c49fba6f544fd239d1395fa691c6efc0979f80190af826749cb561ff0b`;
+- production `/api/health` answers 200 `ok`, and `origin/main` is unchanged.
+
+### Two release blockers this unit found, which are not this unit's to fix
+
+1. **`study.status` for Cuicuilco is `draft`.** `published_study_select` gives a
+   client a study only when it is `published`, and the canonical publish path
+   does not touch that column. **A canonical publication alone leaves the study
+   invisible to its own client.** The live gate executes exactly this case.
+2. **The Cuicuilco tenant has zero profiles.** No client account exists, so there
+   is nothing to verify as a client with. One must be provisioned first.
+
+### Deployment before publication
+
+Publishing first would be a **silent no-op with a misleading audit record**:
+production has no code that could read the publication, so every client would
+keep seeing the legacy dashboard while the database recorded that a named person
+had published. Deploying first changes nothing anybody sees — with no
+publication the reader answers on its `not_published` branch and today's
+behaviour is preserved byte for byte — so the deployment can be verified at
+leisure and publication becomes the single deliberate moment a client's screen
+changes. The full nine-step sequence and the three rollback levers are in
+[`docs/CANONICAL_CLIENT_READ_PATH.md`](CANONICAL_CLIENT_READ_PATH.md) §6.
+
+### What is left
+
+**Deployment, then publication.** Cuicuilco remains **unpublished**; nothing was
+acknowledged, nothing was published, nothing was deployed, no PR was opened and
+`main` was not touched.
+
+External evidence, outside every Git repository: `~/becommunity-6b4b2i/`
+(`hosted-readonly.json`, `client-qa-result.json`, `screenshots/`).

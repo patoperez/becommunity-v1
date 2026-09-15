@@ -721,7 +721,7 @@ for (const [label, code] of [["la página", stripComments(pageSource)], ["la acc
   check(forbidden.length === 0, `${label} no escribe directamente${forbidden.length ? `: ${forbidden.join(", ")}` : ""}`);
 }
 
-// THE ONLY FOUR RPCs THIS ROUTE MAY NAME.
+// THE ONLY THREE RPCs THIS ROUTE MAY NAME.
 //
 // `publish_canonical_presentation_with_qualitative` replaced the bare publish
 // call: it does not reimplement publication — it CALLS
@@ -730,6 +730,16 @@ for (const [label, code] of [["la página", stripComments(pageSource)], ["la acc
 // same transaction. `record_canonical_qualitative_signoff` is how a person's
 // review of one exact set of category labels becomes a row. Both are migration
 // 0031's, and both are the only write path to the table they touch.
+//
+// THERE WERE FOUR, AND UNIT 6B.4B2I MOVED THE FOURTH OUT ON PURPOSE.
+// `read_canonical_publication` is the projection a CLIENT is served, and it now
+// lives in `src/lib/studies/published-presentation.ts`, on the client-facing
+// route that actually calls it. It left this file rather than being duplicated
+// there, because two implementations of «what a client is served» would be two
+// chances for the served thing and the reviewed thing to drift. This route is
+// the internal review, and the internal review reads the current publication
+// through `canonical_presentation_revision` directly — which it must, since it
+// needs the identity columns the client projection deliberately withholds.
 {
   const named = new Set();
   let calls = 0;
@@ -742,7 +752,6 @@ for (const [label, code] of [["la página", stripComments(pageSource)], ["la acc
     JSON.stringify([...named].sort()),
     JSON.stringify([
       "publish_canonical_presentation_with_qualitative",
-      "read_canonical_publication",
       "record_canonical_qualitative_signoff",
       "restore_canonical_presentation",
     ]),

@@ -202,6 +202,31 @@ npm run test:canonical-capability-upgrade # Unit 6B.4B2H: the explicit capabilit
                                     #   59 assertions. Needs a cluster AND the two real workbooks
                                     #   (only the approved blueprint marks a block required);
                                     #   reports SKIPPED without them, never a pass.
+npm run test:canonical-client-publication # Unit 6B.4B2I: the CLIENT'S published read path, offline
+                                    #   — the closed refusal vocabularies and their sentences, the
+                                    #   contract file's purity, the reader's two tables and its ONE
+                                    #   read RPC, that it can name neither the draft nor any write,
+                                    #   the page's three branches and that the unreadable one never
+                                    #   falls back to the legacy engine, the action's two
+                                    #   parameters, the surface's arithmetic-free-ness, and the SQL
+                                    #   projection's three keys. 99 assertions. In `npm test`.
+npm run test:canonical-client-publication-live # Unit 6B.4B2I level 2/3: the SAME contract executed
+                                    #   against a disposable PostgreSQL 17 + PostgREST — a
+                                    #   publication through the REAL publish path, the immutable
+                                    #   snapshot served, an editor's later save reaching nobody, a
+                                    #   second version, a replay, four kinds of reader refused or
+                                    #   allowed, server-side filtering, a study that MOVED refusing
+                                    #   the filter while still serving the snapshot, and a
+                                    #   malformed pointer. 78 assertions. Needs a cluster.
+npm run qa:canonical-client-publication # Unit 6B.4B2I real-route QA against a DISPOSABLE target:
+                                    #   what a stranger, an authorized client, another tenant's
+                                    #   client and an internal person each get; the whole approved
+                                    #   layout; operable and combinable filters that clear back
+                                    #   exactly; show-all on a small selection; three viewports;
+                                    #   and the CHARACTER-FOR-CHARACTER comparison between the
+                                    #   client's own screen and the internal review's preview.
+                                    #   64 checks. Needs a cluster AND the two real workbooks;
+                                    #   reports SKIPPED without them. CANNOT run against hosted.
 npm run test:canonical-presentation-hosted-fingerprint # READ-ONLY. Proves the two legacy
                                     #   experience drafts are still v2/72 and v3/14, that neither
                                     #   is v4, that the experience log is unchanged, that 0029's
@@ -581,31 +606,74 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `runStudyShadowComparison` under `node --conditions=react-server` and lets it
   construct its own admin client and do its own paged reads. Both are read-only.
   Never quote one as the other.
-- ⓘ **There are exactly TWO doors from the application to the canonical layer,
-  both named in a table, and a graph walk proves it.** Unit 6B.1 added the
-  second and last; before it there was one, and the rule read "do not add a
-  second door".
+- ⓘ **Every door from the application to the canonical layer is named in a
+  TABLE, and a graph CUT proves there is no other.** Unit 6B.1 added the second;
+  6B.4A, 6B.4B2C and 6B.4B2I added the rest. Each row names a page and the
+  loaders it is required to go through.
 
   1. `src/app/insights/e/[studyId]/page.tsx` → `src/lib/studies/study-dashboard.ts`
-     (server-only) → `src/lib/shadow/server.ts` (server-only) →
-     `src/lib/canonical-source/server.ts`. Unchanged, and its chain is still
-     required to pass through BOTH the approved loader and the orchestrator.
-  2. `src/app/studio/e/[studyId]/construccion/page.tsx` and its co-located
-     `actions.ts` → `src/lib/studio/presentation-workspace.ts` (server-only) →
-     the canonical read path. It is asserted NOT to travel through the shadow
-     layer: its read is a read, not a comparison.
+     (server-only) → `src/lib/shadow/server.ts` → `src/lib/canonical-source/server.ts`,
+     **and since 6B.4B2I also** → `src/lib/studies/published-presentation.ts`
+     (server-only), the client's published read. The shadow requirement is now
+     asserted on the COMPARISON loader rather than on the page, because the page
+     legitimately reaches the canonical layer for two unrelated reasons.
+  2. `src/app/studio/e/[studyId]/construccion/page.tsx`, `revision/page.tsx`,
+     `revision/dolor/page.tsx` and their co-located `actions.ts` →
+     `src/lib/studio/presentation-workspace.ts` (server-only). Each is asserted
+     NOT to travel through the shadow layer: their reads are reads, not
+     comparisons.
 
-  The doors live as a TABLE in `shadow-boundary-test.mjs` §[8] rather than as a
-  count, so a third cannot be added by editing a digit: an unapproved page that
-  reaches the canonical layer fails by name. The server-action class stays
-  closed with ONE named exemption, which is additionally asserted to perform no
-  insert, update, upsert, delete, RPC or `revalidatePath`. `"use client"`
-  modules and `route.ts` handlers still reach the canonical layer by NO chain,
-  and no page, component or route may so much as name the shadow diagnostics.
+  **THE CHECK IS A CUT, NOT A PATH.** `shadow-boundary-test.mjs` §[8] removes a
+  door's declared loaders from the import graph and requires the canonical layer
+  to become unreachable from the page — which is «EVERY path goes through a
+  declared loader». Until 6B.4B2I it compared only the SHORTEST path, so a page
+  with two reasons to reach the canonical layer had one of them silently stop
+  being measured. The one exclusion is `canonical-commit/sha256.ts`, a pure hash
+  helper the journey-pain digest imports, and it is PROVED pure: the gate
+  requires it to import nothing at all.
 
-  **Do not add a third door.** If a surface needs canonical data, it goes
-  through one of the two loaders above or a new one is argued for in the gate
-  first, not registered afterwards.
+  The server-action class stays closed with three named exemptions, each
+  additionally asserted to perform no insert, update, upsert, delete, RPC or
+  `revalidatePath`. `"use client"` modules and `route.ts` handlers still reach
+  the canonical layer by NO chain, and no page, component or route may so much
+  as name the shadow diagnostics.
+
+  **Do not add a door.** If a surface needs canonical data, it goes through one
+  of the declared loaders or a new one is argued for in the gate first, not
+  registered afterwards.
+- ⓘ **A PUBLICATION IS NOT A CLIENT EXPERIENCE UNTIL A CLIENT ROUTE READS IT,
+  and until Unit 6B.4B2I none did.** The storage, the review, the publish path
+  and the database's own client projection all existed while
+  `/insights/e/[studyId]` rendered the legacy P8 dashboard — so «Publicar para
+  el cliente» would have written an immutable snapshot nothing a client can
+  reach would read.
+
+  The contract now, and it is all in `docs/CANONICAL_CLIENT_READ_PATH.md`:
+
+  * a client is served the **immutable stored snapshot**, byte for byte — never
+    the draft, never a recomputation of it, never the legacy engine;
+  * **no publication → the documented legacy behaviour, unchanged**; a
+    publication that cannot be read → a sentence, and NEVER a silent fallback to
+    different numbers from a different engine;
+  * a **filter** is applied only when recomputing the whole publication under the
+    neutral selection reproduces `render_model_sha256` exactly. Otherwise the
+    selection is refused, the snapshot is served unchanged, and the filter panels
+    are not mounted at all. This is stricter than comparing bindings on purpose:
+    deleting one answered response leaves the frozen document still RESOLVING
+    while its model no longer digests to what was published;
+  * `/studio/e/[id]/vista-cliente` and `/admin/preview/[id]` are **internal
+    LEGACY P8 previews** and are not evidence about the canonical client
+    experience. `/api/studies/[id]/report` is legacy too and is NOT part of a
+    publication;
+  * **DEPLOY BEFORE PUBLISHING.** Production builds from `main`, which has no
+    canonical code, so publishing first is a silent no-op with a misleading audit
+    record. With no publication the new reader answers on its `not_published`
+    branch and today's behaviour is preserved byte for byte, so the deployment is
+    safe to verify at leisure;
+  * **`study.status` still gates visibility.** `published_study_select` gives a
+    client a study only when it is `published`, and the canonical publish path
+    does not touch that column. A canonical publication alone leaves the study
+    invisible to its own client.
 - ⓘ **A CANONICAL DRAFT AND A LEGACY DRAFT LIVE IN DIFFERENT TABLES, and that
   is the whole coexistence answer.** The question was put to a real PostgreSQL
   before it was answered. `study_experience_draft`'s primary key is `study_id`

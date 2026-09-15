@@ -6,13 +6,19 @@ import "server-only";
  * ─────────────────────────────────────────────────────────────────────────────
  * IT ADDS NO DOOR TO THE CANONICAL LAYER.
  *
- * There are exactly two, and a table in `shadow-boundary-test.mjs` names them
- * rather than counting them. This module holds no canonical reader of its own:
- * it goes through `presentation-workspace.ts`, which is the composer's declared
- * loader, so the publication route's chain to the canonical layer passes through
- * a loader that was already argued for. What this file owns is the PUBLICATION
+ * Every door is a row in a TABLE in `shadow-boundary-test.mjs`, named rather
+ * than counted. This module holds no canonical reader of its own: it goes
+ * through `presentation-workspace.ts`, which is the composer's declared loader,
+ * so the publication route's chain to the canonical layer passes through a
+ * loader that was already argued for. What this file owns is the PUBLICATION
  * storage — three tables and three functions migration 0030 created — and
  * nothing else.
+ *
+ * AND WHAT IT DOES NOT OWN, since Unit 6B.4B2I: the read a CLIENT performs.
+ * That is `src/lib/studies/published-presentation.ts`, on the client route, and
+ * it deliberately takes no import of this file — because this file can publish
+ * and restore, and a reading surface should not have a write function in its
+ * import graph even one the database would refuse.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * THE BROWSER NEVER SENDS THE THING BEING PUBLISHED.
@@ -79,7 +85,6 @@ import {
   type QualitativeSignOff,
   type SignOffResult,
   type PublishResult,
-  type PublishedPresentation,
   type QualitativeBinding,
   type RestoreResult,
 } from "@/lib/publication";
@@ -96,19 +101,18 @@ import {
 // `encodePresentationForStorage` in `@/lib/presentation/server`, and both reach
 // the canonical layer by their own routes.
 //
-// WHAT THAT ACTUALLY BUYS, MEASURED RATHER THAN ASSERTED. The boundary gate's
-// door table follows the FIRST path a breadth-first walk finds from a page to
-// the canonical layer, and requires it to pass through the declared loader. A
-// discrimination test tried both ways of breaking that: importing `@/lib/viewer`
-// here does NOT break it today, because that module reaches the canonical layer
-// two hops down and the loader reaches it in one; importing a canonical module
-// DIRECTLY does, immediately and by name.
+// WHAT THAT ACTUALLY BUYS, MEASURED RATHER THAN ASSERTED — AND THE MEASUREMENT
+// GOT STRICTER IN UNIT 6B.4B2I.
 //
-// So the rule is not "an extra import would flip the door" — it would not,
-// today. It is that the shortest path from this module to the canonical layer
-// should be a FACT ABOUT ITS IMPORTS rather than an accident of how deep two
-// other modules happen to reach. One import, one path, one door, and the door
-// row fails the moment this file takes an edge of its own.
+// The door check used to follow the FIRST path a breadth-first walk found from
+// a page to the canonical layer. It is now a CUT: the declared loaders are
+// removed from the import graph and the canonical layer must become unreachable
+// from the page, which is «EVERY path goes through a declared loader» rather
+// than «the shortest one does». An extra import here that reached the canonical
+// layer around the loader now fails immediately, whatever its depth.
+//
+// One import, one path, one door, and the door row fails the moment this file
+// takes an edge of its own.
 import {
   decodeStoredDraft,
   encodePresentationForStorage,
@@ -1541,37 +1545,19 @@ export async function restoreStoredPublication(
 }
 
 /* -------------------------------------------------------------------------- */
-/* what a client would be served                                               */
+/* what a client would be served — AND WHERE IT LIVES NOW                      */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Read the study's current publication as a CLIENT would receive it.
+ * `readPublishedPresentation` USED TO LIVE HERE, AND UNIT 6B.4B2I MOVED IT.
  *
- * It goes through `read_canonical_publication`, whose whole body is one
- * `jsonb_build_object` of three keys. That is the point: the projection is
- * expressed in SQL, so it cannot gradually acquire a fourth field by somebody
- * widening a `select *` here — and a gate can assert the shape against the
- * function rather than against this file's good intentions.
+ * It is now `src/lib/studies/published-presentation.ts`, beside the insights
+ * loader, because that unit connected it to the real client-facing route and a
+ * client route must not take an import of THIS module: this one can publish and
+ * restore, and a reading surface should not have a write function in its import
+ * graph even one the database would refuse.
  *
- * NOTHING IN THIS PHASE CALLS IT FROM A CLIENT ROUTE. The production client
- * route is not switched by this unit; this exists so the read that will serve it
- * is written, proved and unable to leak before anybody wires it.
+ * Moved rather than copied. Two implementations of «what a client is served»
+ * would be two chances for the served thing and the reviewed thing to drift,
+ * which is the single failure this whole layer exists to prevent.
  */
-export async function readPublishedPresentation(
-  client: SupabaseClient,
-  scope: Pick<ComposerScope, "tenantId" | "studyId">,
-): Promise<PublishedPresentation | null> {
-  const { data, error } = await client.rpc("read_canonical_publication", {
-    p_study_id: scope.studyId,
-    p_tenant_id: scope.tenantId,
-  });
-  if (error || data === null || typeof data !== "object") return null;
-  const answer = data as { version?: unknown; publishedAt?: unknown; renderModel?: unknown };
-  if (typeof answer.version !== "number" || typeof answer.publishedAt !== "string") return null;
-  if (typeof answer.renderModel !== "object" || answer.renderModel === null) return null;
-  return {
-    version: answer.version,
-    publishedAt: answer.publishedAt,
-    renderModel: answer.renderModel as PresentationRenderModel,
-  };
-}

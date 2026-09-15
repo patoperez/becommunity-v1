@@ -824,14 +824,27 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     return [...found];
   };
 
-  /** Every module reachable from `entry`, and the first path that reaches each. */
-  const reachable = (entry) => {
+  /**
+   * Every module reachable from `entry`, and the first path that reaches each.
+   *
+   * `blocked` REMOVES modules from the graph before the walk, and it is what
+   * turns "the first path happens to go through a loader" into "EVERY path goes
+   * through one". Unit 6B.4B2I needed that: the insights page now reaches the
+   * canonical layer for TWO legitimate reasons — the shadow comparison and the
+   * canonical publication a client is served — and a check that only ever
+   * measured the shortest of several paths would have silently stopped
+   * measuring the other. Cutting the declared loaders out and requiring the
+   * canonical layer to become unreachable proves the property directly, in one
+   * linear walk, with no path enumeration.
+   */
+  const reachable = (entry, blocked = []) => {
+    const cut = new Set(blocked.map((path) => path.replace(/\\/g, "/")));
     const paths = new Map([[entry.replace(/\\/g, "/"), [entry.replace(/\\/g, "/")]]]);
     const queue = [entry.replace(/\\/g, "/")];
     while (queue.length > 0) {
       const current = queue.shift();
       for (const next of importsOf(current)) {
-        if (paths.has(next)) continue;
+        if (paths.has(next) || cut.has(next)) continue;
         paths.set(next, [...paths.get(current), next]);
         queue.push(next);
       }
@@ -842,6 +855,25 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
   const appFiles = walk(join("src", "app"));
   const componentFiles = walk(join("src", "components"));
   const isCanonical = (path) => /src\/lib\/(canonical-source|ingestion\/canonical-commit|ingestion\/canonical-package)\//.test(path);
+
+  /**
+   * PURE HELPERS THAT HAPPEN TO LIVE IN A CANONICAL FOLDER.
+   *
+   * `isCanonical` is a FOLDER predicate, and the folders hold a few modules that
+   * read nothing: `sha256.ts` is the product's hash and is imported by the
+   * journey-pain digest, which is why the publication review reaches it without
+   * going through a loader. The gate already recognises the shape elsewhere —
+   * «`canonical-commit/result.ts` is the SAFE error vocabulary … banning the
+   * whole folder would ban a type».
+   *
+   * Until Unit 6B.4B2I this never showed, because the door check only ever
+   * measured the SHORTEST path from a page and that one went through the
+   * loader. The cut below measures every path, so the exclusion has to be
+   * stated — and, being stated, it is PROVED rather than asserted: the check
+   * beneath requires each named helper to import nothing at all.
+   */
+  const CANONICAL_PURE_HELPERS = ["src/lib/ingestion/canonical-commit/sha256.ts"];
+  const isCanonicalReader = (path) => isCanonical(path) && !CANONICAL_PURE_HELPERS.includes(path);
   const isShadow = (path) => /src\/lib\/shadow\//.test(path);
   /**
    * THE DOORS TO THE CANONICAL LAYER, and there are exactly two.
@@ -860,14 +892,37 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
    * orchestrator: it is not a comparison, it is a read.
    */
   const APPROVED_DOORS = [
+    /**
+     * THE INSIGHTS DOOR, AND SINCE UNIT 6B.4B2I IT HAS TWO LOADERS.
+     *
+     * The first is the shadow comparison, which is why this door exists at all.
+     * The SECOND is the canonical publication a client is actually served:
+     * until 6B.4B2I this address rendered the legacy P8 experience and nothing
+     * else, so publishing a canonical presentation changed nothing any client
+     * could see. The publication storage, the review, the publish path and the
+     * database's own client projection all existed, and no reading surface
+     * consulted them.
+     *
+     * `published-presentation.ts` adds no LOADER of its own: it holds no
+     * canonical reader, and imports everything that touches one from
+     * `presentation-workspace.ts` — the composer's declared loader — and from
+     * `journey-pain-workspace.ts`, which reaches the canonical layer through
+     * that same file and nothing else.
+     *
+     * `loaders` IS A LIST BECAUSE THE PROPERTY IS NOW A CUT. The check below
+     * removes every declared loader from the import graph and requires the
+     * canonical layer to become unreachable from the page — which is the claim
+     * «every path goes through a declared door», rather than the weaker one the
+     * single-path version measured.
+     */
     {
       page: "src/app/insights/e/[studyId]/page.tsx",
-      loader: "src/lib/studies/study-dashboard.ts",
+      loaders: ["src/lib/studies/study-dashboard.ts", "src/lib/studies/published-presentation.ts"],
       via: "src/lib/shadow/server.ts",
     },
     {
       page: "src/app/studio/e/[studyId]/construccion/page.tsx",
-      loader: "src/lib/studio/presentation-workspace.ts",
+      loaders: ["src/lib/studio/presentation-workspace.ts"],
       via: null,
     },
     /**
@@ -893,7 +948,7 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
      */
     {
       page: "src/app/studio/e/[studyId]/revision/page.tsx",
-      loader: "src/lib/studio/presentation-workspace.ts",
+      loaders: ["src/lib/studio/presentation-workspace.ts"],
       via: null,
     },
     /**
@@ -923,7 +978,7 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
      */
     {
       page: "src/app/studio/e/[studyId]/revision/dolor/page.tsx",
-      loader: "src/lib/studio/presentation-workspace.ts",
+      loaders: ["src/lib/studio/presentation-workspace.ts"],
       via: null,
     },
   ];
@@ -978,13 +1033,40 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       file: "src/app/studio/e/[studyId]/revision/actions.ts",
       loader: "src/lib/studio/presentation-workspace.ts",
     },
+    /**
+     * Unit 6B.4B2I. THE CLIENT'S OWN FILTER ACTION, and the first approved
+     * action that is not internal-only.
+     *
+     * A reader ticking a filter on their published study needs figures
+     * recomputed, and recomputing needs the registry's address map and the
+     * study's canonical results — neither of which may reach a browser. The
+     * only two ways to be called from a browser are a Server Action and an HTTP
+     * route handler, and route handlers are refused the canonical layer
+     * outright above, for stronger reasons.
+     *
+     * IT ACCEPTS NO DOCUMENT AND NO IDENTITY: a study id and a viewer selection
+     * as a JSON string — panel ids, opaque handles and ordinal tokens. It
+     * re-authorizes with `getUser()`, reads the study row with the READER'S own
+     * session so RLS decides, and takes the tenant from that row rather than
+     * from the request.
+     *
+     * AND THE SNAPSHOT IT FILTERS IS IMMUTABLE. The workspace function it calls
+     * recomputes the whole publication under the neutral selection first and
+     * refuses the selection unless the result digests to the render model digest
+     * stored at publication — so a filtered figure is always the published
+     * study's own arithmetic or it is not shown at all.
+     */
+    {
+      file: "src/app/insights/e/[studyId]/actions.ts",
+      loader: "src/lib/studies/published-presentation.ts",
+    },
   ];
   // The insights door by name, for the two checks further down that are about
   // THAT door specifically — that its page binds only the legacy payload, and
-  // that its loader is server-only and mutates nothing. Derived from the table
+  // that its loaders are server-only and mutate nothing. Derived from the table
   // rather than written twice, so the two can never name different files.
   const APPROVED_PAGE = APPROVED_DOORS[0].page;
-  const APPROVED_LOADER = APPROVED_DOORS[0].loader;
+  const APPROVED_LOADERS = APPROVED_DOORS[0].loaders;
 
   /**
    * The entry-point classes that must NEVER reach the canonical layer.
@@ -1028,6 +1110,21 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     }
   });
 
+  check("los ayudantes canónicos excluidos del corte no importan NADA", () => {
+    assert.ok(CANONICAL_PURE_HELPERS.length > 0, "the exclusion list is empty; the cut is untested");
+    for (const helper of CANONICAL_PURE_HELPERS) {
+      assert.ok(statSync(helper).isFile(), `${helper} does not exist`);
+      // NOTHING AT ALL, not «nothing that reads». A module with zero imports
+      // cannot acquire a transport without this line failing first, which is a
+      // stronger and simpler guarantee than any allowlist of safe imports.
+      assert.deepEqual(importsOf(helper), [], `${helper} imports something`);
+      const code = stripComments(readFileSync(helper, "utf8"));
+      for (const transport of ["createClient", "supabase", ".from(", ".rpc(", "fetch("]) {
+        assert.ok(!code.includes(transport), `${helper} names ${transport}`);
+      }
+    }
+  });
+
   check("SÓLO las páginas aprobadas alcanzan la capa canónica, y cada una por su puerta", () => {
     const pages = appFiles.filter((path) => /page\.tsx$/.test(path));
     const reaching = [];
@@ -1044,14 +1141,41 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     for (const door of APPROVED_DOORS) {
       const found = reaching.find((entry) => entry.page === door.page);
       assert.ok(found, `the approved door ${door.page} no longer reaches the canonical layer`);
+      // THE CUT, which is the whole strength of this row. Remove the declared
+      // loaders from the graph; the canonical layer must then be unreachable
+      // from the page. That is «EVERY path goes through a declared loader»,
+      // where the earlier `found.path.includes(...)` only ever said «the
+      // shortest one does» — and a page with two reasons to reach the canonical
+      // layer would have had one of them silently stop being measured.
+      const cut = reachable(door.page, door.loaders);
+      const leak = [...cut.keys()].find(isCanonicalReader);
       assert.ok(
-        found.path.includes(door.loader),
-        `${door.page} skips its declared loader ${door.loader}: ${JSON.stringify(found.path)}`,
+        !leak,
+        `${door.page} reaches ${leak} without passing through ${door.loaders.join(" or ")}: ` +
+          JSON.stringify(cut.get(leak)),
       );
-      if (door.via) {
+      // And each declared loader must still BE one: a row naming a file that no
+      // longer leads anywhere would make the cut above pass vacuously.
+      for (const loader of door.loaders) {
+        const fromLoader = reachable(loader);
         assert.ok(
-          found.path.includes(door.via),
-          `${door.page} skips ${door.via}: ${JSON.stringify(found.path)}`,
+          [...fromLoader.keys()].some(isCanonical),
+          `${door.page} declares ${loader}, which no longer reaches the canonical layer`,
+        );
+      }
+      if (door.via) {
+        // THE `via` IS A FACT ABOUT THE LOADER, NOT ABOUT THE PAGE, and 6B.4B2I
+        // moved it there because it stopped being true of the page: the
+        // insights address now reaches the canonical layer for a second,
+        // unrelated and legitimate reason. What the shadow requirement always
+        // MEANT is that the comparison loader's canonical read goes through the
+        // orchestrator — so it is asserted on that loader, by cutting.
+        const shadowDoor = door.loaders.find(
+          (loader) => [...reachable(loader, [door.via]).keys()].every((path) => !isCanonical(path)),
+        );
+        assert.ok(
+          shadowDoor,
+          `no loader of ${door.page} depends on ${door.via} for its canonical read`,
         );
       }
     }
@@ -1299,10 +1423,68 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     }
   });
 
-  check("el cargador aprobado es server-only y no muta nada", () => {
-    const code = stripComments(readFileSync(APPROVED_LOADER, "utf8"));
-    assert.match(code, /^import "server-only";/m);
-    assert.ok(!/\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(/.test(code));
+  check("los cargadores aprobados son server-only y no mutan nada", () => {
+    for (const loader of APPROVED_LOADERS) {
+      const code = stripComments(readFileSync(loader, "utf8"));
+      assert.match(code, /^import "server-only";/m, `${loader} is not server-only`);
+      // THE PUBLICATION READER IS ALLOWED EXACTLY ONE RPC AND IT IS A READ.
+      // `read_canonical_publication` is a `language sql stable` projection of
+      // three keys; the publication tables grant `select` to `service_role`
+      // alone, so there is no non-RPC way to read what a client is served. Every
+      // other builder mutation stays forbidden, by name.
+      for (const writer of [".insert(", ".update(", ".upsert(", ".delete("]) {
+        assert.ok(!code.includes(writer), `${loader} performs ${writer}`);
+      }
+      const rpcs = [...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((match) => match[1]);
+      assert.deepEqual(
+        [...new Set(rpcs)].sort(),
+        loader === "src/lib/studies/published-presentation.ts" ? ["read_canonical_publication"] : [],
+        `${loader} calls an RPC it was not approved for`,
+      );
+      assert.ok(
+        !/\.rpc\(\s*[^"']/.test(code),
+        `${loader} calls an RPC whose name is not a literal`,
+      );
+    }
+  });
+
+  /**
+   * Unit 6B.4B2I. THE CLIENT'S PUBLICATION READER MUST NOT BE ABLE TO PUBLISH.
+   *
+   * It is the only loader on a client-facing route, and the two things it must
+   * never touch are the editable draft — which would serve a reader work in
+   * progress — and the publish or restore functions, which would put a write
+   * one edit away from a reading surface.
+   *
+   * Asserted over the whole REACHABLE SET rather than over the file, because
+   * "this file does not import it" is a weaker claim than "no path from it
+   * arrives there", and the second is the one that matters.
+   */
+  check("el lector del cliente no alcanza ni el borrador ni el camino de publicación", () => {
+    const READER = "src/lib/studies/published-presentation.ts";
+    const source = stripComments(readFileSync(READER, "utf8"));
+    assert.ok(
+      !source.includes("canonical_presentation_draft"),
+      "the client reader names the editable draft table",
+    );
+    const reach = [...reachable(READER).keys()];
+    assert.ok(
+      !reach.includes("src/lib/studio/publication-workspace.ts"),
+      "the client reader reaches the module that can publish and restore",
+    );
+    for (const file of reach) {
+      const code = stripComments(readFileSync(file, "utf8"));
+      for (const forbidden of ["publish_canonical_presentation", "restore_canonical_presentation"]) {
+        assert.ok(
+          !code.includes(forbidden),
+          `${file} is reachable from the client reader and names ${forbidden}`,
+        );
+      }
+    }
+    // And no shadow diagnostics either: a client's read is a read, not a
+    // comparison, and borrowing the comparison path would put a diagnostic in
+    // the way of the one surface a client actually sees.
+    assert.ok(!reach.some(isShadow), "the client reader reaches the shadow layer");
   });
 
   check("nada alcanzable desde la sombra puede mutar la base de datos", () => {

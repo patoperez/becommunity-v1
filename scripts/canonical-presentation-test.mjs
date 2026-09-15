@@ -2015,6 +2015,28 @@ const APPROVED_PRESENTATION_DOORS = [
     entry: "src/app/studio/e/[studyId]/revision/dolor/page.tsx",
     loader: "src/lib/studio/presentation-workspace.ts",
   },
+  // UNIT 6B.4B2I — the CLIENT'S OWN published study, and its filter action.
+  //
+  // The first two doors on this list that are not internal. A client opening
+  // their published study is served the immutable canonical snapshot, and a
+  // client ticking a filter has it recomputed on the server — both of which
+  // need the presentation's server half, and neither of which any internal
+  // surface can do on their behalf.
+  //
+  // Their declared loader is `published-presentation.ts`, which is a LOADER and
+  // not a second reader: it holds no canonical read of its own and imports
+  // everything that touches one from the composer's declared loader. That chain
+  // is what the dependency gate proves by CUTTING, and what the row below keeps
+  // true here — an approved door must arrive through its declared loader rather
+  // than by importing `resolve.ts` directly.
+  {
+    entry: "src/app/insights/e/[studyId]/page.tsx",
+    loader: "src/lib/studies/published-presentation.ts",
+  },
+  {
+    entry: "src/app/insights/e/[studyId]/actions.ts",
+    loader: "src/lib/studies/published-presentation.ts",
+  },
 ];
 const appSourceFiles = [];
 const collectAppSources = (dir) => {
