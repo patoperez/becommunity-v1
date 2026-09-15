@@ -7074,3 +7074,78 @@ Three user-visible differences, each deliberate:
 And one thing the canonical version has that legacy does not: a decision is
 refused if the version the screen displayed has moved, under the study's
 advisory lock, with a unique index behind it.
+
+### Phase G — the preview, and what the real edge said
+
+A **version**, not a deployment. `wrangler versions upload` on the existing
+Worker created **`c18405d9-6c4b-41ab-989e-e7e6a5f2bdf3`**, tag
+`rc-6b4b2l-88cf34d`, at
+**`https://c18405d9-becommunity-v1.ollinagencyllc.workers.dev`**, from commit
+`88cf34d` in a clean worktree with no `.env` file. Wrangler's own output: *"To
+deploy this version to production traffic use `wrangler versions deploy`"* — it
+was not run.
+
+Built with **nothing baked**: no `.env` file and no `NEXT_PUBLIC_*` in the shell,
+so not even the public anon key is inlined; the Worker's own variables supply
+both at runtime. All three configured credential values appear in **0** files of
+the artifact. BUILD_ID `xyMwJnp-hH4zxVBioGktL`; `.open-next` digest
+`84e23399dfe5a0a66f1914445d7185f0f972d05e794982baae1e61ece84f49b6`; upload
+12 373.55 KiB / gzip 2 644.92 KiB.
+
+#### Edge QA — 142 checks, 142 passed
+
+The new screen, on the runtime that used to refuse the page's fifty-first
+request:
+
+```
+Miembros activos            Desertores
+  Malos resultados financieros  11 · 58 %    Malos resultados financieros  7 · 64 %
+  Mala actitud …                 4 · 21 %    Mala actitud …                2 · 18 %
+  Tiempo                         3 · 16 %    Cambio de titular             1 ·  9 %
+  Situaciones personales         1 ·  5 %    Otra oportunidad              1 ·  9 %
+  No aplica · fuera de la nube   9
+```
+
+Both families report **nothing to decide**, nothing blocking, the manual
+grouping offering all four labels, and the opaque vocabulary markers `vivs5jffg`
+and `vpjbye6ac`. The ledger is not provisioned there, the screen says so, and
+**every control that would write is disabled** — so the QA could not have
+written even by accident. No 64-character hex run reaches the page, no canonical
+item key does, and no element's own text is a bare family key.
+
+Everything Unit 6B.4B2K proved still holds on this build: journey pain
+`SIN REVISAR 0 · APROBADAS 15 · EXCLUIDAS 0 · SIN RESOLVER 0` with the review
+complete, **no hard blocker of any kind** on `/revision`, the qualitative
+sign-off still CURRENT, 15 692 characters of finished canonical content, the
+publish control rendered and disabled with every acknowledgement unticked, the
+filters driven end to end with the fifteen pain badges surviving one filter, two
+filters and a clear, three viewports identical, anonymous visitors sent to
+`/login` from five protected routes, the legacy fallback for a client with no
+canonical publication, another tenant's client refused, and 27 leak checks clean.
+
+#### Nothing else moved
+
+**Production**, before and after: active version `e691ecd8…`, 10 deployments,
+the deployment listing byte-identical, `/api/health` 200.
+
+**The hosted project**, before and after: fingerprint gate **136/136**, 67
+tables, 42 functions — so `0034` is still **not applied** — the legacy
+`category_decision` still holding its two `separate` rows and
+`study_category_snapshot` still empty, and **Cuicuilco still `draft` and still
+unpublished**.
+
+ⓘ **One loose end from Unit 6B.4B2K, reported rather than quietly fixed.** That
+unit set a dashboard variable `CANONICAL_EDGE_DIAGNOSTICS = "on"` for its
+instrumented version, and because `keep_vars = true` retains dashboard variables
+every later version has inherited it — the green `bb742e60` preview, and this
+one. **No code reads it**: the only occurrence of that name in this branch is in
+this document. It is inert, it carries no credential, and it was left alone
+because editing a Worker's variables is a change to the production Worker's
+configuration, which this unit had no authorization to make. **Remove it in the
+dashboard before the release deploy**, or a future diagnostic behind that flag
+would arrive switched on.
+
+External evidence, outside every Git repository: `~/becommunity-6b4b2l/`
+(`legacy-audit.json`, `preview-qa-result.json`, `cf-deployments-*.txt`,
+`cf-upload-raw.txt`, `hosted-before-qa.txt`, `hosted-after-qa.txt`,
+`screenshots/`).
