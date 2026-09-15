@@ -7386,6 +7386,82 @@ says it is applied to no project. The hosted ledger records the bytes that ran;
 editing the file would make the repository and the ledger disagree about what ran.
 The claim is corrected in the governing documents instead.
 
+
+### The release candidate
+
+| | |
+| --- | --- |
+| commit | `09178f4d171b5abb9007f2d1e4e954b0083ab60f` |
+| version | `2995bd70-1bf3-486e-9a84-979fb1717f75` |
+| tag | `rc-6b4b2m-09178f4` |
+| preview | `https://2995bd70-becommunity-v1.ollinagencyllc.workers.dev` |
+| BUILD_ID | `6Dj9XnZsqTRLygZrssYS8` |
+| `.open-next` digest | `3adb7281dd792c68b4786e18b749e7e85d97c01c5698a9f043340091e04ce3cb` |
+| `worker.js` | `d05223bf4d44c84108a102ab62aa3bc9c5568f0c3ac2064c37be5cc65c64bc45` |
+| size | 12 373.54 KiB, gzip 2 644.91 KiB |
+| startup | 29 ms |
+
+Built from a clean checkout of the exact remote commit, with **no `.env` file and
+no `NEXT_PUBLIC_*` in the shell**, so the compiled env snapshot is
+`{}`/`{}`/`{}` — not even the public anon key is inlined, and the Worker's own
+variables supply both at runtime. `npm run test:secrets` passed over the built
+output. `keep_vars = true` is in `wrangler.toml` with no `[vars]` block beneath
+it.
+
+**Uploaded with `wrangler versions upload` and never deployed.** Production was
+`e691ecd8-de9a-4a02-a8e3-13aad7e9e805` with 10 deployments before the upload and
+after it, its deployment listing byte-identical once wrangler's own «update
+available» banner is removed (sha256 `acd589cde018a39f4bf6d8af2377cb6d…` on both
+sides), and `/api/health` answered 200 throughout. No route, DNS or traffic
+change was made.
+
+#### What the Edge QA found
+
+**152 checks, 152 passed**, on the release-candidate version: the category review
+provisioned and drawing exactly the approved labels and counts, zero candidates,
+zero decisions, the manual grouping refusing until two labels are chosen, the
+journey review still `0/15/0/0`, no false blocker on `/revision`, the sign-off
+still CURRENT, the canonical preview surviving one filter, two filters and a
+clear at three viewports, anonymous visitors refused on every protected route,
+the legacy fallback intact for a client with no canonical publication, another
+tenant's client refused, and 27 leak checks clean.
+
+ⓘ **AND IT TOOK THREE RUNS TO GET THAT, WHICH IS REPORTED RATHER THAN ROUNDED
+OFF.** Two runs before it failed 8 assertions each, with an identical signature —
+the filter banner not appearing after a value is ticked, «Ver el estudio
+completo» then not found, and the desktop viewport reading an undrawn preview.
+That is a fixed `sleep(5000)` against a click that costs a server round trip, not
+a product failure: the same assertions pass on the same version minutes later,
+and the page's content is identical when it does (15 692 characters unfiltered).
+**The QA harness's fixed waits are the weakest part of this evidence**, and a
+future unit should replace them with polling before this screen is signed off
+again.
+
+#### Anonymous access, checked at the transport instead of through a redirect
+
+One run failed the browser assertion «the canonical revision screen answers
+/login» because it sampled `location.pathname` before a client-side redirect had
+settled. That answer is not left to a timer: all seven protected routes were
+asked directly with `curl`, no cookies and no JavaScript —
+`/studio/e/<id>/revision`, `/revision/categorias`, `/revision/dolor`,
+`/vista-cliente`, `/studio`, `/e/<id>` and `/dashboard` — and every one answered
+**HTTP 307 to `/login`**. Neither «Nets de Cuicuilco», nor «Malos resultados
+financieros», nor «Miembros activos», nor «Publicar para el cliente» appears
+anywhere in those bodies.
+
+#### The request budget, re-measured after the migration
+
+| page | requests | ceiling |
+| --- | ---: | ---: |
+| `/studio/e/<id>/revision` | 26 | 50 |
+| `/studio/e/<id>/revision/dolor` | 26 | 50 |
+| `/studio/e/<id>/revision/categorias` | 18 | 50 |
+| the Studio shell, on every page | 14 | — |
+| authentication | 2 | — |
+
+Unchanged by `0034`. `read_canonical_category_decisions` costs the one request it
+cost when it did not exist and answered `PGRST202`; what changed is that the
+answer is now a projection instead of a refusal.
 ### An intermittent Cloudflare Error 1101, reported rather than explained away
 
 ⓘ **For about ninety seconds the preview Worker threw.** Between **22:34:54 and
@@ -7411,16 +7487,33 @@ window, all of them downstream of it.
 * the sequence was then driven **eight more times** with the Worker version
   tailed (`wrangler tail --version-id c18405d9…`): eight clean pairs, zero
   exceptions captured, zero error outcomes;
-* and the full QA re-run immediately afterwards passed **152 of 152**.
+* the full QA re-run immediately afterwards passed **152 of 152**;
+* **it recurred on the release-candidate version too**, a different version built
+  from a different commit — a second burst between **23:05:06 and 23:05:39 UTC**,
+  Ray IDs `a3bb46346d524600`, `a3bb4656ff524600`, `a3bb467a188f4600`,
+  `a3bb46beebea4600` and `a3bb47058ef54600`. Three of those five were in the
+  **control arm that never visits the category review at all**, and one was
+  `/login` again;
+* and between the bursts, **200 consecutive GETs** across production
+  `/api/health`, production `/login`, both preview hosts' `/login` and the
+  release candidate's `/api/health` returned **zero failures**.
 
-**What it might be is not known**, and this record does not pretend otherwise. A
-platform-side condition on that colo fits every observation — including a
-trivial page failing — better than any code path this branch owns, but nothing
-here proves it. `wrangler tail` captured no exception either during the window or
-after it, so the Worker's own view of those seven requests was never obtained.
-**Watch for it during the release preview QA**: a repeat that clusters the same
-way, or one that follows the category review specifically, would change the
-reading and must stop the deploy.
+**So it is not the category review and it is not `0034`.** It reaches `/login`,
+it reaches a version that predates the migration in its build, and it reaches the
+arm with no category visit in it. What it IS is not known, and this record does
+not pretend otherwise: a platform-side condition affecting version-preview
+hostnames fits every observation, but nothing here proves it.
+
+ⓘ **`wrangler tail` was not a usable instrument for this.** Attached to either
+version by `--version-id`, it captured **no lines at all** — not even the sixteen
+successful requests driven through it in the same window — so the Worker's own
+account of the failing requests was never obtained. A future unit wanting that
+account should reproduce under local `workerd` rather than expect tail to deliver
+it.
+
+**Watch for it during the release preview QA**: a burst that follows the category
+review specifically, or one that reaches the production hostname, would change
+the reading and must stop the deploy.
 
 ### Nothing else moved
 
