@@ -6526,3 +6526,128 @@ account, set the status, and publish. Cuicuilco remains **unpublished**.
 External evidence, outside every Git repository: `~/becommunity-6b4b2j/`
 (`preview-qa-result.json`, `hosted-before.json`, `hosted-after.json`,
 `cf-deployments-*.txt`, `dryrun.txt`, `screenshots/`).
+
+---
+
+## Unit 6B.4B2K — the Cloudflare edge failure, named and removed
+
+Baseline `dde1e1e1852651c102a5582d13b0f823810f6325`; `origin/main` unchanged at
+`c76762f428834b7401118b7d2ad7f0d40158d56a`. **No merge, no production deploy, no
+publication, no study-status change, no client account.** Migration `0033` WAS
+applied to the hosted project; nothing else there moved.
+
+### The root cause, measured rather than inferred
+
+Unit 6B.4B2J found a canonical read that fails on the Cloudflare edge and
+nowhere else, and named the free plan's fifty-subrequest ceiling as a
+*hypothesis* it could not test, because every transport failure on that path was
+reduced to one code before anyone could see it.
+
+It is now **measured**. A diagnostic version instrumented the affected page
+itself — no new route, no new URL, behind the same `requireInternal()` — and
+counted every outbound request one HTTP request makes, reporting the ordinal and
+a closed code for the first that failed:
+
+```
+outboundTotal : 62      failureCount : 12
+firstFailure  : { n: 51, resource: "rest:journey_stage",
+                  outcome: "SUBREQUEST_BUDGET_EXHAUSTED" }
+```
+
+**Exactly fifty succeeded. Request #51 and every request after it were refused
+by the runtime**, identically across runs, even though the six-way read pool
+reordered the families in between. The twelve refusals are four attempts at
+`journey_stage` and eight at `canonical_qualitative_signoff` — supabase-js
+retries, so 53 distinct operations became 62 attempts against a budget of 50.
+
+The refusal is the RUNTIME'S, not the database's. This is the proven cause; the
+subrequest ceiling is no longer a hypothesis.
+
+### Where the fifty went
+
+| ordinal | what | cost |
+|---|---|---|
+| #1–#2 | the session and the role (`requireInternal`) | 2 |
+| #3–#17 | `loadStudioStudy` — the legacy Studio shell | 15 |
+| #18–#45 | the canonical row set, 26 families + gate + overflow | **28** |
+| #46–#48 | the draft, the publication pointer, its history | 3 |
+| #49–#51 | the curated pain phrases, stage links, stages | 3 |
+| #52 | the decisions in force | 1 |
+| #53 | the qualitative sign-off | 1 |
+
+The canonical read was more than half the budget **and grew with the data** —
+one more request per additional thousand `survey_response` rows. Trimming other
+work would have bought a study or two; it would have climbed back over on the
+next one.
+
+### The fix: migration 0033, one round trip
+
+`read_canonical_row_set` projects the same columns, in the same order, under the
+same ceilings, scoped by tenant AND study — read-only, `stable`, `security
+invoker`, `service_role` only. Full record in
+[`docs/CANONICAL_STUDY_MODEL.md`](CANONICAL_STUDY_MODEL.md).
+
+**Measured against the hosted project, before and after:**
+
+| | before | after |
+|---|---|---|
+| `loadJourneyPainEditor` (`/revision/dolor`) | 36 | **9** |
+| `loadPublicationReview` (`/revision`) | 36 | **9** |
+| page total, server side | 51 | **24** |
+| with the two authorization reads | 53 | **26** |
+| margin under the fifty-subrequest ceiling | −3 | **+24** |
+| journey-pain counters | 0/15/0/0 | 0/15/0/0 |
+
+Parity is exact and was proved before the migration was applied:
+`npm run test:canonical-row-set-live`, **56 checks, 56 passed** — the row set
+byte-identical across both paths (26 families, 3 229 rows, each compared
+separately), the results document identical, 28 requests → 1, cross-tenant zero,
+67 tables unmoved, ceilings still refusing, `anon` and an authenticated client
+refused over real HTTP with `42501`.
+
+⚠️ **One term still grows with the data, and it is not the canonical one.**
+`loadStudioStudy` costs 15, of which `loadStudyMetricOptions` pages the entire
+legacy `quant_response` table — 4 pages for Cuicuilco. About **24 000 more
+`quant_response` rows** would put the page back at the ceiling. It is legacy
+code shared by a dozen Studio pages and this unit did not touch it. The budget is
+no longer growing *because of the canonical layer*; it is not fixed.
+
+### The second fix, which is independent of the cause
+
+A canonical read failure could be reported as unfinished editorial work, and was.
+`loadJourneyPainReview` caught a failed curated read and returned an *applicable*
+review with no items and the gap `undecided_items`; `readDecisions` turned a
+failed RPC into «no decisions». Both are gone.
+
+* `src/lib/publication/read-failure.ts` — **eight closed codes** and one sentence
+  each, about the READ and never about the study. Pure, imports nothing, so a
+  `"use client"` surface may render the sentence it is handed.
+  `classifyTransportFailure` READS the thrown value and retains not one byte of
+  it; `CanonicalReadError` now carries the classification made at the catch site,
+  where the runtime's own words were still visible.
+* `PainReviewOutcome` — a read that failed is a **different type**. There is no
+  `PainReviewPanel` on that branch at all, so no consumer can read a count, a gap
+  or a completeness off a read that never happened.
+* the preflight raises `journey_pain_read_unavailable` and **suppresses**
+  `required_content_missing` and `journey_pain_review_incomplete`: a model
+  resolved without content that could not be fetched cannot be judged for
+  completeness. Not acknowledgeable — there is nothing to acknowledge.
+* the client reader fails closed with `recomputation_refused` and keeps serving
+  the **frozen published snapshot**; only live filtering is withdrawn.
+
+`npm run test:journey-pain-review` §[15a], **296 checks, 296 passed** (from 261):
+a thrown read produces a value with no `panel`, no `counts`, no `gaps` and no
+`applicable` field, its sentence contains none of the five gap sentences, and a
+hostile database message quoting a name and a phone number reduces to one of
+eight constants with not one byte carried through.
+
+### The boundary gate got stronger, not weaker
+
+`.rpc()` was banned outright on the canonical read path — the right instinct, the
+wrong instrument: it bans a SHAPE rather than a CAPABILITY. It is now «an
+`.rpc()` call is a mutation unless it names a function on a declared allowlist»,
+and a new check PROVES each allowlisted name from its own migration: declared
+`stable`, no DML in the body, execute revoked from `PUBLIC`/`anon`/
+`authenticated`, granted only to `service_role`. A computed name is a mutation by
+default. **98 → 100 checks, 100 passed.**
+

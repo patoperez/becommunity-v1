@@ -27,7 +27,7 @@
     "test:canonical-presentation-persistence": "tsx scripts/canonical-presentation-persistence-test.mjs",
     "test:canonical-presentation-draft-live": "tsx scripts/canonical-presentation-draft-live-test.mjs",
     "test:canonical-publication": "tsx scripts/canonical-publication-test.mjs",
-    "test:journey-pain-review": "tsx scripts/journey-pain-review-test.mjs",
+    "test:journey-pain-review": "node --conditions=react-server --import tsx scripts/journey-pain-review-test.mjs",
     "test:canonical-publication-live": "tsx scripts/canonical-publication-live-test.mjs",
     "test:canonical-qualitative-signoff-live": "tsx scripts/canonical-qualitative-signoff-live-test.mjs",
     "test:canonical-journey-pain-live": "tsx scripts/canonical-journey-pain-live-test.mjs",
@@ -115,7 +115,8 @@
     "test:canonical-capability-upgrade": "node --conditions=react-server --import tsx scripts/canonical-capability-upgrade-test.mjs",
     "test:canonical-client-publication": "node --conditions=react-server --import tsx scripts/canonical-client-publication-test.mjs",
     "test:canonical-client-publication-live": "node --conditions=react-server --import tsx scripts/canonical-client-publication-live-test.mjs",
-    "qa:canonical-client-publication": "node --conditions=react-server --import tsx scripts/canonical-client-publication-qa.mjs"
+    "qa:canonical-client-publication": "node --conditions=react-server --import tsx scripts/canonical-client-publication-qa.mjs",
+    "test:canonical-row-set-live": "node --conditions=react-server --import tsx scripts/canonical-row-set-projection-live-test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",

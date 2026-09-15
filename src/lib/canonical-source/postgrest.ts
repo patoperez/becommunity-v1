@@ -49,9 +49,15 @@ export type PostgrestScopedQuery = {
   abortSignal(signal: AbortSignal): PostgrestScopedQuery;
 };
 
-/** The client surface one page needs. Described, never imported. */
+/** The builder surface one function call needs. Described, never imported. */
+export type PostgrestRpcQuery = {
+  abortSignal(signal: AbortSignal): PostgrestRpcQuery;
+};
+
+/** The client surface one page — or one projection — needs. Never imported. */
 export type PostgrestReadClient = {
   from(table: string): { select(columns: string): PostgrestScopedQuery };
+  rpc(name: string, args: Record<string, unknown>): PostgrestRpcQuery;
 };
 
 export function requireUuid(value: unknown): string {
@@ -102,6 +108,33 @@ export function postgrestReadTransport(client: PostgrestReadClient): CanonicalRe
         error: unknown;
       }>)) ?? { data: null, error: null };
       return { rows: answer.data, error: answer.error };
+    },
+
+    /**
+     * THE WHOLE ROW SET IN ONE ROUND TRIP (migration 0033).
+     *
+     * The same tenant-then-study scope, applied by the function rather than by
+     * a filter string — and the arguments are still re-checked as uuids HERE,
+     * immediately before they are sent, for the same reason every cursor value
+     * is: check and use are not separated.
+     *
+     * `p_package_key` is the only non-uuid argument and it is never
+     * interpolated into anything; PostgREST sends it as a JSON value in the
+     * request body, so there is no syntax for it to become.
+     */
+    readAggregate: async (request) => {
+      const args: Record<string, unknown> = {
+        p_tenant_id: requireUuid(request.scope.tenantId),
+        p_study_id: requireUuid(request.scope.studyId),
+        p_package_key: request.packageIdempotencyKey ?? null,
+      };
+      let query = client.rpc("read_canonical_row_set", args);
+      if (request.signal) query = query.abortSignal(request.signal);
+      const answer = (await (query as unknown as PromiseLike<{
+        data: unknown;
+        error: unknown;
+      }>)) ?? { data: null, error: null };
+      return { families: answer.data, error: answer.error };
     },
   };
 }

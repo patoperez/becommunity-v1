@@ -80,6 +80,7 @@
  */
 
 import { safeErrorCode } from "../ingestion/canonical-commit/result";
+import { classifyTransportFailure, type TransportFailureCode } from "../publication/read-failure";
 import type {
   AttributeDefinitionRow,
   BandRuleRow,
@@ -147,19 +148,56 @@ export type CanonicalReadRequest = {
   signal?: AbortSignal;
 };
 
-/** One page of one table. The only thing this workflow can do to the outside. */
+/** Everything the workflow needs of the outside world, and nothing more. */
 export type CanonicalReadTransport = {
+  /** One page of one table. */
   readPage: (request: CanonicalReadRequest) => Promise<{
     rows: Record<string, unknown>[] | null;
     error: unknown;
   }>;
+  /**
+   * THE WHOLE ROW SET, IN ONE ROUND TRIP. Optional, because the workflow must
+   * keep working without it.
+   *
+   * Migration 0033 projects the same columns, in the same order, under the same
+   * ceilings. It is OPTIONAL on this type for two reasons: the offline gate
+   * drives a fake that only implements paging, and a deployment whose database
+   * does not yet carry 0033 must degrade to the paged reader rather than break.
+   * `loadCanonicalRowSet` below decides between them and verifies the result of
+   * either with exactly the same checks.
+   */
+  readAggregate?: (request: {
+    scope: CanonicalReadScope;
+    packageIdempotencyKey?: string;
+    signal?: AbortSignal;
+  }) => Promise<{ families: unknown; error: unknown }>;
 };
 
 export class CanonicalReadError extends Error {
   readonly code: string;
-  constructor(code: string, detail?: string) {
+  /**
+   * WHY THE READ FAILED, CLASSIFIED WHERE THE TRUTH WAS STILL VISIBLE.
+   *
+   * `code` is this module's own vocabulary — `READ_ABORTED`, `READ_NOT_ORDERED`,
+   * `CLIENT_TRANSPORT` — and `safeErrorCode` deliberately destroys the runtime's
+   * words on the way in, because a PostgreSQL message in this schema quotes
+   * respondent data. That protection cost Unit 6B.4B2J its diagnosis: every
+   * failure on the Cloudflare edge arrived at its caller as `CLIENT_TRANSPORT`,
+   * indistinguishable from a network blip, when what had actually happened was
+   * that the runtime refused the page's fifty-first outbound request.
+   *
+   * So the CLASSIFICATION is made at the catch site, where the thrown value is
+   * still the runtime's own, and carried here as one of eight closed constants.
+   * The message itself is still discarded and never stored.
+   *
+   * Null only for refusals this module raises about a shape it read — a ceiling,
+   * an order, a missing manifest — which are not transport failures at all.
+   */
+  readonly transport: TransportFailureCode | null;
+  constructor(code: string, detail?: string, transport: TransportFailureCode | null = null) {
     super(detail ? `${code}: ${detail}` : code);
     this.code = code;
+    this.transport = transport;
     this.name = "CanonicalReadError";
   }
 }
@@ -448,13 +486,22 @@ export async function readCanonicalTable<T>(
     } catch (thrown) {
       // An aborted request rejects, and PostgREST wraps the reason in a message
       // this module may not repeat. The signal is the reliable witness, so it
-      // decides the code and the thrown value is discarded.
-      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", read.table);
-      throw new CanonicalReadError(safeErrorCode(thrown), read.table);
+      // decides the code and the thrown value is discarded — but not before it
+      // is CLASSIFIED, here, where the runtime's own words are still present.
+      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", read.table, "CANCELLED");
+      throw new CanonicalReadError(
+        safeErrorCode(thrown),
+        read.table,
+        classifyTransportFailure(thrown),
+      );
     }
     if (page.error) {
-      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", read.table);
-      throw new CanonicalReadError(safeErrorCode(page.error), read.table);
+      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", read.table, "CANCELLED");
+      throw new CanonicalReadError(
+        safeErrorCode(page.error),
+        read.table,
+        classifyTransportFailure(page.error),
+      );
     }
     const batch = page.rows ?? [];
 
@@ -568,18 +615,10 @@ type ManifestPlan = { specId?: unknown; planFingerprint?: unknown; packageIdempo
  * would silently receive the union of two imports. Refusing names the problem;
  * picking the newest would hide it.
  */
-async function resolveCommittedJob(
-  transport: CanonicalReadTransport,
+function pickCommittedJob(
+  rows: readonly Record<string, unknown>[],
   options: LoadCanonicalRowSetOptions,
-): Promise<{ job: ImportJobRow; specId: string; planFingerprint: string }> {
-  const scope = { tenantId: options.tenantId, studyId: options.studyId };
-  const rows = await readCanonicalTable<Record<string, unknown>>(
-    transport,
-    CANONICAL_READS.importJob,
-    scope,
-    { status: "committed" },
-    options.signal,
-  );
+): { job: ImportJobRow; specId: string; planFingerprint: string } {
   const candidates = options.packageIdempotencyKey
     ? rows.filter((row) => row.idempotency_key === options.packageIdempotencyKey)
     : rows;
@@ -616,12 +655,166 @@ async function resolveCommittedJob(
 }
 
 /**
+ * The families, however the transport can supply them.
+ *
+ * ONE ANSWER SHAPE, TWO WAYS TO GET IT. Both return an array per family, in the
+ * fixed `FAMILIES` order, and both have passed the same order, ceiling and
+ * shape checks by the time they return — so the caller below cannot tell which
+ * ran, and a gate can assert the two are byte-identical.
+ */
+async function loadFamilies(
+  transport: CanonicalReadTransport,
+  families: readonly CanonicalReadName[],
+  scope: CanonicalReadScope,
+  options: LoadCanonicalRowSetOptions,
+  signal: AbortSignal | undefined,
+): Promise<{ families: Record<string, unknown>[][]; importJob: Record<string, unknown>[] }> {
+  if (transport.readAggregate) {
+    let answer: { families: unknown; error: unknown };
+    try {
+      answer = await transport.readAggregate({
+        scope,
+        packageIdempotencyKey: options.packageIdempotencyKey,
+        signal,
+      });
+    } catch (thrown) {
+      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", "row_set", "CANCELLED");
+      throw new CanonicalReadError(
+        safeErrorCode(thrown),
+        "row_set",
+        classifyTransportFailure(thrown),
+      );
+    }
+    if (answer.error) {
+      if (signal?.aborted) throw new CanonicalReadError("READ_ABORTED", "row_set", "CANCELLED");
+      // PGRST202 is PostgREST for «no function by that name». It is the ONE
+      // failure that means «this database does not have migration 0033», as
+      // opposed to «this read did not work», and it is the only one that
+      // returns to the paged reader.
+      const code = (answer.error as { code?: unknown }).code;
+      if (code !== "PGRST202") {
+        throw new CanonicalReadError(
+          safeErrorCode(answer.error),
+          "row_set",
+          classifyTransportFailure(answer.error),
+        );
+      }
+    } else {
+      const projected = answer.families;
+      if (typeof projected !== "object" || projected === null || Array.isArray(projected)) {
+        throw new CanonicalReadError("READ_SHAPE_INVALID", "row_set");
+      }
+      const held = projected as Record<string, unknown>;
+      return {
+        importJob: checkAggregatedFamily(held.importJob, CANONICAL_READS.importJob),
+        families: families.map((family) =>
+          checkAggregatedFamily(held[family], CANONICAL_READS[family] as CanonicalTableRead),
+        ),
+      };
+    }
+  }
+
+  // THE PAGED PATH KEEPS ITS ORDER: `import_job` FIRST AND ALONE, then the
+  // families through the bounded pool. It is a round trip more than the
+  // projection and it is the shape that has always worked.
+  const importJob = await readCanonicalTable<Record<string, unknown>>(
+    transport,
+    CANONICAL_READS.importJob,
+    scope,
+    { status: "committed" },
+    signal,
+  );
+  const fetched = await mapBounded(
+    families,
+    CANONICAL_READ_CONCURRENCY,
+    (family) =>
+      readCanonicalTable<Record<string, unknown>>(
+        transport,
+        CANONICAL_READS[family] as CanonicalTableRead,
+        scope,
+        undefined,
+        signal,
+      ),
+    signal,
+  );
+  return { families: fetched, importJob };
+}
+
+/**
+ * Check one family from the single-round-trip projection, exactly as the paged
+ * reader checked one it assembled itself.
+ *
+ * THE THREE PROOFS DO NOT MOVE, and this is the whole reason a projection is
+ * acceptable at all:
+ *
+ *   ORDER        every row's key must be strictly greater than the one before
+ *                it. In the paged reader this caught a forgotten `order` before
+ *                it could silently skip rows; here it catches a wrong `ORDER BY`
+ *                in migration 0033 the same way, on the first row that is out
+ *                of place.
+ *   CEILING      the projection limits each family to its ceiling PLUS ONE, so
+ *                a set that outgrew its bound arrives one row over and is
+ *                REFUSED here — never truncated, never rounded down to look
+ *                like a smaller study.
+ *   SHAPE        a family that is not an array at all is a refusal, not an
+ *                empty read. A missing key and an empty table must not produce
+ *                the same answer.
+ */
+function checkAggregatedFamily(
+  value: unknown,
+  read: CanonicalTableRead,
+): Record<string, unknown>[] {
+  if (!Array.isArray(value)) throw new CanonicalReadError("READ_SHAPE_INVALID", read.table);
+  if (value.length > read.maxRows) throw new CanonicalReadError("READ_EXCEEDS_CEILING", read.table);
+  let previous: string[] | null = null;
+  for (const row of value) {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+      throw new CanonicalReadError("READ_SHAPE_INVALID", read.table);
+    }
+    const key = keyOf(row as Record<string, unknown>, read.keyColumns, read.table);
+    if (previous !== null && compareKeys(previous, key) >= 0) {
+      throw new CanonicalReadError("READ_NOT_ORDERED", read.table);
+    }
+    previous = key;
+  }
+  return value as Record<string, unknown>[];
+}
+
+/**
  * Read one committed package's canonical rows, complete or not at all.
  *
  * Every read is scoped by BOTH tenant and study. The scope is applied by the
  * transport before the keyset window, so a window can never widen one, and a
  * row belonging to another tenant cannot enter the set even if the connection
  * bypasses RLS — which the service-role connection does.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ONE ROUND TRIP WHEN THE DATABASE OFFERS ONE, AND TWENTY-EIGHT WHEN IT DOES
+ * NOT.
+ *
+ * Twenty-six families read one at a time is twenty-eight HTTP requests for
+ * Cuicuilco, and one more for every additional thousand `survey_response` rows.
+ * A Cloudflare Worker on the free plan may make FIFTY outbound requests per
+ * incoming request, and Unit 6B.4B2K measured the internal review screen
+ * spending 53 — the refusal landing on request #51, which is the curated pain
+ * read, which the product then reported as an unfinished editorial review.
+ *
+ * Migration 0033 projects the whole set in ONE request. The count stops growing
+ * with the data, which is the part that matters: the previous shape could be
+ * brought under the ceiling by trimming other work, and would have climbed back
+ * over it on the next study.
+ *
+ * WHAT THE PROJECTION IS NOT ALLOWED TO CHANGE, and does not: the columns, the
+ * order, the ceilings, the tenant-and-study scope, or the refusal-rather-than-
+ * truncate rule. Every one of those is re-checked HERE, on the returned arrays,
+ * by `checkAggregatedFamily` — so a wrong projection fails against this reader
+ * rather than reaching the builder.
+ *
+ * THE FALLBACK IS NARROW ON PURPOSE. Only a transport that offers
+ * `readAggregate`, and only an error that says the function is not there
+ * (`PGRST202`), returns to the paged reader. Any other failure is the failure,
+ * because a read that silently costs twenty-eight requests instead of one is
+ * exactly the shape that was over budget in the first place.
  */
 export async function loadCanonicalRowSet(
   transport: CanonicalReadTransport,
@@ -632,14 +825,10 @@ export async function loadCanonicalRowSet(
   const scope: CanonicalReadScope = { tenantId: options.tenantId, studyId: options.studyId };
   const signal = options.signal;
 
-  // FIRST, AND ALONE. The manifest names the spec every other read is
-  // interpreted under, and a study with anything but exactly one committed
-  // package is refused before a single family is fetched.
-  const { job, specId, planFingerprint } = await resolveCommittedJob(transport, options);
-
   // The families, in a FIXED order. The order is not the fetch order — the pool
   // decides that — it is the order results are placed in, which is what makes
-  // the concurrent read byte-identical to the sequential one it replaced.
+  // the concurrent read byte-identical to the sequential one it replaced, and
+  // the projected one byte-identical to both.
   const FAMILIES = [
     "participants",
     "attributeDefinitions",
@@ -669,19 +858,19 @@ export async function loadCanonicalRowSet(
     "painPointCultureDimensions",
   ] as const satisfies readonly Exclude<keyof CanonicalRowSet, "importJob" | "specId" | "planFingerprint">[];
 
-  const fetched = await mapBounded(
-    FAMILIES,
-    CANONICAL_READ_CONCURRENCY,
-    (family) =>
-      readCanonicalTable<Record<string, unknown>>(
-        transport,
-        CANONICAL_READS[family] as CanonicalTableRead,
-        scope,
-        undefined,
-        signal,
-      ),
-    signal,
-  );
+  const loaded = await loadFamilies(transport, FAMILIES, scope, options, signal);
+  const fetched = loaded.families;
+
+  // THE COMMITTED-PACKAGE GATE, resolved from the rows this read already has.
+  //
+  // It used to be a read of its own, taken FIRST and ALONE, because the paged
+  // reader had to ask for `import_job` before it could ask for anything else.
+  // The manifest still names the spec every other family is interpreted under
+  // and a study with anything but exactly one committed package is still
+  // refused — but the refusal is now decided from rows rather than from a round
+  // trip, which is what lets the whole set arrive in one request. Nothing about
+  // WHAT is refused changed; only when the bytes were fetched.
+  const { job, specId, planFingerprint } = pickCommittedJob(loaded.importJob, options);
 
   // One lookup, then the same per-family typed reads the sequential version
   // performed. The cast is exactly the one `readCanonicalTable<T>` always made:

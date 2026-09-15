@@ -1119,6 +1119,54 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   were, and it was watched failing **all eight** of its old assertions — and only
   those eight, while the other 57 still passed — immediately after the migrations
   were applied.
+- ⓘ **`0033` IS APPLIED to the hosted project** (2026-09-15, Unit 6B.4B2K). It
+  creates ONE read-only function, `read_canonical_row_set`, and nothing else —
+  no table, no column, no index, no policy, no trigger, and it replaces no
+  function but its own. The canonical chain on disk is `0026`-`0033` and the
+  hosted ledger now ends at `0033`. **Nothing moved:** 67 tables and 15 791 rows
+  before and after, 62 policies (identical set), 215 indexes, 8 triggers, the
+  canonical draft still at revision 3, all publication tables still empty, 50
+  `pain_point` rows under an unchanged digest, and every study's status
+  unchanged — **Cuicuilco is still `draft` and still unpublished**.
+  The delta was PREDICTED before it was produced: the backup was restored into a
+  disposable PostgreSQL (1 benign `schema "public" already exists`, **zero**
+  post-data errors after 4 identities were synthesised for the 26 auth foreign
+  keys), `0033` was applied to that copy first, and the hosted result matched
+  object for object — exactly one function added, `stable`, `security invoker`.
+- ⓘ **WHY `0033` EXISTS: A CLOUDFLARE WORKER MAY MAKE FIFTY OUTBOUND REQUESTS
+  PER INCOMING REQUEST, AND THE REVIEW SCREEN WAS MAKING FIFTY-THREE.** Unit
+  6B.4B2K instrumented the real edge and counted: exactly fifty succeeded and
+  request **#51** — the curated journey-stage read — was refused by the runtime,
+  along with every request after it. The paged canonical reader was spending
+  twenty-eight of the fifty, and one more for every additional thousand
+  `survey_response` rows, so the budget grew with the data. `0033` makes it one.
+  Measured against the hosted project: `/studio/e/<id>/revision/dolor` went from
+  **51 server-side requests to 24** (26 with the two authorization reads), a
+  margin of 24 under the ceiling, and the canonical part no longer grows at all.
+  ⚠️ `loadStudioStudy` still costs 15, of which `loadStudyMetricOptions` pages
+  the whole legacy `quant_response` table — 4 pages for Cuicuilco. THAT term
+  still grows with the data: about 24 000 more `quant_response` rows would put
+  the page back at the ceiling. It is legacy, it is shared by a dozen Studio
+  pages, and this unit did not touch it. Do not assume the budget is fixed.
+- ⓘ **A CANONICAL READ FAILURE IS NO LONGER ALLOWED TO LOOK LIKE UNFINISHED
+  EDITORIAL WORK.** It used to: `loadJourneyPainReview` caught a failed curated
+  read and returned an applicable review with no items and the gap
+  `undecided_items`, and `readDecisions` turned a failed RPC into «no
+  decisions» — so on the edge the product told a reviewer that their fifteen
+  recorded approvals were fifteen undecided phrases, on the one screen whose job
+  is to say whether the work is finished. There are now three states, not two:
+  the read succeeded and the study has no material (`PAIN_REVIEW_NOT_APPLICABLE`),
+  the read succeeded and something is unfinished (gaps), or **the read did not
+  happen** (`PainReviewOutcome.ok === false`, carrying one of eight closed codes
+  from `src/lib/publication/read-failure.ts`). The preflight raises
+  `journey_pain_read_unavailable` and suppresses both `required_content_missing`
+  and `journey_pain_review_incomplete`, because a model resolved without content
+  that could not be fetched cannot be judged for completeness. It is not
+  acknowledgeable — there is nothing to acknowledge.
+  `npm run test:journey-pain-review` §[15a] is the discrimination proof: a thrown
+  read produces a value with **no `panel`, no `counts`, no `gaps` and no
+  `applicable` field at all**, so no consumer can read a count off a read that
+  never happened.
 - ⓘ **NEITHER `0031` NOR `0032` CARRIES ITS OWN `begin;`/`commit;`**, unlike
   `0026`-`0030`. That is safe on this path and it was proved, not assumed: a
   throwaway migration that creates a table then divides by zero was pushed at a

@@ -86,10 +86,24 @@ export type {
   PainItemState,
   PainReviewGap,
   PainReviewItem,
+  PainReviewOutcome,
   PainReviewPanel,
+  PainReviewUnavailable,
   PainTouchpointChoice,
   RecordJourneyPainDecision,
 } from "./journey-pain-review";
+
+/**
+ * WHY A READ FAILED, IN EIGHT CLOSED WORDS.
+ *
+ * Client-safe by construction: `./read-failure` imports nothing at all, holds
+ * no transport and no clock, and its whole range is eight string constants and
+ * eight sentences about the READ. A `"use client"` surface may render the
+ * sentence for the code it was handed; it can neither compute one nor learn
+ * anything from it that the sentence does not already say.
+ */
+export { TRANSPORT_FAILURE_CODES, TRANSPORT_FAILURE_DETAIL, classifyTransportFailure } from "./read-failure";
+export type { TransportFailureCode } from "./read-failure";
 
 export { structuralDifference } from "./difference";
 

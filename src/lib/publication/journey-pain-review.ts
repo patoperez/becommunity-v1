@@ -63,6 +63,7 @@
  */
 
 import type { PresentationHandle } from "../presentation/handles";
+import type { TransportFailureCode } from "./read-failure";
 
 /**
  * What a reviewer decided about one source item.
@@ -218,6 +219,38 @@ export type PainReviewPanel = {
   /** Items with each state, counted on the server so a screen counts nothing. */
   counts: Record<PainItemState, number>;
 };
+
+/**
+ * WHY THERE IS NO REVIEW TO SHOW, WHICH IS NOT THE SAME AS AN EMPTY ONE.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE DEFECT THIS TYPE EXISTS TO MAKE IMPOSSIBLE. Until Unit 6B.4B2K a failed
+ * curated read returned a `PainReviewPanel` with `applicable: true`, no items,
+ * and the gap `undecided_items`. Every consumer then reported, truthfully
+ * according to the data it had been handed, that the editorial review was
+ * unfinished — on the one screen whose job is to say whether the work is
+ * finished. On the Cloudflare edge that happened on a study whose fifteen
+ * decisions were all recorded and all approved, because the runtime refused the
+ * fifty-first outbound request of the page.
+ *
+ * SO THE TWO STATES ARE NOW DIFFERENT TYPES, not different values of one. There
+ * is no `PainReviewPanel` on this branch at all — not an empty one, not a
+ * zeroed one — so no consumer can accidentally read counts, gaps or
+ * completeness off a read that never happened. `PAIN_REVIEW_NOT_APPLICABLE`
+ * still means what it always meant: the read SUCCEEDED and the study carries no
+ * pain material.
+ */
+export type PainReviewUnavailable = {
+  /** One of eight closed codes. Never a message, never the database's words. */
+  code: TransportFailureCode;
+  /** What a person may be told. Describes the READ, never the study. */
+  detail: string;
+};
+
+/** A review that was read, or a named reason it could not be. */
+export type PainReviewOutcome =
+  | { ok: true; panel: PainReviewPanel }
+  | { ok: false; unavailable: PainReviewUnavailable };
 
 /* -------------------------------------------------------------------------- */
 /* recording one decision                                                      */

@@ -313,7 +313,25 @@ async function reproducePublication(
 
   const first = resolveUnderSelection(built, decoded.value, EMPTY_VIEWER_SELECTION);
   if (!first.ok) return { ok: false, refusal: "study_moved_since_publication" };
-  const authored = authoredPainContent(await loadJourneyPainReview(admin, scope, first.model));
+
+  // A PAIN READ THAT FAILED REFUSES THE RECOMPUTATION. IT DOES NOT PROCEED
+  // WITHOUT THE CONTENT.
+  //
+  // This used to fall through with `authored === null`, which resolves a
+  // DIFFERENT model — no pain cloud, no touchpoint badges — whose digest cannot
+  // match the one stored at publication. So the effect was already correct by
+  // accident: the comparison below failed and live filtering was refused. It is
+  // now correct on purpose, with the right refusal code, because «the reader's
+  // filters cannot be honoured because a read failed» and «this study moved
+  // since it was published» are different facts and only one of them means
+  // somebody should go and look at the study.
+  //
+  // THE FROZEN SNAPSHOT IS UNAFFECTED, which is the whole point of the
+  // publication contract: the caller still serves `published.renderModel`, the
+  // bytes stored at publication, and only live filtering is withdrawn.
+  const painOutcome = await loadJourneyPainReview(admin, scope, first.model);
+  if (!painOutcome.ok) return { ok: false, refusal: "recomputation_refused" };
+  const authored = authoredPainContent(painOutcome.panel);
   const neutral = authored
     ? resolveUnderSelection(built, decoded.value, EMPTY_VIEWER_SELECTION, authored)
     : first;

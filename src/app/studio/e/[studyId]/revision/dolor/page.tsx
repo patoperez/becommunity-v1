@@ -108,14 +108,35 @@ export default async function StudioJourneyPainPage({ params }: { params: Params
             decide={recordCanonicalJourneyPainDecision}
           />
         ) : (
-          <section className="rounded-xl border border-caution-line bg-caution-surface p-5">
+          <section
+            className="rounded-xl border border-caution-line bg-caution-surface p-5"
+            data-testid="revision-no-disponible"
+          >
             <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-caution">
               Sólo interno · no lo ve el cliente
             </p>
+            {/*
+              THE HEADING BRANCHES, AND THAT IS THE WHOLE POINT OF THE BRANCH.
+
+              «Todavía no hay nada que revisar» is a statement about the STUDY,
+              and it is true when there is no draft or no canonical package. It
+              is FALSE when a read failed — Unit 6B.4B2J watched this exact
+              sentence appear over a queue of fifteen approved phrases, because
+              the Cloudflare runtime refused the page's fifty-first request. A
+              failed read gets its own sentence, about the read.
+            */}
             <h2 className="mt-1 font-display text-base font-semibold text-caution">
-              Todavía no hay nada que revisar
+              {review.unavailable.reason === "journey_pain_read_unavailable"
+                ? "No se pudo leer el material"
+                : "Todavía no hay nada que revisar"}
             </h2>
             <p className="mt-1.5 max-w-prose text-sm text-caution">{review.unavailable.detail}</p>
+            {review.unavailable.reason === "journey_pain_read_unavailable" ? (
+              <p className="mt-2 max-w-prose text-sm text-caution">
+                Esto no dice nada sobre tu revisión: las decisiones que hayas tomado siguen
+                guardadas. Vuelve a cargar la pantalla.
+              </p>
+            ) : null}
           </section>
         )}
       </div>

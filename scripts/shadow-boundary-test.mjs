@@ -1487,6 +1487,21 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     assert.ok(!reach.some(isShadow), "the client reader reaches the shadow layer");
   });
 
+  /**
+   * THE DATABASE FUNCTIONS A READ PATH MAY CALL. Exactly one, today.
+   *
+   * `read_canonical_row_set` (migration 0033) projects the canonical read
+   * model — the same columns, the same order and the same ceilings as the paged
+   * reader — in one round trip, because a Cloudflare Worker may make fifty
+   * outbound requests per incoming request and twenty-eight of them were going
+   * to one read that grows with the data.
+   *
+   * A NAME HERE IS A CLAIM, AND THE CHECK BELOW TURNS IT INTO A PROOF: the
+   * function must exist in a migration, be declared `stable`, and contain no
+   * DML. Adding a name without that migration fails.
+   */
+  const READ_ONLY_RPCS = ["read_canonical_row_set"];
+
   check("nada alcanzable desde la sombra puede mutar la base de datos", () => {
     // THE WRITE PATH, precisely. `canonical-commit/result.ts` is the SAFE error
     // vocabulary and `canonical-package/values.ts` the absence states; the read
@@ -1509,6 +1524,17 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
     // "must be a subset of the read-only vocabulary", which nothing checked. The
     // denylist is the real property and it is kept; the allowlist claim is moved
     // to where it can actually be enforced, in the check below this one.
+    //
+    // ⚠️ UNIT 6B.4B2K WIDENED ONE OF THE FIVE, AND NARROWED IT AT THE SAME TIME.
+    // `.rpc()` used to be banned outright, by name. That is the right instinct —
+    // a database function can write — and the wrong instrument: it bans the
+    // SHAPE rather than the CAPABILITY, so a projection that reads twenty-six
+    // families in one round trip is refused for the same reason a commit would
+    // be. The rule is now «an `.rpc()` call is a mutation unless it names a
+    // function on the list below», and the check beneath this one PROVES each
+    // listed function is read-only by reading its migration: declared `stable`,
+    // and no DML anywhere in its body. A name added to the list without a
+    // read-only migration behind it fails there.
     const WRITE_PATH = /canonical-commit\/(adapter|server|flow|projector)\.ts$/;
     const paths = reachable("src/lib/shadow/server.ts");
     const mutators = [];
@@ -1517,14 +1543,112 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       if (WRITE_PATH.test(file)) mutators.push(`${file} (write path)`);
       const holdsClient = /@supabase\/supabase-js|createAdminClient|createClient\(|\.from\(/.test(code);
       if (!holdsClient) continue;
-      for (const match of code.matchAll(/\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g)) {
-        if (/^(insert|update|upsert|delete|rpc)$/.test(match[1])) mutators.push(`${file} (.${match[1]}())`);
+      for (const match of code.matchAll(/\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*("([^"]*)")?/g)) {
+        if (match[1] === "rpc") {
+          // The name must be a STRING LITERAL. A computed one is a mutation by
+          // default: nothing can be proved about a function chosen at runtime.
+          if (!READ_ONLY_RPCS.includes(match[3] ?? "")) {
+            mutators.push(`${file} (.rpc(${match[3] ?? "<computed>"}))`);
+          }
+          continue;
+        }
+        if (/^(insert|update|upsert|delete)$/.test(match[1])) mutators.push(`${file} (.${match[1]}())`);
       }
     }
     assert.deepEqual(mutators, []);
     assert.ok(paths.size > 10, `only ${paths.size} modules reachable from the shadow entry point`);
     assert.ok([...paths.keys()].some((file) => /canonical-source\/adapter\.ts$/.test(file)), "the read adapter is unreachable");
     assert.ok([...paths.keys()].some((file) => /shadow\/sink\.ts$/.test(file)), "the sink is not on the entry point's path");
+  });
+
+  /**
+   * EVERY ALLOWLISTED FUNCTION IS READ-ONLY, PROVED FROM ITS MIGRATION.
+   *
+   * The check above stops banning `.rpc()` by name, which is only defensible if
+   * the names it allows are proved rather than trusted. So each one is located
+   * in `supabase/migrations`, and its declaration is read:
+   *
+   *   · it must be declared `stable` — PostgreSQL then REFUSES a write inside
+   *     it at execution time, so this is enforced by the database and not only
+   *     by the reviewer who read the body;
+   *   · its body must contain no DML and no DDL, so it cannot even be attempted;
+   *   · and execution must be revoked from PUBLIC, `anon` and `authenticated`,
+   *     so a browser holding a session token cannot call it at all.
+   */
+  check("cada función de la lista blanca es de SÓLO LECTURA, según su propia migración", () => {
+    assert.ok(READ_ONLY_RPCS.length > 0, "the allowlist is empty; the rule above is untested");
+    const migrations = readdirSync(join("supabase", "migrations"))
+      .filter((name) => name.endsWith(".sql"))
+      .map((name) => readFileSync(join("supabase", "migrations", name), "utf8"));
+    for (const name of READ_ONLY_RPCS) {
+      const signature = `function public.${name}(`;
+      const sql = migrations.find((text) => text.includes(signature));
+      assert.ok(sql, `${name} is on the allowlist and no migration creates it`);
+
+      // THE DECLARATION, not the whole file: a migration may carry more than one
+      // object, and a sibling's INSERT must not clear this one.
+      const from = sql.indexOf(signature);
+      const end = sql.indexOf("revoke execute on function", from);
+      assert.notEqual(end, -1, `${name} never revokes execute`);
+      const body = sql.slice(from, end).toLowerCase();
+      const grants = sql.slice(end).toLowerCase();
+
+      // `stable` is enforced by PostgreSQL itself: a write attempted inside a
+      // STABLE function raises at execution time. So this is a database
+      // guarantee, not a reviewer's promise.
+      assert.ok(body.includes("stable"), `${name} is not declared stable`);
+      assert.ok(!body.includes("volatile"), `${name} is declared volatile`);
+      for (const forbidden of [
+        "insert into",
+        "update public.",
+        "delete from",
+        "truncate",
+        "alter table",
+        "drop table",
+        "drop function",
+        "drop policy",
+        "create table",
+      ]) {
+        assert.ok(!body.includes(forbidden), `${name} contains "${forbidden}" in its body`);
+      }
+
+      // AND A BROWSER CANNOT CALL IT. The revocation and the single grant are
+      // read from the text that follows the declaration.
+      const revoke = grants.slice(0, grants.indexOf(";"));
+      for (const role of ["public", "anon", "authenticated"]) {
+        assert.ok(revoke.includes(role), `${name} does not revoke execute from ${role}`);
+      }
+      assert.ok(
+        grants.includes("to service_role"),
+        `${name} is not granted to service_role`,
+      );
+      assert.ok(
+        !/to (anon|authenticated|public)\b/.test(grants),
+        `${name} grants execute to a browser-reachable role`,
+      );
+    }
+  });
+
+  /**
+   * AND THE CLIENT SURFACE THE TRANSPORT DECLARES IS STILL COMPLETE.
+   *
+   * `PostgrestReadClient` is the whole of what the canonical read path can ask
+   * a database client to do. It gained `rpc` for the projection, so it is
+   * asserted here rather than left implicit: two methods, no more.
+   */
+  check("el cliente que el transporte declara ofrece exactamente «from» y «rpc»", () => {
+    const source = readFileSync(join("src", "lib", "canonical-source", "postgrest.ts"), "utf8");
+    const from = source.indexOf("export type PostgrestReadClient = {");
+    assert.notEqual(from, -1);
+    const block = source.slice(from, source.indexOf("\n};", from));
+    const methods = [...block.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)].map((m) => m[1]).sort();
+    assert.deepEqual(methods, ["from", "rpc"]);
+
+    const rpcFrom = source.indexOf("export type PostgrestRpcQuery = {");
+    assert.notEqual(rpcFrom, -1);
+    const rpcBlock = source.slice(rpcFrom, source.indexOf("\n};", rpcFrom));
+    const rpcMethods = [...rpcBlock.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)].map((m) => m[1]).sort();
+    assert.deepEqual(rpcMethods, ["abortSignal"]);
   });
 
   check("la superficie del constructor que el transporte declara es sólo de LECTURA", () => {

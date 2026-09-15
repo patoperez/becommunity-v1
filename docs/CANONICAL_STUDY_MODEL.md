@@ -545,6 +545,110 @@ other copy, and after it every study's review reopens from nothing.
 resolved render model, so approved phrases inside an already-published snapshot
 are bytes in `canonical_presentation_revision` and are not reachable from there.
 
+## Migration 0033: one round trip for the canonical row set
+
+`0033_canonical_row_set_projection.sql` is the eighth canonical migration.
+Migration `0033` is applied to the hosted project, on 2026-09-15, by Unit
+6B.4B2K. It creates ONE function and nothing else: no table, no column, no
+index, no policy, no trigger, and it replaces no function but its own. It
+rewrites no row — 67 tables held 15 791 rows before it and 15 791 after.
+
+### Why it exists: a platform ceiling, measured
+
+The canonical read model is twenty-six independent families plus the
+committed-package gate, and `src/lib/canonical-source/read.ts` reads each one
+separately, paging by keyset so a set larger than its ceiling is refused rather
+than truncated. That is **twenty-eight HTTP requests** for Cuicuilco, and one
+more for every additional thousand `survey_response` rows.
+
+A Cloudflare Worker on the free plan may make **fifty** outbound requests per
+incoming HTTP request. Unit 6B.4B2K instrumented the internal review screen on
+the real edge — closed codes only, no query, no value, no message — and counted
+every request the page made:
+
+| ordinal | what | outcome |
+|---|---|---|
+| #1–#2 | the session and the role | `http_200` |
+| #3–#17 | the Studio study workspace | `http_200` / `http_206` |
+| #18–#45 | the canonical row set | `http_200` ×28 |
+| #46–#48 | the draft, the publication, its history | `http_200` |
+| #49–#50 | the curated pain phrases and their stage links | `http_200` |
+| **#51** | **the curated journey stages** | **`SUBREQUEST_BUDGET_EXHAUSTED`** |
+| #52–#62 | everything after it, retries included | refused |
+
+Exactly fifty succeeded and everything from the fifty-first onward was refused,
+identically across runs. The refusal is the RUNTIME'S, not the database's — and
+the product reported it as an unfinished editorial review on a study whose
+fifteen decisions were all recorded and all approved.
+
+`0033` removes the cause: twenty-eight requests become **one**, and the count
+stops growing with the data.
+
+### What it is not
+
+**It is not a calculation.** There is no sum, average, ratio, band, threshold or
+business rule anywhere in it. Every expression is a column projection, a
+tenant/study filter, an `ORDER BY` and a `LIMIT`. The formulas stay in the one
+pure builder in `src/lib/results`; the database gains no second place to decide
+a number.
+
+**It is not a wider read.** The columns are the columns `read.ts` already
+selects, family by family, and no others. `pain_point.raw_text` and
+`normalized_text` are still not selected — the canonical read model excludes a
+consultant's prose because it is what a client is eventually served from (§12) —
+and no table holding a person is named anywhere in the function.
+
+**It is not a new authority.** `security invoker`, so it runs with the caller's
+own privileges and RLS applies to the caller exactly as it does to the direct
+reads it replaces. Execution is revoked from `PUBLIC`, `anon` and
+`authenticated`, and granted only to `service_role`.
+
+**It cannot write.** `language sql`, `stable`, one `SELECT`. `stable` is enforced
+by PostgreSQL at execution time, so this is a database guarantee rather than a
+promise in a comment.
+
+### The ceilings and the order do not move
+
+Each family is limited to its declared ceiling **plus one**, and the caller
+refuses when it receives more than the ceiling — so a set that outgrew its bound
+is still a refusal, never a silently shorter answer. Every family is ordered by
+its full key, and `checkAggregatedFamily` verifies on the returned arrays that
+each row's key is strictly greater than the one before it. A wrong `ORDER BY`
+here fails against the reader rather than skipping rows quietly.
+
+The ceilings are duplicated between this migration and `CANONICAL_READS`; they
+cannot drift apart silently, because the shadow boundary gate reads both.
+
+### What was proved before it was applied
+
+`npm run test:canonical-row-set-live` — **56 checks, 56 passed**, against a real
+PostgreSQL and a real PostgREST:
+
+* the row set read in ONE round trip is **byte-identical** to the row set read in
+  twenty-eight — 26 families, 3 229 rows, every family compared separately;
+* **28 requests → 1**, counted at the transport;
+* the canonical study results built on top serialize identically, so no figure a
+  client could see depends on which path fetched the rows;
+* the same study under the WRONG tenant returns zero rows in every family, and a
+  study that does not exist returns zero too;
+* **67 tables held the same number of rows before and after** two executions;
+* a family past its ceiling is `READ_EXCEEDS_CEILING`, not a truncation;
+* a database WITHOUT `0033` degrades to the paged reader and answers identically
+  (and costs twenty-eight requests again), while any OTHER failure of the
+  projection is a refusal — degrading on a transport failure would spend
+  twenty-eight requests exactly when there are none left;
+* and over real HTTP, `anon` and an authenticated client are both refused with
+  `42501` while `service_role` succeeds.
+
+### The rollback
+
+`supabase/rollbacks/0033_drop_canonical_row_set_projection.sql`. It destroys
+nothing: the function held no data. After it, a canonical read falls back to the
+paged reader — twenty-eight requests, growing with the data — which on a
+fifty-subrequest Worker is over budget for the internal review screens. The
+failure is then reported as `SUBREQUEST_BUDGET_EXHAUSTED`, a named refusal, not
+an empty review.
+
 ## Security boundary
 
 All 36 new tables — 18 in `0026`, 16 in `0027` and 2 in `0028` — are

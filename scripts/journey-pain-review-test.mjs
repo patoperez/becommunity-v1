@@ -885,6 +885,10 @@ const subject = {
   painApplicable: true,
   painGaps: [],
   painContentRequired: true,
+  // THE READ SUCCEEDED. A healthy subject says so explicitly, because the
+  // preflight now distinguishes «unfinished» from «unreadable» and §[15a]
+  // drives both from this one baseline.
+  painReadFailure: null,
   expectedActiveVersion: null,
   actualActiveVersion: null,
   structureChanged: false,
@@ -952,6 +956,172 @@ const painRequiredOnly = runPublicationPreflight({
 check(
   painRequiredOnly.blockers.some((entry) => entry.code === "journey_pain_review_incomplete"),
   "y el que exige ESTE contenido sí, aunque no exija ningún otro",
+);
+
+
+/* -------------------------------------------------------------------------- */
+console.log("\n[15a] Un fallo de lectura NO puede volverse trabajo editorial sin terminar");
+
+/*
+  LA DISCRIMINACIÓN QUE FALTABA, Y LO QUE COSTÓ QUE FALTARA.
+
+  Hasta la unidad 6B.4B2K, `loadJourneyPainReview` respondía a una lectura que
+  falló con un panel APLICABLE, sin elementos y con el hueco «undecided_items».
+  El argumento era que dejaba la publicación bloqueada, que es la dirección
+  segura; y lo era, con la frase equivocada. En el borde de Cloudflare el
+  runtime rechazó la petición número cincuenta y uno de la página, la lectura
+  curada falló, y el producto le dijo a quien había aprobado quince frases que
+  tenía quince frases sin decidir — en la pantalla cuyo único trabajo es decir
+  si el trabajo está terminado.
+
+  Estas comprobaciones son la razón por la que eso no puede volver a pasar: un
+  fallo de lectura ya no es un `PainReviewPanel` de ninguna forma, ni vacío, ni
+  en ceros. Es OTRO TIPO, y no hay campo del que leer un conteo.
+*/
+const { loadJourneyPainReview } = await import("../src/lib/studio/journey-pain-workspace.ts");
+const {
+  TRANSPORT_FAILURE_CODES,
+  TRANSPORT_FAILURE_DETAIL,
+  classifyTransportFailure,
+} = await import("../src/lib/publication/read-failure.ts");
+
+const failScope = {
+  tenantId: "11111111-1111-4111-8111-111111111111",
+  studyId: "22222222-2222-4222-8222-222222222222",
+};
+/** A client whose very first canonical read throws whatever the runtime threw. */
+const throwingClient = (thrown) => ({
+  from() {
+    throw thrown;
+  },
+  rpc() {
+    throw thrown;
+  },
+});
+
+// LAS OCHO CLASES, CADA UNA POR SU NOMBRE. El techo de subpeticiones del
+// runtime es la que importa aquí y es la que no existía: antes llegaba como
+// «CLIENT_TRANSPORT», indistinguible de un corte de red.
+const CLASSES = [
+  ["Too many subrequests.", "SUBREQUEST_BUDGET_EXHAUSTED"],
+  ["Worker exceeded subrequest limit", "SUBREQUEST_BUDGET_EXHAUSTED"],
+  ["fetch failed", "NETWORK_FAILED"],
+];
+for (const [message, expected] of CLASSES) {
+  const outcome = await loadJourneyPainReview(throwingClient(new Error(message)), failScope, null);
+  check(outcome.ok === false, `una lectura que falla NO devuelve panel (${expected})`);
+  check(
+    outcome.ok === false && outcome.unavailable.code === expected,
+    `y la clasifica como ${expected}`,
+  );
+}
+
+const exhausted = await loadJourneyPainReview(
+  throwingClient(new Error("Too many subrequests.")),
+  failScope,
+  null,
+);
+// NO HAY DE DÓNDE LEER UN CONTEO. Ésta es la comprobación estructural: no es
+// que los conteos estén en cero, es que no existen.
+check(!("panel" in exhausted), "el resultado fallido no lleva panel de ninguna clase");
+check(!("counts" in exhausted), "ni conteos");
+check(!("gaps" in exhausted), "ni huecos");
+check(!("applicable" in exhausted), "ni «aplicable»");
+check(
+  exhausted.ok === false && exhausted.unavailable.detail === TRANSPORT_FAILURE_DETAIL.SUBREQUEST_BUDGET_EXHAUSTED,
+  "la frase es la del código, y habla de la LECTURA",
+);
+// Y NO ACUSA A NADIE. La frase de un fallo de infraestructura no puede contener
+// la de un hueco editorial.
+for (const gap of Object.keys(PAIN_GAP_DETAIL)) {
+  check(
+    exhausted.ok === false && !exhausted.unavailable.detail.includes(PAIN_GAP_DETAIL[gap]),
+    `la frase no incluye la del hueco «${gap}»`,
+  );
+}
+
+// UNA LECTURA CURADA QUE FUNCIONA Y UNAS DECISIONES QUE NO, TAMPOCO.
+// `readDecisions` devolvía [] ante un error, que el panel reportaba como «nadie
+// ha decidido nada» — la misma sustitución, un nivel más abajo.
+const curatedOkDecisionsFail = {
+  from(table) {
+    const rows = table === "pain_point" ? [] : [];
+    const q = {
+      select: () => q,
+      eq: () => q,
+      gt: () => q,
+      or: () => q,
+      order: () => q,
+      limit: () => q,
+      abortSignal: () => q,
+      then: (resolve) => resolve({ data: rows, error: null }),
+    };
+    return q;
+  },
+  rpc() {
+    return Promise.resolve({ data: null, error: { message: "Too many subrequests.", code: null } });
+  },
+};
+const decisionsFailed = await loadJourneyPainReview(curatedOkDecisionsFail, failScope, null);
+check(
+  decisionsFailed.ok === false || decisionsFailed.panel.applicable === false,
+  "unas decisiones ilegibles NO producen una cola «sin revisar»",
+);
+
+// EL PREVUELO NOMBRA LA INFRAESTRUCTURA, NO A LA PERSONA.
+const unreadable = runPublicationPreflight({
+  ...subject,
+  painApplicable: false,
+  painGaps: [],
+  painReadFailure: "SUBREQUEST_BUDGET_EXHAUSTED",
+});
+const unreadableBlocker = unreadable.blockers.find(
+  (entry) => entry.code === "journey_pain_read_unavailable",
+);
+check(unreadableBlocker !== undefined, "con la lectura fallida, el bloqueo es «no se pudo leer»");
+check(
+  !unreadable.blockers.some((entry) => entry.code === "journey_pain_review_incomplete"),
+  "y NO es «la revisión está sin terminar»",
+);
+check(
+  !unreadable.blockers.some((entry) => entry.code === "required_content_missing"),
+  "ni «falta contenido obligatorio»: el contenido no se pudo leer, no falta",
+);
+check(
+  unreadableBlocker !== undefined &&
+    unreadableBlocker.detail.includes(TRANSPORT_FAILURE_DETAIL.SUBREQUEST_BUDGET_EXHAUSTED),
+  "la frase del bloqueo dice qué clase de fallo fue",
+);
+check(
+  !unreadable.required.includes("journey_pain_read_unavailable"),
+  "no se puede confirmar: no hay nada que confirmar",
+);
+check(unreadable.canPublish === false, "y con él no se puede publicar");
+
+// Y UNA COLA COMPLETA SIGUE SIENDO UNA COLA COMPLETA.
+const stillClean = runPublicationPreflight({ ...subject, painReadFailure: null });
+check(
+  !stillClean.blockers.some((entry) => entry.code === "journey_pain_read_unavailable"),
+  "sin fallo de lectura, el bloqueo nuevo no aparece",
+);
+
+// EL VOCABULARIO ES CERRADO Y NO REENVÍA MENSAJES.
+check(TRANSPORT_FAILURE_CODES.length === 8, "el vocabulario de fallos tiene exactamente ocho códigos");
+for (const code of TRANSPORT_FAILURE_CODES) {
+  check(typeof TRANSPORT_FAILURE_DETAIL[code] === "string", `«${code}» tiene frase propia`);
+}
+// La clasificación LEE el mensaje y no lo devuelve: un mensaje con datos dentro
+// sale como una de ocho constantes y nada más.
+const hostile = new Error("permission denied for table pain_point: fila de Juan Pérez, 5551234567");
+const classified = classifyTransportFailure(hostile);
+check(
+  TRANSPORT_FAILURE_CODES.includes(classified),
+  "un mensaje hostil se reduce a uno de los ocho códigos",
+);
+check(
+  !TRANSPORT_FAILURE_DETAIL[classified].includes("Juan") &&
+    !TRANSPORT_FAILURE_DETAIL[classified].includes("5551234567"),
+  "y ni un byte del mensaje viaja en la frase que se muestra",
 );
 
 /* -------------------------------------------------------------------------- */

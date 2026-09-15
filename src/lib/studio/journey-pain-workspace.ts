@@ -58,9 +58,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   PAIN_REVIEW_LIMITS,
+  TRANSPORT_FAILURE_DETAIL,
+  classifyTransportFailure,
   type PainDecisionInput,
   type PainDecisionResult,
-  type PainReviewPanel,
+  type PainReviewOutcome,
 } from "@/lib/publication";
 import type { PresentationRenderModel } from "@/lib/presentation";
 // THE PURE HALF, IMPORTED RATHER THAN DUPLICATED. It is off the client-safe
@@ -68,7 +70,6 @@ import type { PresentationRenderModel } from "@/lib/presentation";
 // SHA-256 — so this module names it directly, and so does the offline gate that
 // drives it.
 import {
-  EMPTY_PAIN_COUNTS,
   PAIN_REVIEW_NOT_APPLICABLE,
   buildPainReviewItems,
   painReviewCounts,
@@ -89,11 +90,18 @@ const DECISION_TABLE = "canonical_journey_pain_decision";
 /**
  * Read the decisions in force for one study.
  *
- * A MISSING TABLE IS NOT AN EMPTY REVIEW, AND IT IS NOT SILENT EITHER. Until
- * migration 0032 is applied this read fails and the answer is «no decisions» —
- * which the panel reports as a queue nobody has started and the preflight
- * reports as an unacknowledgeable blocker. That is the safe direction. It must
- * never be reported as «reviewed».
+ * A MISSING TABLE IS NOT AN EMPTY REVIEW, AND A FAILED READ IS NOT ONE EITHER.
+ *
+ * This used to answer «no decisions» to both, which the panel then reported as
+ * a queue nobody had started. Unit 6B.4B2K found what that costs: on the
+ * Cloudflare edge this RPC was refused by the runtime, not by the database, and
+ * fifteen recorded approvals were reported to their own author as unreviewed.
+ * So a REFUSAL is now distinguishable from an EMPTY ANSWER — the first throws
+ * and the caller reports an unreadable review, the second returns zero rows and
+ * means zero rows.
+ *
+ * It must never be reported as «reviewed» either. Both of those are still true;
+ * what is new is that there are now three states rather than two.
  */
 async function readDecisions(
   client: SupabaseClient,
@@ -103,7 +111,11 @@ async function readDecisions(
     p_study_id: scope.studyId,
     p_tenant_id: scope.tenantId,
   });
-  if (error || !Array.isArray(data)) return [];
+  // THE ERROR IS NOT SWALLOWED AND ITS MESSAGE IS NOT FORWARDED. It is thrown
+  // as a value the caller classifies into one of eight closed codes, exactly as
+  // a failed curated read is.
+  if (error) throw error;
+  if (!Array.isArray(data)) throw new Error("DECODE_FAILED: rpc did not return a list");
   const rows: StoredPainDecision[] = [];
   for (const entry of data as unknown[]) {
     if (typeof entry !== "object" || entry === null) continue;
@@ -142,54 +154,67 @@ export async function loadJourneyPainReview(
   client: SupabaseClient,
   scope: ComposerScope,
   model: PresentationRenderModel | null,
-): Promise<PainReviewPanel> {
+): Promise<PainReviewOutcome> {
   let evidence: CuratedPainEvidence;
   try {
     evidence = await loadCuratedPainReviewEvidence(client, {
       tenantId: scope.tenantId,
       studyId: scope.studyId,
     });
-  } catch {
-    // A READ THAT FAILED IS NOT A STUDY WITHOUT PAIN MATERIAL. It is reported
-    // as an applicable review with nothing in it, which leaves the required
-    // content missing and the publication blocked — the safe direction. The
-    // database's own message is never forwarded: a refusal quotes values.
-    return {
-      applicable: true,
-      items: [],
-      choices: painTouchpointChoices(model),
-      gaps: ["undecided_items"],
-      complete: false,
-      counts: { ...EMPTY_PAIN_COUNTS },
-    };
+  } catch (thrown) {
+    // A READ THAT FAILED IS NOT A STUDY WITHOUT PAIN MATERIAL, AND IT IS NOT AN
+    // UNFINISHED REVIEW EITHER.
+    //
+    // This used to return an applicable review with nothing in it and the gap
+    // «undecided_items», on the argument that leaving the publication blocked
+    // was the safe direction. It was the safe direction and the wrong SENTENCE:
+    // every consumer then told a reviewer that their editorial work was
+    // unfinished, which on the Cloudflare edge it demonstrably was not — the
+    // runtime had refused the request, not the database, and fifteen approvals
+    // were sitting in the table the whole time.
+    //
+    // So the failure is now a DIFFERENT TYPE, carrying one of eight closed
+    // codes. The database's own message is still never forwarded: a refusal in
+    // this schema quotes values, and `classifyTransportFailure` reads the
+    // thrown value without retaining a byte of it.
+    const code = classifyTransportFailure(thrown);
+    return { ok: false, unavailable: { code, detail: TRANSPORT_FAILURE_DETAIL[code] } };
   }
 
-  const decisions = await readDecisions(client, scope);
+  let decisions: StoredPainDecision[];
+  try {
+    decisions = await readDecisions(client, scope);
+  } catch (thrown) {
+    const code = classifyTransportFailure(thrown);
+    return { ok: false, unavailable: { code, detail: TRANSPORT_FAILURE_DETAIL[code] } };
+  }
   const items = buildPainReviewItems(scope.studyId, evidence, decisions);
-  if (items.length === 0) return PAIN_REVIEW_NOT_APPLICABLE;
+  if (items.length === 0) return { ok: true, panel: PAIN_REVIEW_NOT_APPLICABLE };
   if (items.length > PAIN_REVIEW_LIMITS.items) {
     // A queue past the bound is refused rather than truncated, for the same
     // reason every canonical read refuses past its ceiling: a silently shorter
-    // list is a review that looks finished because half of it is missing.
+    // list is a review that looks finished because half of it is missing. It is
+    // reported as an UNREADABLE review rather than an unfinished one, because
+    // nobody failed to decide anything — the queue outgrew what this screen can
+    // put in front of a person.
     return {
-      applicable: true,
-      items: [],
-      choices: painTouchpointChoices(model),
-      gaps: ["undecided_items"],
-      complete: false,
-      counts: { ...EMPTY_PAIN_COUNTS },
+      ok: false,
+      unavailable: { code: "DATABASE_REFUSED", detail: TRANSPORT_FAILURE_DETAIL.DATABASE_REFUSED },
     };
   }
 
   const choices = painTouchpointChoices(model);
   const gaps = painReviewGaps(items, choices);
   return {
-    applicable: true,
-    items,
-    choices,
-    gaps,
-    complete: gaps.length === 0,
-    counts: painReviewCounts(items),
+    ok: true,
+    panel: {
+      applicable: true,
+      items,
+      choices,
+      gaps,
+      complete: gaps.length === 0,
+      counts: painReviewCounts(items),
+    },
   };
 }
 

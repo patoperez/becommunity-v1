@@ -225,6 +225,30 @@ export type PublicationBlockerCode =
    * number beneath it would be quoted.
    */
   | "journey_pain_review_incomplete"
+  /**
+   * The journey pain review COULD NOT BE READ. Nobody left anything unfinished.
+   *
+   * SEPARATE FROM `journey_pain_review_incomplete`, AND THE DIFFERENCE IS THE
+   * WHOLE REASON THIS CODE EXISTS. That one is a statement about a person's
+   * work: five named things somebody still has to go and do. This one is a
+   * statement about the INFRASTRUCTURE: the curated evidence, or the decisions
+   * in force, could not be fetched at all, so nothing is known about the review
+   * — not that it is finished, not that it is unfinished, not that the study has
+   * no pain material.
+   *
+   * Unit 6B.4B2J watched the product make the other statement instead. On the
+   * Cloudflare edge the runtime refused the page's fifty-first outbound request;
+   * the curated read threw; the loader turned that into an applicable review
+   * with no items; and the preflight told a reviewer, on the screen whose job is
+   * to say whether the work is done, that their fifteen recorded approvals were
+   * fifteen undecided phrases. An infrastructure failure must never be able to
+   * make that accusation.
+   *
+   * NOT ACKNOWLEDGEABLE, and for a stronger reason than the others: there is
+   * nothing to acknowledge. A reviewer cannot consent to publishing under a fact
+   * nobody has established.
+   */
+  | "journey_pain_read_unavailable"
 
   /* -------- UNAUTHORIZED, and the state of the world -------- */
   | "not_authorized"

@@ -42,6 +42,7 @@ import {
   type QualitativeReviewState,
 } from "./qualitative-signoff";
 import { PAIN_GAP_DETAIL, type PainReviewGap } from "./journey-pain-review";
+import { TRANSPORT_FAILURE_DETAIL, type TransportFailureCode } from "./read-failure";
 import {
   WARNINGS_REQUIRING_ACKNOWLEDGEMENT,
   warningRequiresAcknowledgement,
@@ -178,6 +179,16 @@ export type PublicationSubject = {
    * construction. What arrives here is a list of codes, already decided.
    */
   painGaps: readonly PainReviewGap[];
+  /**
+   * Why the journey pain review could not be READ, or null when it was read.
+   *
+   * IT IS NOT A GAP AND IT MUST NEVER BE ONE. A gap is a thing a person has
+   * left to do; this is a thing that did not happen to a request. When it is
+   * non-null, `painApplicable`, `painGaps` and `painContentRequired` describe
+   * nothing at all — the read they would have been derived from never returned
+   * — and the preflight below refuses to reason from them.
+   */
+  painReadFailure: TransportFailureCode | null;
   /**
    * Which of the four states the qualitative review is in.
    *
@@ -409,6 +420,35 @@ export function runPublicationPreflight(subject: PublicationSubject): Publicatio
     subject.clientSurfaceIsLive,
     new Set(subject.requiredBlockIds),
   );
+
+  // [8·0] THE JOURNEY PAIN REVIEW COULD NOT BE READ.
+  //
+  // FIRST OF THE THREE, AND IT REPLACES THE OTHER TWO RATHER THAN JOINING THEM.
+  //
+  // [8a] and [8b] both reason from a model resolved WITHOUT authored pain
+  // content and from a review that is supposed to describe it. When the read
+  // failed, neither input exists: the pain slot is empty because nothing was
+  // fetched to fill it, not because nobody wrote it, and the gap list is empty
+  // because there was no queue to find gaps in. Emitting either would be the
+  // exact substitution this code exists to prevent — an infrastructure failure
+  // wearing an editorial accusation.
+  //
+  // So the two are SKIPPED and this one is raised instead. The publication stays
+  // blocked, which is the safe direction and was never in question; what changes
+  // is that the sentence is now true.
+  if (subject.painReadFailure !== null) {
+    blockers.push(
+      blocker(
+        "journey_pain_read_unavailable",
+        "No se pudo leer la revisión de los puntos de dolor de este estudio, así que no se " +
+          "sabe si está terminada. Esto NO quiere decir que falte trabajo editorial: quiere " +
+          "decir que la lectura no se completó. " +
+          TRANSPORT_FAILURE_DETAIL[subject.painReadFailure] +
+          " Vuelve a cargar la pantalla; si se repite, no se publica hasta que la lectura funcione.",
+      ),
+    );
+    return verdict(blockers, warnings, subject.acknowledged);
+  }
 
   // [8a] CONTENT THE AUTHOR SAID IS REQUIRED, AND IS NOT THERE.
   //

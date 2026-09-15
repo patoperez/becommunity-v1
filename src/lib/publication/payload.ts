@@ -58,6 +58,14 @@ export type PublicationUnavailableReason =
   | "specification_not_registered"
   | "canonical_read_refused"
   | "no_stored_draft"
+  /**
+   * The journey pain review could not be READ.
+   *
+   * Its own reason rather than `review_refused`, because the sentence a person
+   * is owed is different: nothing is wrong with the presentation, and nothing is
+   * unfinished — a read did not complete. See `journey_pain_read_unavailable`.
+   */
+  | "journey_pain_read_unavailable"
   | "review_refused";
 
 export type PublicationUnavailable = {

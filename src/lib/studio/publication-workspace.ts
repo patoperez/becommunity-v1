@@ -77,6 +77,7 @@ import {
   type PublicationUnavailableReason,
   type PainReviewPanel,
   type PainReviewSummary,
+  type PainReviewUnavailable,
   type PainDecisionInput,
   type PainDecisionResult,
   type QualitativeCategorySet,
@@ -195,8 +196,17 @@ type Assembled = {
   subject: PublicationSubject;
   /** The sign-off row behind `subject.qualitativeSignOff`, with its id. */
   storedSignOff: StoredSignOff | null;
-  /** The journey pain review, and the content it authorizes when complete. */
+  /**
+   * The journey pain review, and the content it authorizes when complete.
+   *
+   * WHEN `painUnavailable` IS SET THIS FIELD DESCRIBES NOTHING. It carries
+   * `PAIN_REVIEW_NOT_APPLICABLE` so the shape stays total, and no consumer may
+   * read a count, a gap or a completeness off it — the preflight refuses to,
+   * and the review screen is handed the unavailable state instead.
+   */
   pain: PainReviewPanel;
+  /** Why the pain review could not be read, or null when it was read. */
+  painUnavailable: PainReviewUnavailable | null;
   built: CanonicalPresentationRead | null;
   document: PresentationDocument | null;
   model: PresentationRenderModel | null;
@@ -518,6 +528,10 @@ async function assemble(
       painApplicable: false,
       painGaps: [],
       painContentRequired: false,
+      // AND IT DID NOT FAIL TO READ ONE EITHER. The pain read is not reached on
+      // any path that produces an empty subject, so reporting a read failure
+      // here would invent one.
+      painReadFailure: null,
       expectedActiveVersion: asserted.expectedActiveVersion,
       actualActiveVersion: null,
       structureChanged: false,
@@ -530,6 +544,7 @@ async function assemble(
     // document to require the content, so there is nothing to be incomplete
     // about. The blockers above say what is actually wrong.
     pain: PAIN_REVIEW_NOT_APPLICABLE,
+    painUnavailable: null,
     built: null,
     document: null,
     model: null,
@@ -628,7 +643,31 @@ async function assemble(
   // pain content changes no route and no touchpoint: it fills one editorial
   // slot and attaches badges to points that already exist. So the offer the
   // review was checked against is the offer the second model makes.
-  const pain = await loadJourneyPainReview(client, scope, first.model);
+  //
+  // AND A READ THAT FAILED STOPS HERE. Until Unit 6B.4B2K this function carried
+  // on with an applicable-but-empty panel, which resolved the document with no
+  // authored content and then reported the empty slot as unfinished editorial
+  // work. There is no content to resolve with and no review to report, so the
+  // subject carries the failure and the preflight names it.
+  const painOutcome = await loadJourneyPainReview(client, scope, first.model);
+  if (!painOutcome.ok) {
+    const assembled = empty({
+      ...base,
+      bound: document.binding !== null,
+      painReadFailure: painOutcome.unavailable.code,
+    });
+    return {
+      ...assembled,
+      painUnavailable: painOutcome.unavailable,
+      built,
+      row,
+      identity,
+      document,
+      current: currentRow,
+      history,
+    };
+  }
+  const pain = painOutcome.panel;
   const authored = authoredPainContent(pain);
   const withContent = authored
     ? resolveUnderSelection(built, document, EMPTY_VIEWER_SELECTION, authored)
@@ -696,6 +735,8 @@ async function assemble(
     painApplicable: pain.applicable,
     painGaps: pain.gaps,
     painContentRequired: painContentIsRequired(built, document),
+    // THE READ SUCCEEDED, WHICH IS THE ONLY WAY EXECUTION REACHES THIS LINE.
+    painReadFailure: null,
     expectedActiveVersion: asserted.expectedActiveVersion,
     structureChanged:
       publishedModel === null
@@ -708,6 +749,7 @@ async function assemble(
     subject,
     storedSignOff: qualitativeSignOff,
     pain,
+    painUnavailable: null,
     built,
     document,
     model: resolved.model,
@@ -734,6 +776,8 @@ const UNAVAILABLE_DETAIL: Record<PublicationUnavailableReason, string> = {
     "No se pudieron leer los resultados canónicos de este estudio, así que no hay nada que revisar.",
   no_stored_draft:
     "Este estudio todavía no tiene una presentación guardada. Compón una en Construcción y guárdala antes de publicar.",
+  journey_pain_read_unavailable:
+    "No se pudo leer el material de los puntos de dolor. Esto no quiere decir que falte revisarlo: quiere decir que la lectura no se completó. Vuelve a cargar la pantalla.",
   review_refused: "No se pudo preparar la revisión de esta presentación.",
 };
 
@@ -959,7 +1003,21 @@ export async function previewStoredPresentationUnderSelection(
   if (!first.ok) {
     return { ok: false, unavailable: unavailable("review_refused", [...first.issues]) };
   }
-  const authored = authoredPainContent(await loadJourneyPainReview(client, scope, first.model));
+  // AND A READ THAT FAILED IS A REFUSAL, NOT AN EMPTY CLOUD. Falling through
+  // with no authored content would hand the reviewer the very preview this
+  // comment says the screen exists to prevent — the pain cloud and the fifteen
+  // badges gone — and would attribute it to the filter they just ticked.
+  const painOutcome = await loadJourneyPainReview(client, scope, first.model);
+  if (!painOutcome.ok) {
+    return {
+      ok: false,
+      unavailable: {
+        reason: "journey_pain_read_unavailable",
+        detail: painOutcome.unavailable.detail,
+      },
+    };
+  }
+  const authored = authoredPainContent(painOutcome.panel);
   const resolved = authored
     ? resolveUnderSelection(built, decoded.value, selection, authored)
     : first;
@@ -1157,6 +1215,18 @@ export async function loadJourneyPainEditor(
   }
   if (assembled.subject.stored === null || assembled.row === null) {
     return { ok: false, unavailable: unavailable("no_stored_draft") };
+  }
+  // A READ THAT FAILED IS NOT AN EMPTY QUEUE. The editor is shown a named
+  // refusal — the closed code's own sentence, about the READ — instead of
+  // fifteen approved phrases rendered as fifteen phrases nobody has looked at.
+  if (assembled.painUnavailable !== null) {
+    return {
+      ok: false,
+      unavailable: {
+        reason: "journey_pain_read_unavailable",
+        detail: assembled.painUnavailable.detail,
+      },
+    };
   }
   return { ok: true, panel: assembled.pain };
 }

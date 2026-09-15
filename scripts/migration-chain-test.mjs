@@ -313,6 +313,14 @@ const CANONICAL_ORDER = [
   // particular — never touches `pain_point`, which it identifies only by an
   // opaque derived token and never by a foreign key.
   "canonical_journey_pain_review",
+  // Unit 6B.4B2K. One read-only projection function, and nothing else: the
+  // canonical read model in a single round trip, because a Cloudflare Worker
+  // may make fifty outbound requests per incoming request and the paged reader
+  // was spending twenty-eight of them on one read that grows with the data.
+  // Last because it projects exactly what the three migrations above created,
+  // and additive to all of them: it creates no table, alters none, and replaces
+  // no function but its own.
+  "canonical_row_set_projection",
 ];
 
 /**
@@ -338,10 +346,11 @@ const COMMIT_SLUG = "canonical_commit_and_rollback";
  * `canonical_presentation_draft` on 2026-09-08, when Unit 6B.3B applied 0029,
  * to `canonical_publication` on 2026-09-09, when Unit 6B.4B1 applied 0030, and
  * to `canonical_journey_pain_review` on 2026-09-14, when Unit 6B.4B2D applied
- * 0031 and 0032 together. It must be moved BY HAND again, after a migration is
- * applied there.
+ * 0031 and 0032 together, and to `canonical_row_set_projection` on 2026-09-15,
+ * when Unit 6B.4B2K applied 0033. It must be moved BY HAND again, after a
+ * migration is applied there.
  */
-const HOSTED_APPLIED_SLUG = "canonical_journey_pain_review";
+const HOSTED_APPLIED_SLUG = "canonical_row_set_projection";
 const canonical = parsed.filter((e) => e.slug.startsWith("canonical_"));
 
 {

@@ -218,6 +218,8 @@ const healthy = (over = {}) => ({
   painApplicable: false,
   painGaps: [],
   painContentRequired: false,
+  /** The pain read succeeded. Varied on its own in the journey-pain gate. */
+  painReadFailure: null,
   expectedActiveVersion: null,
   actualActiveVersion: null,
   structureChanged: false,

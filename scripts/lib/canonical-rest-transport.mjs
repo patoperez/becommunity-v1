@@ -297,7 +297,7 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
      * silently ran against migrations 0000-0027 would be measuring the wrong
      * database.
      */
-    async prepare(upTo = 32) {
+    async prepare(upTo = 33) {
       // THE BOUND IS A FACT ABOUT THE TARGET, NOT THE NEWEST FILE ON DISK — the
       // two transports answer different questions and must be allowed to
       // disagree.
@@ -307,14 +307,15 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
       // its bound says where that target actually is. It read 28 for as long as
       // that was true, then 29 when Unit 6B.3B applied
       // `0029_canonical_presentation_draft.sql` on 2026-09-08, then 30 when Unit
-      // 6B.4B1 applied `0030_canonical_publication.sql` on 2026-09-09, and it
-      // now reads 32, because Unit 6B.4B2D applied BOTH
-      // `0031_canonical_qualitative_signoff.sql` and
-      // `0032_canonical_journey_pain_review.sql` on 2026-09-14. The two numbers
+      // 6B.4B1 applied `0030_canonical_publication.sql` on 2026-09-09, then 32
+      // when Unit 6B.4B2D applied BOTH `0031_canonical_qualitative_signoff.sql`
+      // and `0032_canonical_journey_pain_review.sql` on 2026-09-14, and it now
+      // reads 33, because Unit 6B.4B2K applied
+      // `0033_canonical_row_set_projection.sql` on 2026-09-15. The two numbers
       // agreeing is a coincidence of this moment, not the rule: the moment a
       // migration is written and not yet applied, they diverge, and this bound
       // must follow the PROJECT.
-      if (upTo !== 32) {
+      if (upTo !== 33) {
         refuse(
           `this transport cannot roll the schema back to ${upTo}: it applies no migration and reverses none.`,
         );
