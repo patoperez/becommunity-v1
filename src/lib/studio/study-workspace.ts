@@ -67,9 +67,22 @@ async function headCount(
   table: string,
   filters: [string, string][],
   selectColumn = "id",
+  /**
+   * One column, several acceptable values — ONE request instead of one per
+   * value.
+   *
+   * It exists because of a measurement rather than a style: every Studio page
+   * pays for this loader, a Cloudflare Worker may make fifty outbound requests
+   * per incoming request, and the review screen was measured at 27 of them.
+   * `staged` and `failed` import batches are never reported apart — they are
+   * summed into `unfinishedImports` on the next line and the parts are not
+   * returned — so asking twice was buying a number nobody reads.
+   */
+  oneOf?: [string, string[]],
 ): Promise<number> {
   let query = admin.from(table).select(selectColumn, { count: "exact", head: true });
   for (const [column, value] of filters) query = query.eq(column, value);
+  if (oneOf) query = query.in(oneOf[0], oneOf[1]);
   const { count, error } = await query;
   if (error) throw new Error(`${table} count: ${error.message}`);
   return count ?? 0;
@@ -95,8 +108,7 @@ export async function loadStudioStudy(
     pendingObservations,
     rejectedObservations,
     importBatches,
-    stagedImports,
-    failedImports,
+    unfinishedImports,
     archiveState,
     metricOptionsByStudy,
   ] = await Promise.all([
@@ -107,8 +119,9 @@ export async function loadStudioStudy(
     headCount(admin, "qual_observation", [["study_id", study.id], ["review_status", "pending"]]),
     headCount(admin, "qual_observation", [["study_id", study.id], ["review_status", "rejected"]]),
     headCount(admin, "import_batch", [["study_id", study.id]]),
-    headCount(admin, "import_batch", [["study_id", study.id], ["status", "staged"]]),
-    headCount(admin, "import_batch", [["study_id", study.id], ["status", "failed"]]),
+    // BOTH UNFINISHED STATES IN ONE REQUEST. The two were counted separately and
+    // then added together on the next line; nothing has ever read them apart.
+    headCount(admin, "import_batch", [["study_id", study.id]], "id", ["status", ["staged", "failed"]]),
     loadTenantArchiveState(admin, [study.tenant_id]),
     loadStudyMetricOptions(admin, [study.id]),
   ]);
@@ -118,7 +131,6 @@ export async function loadStudioStudy(
   const offered = new Set(metricOptions.map((option) => option.key));
   const stagesWithoutResult = stages.filter((stage) => !offered.has(stage.metric)).length;
   const clientArchived = Boolean(archiveState.archivedAt[study.tenant_id]);
-  const unfinishedImports = stagedImports + failedImports;
 
   return {
     study: {
