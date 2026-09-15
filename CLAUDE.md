@@ -1394,3 +1394,13 @@ cheaper than a leak or a wrong number shipped to a client.
   every dashboard-managed plain-text variable the file does not declare, and this
   file declares none — deliberately, because it is committed. Suite D's D-g check
   fails if the line is removed or flipped or if a `[vars]` block appears.
+- ⓘ **THE CORRECTED PREVIEW IS `bb742e60-7d0e-4751-a67b-bee95fa7e03e`**, tag
+  `rc-6b4b2k-6d7bdf8`, at `https://bb742e60-becommunity-v1.ollinagencyllc.workers.dev`
+  — a VERSION, never deployed. **Edge QA: 112 checks, 112 passed**, including the
+  journey-pain counters at `0 / 15 / 0 / 0`, no blocker of any kind on the review,
+  the qualitative sign-off current, and the filters driven end to end: the fifteen
+  badges survive one filter, two filters and a clear, and clearing returns the
+  preview character-for-character to the unfiltered 15 692. Production untouched
+  (same active version `e691ecd8…`, same 10 deployments, same served-asset
+  fingerprint); hosted untouched (15 791 rows, fingerprint gate 136/136);
+  **Cuicuilco still `draft`, still unpublished**.

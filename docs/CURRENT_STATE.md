@@ -6757,3 +6757,85 @@ It was NOT ported, and the reason is not effort:
 Nothing about this is urgent for the canonical release EXCEPT that a merge plus a
 deploy removes it from production. Deciding to drop it is a legitimate answer;
 dropping it by accident is not.
+
+### The corrected preview, and what it proved on the real edge
+
+A **version**, not a deployment. `wrangler versions upload` on the existing
+Worker created **`bb742e60-7d0e-4751-a67b-bee95fa7e03e`**, tag
+`rc-6b4b2k-6d7bdf8`, at
+**`https://bb742e60-becommunity-v1.ollinagencyllc.workers.dev`**, from commit
+`6d7bdf8` in a clean worktree with no `.env` file. Wrangler's own output: *"To
+deploy this version to production traffic use `wrangler versions deploy`"* — it
+was not run.
+
+Built with **nothing baked**: no `.env` file and no `NEXT_PUBLIC_*` in the shell,
+so not even the public anon key is inlined; the Worker's own variables supply
+both at runtime. `test:secrets` passed, the compiled env snapshot is three empty
+objects, and all four configured credential values appear in **0** files of the
+artifact. BUILD_ID `kRnJ--bkYGZb6Ntgl9Kxw`; the preview serves exactly that and
+production serves `vD8W7i8ruS3W_UdFMujl0`.
+
+A diagnostic version — `1aaae465-8bcf-4d51-b279-405a2524e9bf`, tag
+`diag-6b4b2k` — was uploaded first, carried the outbound ledger behind
+`CANONICAL_EDGE_DIAGNOSTICS=on`, and produced the measurement at the top of this
+section. Neither version was deployed.
+
+#### Edge QA — 112 checks, 112 passed
+
+The headline, on the screen Unit 6B.4B2J watched get it wrong:
+
+```
+SIN REVISAR 0   APROBADAS 15   EXCLUIDAS 0   SIN RESOLVER 0
+15 items · the review reports itself COMPLETE · no gaps
+```
+
+and on the review beside it: **no hard blockers at all**, no pain-review blocker
+true or false, the qualitative sign-off CURRENT ("Alguien registró haber revisado
+exactamente estas categorías el 14/09/2026"), 15 692 characters of finished
+canonical content, the publish control rendered and correctly DISABLED with every
+acknowledgement unticked. Nothing was pressed that writes.
+
+**The filters were driven, which 6B.4B2J could not do.** 49 filter groups, 311
+operable options. Ticking one: the «estás mirando una selección» banner appears,
+the fifteen pain badges are still drawn, the content moves 15 692 → 15 858
+characters and nothing is suppressed. Ticking a second: the cloud survives both,
+still no suppression. «Ver el estudio completo»: the banner goes, nothing is
+ticked, the fifteen badges are back, and the preview is **character-for-character
+the unfiltered one again** (15 692). `show_all` holds throughout — no block is
+ever withheld for a small sample, at any viewport.
+
+Three viewports compose without overflow and draw identical content
+(15 692/15 692/15 692) with all fifteen badges. Anonymous visitors get `/login`
+from five protected routes and read none of four secrets. A real client on a real
+published study with no canonical publication gets the documented legacy
+behaviour; another tenant's client is refused; and 27 leak checks find nothing
+internal in a client's page — including the four transport-failure codes, which
+are for an internal screen and never for a reader.
+
+ⓘ **Two QA assertions were wrong and were corrected, not the product.**
+`dolor-en-punto` counts the touchpoints of the OPEN route tab, not all fifteen —
+the journey mounts one tabpanel at a time — so the badge count is the
+case-sensitive `aria-label` one, which spans all five routes. And the sign-off's
+`current` state renders a Spanish sentence, not the word «vigente».
+
+#### Nothing else moved
+
+**Production**, before and after: active version `e691ecd8…`, 10 deployments, the
+deployment listing byte-identical, served-asset fingerprint `7b4f0455…`
+unchanged, `/api/health` 200 `ok`.
+
+**The hosted project**, before and after the QA: no table's row count changed,
+15 791 rows both times, the canonical draft still at revision 3, all publication
+tables still empty, 50 `pain_point` rows under an unchanged digest, 62 policies
+and 42 functions, every study's status unchanged. The fingerprint gate is
+**136/136**. **Cuicuilco is still `draft` and still unpublished.**
+
+Login and logout do write hosted Auth state; that is inherent to authenticated QA
+and is reported rather than pretended away. No study, publication, draft or
+editorial row was touched.
+
+External evidence, outside every Git repository: `~/becommunity-6b4b2k/`
+(`edge-ledger.json`, `preview-qa-result.json`, `hosted-before-qa.json`,
+`hosted-after-qa.json`, `before.json`, `after.json`, `cf-deployments-*.txt`,
+`dryrun.txt`, `screenshots/`) and the backup at
+`~/becommunity-backups/u6b4b2k-pre-0033-20260915T054937Z/`.
