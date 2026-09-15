@@ -111,7 +111,8 @@
     "test:cloudflare-calc": "tsx scripts/cloudflare-calc-compat-test.mjs",
     "test:workers-runtime": "tsx scripts/workers-runtime-safety-test.mjs",
     "test:workers-ingestion": "tsx scripts/workers-ingestion-runtime-test.mjs",
-    "test:canonical-presentation-rebind": "node --conditions=react-server --import tsx scripts/canonical-presentation-rebind-test.mjs"
+    "test:canonical-presentation-rebind": "node --conditions=react-server --import tsx scripts/canonical-presentation-rebind-test.mjs",
+    "test:canonical-capability-upgrade": "node --conditions=react-server --import tsx scripts/canonical-capability-upgrade-test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",

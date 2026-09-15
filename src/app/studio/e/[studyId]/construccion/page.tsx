@@ -5,17 +5,20 @@ import { presentationErrorLabel } from "@/lib/presentation";
 import { requireInternal } from "@/lib/studio/guard";
 import { loadStudioStudy } from "@/lib/studio/study-workspace";
 import {
+  describeCapabilityUpgrade,
   describePresentationRebind,
   loadPresentationComposerWorkspace,
 } from "@/lib/studio/presentation-workspace";
 import { StudyWorkSurface } from "@/components/studio/StudyWorkSurface";
 import { ComposerWorkspace } from "@/components/studio/composer/ComposerWorkspace";
 import { RebindPanel } from "@/components/studio/composer/RebindPanel";
+import { CapabilityPanel } from "@/components/studio/composer/CapabilityPanel";
 import {
   loadCanonicalPresentationDraft,
   rebindCanonicalPresentationDraft,
   refreshPresentationPreview,
   saveCanonicalPresentationDraft,
+  upgradeCanonicalPresentationCapabilities,
 } from "./actions";
 
 export const metadata = { title: "Construcción · Be Community" };
@@ -116,6 +119,22 @@ export default async function StudioStudyConstructionPage({
     studyName: study.name,
   });
 
+  // THE SECOND DESCRIPTION, AND IT IS ALSO NOT A REPAIR — Unit 6B.4B2H.
+  //
+  // A document stored before `requiredContent` existed does not declare which of
+  // its blocks the layout requires, so the publication preflight reads a missing
+  // required block as an acknowledgeable warning. `describeCapabilityUpgrade`
+  // reads and computes and writes nothing; the upgrade happens only when a
+  // person presses the button. It is asked only when the composer OPENS, because
+  // a document that cannot be read is a rebind's problem and not this one's.
+  const capability = composer.ok
+    ? await describeCapabilityUpgrade(admin, {
+        tenantId: study.tenantId,
+        studyId: study.id,
+        studyName: study.name,
+      })
+    : null;
+
   return (
     <StudyWorkSurface
       workspace={workspace}
@@ -178,6 +197,19 @@ export default async function StudioStudyConstructionPage({
             preserved: rebind.preserved,
           }}
           rebind={rebindCanonicalPresentationDraft}
+        />
+      ) : null}
+      {capability && capability.status === "ready" ? (
+        <CapabilityPanel
+          studyId={study.id}
+          plan={{
+            storedRevision: capability.storedRevision,
+            blueprintId: capability.blueprintId,
+            blueprintLabel: capability.blueprintLabel,
+            changes: capability.changes,
+            preserved: capability.preserved,
+          }}
+          upgrade={upgradeCanonicalPresentationCapabilities}
         />
       ) : null}
     </StudyWorkSurface>

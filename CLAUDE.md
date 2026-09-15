@@ -191,6 +191,17 @@ npm run qa:canonical-publication    # Unit 6B.4A real-route QA against a DISPOSA
                                     #   published, a second version, the history, a restoration
                                     #   into a new draft revision, a conflict, and three viewports.
                                     #   111 checks. It CANNOT run against the hosted project.
+npm run test:canonical-capability-upgrade # Unit 6B.4B2H: the explicit capability upgrade of a
+                                    #   document stored before `requiredContent` existed, against a
+                                    #   disposable PostgreSQL 17 + PostgREST — revision 2 becomes 3
+                                    #   exactly once, the key replays without a fourth, a stale
+                                    #   revision and another tenant are refused, ONLY the classified
+                                    #   metadata changes, removing it reproduces the revision-2
+                                    #   definition byte for byte, and the sign-off, the journey
+                                    #   decision and the empty publication tables are untouched.
+                                    #   59 assertions. Needs a cluster AND the two real workbooks
+                                    #   (only the approved blueprint marks a block required);
+                                    #   reports SKIPPED without them, never a pass.
 npm run test:canonical-presentation-hosted-fingerprint # READ-ONLY. Proves the two legacy
                                     #   experience drafts are still v2/72 and v3/14, that neither
                                     #   is v4, that the experience log is unchanged, that 0029's
@@ -1074,12 +1085,25 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   that blocking «would make the approved blueprint unpublishable forever» was
   answering a different question: «the client sees nothing» and «the deliverable
   is finished» are two facts, and the approved north-star SHOWS that cloud.
-  ⓘ **That is true of the BLUEPRINT CODE, not of every stored document.** The
-  hosted Cuicuilco draft was saved before `requiredContent` existed and carries
-  the key zero times, so ITS empty pain slot raised the acknowledgeable
-  `configuration_required_blocks` warning and never a blocker. Check the stored
-  definition before asserting what a given study's review screen will do —
-  `docs/CURRENT_STATE.md` §"What actually stops a publication" has the reading.
+  ⓘ **That is true of the BLUEPRINT CODE, not of every stored document, and the
+  two can drift apart.** The hosted Cuicuilco draft was saved before
+  `requiredContent` existed and carried the key zero times, so ITS empty pain
+  slot raised the acknowledgeable `configuration_required_blocks` warning and
+  never a blocker. **Unit 6B.4B2H closed that gap explicitly** — see
+  `upgradeStoredPresentationCapabilities` in `presentation-workspace.ts`, the
+  «Declarar contenido obligatorio» panel, and `test:canonical-capability-upgrade`
+  — and the hosted draft is now at revision 3 and does declare it. Check the
+  STORED definition, never the blueprint, before asserting what a given study's
+  review screen will do: `docs/CURRENT_STATE.md` §"What actually stops a
+  publication" has the reading.
+- ⓘ **A CAPABILITY UPGRADE IS NOT A REGENERATION, and the difference is
+  enforced.** `assessCapabilityUpgrade` adds `requiredContent` to blocks the
+  CURRENT blueprint names, by block id, and refuses to write unless (a) the
+  document with every `requiredContent` stripped is BYTE-IDENTICAL before and
+  after, and (b) deleting exactly the keys it would add reproduces the stored
+  definition exactly. It never touches the binding, never re-runs the blueprint
+  over the document, and never runs on a page load. Anything that would change
+  more is refused rather than written.
 - ⓘ **`reviewStatus: "pending"` IS GONE FROM `QualitativeGroupResult`, AND THAT
   IS WHY THE RESULTS CONTRACT IS `3.0.0`.** It was a literal, written on every
   group of every study for ever, and the preflight read it as «nobody at Be

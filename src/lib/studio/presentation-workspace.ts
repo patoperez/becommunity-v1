@@ -1340,3 +1340,453 @@ export async function rebindStoredPresentation(
     `vínculo actualizado ${assessment.supersededContractVersion} → ${assessment.currentContractVersion}`,
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* the capability upgrade — adding metadata a stored document predates          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * THE CAPABILITY UPGRADE — the second thing an operator may ask the server to
+ * recompute about a document they already stored, and the narrowest one.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT PROBLEM IT EXISTS FOR.
+ *
+ * `requiredContent` was added to `PresentationBlock` after documents had already
+ * been stored. Its own comment says «Absent or false on every document authored
+ * before this existed, so nothing already saved becomes unpublishable by the
+ * flag arriving» — which is true, and is exactly the difficulty: the stored
+ * Cuicuilco draft predates the field, carries the key zero times, and so its
+ * empty journey-pain slot raised the ACKNOWLEDGEABLE warning
+ * `configuration_required_blocks` where today's blueprint intends the
+ * non-acknowledgeable blocker `required_content_missing`. The product was
+ * behaving correctly for that document; the document was simply older than the
+ * capability.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT IS NOT A REGENERATION, AND THE DIFFERENCE IS THE WHOLE SAFETY ARGUMENT.
+ *
+ * A regeneration would rebuild the document from the blueprint and overwrite
+ * what an author composed. This reads the STORED document, adds `requiredContent`
+ * to the blocks the CURRENT blueprint marks required — by block id, which the
+ * blueprint and the stored document already share — and changes nothing else.
+ * Not a title, not a body, not an order, not a span, not a filter, not a sample
+ * policy, not a disclosure level, not the binding, not the registry version.
+ *
+ * And it PROVES that rather than promising it. `capabilityStrippedProjection`
+ * serializes a document with every block's `requiredContent` removed; the
+ * assessment refuses unless that projection is BYTE-IDENTICAL before and after.
+ * A change anywhere else in the document moves those bytes and is refused. The
+ * same function is what makes the upgrade reversible: deleting the keys this
+ * function added reproduces the stored definition exactly, and the assessment
+ * checks that too before it lets anything be written.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE CAPABILITY COMES FROM THE SERVER, NEVER FROM A CALLER.
+ *
+ * There is no parameter anywhere on this path by which a browser could say
+ * which blocks are required, or assert a digest, or supply a document. The
+ * action takes a study id, an expected revision and a retry key — three
+ * scalars — exactly as the rebind does, and for the same reason. The required
+ * set is read from `chooseBlueprint`, the same selection the composer uses,
+ * built from the registry this request just read.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * AND IT NEVER RUNS BY ITSELF.
+ *
+ * No read path calls it, no page load calls it, and `describeCapabilityUpgrade`
+ * — which the Construcción page does call — reads and computes and writes
+ * nothing. The upgrade happens when a person presses the button, so it can be
+ * refused, reviewed, and found afterwards in the event log.
+ */
+
+/** One field this upgrade would add, named by the block it belongs to. */
+export type CapabilityChange = {
+  /** The JSON path in the stored definition. */
+  path: string;
+  /** The block's own id, which the blueprint and the document share. */
+  blockId: string;
+  /** The block's authored title, so an operator reads a name and not an id. */
+  blockTitle: string;
+  field: "requiredContent";
+  /** What the stored document has there now. */
+  from: "(ausente)" | "false";
+  to: "true";
+};
+
+export type CapabilityRefusalReason =
+  | "document_refused"
+  | "would_change_more_than_capability"
+  | "not_reversible"
+  | "does_not_resolve_after_upgrade"
+  | "binding_would_change";
+
+export type CapabilityUpgradePlan = {
+  status: "ready";
+  storedRevision: number;
+  /** The blueprint the capability was derived from. */
+  blueprintId: string;
+  blueprintLabel: string;
+  changes: CapabilityChange[];
+  preserved: {
+    title: string;
+    pages: number;
+    blocks: number;
+    samplePolicyMode: string;
+    methodologyDisclosure: string;
+    /** Bytes and digest of the document with capability metadata removed. */
+    strippedBytes: number;
+    strippedDigest: string;
+    binding: string;
+    registryVersion: string;
+  };
+};
+
+export type CapabilityUpgradeUnavailable = {
+  status: "not_needed" | "refused";
+  reason: "already_current" | "blueprint_requires_nothing" | CapabilityRefusalReason;
+  detail: string;
+  issues?: { code: string; path: string }[];
+};
+
+export type CapabilityUpgradeAssessment = CapabilityUpgradePlan | CapabilityUpgradeUnavailable;
+
+/**
+ * The document with every block's `requiredContent` removed, serialized.
+ *
+ * THE INVARIANT OF THIS WHOLE FEATURE. It must be byte-identical before and
+ * after, which is a stronger statement than any list of fields somebody
+ * remembered to compare: anything this upgrade touched other than capability
+ * metadata moves these bytes.
+ */
+function capabilityStrippedProjection(document: PresentationDocument): string {
+  const copy = JSON.parse(serializeDeterministic(document)) as {
+    pages: { blocks: Record<string, unknown>[] }[];
+  };
+  for (const page of copy.pages) {
+    for (const block of page.blocks) delete block.requiredContent;
+  }
+  return serializeDeterministic(copy);
+}
+
+/** Every block id the CURRENT blueprint marks as carrying required content. */
+function blueprintRequiredBlockIds(
+  registry: CanonicalPresentationRegistry,
+  studyName: string,
+): { ids: Set<string>; choice: BlueprintChoice } {
+  const chosen = chooseBlueprint(registry, studyName);
+  const ids = new Set<string>();
+  for (const page of chosen.document.pages) {
+    for (const block of page.blocks) {
+      if (block.requiredContent === true) ids.add(block.id);
+    }
+  }
+  return { ids, choice: chosen.choice };
+}
+
+/**
+ * Decide what a capability upgrade would do to THIS stored row.
+ *
+ * Pure over its inputs — it reads nothing and writes nothing — so the page can
+ * call it to describe the change and the action can call it again to perform
+ * one, and the two cannot disagree about what was approved.
+ */
+export function assessCapabilityUpgrade(
+  built: CanonicalPresentationRead,
+  row: DraftRow,
+  scope: ComposerScope,
+): CapabilityUpgradeAssessment {
+  const decoded = decodeStoredDraft(row, scope);
+  if (!decoded.ok) {
+    return {
+      status: "refused",
+      reason: "document_refused",
+      detail:
+        "El borrador almacenado no se puede leer como documento canónico, así que no se le añade nada.",
+      issues: decoded.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+
+  const { ids: required, choice } = blueprintRequiredBlockIds(built.registry, scope.studyName);
+  if (required.size === 0) {
+    return {
+      status: "not_needed",
+      reason: "blueprint_requires_nothing",
+      detail:
+        "El plano vigente para este estudio no marca ningún bloque como contenido obligatorio, " +
+        "así que no hay capacidad que añadir. No se escribe nada.",
+    };
+  }
+
+  // THE UPGRADE ITSELF — the whole of it. One optional boolean, on blocks the
+  // blueprint named, added only where it is absent or false.
+  const upgraded = JSON.parse(serializeDeterministic(decoded.value)) as PresentationDocument;
+  const changes: CapabilityChange[] = [];
+  upgraded.pages.forEach((page, pageIndex) => {
+    page.blocks.forEach((block, blockIndex) => {
+      if (!required.has(block.id)) return;
+      if (block.requiredContent === true) return;
+      changes.push({
+        path: `$.pages[${pageIndex}].blocks[${blockIndex}].requiredContent`,
+        blockId: block.id,
+        // A BLOCK MAY LEGITIMATELY HAVE NO AUTHORED TITLE, and an operator
+        // reading a raw id would be reading something internal. Saying so is
+        // better than either.
+        blockTitle: block.copy.title ?? "(bloque sin título)",
+        field: "requiredContent",
+        from: block.requiredContent === false ? "false" : "(ausente)",
+        to: "true",
+      });
+      block.requiredContent = true;
+    });
+  });
+
+  if (changes.length === 0) {
+    return {
+      status: "not_needed",
+      reason: "already_current",
+      detail:
+        "Este borrador ya declara la capacidad que el plano vigente exige. No hay nada que añadir " +
+        "y no se escribe nada.",
+    };
+  }
+
+  // [1] NOTHING BUT CAPABILITY METADATA MOVED. Bytes, not a field list.
+  const strippedBefore = capabilityStrippedProjection(decoded.value);
+  const strippedAfter = capabilityStrippedProjection(upgraded);
+  if (strippedBefore !== strippedAfter) {
+    return {
+      status: "refused",
+      reason: "would_change_more_than_capability",
+      detail:
+        "Añadir la capacidad cambiaría algo más que la capacidad, y esta acción sólo hace eso. " +
+        "No se escribe nada.",
+    };
+  }
+
+  // [2] AND IT IS REVERSIBLE. Deleting exactly the keys added above has to
+  //     reproduce the stored document byte for byte. This is what makes «only
+  //     metadata was added» a fact about the write rather than about the plan.
+  const reverted = JSON.parse(serializeDeterministic(upgraded)) as {
+    pages: { blocks: Record<string, unknown>[] }[];
+  };
+  for (const change of changes) {
+    const [, pageIndex, blockIndex] = change.path.match(/\$\.pages\[(\d+)\]\.blocks\[(\d+)\]/)!;
+    const block = reverted.pages[Number(pageIndex)].blocks[Number(blockIndex)];
+    if (change.from === "false") block.requiredContent = false;
+    else delete block.requiredContent;
+  }
+  if (serializeDeterministic(reverted) !== serializeDeterministic(decoded.value)) {
+    return {
+      status: "refused",
+      reason: "not_reversible",
+      detail:
+        "Quitar lo que esta acción añadiría no reproduce el documento guardado, así que la " +
+        "operación no es la que dice ser. No se escribe nada.",
+    };
+  }
+
+  // [3] THE BINDING DOES NOT MOVE. This is not a rebind and must not become one.
+  if (upgraded.binding !== decoded.value.binding || upgraded.registryVersion !== decoded.value.registryVersion) {
+    return {
+      status: "refused",
+      reason: "binding_would_change",
+      detail: "Esta acción no vuelve a vincular el documento, y algo movió el vínculo. No se escribe nada.",
+    };
+  }
+
+  // [4] AND IT HAS TO WORK AFTERWARDS.
+  const resolved = resolveUnderSelection(built, upgraded, EMPTY_VIEWER_SELECTION);
+  if (!resolved.ok) {
+    return {
+      status: "refused",
+      reason: "does_not_resolve_after_upgrade",
+      detail:
+        "Con la capacidad añadida el documento ya no corresponde a los resultados de este estudio, " +
+        "así que no se guarda.",
+      issues: resolved.issues,
+    };
+  }
+
+  const blocks = decoded.value.pages.reduce((total, page) => total + page.blocks.length, 0);
+  return {
+    status: "ready",
+    storedRevision: row.revision,
+    blueprintId: choice.id,
+    blueprintLabel: choice.label,
+    changes,
+    preserved: {
+      title: decoded.value.title,
+      pages: decoded.value.pages.length,
+      blocks,
+      samplePolicyMode: decoded.value.samplePolicy.mode,
+      methodologyDisclosure: decoded.value.methodologyDisclosure,
+      strippedBytes: new TextEncoder().encode(strippedBefore).length,
+      strippedDigest: sha256Hex(strippedBefore),
+      binding: decoded.value.binding ?? "",
+      registryVersion: decoded.value.registryVersion,
+    },
+  };
+}
+
+/** Read the row and assess, for a screen that wants to DESCRIBE the change. */
+export async function describeCapabilityUpgrade(
+  client: SupabaseClient,
+  scope: ComposerScope,
+): Promise<CapabilityUpgradeAssessment> {
+  const stored = await readStoredDraftRow(client, scope);
+  if (!stored.ok) {
+    return { status: "refused", reason: "document_refused", detail: stored.unavailable.detail };
+  }
+  if (!stored.row) {
+    return {
+      status: "not_needed",
+      reason: "already_current",
+      detail: "Este estudio no tiene un borrador canónico guardado, así que no hay nada que actualizar.",
+    };
+  }
+  let built;
+  try {
+    built = await readAndBuild(client, scope);
+  } catch (caught) {
+    return { status: "refused", reason: "document_refused", detail: refusalFor(caught).detail };
+  }
+  return assessCapabilityUpgrade(built, stored.row, scope);
+}
+
+/**
+ * Add the missing capability metadata and store the result as a new revision.
+ *
+ * The same shape as `rebindStoredPresentation`, deliberately: replay first,
+ * then the expected revision, then a fresh read, then the assessment, then one
+ * write through the draft's own save function. See that function's comments for
+ * why the order of the first two is what it is.
+ */
+export async function upgradeStoredPresentationCapabilities(
+  client: SupabaseClient,
+  scope: ComposerScope,
+  actorUserId: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<SaveResult> {
+  const stored = await readStoredDraftRow(client, scope);
+  if (!stored.ok) {
+    return { ok: false, reason: "storage_refused", detail: stored.unavailable.detail };
+  }
+  if (!stored.row) {
+    return {
+      ok: false,
+      reason: "storage_refused",
+      detail: "Este estudio no tiene un borrador canónico guardado, así que no hay nada que actualizar.",
+    };
+  }
+
+  // A REPLAY IS ANSWERED BEFORE A CONFLICT IS. Same reasoning as the rebind's.
+  const { data: replayed } = await client
+    .from(DRAFT_EVENT_TABLE)
+    .select("revision")
+    .eq("study_id", scope.studyId)
+    .eq("tenant_id", scope.tenantId)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle<{ revision: number }>();
+  if (replayed) {
+    return {
+      ok: true,
+      revision: replayed.revision,
+      currentRevision: stored.row.revision,
+      created: false,
+      replayed: true,
+    };
+  }
+
+  if (stored.row.revision !== expectedRevision) {
+    return {
+      ok: false,
+      reason: "conflict",
+      detail:
+        "Alguien guardó este borrador después de que se abrió esta pantalla, así que no se le " +
+        "añade nada sobre una revisión que ya no es la última.",
+      storedRevision: stored.row.revision,
+    };
+  }
+
+  let built;
+  try {
+    built = await readAndBuild(client, scope);
+  } catch (caught) {
+    return { ok: false, reason: "storage_refused", detail: refusalFor(caught).detail };
+  }
+
+  const assessment = assessCapabilityUpgrade(built, stored.row, scope);
+  if (assessment.status !== "ready") {
+    if (assessment.status === "not_needed") {
+      return {
+        ok: true,
+        revision: stored.row.revision,
+        currentRevision: stored.row.revision,
+        created: false,
+        replayed: true,
+      };
+    }
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: assessment.detail,
+      issues: assessment.issues,
+    };
+  }
+
+  const decoded = decodeStoredDraft(stored.row, scope);
+  if (!decoded.ok) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "El borrador almacenado dejó de leerse entre la evaluación y la escritura.",
+      issues: decoded.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+
+  // THE SAME MUTATION THE ASSESSMENT MADE, from the same required set. It is
+  // recomputed here rather than carried across, so nothing between the two is a
+  // value this function was handed.
+  const { ids: required } = blueprintRequiredBlockIds(built.registry, scope.studyName);
+  const upgraded = JSON.parse(serializeDeterministic(decoded.value)) as PresentationDocument;
+  for (const page of upgraded.pages) {
+    for (const block of page.blocks) {
+      if (required.has(block.id) && block.requiredContent !== true) block.requiredContent = true;
+    }
+  }
+
+  // THE SUBTITLE IS CARRIED ACROSS BY HAND, for the reason the rebind states:
+  // it lives in the envelope's metadata, not in the document, so a
+  // decode-then-encode round trip drops it.
+  const definition = stored.row.definition as { metadata?: { subtitle?: unknown } } | null;
+  const storedSubtitle =
+    definition && typeof definition.metadata === "object" && definition.metadata !== null
+      ? definition.metadata.subtitle
+      : null;
+
+  const encoded = encodePresentationForStorage(
+    upgraded,
+    { tenantId: scope.tenantId, studyId: scope.studyId },
+    { subtitle: typeof storedSubtitle === "string" ? storedSubtitle : null },
+  );
+  if (!encoded.ok) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "El documento con la capacidad añadida no se puede almacenar en la forma que exige la columna.",
+      issues: encoded.errors.map((entry) => ({ code: entry.code, path: entry.path })),
+    };
+  }
+
+  return saveEncodedPresentation(
+    client,
+    scope,
+    actorUserId,
+    encoded.value,
+    expectedRevision,
+    idempotencyKey,
+    `capacidad declarada: requiredContent en ${assessment.changes.length} bloque(s)`,
+  );
+}

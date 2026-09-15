@@ -82,6 +82,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   loadStoredPresentation,
   rebindStoredPresentation,
+  upgradeStoredPresentationCapabilities,
   resolveEditedPresentation,
   storeEditedPresentation,
 } from "@/lib/studio/presentation-workspace";
@@ -443,6 +444,66 @@ export async function rebindCanonicalPresentationDraft(
   }
 
   return rebindStoredPresentation(
+    authorized.admin,
+    authorized.scope,
+    authorized.userId,
+    revision.data,
+    idempotencyKey,
+  );
+}
+
+/**
+ * DECLARE THE CAPABILITY THIS DOCUMENT PREDATES — three scalars, like the rebind.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT TAKES NO DOCUMENT AND NO CAPABILITY, AND THAT IS THE POINT.
+ *
+ * The blocks whose content the layout requires are read on the SERVER from the
+ * blueprint this study's registry selects — the same selection the composer
+ * uses. There is no parameter here through which a browser could name a block,
+ * assert a flag, or supply a document, so «the capability came from the server»
+ * is a fact about this signature rather than a promise about its body.
+ *
+ * What it does change is one optional boolean per named block, and the
+ * assessment refuses to write unless removing exactly those booleans reproduces
+ * the stored document byte for byte. Nothing an author composed can move
+ * through this path.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * IT RETURNS RATHER THAN REDIRECTS, for the reason the rebind does: a redirect
+ * remounts the page, and the screen has a plan the operator was looking at.
+ */
+export async function upgradeCanonicalPresentationCapabilities(
+  studyId: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<SaveResult> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return { ok: false, reason: authorized.reason, detail: authorized.detail };
+  }
+
+  if (!IDEMPOTENCY_KEY.safeParse(idempotencyKey).success) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "La clave de reintento enviada no tiene la forma que esta capa admite.",
+    };
+  }
+
+  // AN UPGRADE ALWAYS HAS AN EXPECTED REVISION, and `null` is not one — the
+  // same reasoning the rebind states: it is defined only over a row that
+  // already exists, so null is a caller who did not read the row.
+  const revision = EXPECTED_REVISION.safeParse(expectedRevision);
+  if (!revision.success || revision.data === null) {
+    return {
+      ok: false,
+      reason: "document_refused",
+      detail: "Declarar la capacidad exige decir sobre qué revisión se hace, y no se recibió una.",
+    };
+  }
+
+  return upgradeStoredPresentationCapabilities(
     authorized.admin,
     authorized.scope,
     authorized.userId,

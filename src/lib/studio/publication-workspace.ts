@@ -932,7 +932,35 @@ export async function previewStoredPresentationUnderSelection(
     };
   }
 
-  const resolved = resolveUnderSelection(built, decoded.value, selection);
+  // THE AUTHORED JOURNEY PAIN CONTENT HAS TO TRAVEL WITH THE SELECTION, and it
+  // did not — Unit 6B.4B2H's rehearsal found it.
+  //
+  // This action returns the screen a reviewer approves from. The review PAGE
+  // resolves the stored draft WITH the authored pain content (see `assemble`);
+  // this action resolved it without, so the moment a reviewer touched any
+  // filter control the pain cloud and all fifteen touchpoint badges vanished
+  // from the preview — and pressing «limpiar filtros» did not bring them back,
+  // because clearing is another round trip through this same action. Only a
+  // full page reload restored them. A reviewer could therefore approve a
+  // preview showing strictly less than the client would receive, which is the
+  // one thing this screen exists to prevent.
+  //
+  // THE SAME TWO STEPS `assemble` TAKES, and for the same stated reason:
+  // resolve once WITHOUT content to learn the offer, build the review against
+  // that model, and resolve again WITH the content only if the review is
+  // complete. Adding pain content changes no route and no touchpoint — it fills
+  // one editorial slot and badges points that already exist — so the offer the
+  // review was checked against is the offer the second model makes.
+  const first = resolveUnderSelection(built, decoded.value, selection);
+  if (!first.ok) {
+    return { ok: false, unavailable: unavailable("review_refused", [...first.issues]) };
+  }
+  const authored = authoredPainContent(await loadJourneyPainReview(client, scope, first.model));
+  const resolved = authored
+    ? resolveUnderSelection(built, decoded.value, selection, authored)
+    : first;
+  // A DOCUMENT THAT RESOLVED WITHOUT THE CONTENT AND REFUSES WITH IT IS A
+  // REFUSAL, not a reason to fall back to the emptier picture.
   if (!resolved.ok) {
     return { ok: false, unavailable: unavailable("review_refused", [...resolved.issues]) };
   }

@@ -68,6 +68,12 @@ import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 import { HostedTargetError, resolveHostedTarget } from "./lib/hosted-target.mjs";
+// THE PRODUCT'S OWN SERIALIZATION AND DIGEST, so the reduction below is
+// comparable with the digest the database holds. A second implementation of
+// either would be a second answer, and the whole value of §[2c] is that its
+// number is the same number `encodePresentationForStorage` computed.
+import { serializeDeterministic } from "../src/lib/presentation/serialize.ts";
+import { sha256Hex } from "../src/lib/ingestion/canonical-commit/sha256.ts";
 
 /**
  * What the previous unit recorded, so this run compares rather than reports.
@@ -119,13 +125,84 @@ const EXPECTED = {
      * page and twenty-four blocks, still `show_all`, still titled «La voz de
      * las y los Nets de Cuicuilco».
      */
-    revision: 2,
+    /**
+     * REVISION 3 SINCE 2026-09-14 — Unit 6B.4B2H's explicit capability upgrade.
+     *
+     * It was 2. The document had been stored before `requiredContent` existed
+     * and carried the key zero times, so the publication preflight read its
+     * empty journey pain-cloud slot as the acknowledgeable warning
+     * `configuration_required_blocks` where today's blueprint intends the
+     * non-acknowledgeable blocker `required_content_missing`. One explicit
+     * «Declarar contenido obligatorio» added that one boolean, on the one block
+     * the server's own blueprint names, and saved revision 3.
+     *
+     * NOTHING ELSE MOVED, and it is checked rather than asserted: deleting
+     * `$.pages[0].blocks[21].requiredContent` from the revision-3 definition
+     * reproduces `78a34758…` — the revision-2 digest — exactly. The binding did
+     * not move at all.
+     */
+    revision: 3,
     registryVersion: "1.0.0",
     binding: "e2ee45b43fe99102776d4617e12d9a7584d764ddd792199c0dbb96b08a25e2d2",
-    definitionSha256: "78a34758eca3b3d59349fd1dd09ae24114122a2d27575b9c35d852823b25a52d",
+    definitionSha256: "5f1ec0349f81a155e97f52a4aeea5f555fb02e5054b6d8c1da084e3ff057f4da",
+    /**
+     * The revision-2 digest, and it is not merely history: §[2c] REPRODUCES it
+     * by removing the field the upgrade added, which is what makes «only
+     * capability metadata was added» a fact rather than a claim.
+     */
+    revisionTwoDefinitionSha256: "78a34758eca3b3d59349fd1dd09ae24114122a2d27575b9c35d852823b25a52d",
+    /** The blocks the upgrade declared, by authored id. Exactly these. */
+    requiredContentBlockIds: ["temas-recorrido"],
+    samplePolicyMode: "show_all",
+    pages: 1,
+    blocks: 24,
     /** What it was before the rebind, kept so a regression can be recognised. */
     supersededBinding: "cf63bdca71e842fb0f6af50665348567a7b5a0f14f21b62683d2b0d0b5ca2037",
     supersededDefinitionSha256: "511d7f54f3ec0a391b45db259f64d57f9d415a9b2f5711c6f5fc551cdb67809d",
+  },
+  /**
+   * THE EDITORIAL STATE UNIT 6B.4B2G TRANSCRIBED, pinned by SEMANTICS.
+   *
+   * Not «non-empty», and not a count. Every item key and every touchpoint handle
+   * is written down, so a decision that changes target, a decision that
+   * disappears, a sixteenth that appears, or a superseded row promoted back into
+   * force all fail by name.
+   *
+   * THE PUBLIC PHRASES ARE DELIBERATELY NOT HERE. They are a real client's
+   * curated prose and that never enters this repository — the same rule that
+   * keeps the two workbooks out of it. Their PRESENCE is asserted instead: every
+   * decision in force must carry a non-empty phrase.
+   *
+   * The keys and handles are opaque: `pp…` is derived from the study and the
+   * source row, `journey-touchpoint:g1-t…` is a registry address. Neither is
+   * prose and neither identifies a person.
+   */
+  editorial: {
+    tenantId: "e63b2092-244e-4751-b7e9-19172a9f6b41",
+    signOffDigest: "4ed838c49fba6f544fd239d1395fa691c6efc0979f80190af826749cb561ff0b",
+    /** Rows the table holds in total, history included. */
+    decisionRows: 20,
+    /** Decisions IN FORCE — the latest per item key — and their targets. */
+    inForce: [
+      ["pp2ssjqwobsxile5vy", ["journey-touchpoint:g1-t26"]],
+      ["pp3sfkielw4zxlmjwd", ["journey-touchpoint:g1-t27"]],
+      ["pp43gtmir3nn2mxg5g", ["journey-touchpoint:g1-t12"]],
+      ["pp75fioamajytmems4", ["journey-touchpoint:g1-t14"]],
+      ["ppawbwjs65joodprei", ["journey-touchpoint:g1-t28"]],
+      ["ppaywdrbs6yjocv3lh", ["journey-touchpoint:g1-t4"]],
+      ["ppb423ot3a2jqzsi6t", ["journey-touchpoint:g1-t29"]],
+      ["ppdfhnubzdv7g55owy", ["journey-touchpoint:g1-t7"]],
+      ["ppio4yk7xkduiipmeq", ["journey-touchpoint:g1-t13"]],
+      ["ppm6itaxols7bmvtpr", ["journey-touchpoint:g1-t25"]],
+      ["ppqicj3qmgufjf2dta", ["journey-touchpoint:g1-t10"]],
+      ["pprailpwvcpyflus3u", ["journey-touchpoint:g1-t8"]],
+      ["pps3rorrpgkjyagxxi", ["journey-touchpoint:g1-t9"]],
+      ["ppw7yj73tpjbqnwvgh", ["journey-touchpoint:g1-t2"]],
+      ["ppzj7jj6gbertay53s", ["journey-touchpoint:g1-t1"]],
+    ],
+    /** Superseded rows, which must stay superseded and stay distinguishable. */
+    supersededRows: 5,
+    supersededDisposition: "unresolved",
   },
 };
 
@@ -167,8 +244,17 @@ console.log("  every request below is a select; nothing is written.");
 
 const evidence = process.env.BECOMMUNITY_QA_EVIDENCE ?? "/tmp/becommunity-qa-6b3a";
 mkdirSync(evidence, { recursive: true });
-const record = { ref: target.ref, readAt: new Date().toISOString(), drafts: [], counts: {}, present: {},
-                 canonicalDrafts: [], canonicalEvents: null };
+const record = {
+  ref: target.ref,
+  readAt: new Date().toISOString(),
+  drafts: [],
+  counts: {},
+  present: {},
+  canonicalDrafts: [],
+  canonicalEvents: null,
+  /** What the editorial tables hold — semantics, never a client's words. */
+  editorial: {},
+};
 
 /* -------------------------------------------------------------------------- */
 console.log("\n[1] The two legacy experience drafts");
@@ -298,6 +384,77 @@ if (canonicalDrafts) {
   check(strangers.length === 0, `no other study has acquired a canonical draft (${strangers.length})`);
 }
 
+/*
+ * [2c] THE DEFINITION ITSELF — the capability it now declares, the policy it
+ * still declares, and the revision it can still be reduced to.
+ *
+ * The column above is compared by DIGEST, which proves the bytes have not
+ * moved; it cannot say WHAT those bytes are. This reads them.
+ *
+ * THE REVERSIBILITY CHECK IS THE POINT OF THIS SECTION. Unit 6B.4B2H added one
+ * optional boolean to one block. Deleting exactly that field from the stored
+ * definition has to reproduce `revisionTwoDefinitionSha256` — the digest the
+ * database held before the upgrade. If it does, then nothing else changed,
+ * and that is a fact about the bytes rather than a claim about the code that
+ * wrote them. If it does not, something else moved with it.
+ */
+{
+  const { data, error } = await client
+    .from("canonical_presentation_draft")
+    .select("definition")
+    .eq("study_id", EXPECTED.canonicalDraft.studyId)
+    .maybeSingle();
+  check(error === null, `the stored definition reads${error ? ` — ${error.code}` : ""}`);
+  const definition = data?.definition ?? null;
+  check(definition !== null, "and it is there to read");
+  if (definition) {
+    const pages = Array.isArray(definition.pages) ? definition.pages : [];
+    const blocks = pages.flatMap((page) => (Array.isArray(page.blocks) ? page.blocks : []));
+    record.present.definitionPages = pages.length;
+    record.present.definitionBlocks = blocks.length;
+
+    check(pages.length === EXPECTED.canonicalDraft.pages, `it is ${pages.length} page, as composed`);
+    check(blocks.length === EXPECTED.canonicalDraft.blocks, `and ${blocks.length} blocks, as composed`);
+
+    // SAMPLE POLICY: show_all at the document, and NOT overridden anywhere. A
+    // block-level policy is how automatic suppression would arrive, so both
+    // halves are asserted rather than only the default.
+    check(
+      definition.samplePolicy?.mode === EXPECTED.canonicalDraft.samplePolicyMode,
+      `the sample policy is «${definition.samplePolicy?.mode}» — expected «${EXPECTED.canonicalDraft.samplePolicyMode}»`,
+    );
+    check(
+      blocks.every((block) => block.samplePolicy === null || block.samplePolicy === undefined),
+      "and no block overrides it — no automatic small-sample suppression exists anywhere in the document",
+    );
+
+    // THE CAPABILITY, by block id, and exactly these.
+    const declared = blocks.filter((block) => block.requiredContent === true).map((block) => block.id).sort();
+    record.present.requiredContentBlockIds = declared;
+    check(
+      JSON.stringify(declared) === JSON.stringify([...EXPECTED.canonicalDraft.requiredContentBlockIds].sort()),
+      `exactly ${JSON.stringify(EXPECTED.canonicalDraft.requiredContentBlockIds)} declare required content (${JSON.stringify(declared)})`,
+    );
+    check(
+      blocks.every((block) => block.requiredContent === true || block.requiredContent === undefined),
+      "and no block declares it FALSE — the upgrade added, it did not set",
+    );
+
+    // AND IT REDUCES TO REVISION 2. Deterministic serialization, the product's
+    // own, so the digest is comparable with the one the database held.
+    const reduced = JSON.parse(serializeDeterministic(definition));
+    for (const page of reduced.pages) {
+      for (const block of page.blocks) delete block.requiredContent;
+    }
+    const reducedDigest = sha256Hex(serializeDeterministic(reduced));
+    check(
+      reducedDigest === EXPECTED.canonicalDraft.revisionTwoDefinitionSha256,
+      `removing the declared capability reproduces the revision-2 definition exactly (${reducedDigest.slice(0, 16)}…)` +
+        `${reducedDigest === EXPECTED.canonicalDraft.revisionTwoDefinitionSha256 ? "" : ` — EXPECTED ${EXPECTED.canonicalDraft.revisionTwoDefinitionSha256.slice(0, 16)}…`}`,
+    );
+  }
+}
+
 const { data: canonicalEvents, error: canonicalEventError } = await client
   .from("canonical_presentation_draft_event")
   .select("study_id, action, revision, idempotency_key, occurred_at")
@@ -310,8 +467,12 @@ if (canonicalEvents) {
   // counted. The rebind is a SAVE — it goes through the same RPC the composer
   // saves through — so it appends a `draft_saved`, and an event log that gained
   // anything else would mean a write nobody authorized.
-  check(canonicalEvents.length === 2, `it holds exactly two events (${canonicalEvents.length})`);
-  const [first, second] = canonicalEvents;
+  // THREE SINCE 2026-09-14, and each one is named rather than merely counted.
+  // Both the rebind and the capability upgrade are SAVES — they go through the
+  // same RPC the composer saves through — so each appends a `draft_saved`, and
+  // an event log that gained anything else would mean a write nobody authorized.
+  check(canonicalEvents.length === 3, `it holds exactly three events (${canonicalEvents.length})`);
+  const [first, second, third] = canonicalEvents;
   if (first) {
     check(first.action === "draft_created", `the first is a ${first.action} at revision ${first.revision}`);
     check(first.revision === 1, `at revision 1 (${first.revision})`);
@@ -321,6 +482,18 @@ if (canonicalEvents) {
     check(second.action === "draft_saved", `the second is a ${second.action} — Unit 6B.4B2E's rebind`);
     check(second.revision === 2, `at revision 2 (${second.revision})`);
     check(second.study_id === EXPECTED.canonicalDraft.studyId, "for Cuicuilco too, and no one else");
+  }
+  if (third) {
+    check(
+      third.action === "draft_saved",
+      `the third is a ${third.action} — Unit 6B.4B2H's capability upgrade`,
+    );
+    check(third.revision === 3, `at revision 3 (${third.revision})`);
+    check(third.study_id === EXPECTED.canonicalDraft.studyId, "for Cuicuilco too, and no one else");
+    check(
+      typeof third.idempotency_key === "string" && third.idempotency_key.startsWith("capability-r2-"),
+      `and it carries the key that operation minted (${third.idempotency_key})`,
+    );
   }
   check(
     canonicalEvents.every((e) => e.study_id === EXPECTED.canonicalDraft.studyId),
@@ -424,7 +597,10 @@ for (const [table, what] of [
 }
 
 /* -------------------------------------------------------------------------- */
-console.log("\n[3c] Migrations 0031 and 0032 ARE applied there, and their storage is EMPTY");
+console.log(
+  "\n[3c] Migrations 0031 and 0032 are applied, and their storage holds EXACTLY" +
+    " the editorial state Unit 6B.4B2G transcribed — pinned by semantics, not counts",
+);
 
 /*
  * INVERTED ON 2026-09-14, WHEN UNIT 6B.4B2D APPLIED `0031` AND `0032`.
@@ -471,13 +647,175 @@ for (const [table, migration] of [
     present,
     `${table} is present, so ${migration} is applied${present ? "" : " — IT IS GONE, WHICH MEANS THE MIGRATION WAS REVERSED. Stop and investigate."}`,
   );
+}
+
+/*
+ * THE LINK TABLE IS STILL EMPTY, and it is the one of the three that should be.
+ *
+ * `canonical_publication_qualitative_signoff` records WHICH sign-off a
+ * PUBLICATION was made under. Nothing has been published, so a row in it would
+ * mean a publication exists that the five publication-table assertions in §[3b]
+ * did not see — two independent readings of the same fact, which is why both
+ * are kept.
+ */
+{
+  const { count, error } = await client
+    .from("canonical_publication_qualitative_signoff")
+    .select("*", { count: "exact", head: true });
   check(
-    present && count === 0,
-    `and it is EMPTY — no editorial decision has been recorded in it${
-      present && count !== 0
-        ? ` — IT HOLDS ${count} ROW(S). Something was written that nobody authorized. Stop and investigate.`
-        : ""
-    }`,
+    error === null && count === 0,
+    `canonical_publication_qualitative_signoff is EMPTY (${error ? error.code : count}) — nothing has been published under any sign-off`,
+  );
+}
+
+/* ---- the qualitative sign-off: exactly one, for exactly this evidence ---- */
+{
+  const { data, error } = await client
+    .from("canonical_qualitative_signoff")
+    .select("study_id, tenant_id, evidence_digest, reviewed_at");
+  check(error === null, `the sign-off table reads${error ? ` — ${error.code}` : ""}`);
+  const rows = data ?? [];
+  record.editorial.signOffRows = rows.length;
+  check(rows.length === 1, `exactly ONE qualitative sign-off exists (${rows.length})`);
+  if (rows.length === 1) {
+    const row = rows[0];
+    check(
+      row.study_id === EXPECTED.canonicalDraft.studyId,
+      `it belongs to Cuicuilco (${row.study_id === EXPECTED.canonicalDraft.studyId ? "yes" : row.study_id})`,
+    );
+    check(row.tenant_id === EXPECTED.editorial.tenantId, "and to its tenant");
+    check(
+      row.evidence_digest === EXPECTED.editorial.signOffDigest,
+      `and it is against the CURRENT evidence digest (${row.evidence_digest.slice(0, 16)}…)`,
+    );
+    record.editorial.signOffDigest = row.evidence_digest;
+    record.editorial.signOffAt = row.reviewed_at;
+  }
+}
+
+/* ---- the journey decisions: fifteen, approved, and exactly these targets --- */
+{
+  const { data, error } = await client
+    .from("canonical_journey_pain_decision")
+    .select("study_id, tenant_id, item_key, disposition, public_phrase, touchpoints, decided_at");
+  check(error === null, `the journey decision table reads${error ? ` — ${error.code}` : ""}`);
+  const rows = data ?? [];
+  record.editorial.decisionRows = rows.length;
+  check(
+    rows.length === EXPECTED.editorial.decisionRows,
+    `the table holds ${EXPECTED.editorial.decisionRows} rows, history included (${rows.length})`,
+  );
+  check(
+    rows.every((row) => row.study_id === EXPECTED.canonicalDraft.studyId),
+    "every row belongs to Cuicuilco — no other study acquired a decision",
+  );
+  check(
+    rows.every((row) => row.tenant_id === EXPECTED.editorial.tenantId),
+    "and to its tenant",
+  );
+
+  /*
+   * IN FORCE = THE LATEST PER ITEM KEY.
+   *
+   * The same rule migration 0032's `read_canonical_journey_pain_decisions`
+   * applies, restated here rather than called: this file contains no `.rpc(`
+   * at all — §[3] records why — and an unmatched call would still be a call.
+   * The rule is one line and the raw rows are right here, so restating it
+   * costs nothing and keeps the read-only property exact.
+   */
+  const inForce = new Map();
+  for (const row of rows) {
+    const held = inForce.get(row.item_key);
+    if (!held || row.decided_at > held.decided_at) inForce.set(row.item_key, row);
+  }
+  record.editorial.inForce = inForce.size;
+
+  check(inForce.size === EXPECTED.editorial.inForce.length, `${inForce.size} decisions are IN FORCE`);
+  check(
+    [...inForce.values()].every((row) => row.disposition === "approved"),
+    `and every one is APPROVED (${[...new Set([...inForce.values()].map((r) => r.disposition))].join(", ")})`,
+  );
+  check(
+    [...inForce.values()].filter((row) => row.disposition === "unresolved").length === 0,
+    "ZERO are unresolved in force",
+  );
+  check(
+    [...inForce.values()].every(
+      (row) => typeof row.public_phrase === "string" && row.public_phrase.trim().length > 0,
+    ),
+    "every one carries a non-empty public phrase (its words are NOT recorded here)",
+  );
+
+  /*
+   * ZERO UNDECIDED, measured against the SOURCE rather than assumed.
+   *
+   * The journey review's scope is the set of `pain_point` rows attached to a
+   * journey stage. If that set is larger than the set of decisions in force,
+   * somebody has an item nobody decided — which is precisely the state this
+   * gate existed to detect before, inverted.
+   */
+  const { data: links } = await client.from("pain_point_journey_stage").select("pain_point_id");
+  const journeyScoped = new Set((links ?? []).map((link) => link.pain_point_id)).size;
+  record.editorial.journeyScopedPainRows = journeyScoped;
+  check(
+    journeyScoped === inForce.size,
+    `ZERO undecided: the source has ${journeyScoped} journey pain rows and ${inForce.size} decisions in force`,
+  );
+
+  /* every target, by name, and every target well formed */
+  const expectedMap = new Map(EXPECTED.editorial.inForce);
+  for (const [key, targets] of expectedMap) {
+    const row = inForce.get(key);
+    check(row !== undefined, `${key} is in force`);
+    if (!row) continue;
+    check(
+      JSON.stringify(row.touchpoints) === JSON.stringify(targets),
+      `${key} targets exactly ${JSON.stringify(targets)}${
+        JSON.stringify(row.touchpoints) === JSON.stringify(targets) ? "" : ` — IT TARGETS ${JSON.stringify(row.touchpoints)}`
+      }`,
+    );
+  }
+  const strangers = [...inForce.keys()].filter((key) => !expectedMap.has(key));
+  check(strangers.length === 0, `no decision in force is outside the pinned set (${strangers.join(", ") || "none"})`);
+
+  // LEGAL TARGETS: a handle of the journey-touchpoint family, at least one per
+  // decision, none repeated inside a decision, and none shared between two —
+  // the approved layout draws each touchpoint once.
+  const HANDLE = /^journey-touchpoint:[a-z0-9-]+$/;
+  check(
+    [...inForce.values()].every(
+      (row) =>
+        Array.isArray(row.touchpoints) &&
+        row.touchpoints.length >= 1 &&
+        row.touchpoints.every((handle) => HANDLE.test(handle)) &&
+        new Set(row.touchpoints).size === row.touchpoints.length,
+    ),
+    "every decision names at least one well-formed canonical touchpoint and repeats none",
+  );
+  const allTargets = [...inForce.values()].flatMap((row) => row.touchpoints);
+  check(
+    new Set(allTargets).size === allTargets.length,
+    `and no touchpoint carries two decisions (${allTargets.length} targets, ${new Set(allTargets).size} distinct)`,
+  );
+
+  /* the superseded rows stay superseded, and stay attributable */
+  const superseded = rows.filter((row) => inForce.get(row.item_key).decided_at !== row.decided_at);
+  record.editorial.superseded = superseded.length;
+  check(
+    superseded.length === EXPECTED.editorial.supersededRows,
+    `${superseded.length} rows are historical, superseded by a later decision on the same item`,
+  );
+  check(
+    superseded.every((row) => row.disposition === EXPECTED.editorial.supersededDisposition),
+    `and every one of them is «${EXPECTED.editorial.supersededDisposition}» — the exploratory records 6B.4B2G superseded`,
+  );
+  check(
+    superseded.every((row) => row.decided_at < inForce.get(row.item_key).decided_at),
+    "each is strictly older than the decision that replaced it, so history is distinguishable from force",
+  );
+  check(
+    superseded.every((row) => expectedMap.has(row.item_key)),
+    "and every superseded row belongs to an item that IS decided now",
   );
 }
 
@@ -562,11 +900,19 @@ console.log(
   "RESULT: both legacy experience drafts are at the versions and revisions the previous unit\n" +
     "        recorded, neither is schema version 4, the experience log is unchanged, migration\n" +
     "        0029's storage exists and holds exactly ONE canonical draft — Cuicuilco's, at\n" +
-    "        revision 2 after the explicit rebind, under a draft_created and a draft_saved and\n" +
-    "        nothing else — no other study has acquired one,\n" +
-    "        migration 0030's storage exists and is EMPTY in all three tables so no experience\n" +
-    "        has been published, migrations 0031 and 0032 are applied and their three review\n" +
-    "        tables are EMPTY so no qualitative sign-off and no pain-item decision has been\n" +
-    "        recorded, the 0030 publish function still stands beside its 0031 wrapper, and\n" +
-    "        every protected table was counted. Nothing was written.",
+    "        revision 3 after the explicit rebind and the explicit capability upgrade, under a\n" +
+    "        draft_created and two draft_saved and nothing else — no other study has acquired\n" +
+    "        one; its definition is one page of 24 blocks, its sample policy is show_all and no\n" +
+    "        block overrides it, exactly the pinned block declares requiredContent, and removing\n" +
+    "        that one field reproduces the revision-2 digest exactly, so nothing else moved with\n" +
+    "        it; migration 0030's storage exists and is EMPTY in all three tables so no\n" +
+    "        experience has been published; migrations 0031 and 0032 are applied and hold\n" +
+    "        EXACTLY the editorial state Unit 6B.4B2G transcribed — ONE qualitative sign-off\n" +
+    "        against the current evidence digest, FIFTEEN journey decisions in force, every one\n" +
+    "        approved, every one carrying a public phrase and targeting exactly the pinned\n" +
+    "        canonical touchpoint, ZERO unresolved, ZERO undecided against the source's own\n" +
+    "        fifteen journey pain rows, and five older rows still superseded and still\n" +
+    "        distinguishable from the decisions in force; the 0030 publish function still stands\n" +
+    "        beside its 0031 wrapper, and every protected table was counted. Nothing was\n" +
+    "        written, and no client's words were read into this record.",
 );

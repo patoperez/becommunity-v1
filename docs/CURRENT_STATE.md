@@ -6017,3 +6017,254 @@ One decision, and it is not editorial: **whether to publish.** The review is
 complete, the pain cloud and its touchpoint badges are authorized, the sign-off
 is current, and the publish control is reachable behind one remaining
 acknowledgement plus the final confirmation. Nobody has ticked either.
+
+---
+
+## Unit 6B.4B2H — the legacy draft's capability, and the final prepublication rehearsal
+
+**2026-09-14, from commit `e1c5748`.** Two technical gaps closed, one hosted
+mutation, one defect found and fixed by the rehearsal itself, and **no
+publication**.
+
+### The legacy-field omission, and what it cost
+
+The Cuicuilco draft was saved on 2026-09-08, **before `requiredContent` existed
+on `PresentationBlock`**. Read from the hosted definition: the key occurred
+**zero** times in 16 639 bytes. `requiredBlockIdsOf` therefore returned an empty
+set, `painContentIsRequired` was false, and the publication preflight classified
+the empty journey pain slot as the ACKNOWLEDGEABLE warning
+`configuration_required_blocks` where today's blueprint — which does pass
+`required = true` for `temas-recorrido` — intends the non-acknowledgeable blocker
+`required_content_missing`.
+
+Nothing was defective. The code and the stored document were simply of different
+ages, and §"What actually stops a publication" above records that reading.
+
+### The upgrade — one field, and it is proved to be one field
+
+A new explicit server path, mirroring the rebind's discipline exactly:
+`assessCapabilityUpgrade` / `describeCapabilityUpgrade` /
+`upgradeStoredPresentationCapabilities` in `presentation-workspace.ts`, the
+action `upgradeCanonicalPresentationCapabilities`, and the
+«Declarar contenido obligatorio» panel. It takes **three scalars** — study,
+expected revision, retry key — so there is no parameter through which a browser
+could name a block, assert a flag or supply a document. The required set is read
+on the server from `chooseBlueprint`, the same selection the composer uses.
+
+It refuses to write unless **both** of these hold:
+
+1. the document with every `requiredContent` stripped is **byte-identical**
+   before and after — so anything else that moved moves those bytes;
+2. deleting exactly the keys it would add **reproduces the stored definition
+   exactly** — so «only metadata was added» is a fact about bytes, not a claim
+   about code.
+
+It also refuses if the binding would move, or if the document stops resolving.
+It never runs on a read or a page load.
+
+#### The hosted mutation — the only one this unit made
+
+| | before | after |
+|---|---|---|
+| revision | **2** | **3** |
+| binding | `e2ee45b43fe99102776d4617e12d9a7584d764ddd792199c0dbb96b08a25e2d2` | **unchanged, byte for byte** |
+| `definition_sha256` | `78a34758eca3b3d59349fd1dd09ae24114122a2d27575b9c35d852823b25a52d` | `5f1ec0349f81a155e97f52a4aeea5f555fb02e5054b6d8c1da084e3ff057f4da` |
+| registry version | `1.0.0` | unchanged |
+
+Performed **through the real authenticated route** — `/login`, then
+`/studio/e/cd4d6acd…/construccion`, one press — with expected revision 2 and one
+fresh key `capability-r2-mu1vxnkv-cih6ajk5`. No SQL, no RPC, no direct write.
+
+**EXHAUSTIVE FIELD-LEVEL CLASSIFICATION — one field changed:**
+
+| path | block | before | after |
+|---|---|---|---|
+| `$.pages[0].blocks[21].requiredContent` | `temas-recorrido` («Puntos de dolor del recorrido») | *(absent)* | `true` |
+
+And **nothing else**: deleting that one key reproduces `78a34758…` exactly. Read
+back field by field afterwards — 1 page, 24 blocks, `samplePolicy {mode:
+show_all}` with **no block overriding it**, disclosure `plain_language_with_base`,
+title intact, `metadata.subtitle` still `null` (carried across by hand, not
+stamped), envelope still naming the study. The draft log holds three events:
+`draft_created`@1, `draft_saved`@2 (the rebind), `draft_saved`@3 with the note
+«capacidad declarada: requiredContent en 1 bloque(s)».
+
+#### The disposable proof, before anything hosted was touched
+
+`npm run test:canonical-capability-upgrade` — **59 assertions, 59 passed**,
+against a disposable PostgreSQL 17 + real PostgREST, with a draft planted at
+revision 2 whose `requiredContent` had been stripped. It proves: revision 2
+becomes 3 **exactly once**; the same key **replays** and makes no revision 4; a
+fresh key over the upgraded row is «nothing to do» rather than a fourth
+revision; a **stale** expected revision is a typed `conflict` naming the current
+one; **another tenant** is refused; **only** the classified metadata changes;
+**removing it reproduces the revision-2 definition exactly**; the binding, the
+authored content and the envelope's subtitle do not move; and the qualitative
+sign-off stays **current**, the journey decision stays in force and not stale,
+and the three publication tables stay empty.
+
+ⓘ **THE FIXTURE NEEDS THE REAL WORKBOOKS, AND THE GATE SAYS SO.** Only
+`cuicuilco-aprobado` marks any block required, and `chooseBlueprint` selects it
+only when the registry publishes every handle it names — which the synthetic
+package does not. The first run of this gate produced `inicio-generico`, whose
+blocks are all optional, and so «passed» while testing the «nothing to do»
+branch. It now commits the real package and is **SKIPPED, never passed**, when
+the workbooks are absent.
+
+### A defect the rehearsal found, and fixed
+
+ⓘ **The preview action did not carry the authored journey pain content.**
+`previewStoredPresentationUnderSelection` resolved the stored draft under a
+reviewer's filter selection but never loaded the pain review, so the moment a
+reviewer touched **any** filter control the «Puntos de dolor del recorrido»
+block and **all fifteen** touchpoint badges disappeared from the preview — and
+«limpiar filtros» did not bring them back, because clearing is another round
+trip through the same action. Only a full page reload restored them. Measured:
+25 blocks / 15 badges on load → 24 / 0 filtered → 24 / 0 cleared → 25 / 15 after
+reload.
+
+That is the one thing that screen exists to prevent: a reviewer could have
+approved a preview showing strictly less than the client would receive. The fix
+is the same two steps `assemble` already took — resolve once to learn the offer,
+load the review against that model, resolve again with the content — and after
+it: **25 / 15 in every state**.
+
+### The final prepublication rehearsal — 44 checks, 44 passed
+
+Through the real authenticated routes, pressing nothing that publishes.
+
+| | |
+|---|---|
+| **hard blockers** | **none.** The `bloqueos` section is not rendered |
+| **acknowledgeable warnings** | **one** — `granular_filter_dimensions`, unticked |
+| | `qualitative_review_pending` **gone** — the sign-off cleared it |
+| | `configuration_required_blocks` **gone** — the slot is authored now, and **no blocker replaced it** |
+| **informational** | 24 client-visible blocks of 24, 1 page |
+| **required content** | satisfied; no warning names the pain block any more |
+| **qualitative sign-off** | **current**; no sign-off control is offered because nothing is pending |
+| **journey review** | «SIN REVISAR 0 · APROBADAS 15 · EXCLUIDAS 0 · SIN RESOLVER 0», no gaps |
+| **binding** | current — the review resolved the stored draft and Construcción offered no rebind |
+| **sample policy** | `show_all`, not overridden by any block; nothing says a result was hidden for its size, even under a narrow selection |
+| **publication** | none exists; publish **DISABLED**; «Falta 1 confirmación de arriba»; final confirmation unticked |
+
+**Visual rehearsal**, on the canonical client preview:
+
+- the **15 approved mappings render exactly where they were mapped** — one badge
+  each, on precisely the fifteen touchpoints the approved artifact named, with
+  **BNI Connect (versión web)** and **App BNI Connect (celular)** each carrying
+  their own, so the ambiguity the artifact resolved stayed resolved;
+- the **two qualitative clouds match the CEO-approved dashboard exactly** — all
+  eight categories with identical counts and identical shares;
+- a real filter selection **recomputed on the server**, and **clearing restored
+  the baseline exactly** (16 250 characters and 22 terms, both ways);
+- **desktop 1440 / tablet 834 / mobile 390**: no horizontal overflow, all 15
+  badges drawn at every width;
+- **nothing internal crosses** — no review marker, state, token or identifier.
+
+ⓘ **THE CLIENT PREVIEW IS THE ONE INSIDE THE REVIEW PAGE.**
+`/studio/e/<id>/vista-cliente` is the LEGACY P8 pivot experience and draws no
+canonical presentation at all — it contains the string «Puntos de dolor» zero
+times. The first rehearsal measured it and reported thirteen false failures.
+The canonical client screen is `[data-testid="vista-cliente"]` on the review
+page.
+
+ⓘ **ONE HONEST DIFFERENCE FROM THE APPROVED DASHBOARD, and it is by design.**
+The journey pain cloud draws **14 phrases**; the approved dashboard drew **79
+sentence fragments** of the same workbook cells. CLAUDE.md forbids copying its
+phrase-splitting rule, and the contract counts phrases rather than pairs — a
+phrase mapped from two source items reads «Mayor entrenamiento.: 2 menciones».
+
+### The corrected hosted gate
+
+`test:canonical-presentation-hosted-fingerprint` was **72/74** after 6B.4B2G,
+failing exactly its «and it is EMPTY» assertions. It is now **136/136** and
+asserts SEMANTICS, not counts:
+
+- exactly **15** decisions **in force** — the latest per item key, the same rule
+  migration 0032's read function applies, restated rather than called because
+  this file contains no `.rpc(` at all;
+- every one **approved**, every one carrying a **non-empty public phrase**, and
+  every one targeting **exactly the pinned canonical handle**;
+- **0 unresolved in force**; **0 undecided**, measured against the source's own
+  15 journey-scoped `pain_point` rows rather than assumed;
+- the **5 superseded rows** stay superseded, are strictly older than what
+  replaced them, and belong to items that are decided now;
+- exactly **one** qualitative sign-off, for this tenant and study, against the
+  **current evidence digest**;
+- publication tables still **empty**;
+- the draft's revision, binding, digest, page and block counts, `show_all`
+  policy and declared capability all pinned, and the **revision-2 reproduction**
+  checked.
+
+ⓘ **THE PUBLIC PHRASES ARE DELIBERATELY NOT PINNED.** They are a real client's
+curated prose and that never enters this repository. Their PRESENCE is asserted
+instead. The item keys and touchpoint handles are opaque and carry no prose.
+
+**The gate was proved to discriminate** by perturbing its own expectations —
+never hosted data, which this unit was not authorized to touch beyond the one
+draft upgrade — and restoring the file byte-identically each time
+(`sha256 cee3bbb596beb623…`, identical before and after):
+
+| perturbation | caught |
+|---|---|
+| one current journey decision retargeted to `g1-t99` | ✓ 1 failure, naming the item and its real target |
+| the sign-off digest changed by one character | ✓ 1 failure |
+| a publication table expected to hold a row | ✓ 3 failures |
+| the revision-2 reproduction digest changed by one character | ✓ 1 failure |
+
+### Verification after the mutation — read-only
+
+- draft **revision 3**, binding unchanged and **resolving**; only the classified
+  field changed (44 assertions, 44 passed);
+- **results parity 531/531**, **presentation parity 59/59**;
+- **15** journey decisions in force, all approved, one touchpoint each; the table
+  holds 20 rows with history;
+- qualitative sign-off still **one row**, same digest `4ed838c4…`, same timestamp
+  `18:53:03` — this unit wrote nothing to it;
+- **all five publication tables EMPTY**, and
+  `canonical_publication_qualitative_signoff` empty;
+- legacy drafts unchanged — **v2/72** and **v3/14**;
+- canonical source unchanged — 50 `pain_point` rows all still `pending`, study 5,
+  respondent 82, quant_response 3364, qual_observation 33, study_participant 60,
+  survey_response 1685, performance_observation 252, metric_definition 116;
+- sample policy **show_all**; `origin/main` unchanged at `c76762f4…`.
+
+### Gates
+
+`typecheck` **0 errors**; `lint` **0 errors, 54 warnings** (the baseline);
+`build` passes; `test:canonical-presentation`, `test:canonical-presentation-persistence`,
+`test:journey-pain-review` **261/261**, `test:canonical-publication` **268/268**,
+`test:publication-boundary`, `test:canonical-composer`,
+`test:canonical-capability-upgrade` **59/59**,
+`test:canonical-presentation-hosted-fingerprint` **136/136**, results parity
+**531/531**, presentation parity **59/59** — all pass.
+
+ⓘ **`npm test` exits 1 on `test:hosted-target-guard` §[8], and it is the SAME
+baseline-identical environmental failure 6B.4B2D and 6B.4B2E recorded** — «the
+refusal names the main-repository rule, so the worktree rule did not answer for
+it». It builds `<root>/../becommunity-software/evidence` expecting a sibling main
+repository, and the WSL verifier is a plain clone AT that path. It concerns
+`scripts/lib/hosted-target.mjs` and evidence-path rules, neither of which this
+unit touched. **It is not called a pass.**
+
+ⓘ **That gate is number 23 of 53, so 30 gates never run in the chain.** All
+**30 were run individually and all 30 passed**: `import-center`, `templates`,
+`bi-filters`, `qualitative`, `confirmed-qualitative`, `client-boundary`,
+`publication-boundary`, `data-scope`, `client-admin`, `study-config`,
+`client-preview`, `longitudinal`, `narrative-home`, `server-pdf`,
+`tenant-branding`, `validation`, `pivot`, `suite-a-selftest`,
+`suite-bc-selftest`, `design-tokens`, `studio-workflows`, `studio-completion`,
+`insights-story`, `p8-qualitative`, `p8-acceptance`, `private-metadata`,
+`data-completeness`, `segments`, `periods`, `xlsx-hardening`.
+
+### What is left
+
+**Publication, and nothing else.** It remains pending **explicit operator
+authorization**: one acknowledgement of `granular_filter_dimensions` plus the
+final confirmation, both deliberate, both untouched by this unit. No
+acknowledgement was ticked, no publication was created, nothing was deployed,
+and the client still sees nothing.
+
+External evidence, outside every Git repository, at `~/becommunity-6b4b2h/`
+(WSL) and `C:\dev\becommunity-review-6b4b2h\`: `upgrade-result.json`,
+`post-upgrade-verification.json`, `rehearsal-result.json`, and `screenshots/`.
