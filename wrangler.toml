@@ -10,6 +10,32 @@ main = ".open-next/worker.js"
 compatibility_date = "2025-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+# -----------------------------------------------------------------------------
+# KEEP THE DASHBOARD'S PLAIN-TEXT VARIABLES. THIS LINE IS AN INCIDENT CONTROL.
+# -----------------------------------------------------------------------------
+# Wrangler treats this file as the source of truth for a Worker's environment,
+# the way a Terraform file is. With `keep_vars` at its default of `false`, a
+# `wrangler deploy` DELETES every dashboard-managed plain-text variable that
+# this file does not declare. Encrypted secrets are not touched.
+#
+# On 2026-08-28 that is exactly what happened: a manual deploy removed
+# NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, every route
+# answered HTTP 500 for about nine minutes, and service returned only after a
+# rollback and a corrected preview promotion.
+#
+# `true` makes the deploy additive for plain-text variables: it leaves what the
+# dashboard holds alone instead of reconciling it away.
+#
+# THE FIX IS NOT TO PUT THE VALUES HERE. This file is committed, so a `[vars]`
+# block would publish configuration into git, and it would put the operator one
+# careless edit away from committing the privileged key. The public values stay
+# in the dashboard, the privileged key stays an encrypted secret, and this flag
+# is what stops a deploy from reconciling the first group out of existence.
+#
+# Suite D's D-g check fails if this line is removed, flipped, or if a `[vars]`
+# block ever appears below.
+keep_vars = true
+
 # Static assets emitted by the OpenNext build.
 [assets]
 directory = ".open-next/assets"

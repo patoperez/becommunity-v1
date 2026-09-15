@@ -147,7 +147,21 @@ export type StudyMetrics = {
  */
 export function computeStudyMetrics(
   rows: LongRow[],
-  opts: { crossSegment?: string; csatMin?: number; satMetricPrefix?: string } = {},
+  opts: {
+    crossSegment?: string;
+    csatMin?: number;
+    satMetricPrefix?: string;
+    /**
+     * Whether to cross EVERY metric key against the chosen segment. Defaults to
+     * true, so every existing caller — the PDF included — keeps the exact
+     * result it had. The dashboard passes false because it no longer renders
+     * that product: a real study with 123 metric keys and 28 values of one
+     * characteristic produced 3 400 rows of which almost all were below the
+     * disclosure minimum. Nothing about a cross that IS asked for changes; this
+     * only stops computing crosses nobody reads.
+     */
+    includeCrosses?: boolean;
+  } = {},
 ): StudyMetrics {
   const dt = buildTable(rows);
   const keys = metricKeys(dt);
@@ -167,7 +181,7 @@ export function computeStudyMetrics(
   // Prefer 'genero' as the cross dimension, else the first available segment.
   const crossSegment =
     opts.crossSegment ?? (segments.includes("genero") ? "genero" : segments[0] ?? null);
-  const crosses = crossSegment
+  const crosses = crossSegment && opts.includeCrosses !== false
     ? keys.map((k) => ({ metric_key: k, rows: crossAverage(dt, k, crossSegment) }))
     : [];
 

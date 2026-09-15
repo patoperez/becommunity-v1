@@ -79,8 +79,13 @@ export function resultLanguage(key: string, fallbackTitle: string): ResultLangua
     const about = subject(key.slice("average:".length));
     return {
       name: about,
-      question: `¿Cómo se calificó ${about.toLowerCase()}?`,
-      method: "Promedio simple de las calificaciones registradas en la selección actual.",
+      question: `¿Cómo salió ${about.toLowerCase()}?`,
+      // NOT "de las calificaciones". A study's numeric columns are whatever the
+      // instrument measured — a rating, a count, an amount of money. Calling
+      // every one of them a calificación puts an invented unit under a right
+      // number: the real study's `ltv_cliente` averages 34 144.50, which is not
+      // a rating on anybody's scale.
+      method: "Promedio simple de los valores registrados en la selección actual.",
     };
   }
 
@@ -104,6 +109,32 @@ export function unitLabel(unit: "nps" | "percent" | "score"): string {
   if (unit === "nps") return "recomendación";
   if (unit === "percent") return "por ciento";
   return "promedio de las calificaciones";
+}
+
+/**
+ * What a result is called on screen, preferring a name a person actually wrote.
+ *
+ * A recorrido moment carries an authored label — somebody typed "Dar
+ * referencias" for `csat_rendicion_de_cuentas_dar_referencias` — and that beats
+ * anything derivable from an imported column name. With no authored label the
+ * derived vocabulary above applies, unchanged.
+ */
+export function resultName(key: string, fallbackTitle: string, authored?: string | null): string {
+  const label = typeof authored === "string" ? authored.trim() : "";
+  return label || resultLanguage(key, fallbackTitle).name;
+}
+
+/**
+ * Whether a result's name comes from something a person wrote, rather than from
+ * the column an import happened to carry.
+ *
+ * Used ONLY by the internal preview, to mark what still needs configuring. The
+ * client is never told that a name is derived: that is Be Community's own
+ * unfinished work, and contract C11 keeps it off the client surface.
+ */
+export function hasAuthoredName(key: string, authored?: string | null): boolean {
+  if (typeof authored === "string" && authored.trim()) return true;
+  return key === "respondents" || key === "nps" || key.startsWith("nps");
 }
 
 /** A characteristic (`area`, `antiguedad`) as the client sees it. */

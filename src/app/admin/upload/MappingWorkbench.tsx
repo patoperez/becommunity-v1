@@ -403,7 +403,9 @@ export function MappingWorkbench({
 
         <div className="mt-4 space-y-4">
           {mapping.recodingTables.map((table, tableIndex) => (
-            <div key={`${table.id}-${tableIndex}`} className="rounded-lg border border-line bg-surface-sunken p-3">
+            // Keyed by position, never by the group id: that id is regenerated
+            // from the name, and a key that moves throws the card away mid-edit.
+            <div key={tableIndex} className="rounded-lg border border-line bg-surface-sunken p-3">
               <label className="block text-sm font-medium text-strong">
                 Nombre de este grupo de equivalencias
                 <input
@@ -448,7 +450,10 @@ export function MappingWorkbench({
 
               <div className="mt-3 space-y-2">
                 {Object.entries(table.values).map(([label, value], valueIndex) => (
-                  <div key={`${label}-${valueIndex}`} className="flex flex-wrap items-end gap-2">
+                  // Keyed by position, never by the label: the label IS what the
+                  // operator is typing, so keying on it replaced the row — and
+                  // the focused input with it — on every character.
+                  <div key={valueIndex} className="flex flex-wrap items-end gap-2">
                     <label className="min-w-0 flex-1 text-xs font-medium text-muted">
                       Cuando la respuesta dice
                       <input

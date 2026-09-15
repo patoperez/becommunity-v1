@@ -15,6 +15,7 @@ import { DECIMALS, roundTo } from "@/lib/calc/metrics";
 import { buildAllowlist, type PivotAllowlist, type PivotResult } from "@/lib/calc/pivot";
 import type { JourneyStage } from "@/lib/calc/journey";
 import { parseDashboardConfig, type DashboardSections } from "@/lib/dashboard/config";
+import { authoredResultLabels, featuredResultKeys } from "@/lib/dashboard/results";
 import {
   summarizeConfirmedQualitative,
   type ConfirmedQualitative,
@@ -64,16 +65,6 @@ export type SafeJourneyStage = {
   qualitative: SafeQualitativeSummary;
 };
 
-export type SafeCross = {
-  metricKey: string;
-  rows: {
-    segment: string;
-    value: string | null;
-    n: number | null;
-    visibility: SampleVisibility;
-  }[];
-};
-
 export type SafeStudyView = {
   emptyStudy: boolean;
   emptySelection: boolean;
@@ -82,8 +73,26 @@ export type SafeStudyView = {
   sourceUnits: number | null;
   tiles: SafeMetric[];
   averages: SafeMetric[];
-  crossSegment: string | null;
-  crosses: SafeCross[];
+  /**
+   * The characteristic the one comparison explorer OPENS ON.
+   *
+   * It is the coarsest one the study has — the characteristic with the fewest
+   * distinct values — because that is the grouping most likely to put whole
+   * groups above the disclosure minimum. Opening on `giro`, which the real
+   * study splits 28 ways across 54 people, meant the first thing a reader saw
+   * was a comparison in which nothing could be shown.
+   *
+   * The engine's own `crossSegment` is untouched: the PDF still names the
+   * dimension it always did.
+   */
+  comparisonDimension: string | null;
+  /**
+   * The results the study's own configuration singles out, in reading order.
+   * Everything else stays in the complete inventory behind its disclosure.
+   */
+  featuredKeys: string[];
+  /** Display names the study authored for its results (recorrido moments). */
+  resultLabels: Record<string, string>;
   journey: SafeJourneyStage[];
   qualitative: SafeQualitativeSummary;
   canPivot: boolean;
@@ -114,6 +123,23 @@ function distinctUnits(rows: LongRow[], qualitative: ConfirmedQualitative[]): nu
     ...rows.map((row) => `r:${row.respondent_id}`),
     ...qualitative.map((row) => (row.respondent_id ? `r:${row.respondent_id}` : `o:${row.id}`)),
   ]).size;
+}
+
+/**
+ * The characteristic with the fewest distinct values, ties broken by name so
+ * the choice is stable between renders. Null when the study has none.
+ */
+function coarsestDimension(options: SegmentFilterOption[]): string | null {
+  let best: SegmentFilterOption | null = null;
+  for (const option of options) {
+    if (option.values.length === 0) continue;
+    if (
+      !best
+      || option.values.length < best.values.length
+      || (option.values.length === best.values.length && option.key.localeCompare(best.key) < 0)
+    ) best = option;
+  }
+  return best?.key ?? null;
 }
 
 function visibleCount(n: number, visibility: SampleVisibility): number | null {
@@ -178,7 +204,7 @@ export function buildStudyDashboard(
   filters: SegmentFilters,
   rawConfig: unknown = {},
 ): StudyDashboardPayload {
-  const { sections } = parseDashboardConfig(rawConfig);
+  const { sections, presentation } = parseDashboardConfig(rawConfig);
   const filterOptions = buildSegmentFilterOptions([...rows, ...qualitative]);
   const pivotAllowlist = buildAllowlist(rows);
   const filteredRows = filterRowsBySegments(rows, filters, filterOptions);
@@ -187,7 +213,12 @@ export function buildStudyDashboard(
   const selectedCount = distinctUnits(filteredRows, filteredQualitative);
   const selectionVisibility = sampleVisibility(selectedCount);
   const selectionSuppressed = selectionVisibility === "suppressed";
-  const metrics = computeStudyMetrics(filteredRows);
+  // `includeCrosses: false` — the exhaustive metric x segment product is no
+  // longer rendered anywhere on this surface, so it is no longer computed here.
+  // Every formula, and every cross a reader actually asks for, is unchanged:
+  // the comparison explorer computes exactly the one cross it was asked for,
+  // through the same allowlisted server path it always used.
+  const metrics = computeStudyMetrics(filteredRows, { includeCrosses: false });
 
   const tiles: SafeMetric[] = [];
   if (!selectionSuppressed && selectedCount > 0) {
@@ -220,18 +251,11 @@ export function buildStudyDashboard(
     item.n,
   ));
 
-  const crosses: SafeCross[] = selectionSuppressed ? [] : metrics.crosses.map((cross) => ({
-    metricKey: cross.metric_key,
-    rows: cross.rows.map((row) => {
-      const visibility = sampleVisibility(row.n);
-      return {
-        segment: row.segment,
-        value: visibility === "suppressed" ? null : formatScore(row.average),
-        n: visibleCount(row.n, visibility),
-        visibility,
-      };
-    }),
-  }));
+  // The study's own configuration decides what leads. `published` is exactly
+  // what the reader can be shown, so a result the selection suppressed can
+  // never be promoted into the lead by having been named somewhere.
+  const published = [...tiles, ...averages];
+  const featured = featuredResultKeys(published, stages, presentation.threshold);
 
   const journey: SafeJourneyStage[] = selectionSuppressed ? [] : stages.map((stage) => {
     const metric = computeStageMetric(filteredRows, stage.metric);
@@ -268,8 +292,11 @@ export function buildStudyDashboard(
       sourceUnits: visibleCount(sourceCount, sampleVisibility(sourceCount)),
       tiles: sections.metrics ? tiles : [],
       averages: sections.metrics ? averages : [],
-      crossSegment: sections.segments && !selectionSuppressed ? metrics.crossSegment : null,
-      crosses: sections.segments ? crosses : [],
+      comparisonDimension: sections.segments && !selectionSuppressed
+        ? coarsestDimension(filterOptions) ?? metrics.crossSegment
+        : null,
+      featuredKeys: sections.metrics ? featured : [],
+      resultLabels: sections.metrics ? authoredResultLabels(published, stages) : {},
       journey: sections.journey ? journey : [],
       qualitative: !sections.qualitative || selectionSuppressed
         ? { themes: [], quotes: [], hasSuppressedThemes: false }

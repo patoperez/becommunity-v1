@@ -31,7 +31,7 @@ has(trends, /tabIndex=\{0\}/, "chart points are keyboard reachable");
 lacks(trends, /`n=/, "trend never exposes technical n= copy");
 has(pivot, /computeStudyPivot\(studyId, filters, intent\)/, "comparison preserves the server computation contract");
 has(pivot, /validatePivotIntent\(intent, allowlist\)/, "comparison preserves the allowlist");
-has(pivot, /Compara por\.\.\./, "comparison uses plain-language framing");
+has(pivot, /Comparar por segmento/, "comparison uses plain-language framing");
 has(pivot, /Intentar de nuevo/, "comparison failure has a recovery action");
 has(pivot, /sampleCopy\("suppressed", null\)/, "comparison uses canonical privacy copy");
 has(findings, /interpretation: string \| null/, "finding contract includes a human interpretation slot");

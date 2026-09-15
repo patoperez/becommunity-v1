@@ -234,6 +234,22 @@ export const NOTE_CODES = [
   "legacy_only_pivot_explorer",
   "legacy_filter_key_space_differs",
   "legacy_cross_needs_presentation_map",
+  /**
+   * The legacy payload no longer PRECOMPUTES cross series.
+   *
+   * `src/lib/dashboard/view.ts` used to carry a `crosses` array and this
+   * comparison reported its length. The deployed insights fix (`75620a4`,
+   * "make a 123-result study readable instead of exhaustive") removed it: the
+   * study opens on ONE comparison the reader chooses from, computed on demand,
+   * because a 123-result study rendered exhaustively was unreadable.
+   *
+   * THE GAP IT REPORTED IS UNCHANGED — the legacy layer still compares and the
+   * canonical presentation still has no map for it — so the finding stays. What
+   * is gone is the NUMBER, and reporting a different quantity under the same key
+   * would be exactly the silent substitution this layer exists to refuse. The
+   * extent of the capability is still reported, under `legacy.pivot.allowlist`.
+   */
+  "legacy_cross_series_moved_behind_explorer",
   "canonical_reports_base_legacy_suppresses",
   "editorial_content_differs_on_both_sides",
 

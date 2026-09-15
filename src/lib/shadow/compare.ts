@@ -48,7 +48,9 @@
  *     view.averages       → `renewal.cri.{value,base}`, `legacy.metric_keys.*`
  *     view.selectedUnits  → `population.selected`
  *     view.selectionVisibility → `disclosure.small_sample_suppression`
- *     view.crosses        → `legacy.crosses`
+ *     view.crosses        → `legacy.crosses`  (REMOVED from the payload by the
+ *                           deployed insights fix; see the note code
+ *                           `legacy_cross_series_moved_behind_explorer`)
  *     view.qualitative    → `qualitative.curated_journey_cloud`
  *
  *   NOT FILTERED, provably, and therefore still comparable:
@@ -645,16 +647,27 @@ export function compareLegacyWithCanonical(
       noteCode: "legacy_filter_key_space_differs",
     }),
   );
+  // THE CROSS SERIES ARE NO LONGER IN THE PAYLOAD, AND THE FINDING SURVIVES
+  // WITHOUT ITS NUMBER.
+  //
+  // `view.crosses` carried every cross series and this line reported its
+  // length. The deployed insights fix removed it: a 123-result study rendered
+  // exhaustively was unreadable, so the study now opens on ONE comparison the
+  // reader chooses from and the series are computed on demand.
+  //
+  // The GAP is unchanged — the legacy layer still compares, and the canonical
+  // presentation still has no map for it — so the finding stays. Putting some
+  // other quantity behind the same key would be the silent substitution this
+  // whole layer exists to refuse, so there is no value, in either direction.
+  // The extent of the capability is reported above, under
+  // `legacy.pivot.allowlist`, from the same unfiltered allowlist as before.
   findings.push(
-    filtered
-      ? valueWithheld("legacy.crosses", "crosses", "legacy_only")
-      : finding({
-          key: "legacy.crosses",
-          section: "crosses",
-          classification: "legacy_only",
-          legacyValue: legacy.view.crosses.length,
-          noteCode: "legacy_cross_needs_presentation_map",
-        }),
+    finding({
+      key: "legacy.crosses",
+      section: "crosses",
+      classification: "legacy_only",
+      noteCode: "legacy_cross_series_moved_behind_explorer",
+    }),
   );
 
   // Suppression is the one place the two layers deliberately DISAGREE about

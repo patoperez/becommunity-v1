@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { JourneyStage } from "@/lib/calc/journey";
 import {
+  addStageDraft,
+  editStageDraft,
   optionsForStage,
+  removeStageDraft,
   stageConsequence,
   stageDraftRefusal,
-  stageIdFromLabel,
-  toStageDrafts,
+  toStageEditorDrafts,
   type JourneyMetricOption,
-  type StageDraft,
+  type StageEditorDraft,
 } from "@/lib/studio/journey-picker";
 
 /**
@@ -30,12 +32,16 @@ import {
  * `qual_observation.confirmed_stage_key` points at that id: regenerating it on
  * a rename would detach every comment a consultant had already filed against
  * that moment.
+ *
+ * THE ROW IS KEYED ON `uid`, NEVER ON THE STORED ID AND NEVER ON THE POSITION.
+ * A stage that has never been saved still derives its stored id from its own
+ * name, so keying the row on that id moved the key on every keystroke: React
+ * replaced the row, the browser discarded the focused input with it, and a
+ * moment could only be named one character per click.
  */
 
 const field =
   "min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-strong";
-
-type Draft = StageDraft & { isNew: boolean };
 
 const MAX_STAGES = 30;
 
@@ -54,42 +60,18 @@ export function JourneyStagesFields({
   /** The rest of the form: identity, publication state, visible sections. */
   children?: ReactNode;
 }) {
-  const [drafts, setDrafts] = useState<Draft[]>(() =>
-    toStageDrafts(initialStages).map((draft) => ({ ...draft, isNew: false })),
+  const [drafts, setDrafts] = useState<StageEditorDraft[]>(() =>
+    toStageEditorDrafts(initialStages),
   );
+  /** Monotonic and never reused, so a removed row cannot resurrect its key. */
+  const added = useRef(0);
 
   const refusal = stageDraftRefusal(drafts);
 
-  function update(index: number, patch: Partial<Draft>) {
-    setDrafts((previous) =>
-      previous.map((draft, position) => {
-        if (position !== index) return draft;
-        const next = { ...draft, ...patch };
-        // Only a stage that has never been saved may still take a new
-        // identifier from its name.
-        if (next.isNew && patch.label !== undefined) {
-          const taken = previous.filter((_, other) => other !== index).map((other) => other.id);
-          next.id = stageIdFromLabel(next.label, taken, index + 1);
-        }
-        return next;
-      }),
-    );
-  }
-
   function addStage() {
-    setDrafts((previous) => {
-      const taken = previous.map((draft) => draft.id);
-      return [
-        ...previous,
-        {
-          id: stageIdFromLabel("", taken, previous.length + 1),
-          label: "",
-          metric: "",
-          description: "",
-          isNew: true,
-        },
-      ];
-    });
+    added.current += 1;
+    const sequence = added.current;
+    setDrafts((previous) => addStageDraft(previous, sequence));
   }
 
   return (
@@ -123,15 +105,12 @@ export function JourneyStagesFields({
         ) : null}
 
         <div className="mt-3 space-y-3">
-          {drafts.map((draft, index) => {
+          {drafts.map((draft) => {
             const stageOptions = optionsForStage(options, draft.metric);
             const chosen = stageOptions.find((option) => option.key === draft.metric) ?? null;
             const historical = chosen !== null && !chosen.available;
             return (
-              <div
-                key={`${draft.id}-${index}`}
-                className="rounded-xl border border-line bg-surface-page p-3.5"
-              >
+              <div key={draft.uid} className="rounded-xl border border-line bg-surface-page p-3.5">
                 {/* The stored identifier travels with the stage and is never
                     presented as something to fill in. */}
                 <input type="hidden" name="stage_id" value={draft.id} />
@@ -146,7 +125,10 @@ export function JourneyStagesFields({
                       maxLength={120}
                       value={draft.label}
                       placeholder="Primer contacto"
-                      onChange={(event) => update(index, { label: event.target.value })}
+                      onChange={(event) => {
+                        const label = event.target.value;
+                        setDrafts((previous) => editStageDraft(previous, draft.uid, { label }));
+                      }}
                     />
                   </label>
 
@@ -157,7 +139,10 @@ export function JourneyStagesFields({
                       name="stage_metric"
                       required
                       value={draft.metric}
-                      onChange={(event) => update(index, { metric: event.target.value })}
+                      onChange={(event) => {
+                        const metric = event.target.value;
+                        setDrafts((previous) => editStageDraft(previous, draft.uid, { metric }));
+                      }}
                     >
                       <option value="">Elige un resultado…</option>
                       {stageOptions.map((option) => (
@@ -175,7 +160,7 @@ export function JourneyStagesFields({
 
                   <button
                     type="button"
-                    onClick={() => setDrafts(drafts.filter((_, other) => other !== index))}
+                    onClick={() => setDrafts((previous) => removeStageDraft(previous, draft.uid))}
                     className="min-h-11 rounded-lg px-3 py-2 text-sm font-medium text-danger hover:bg-danger-surface"
                   >
                     Quitar
@@ -201,7 +186,10 @@ export function JourneyStagesFields({
                     rows={2}
                     value={draft.description}
                     placeholder="Qué vive la persona en este momento."
-                    onChange={(event) => update(index, { description: event.target.value })}
+                    onChange={(event) => {
+                      const description = event.target.value;
+                      setDrafts((previous) => editStageDraft(previous, draft.uid, { description }));
+                    }}
                   />
                 </label>
               </div>

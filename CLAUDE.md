@@ -1373,3 +1373,24 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
 ## When unsure
 Ask. Do not guess on security, authorization, or calculations. A stopped task is
 cheaper than a leak or a wrong number shipped to a client.
+- ⚠️ **PRODUCTION CARRIES FOURTEEN COMMITS THAT `main` HAS NEVER HAD.** They were
+  deployed from `claude/bni-executive-preview-hotfix` directly, never merged, so
+  merging EITHER branch and deploying removes them. Unit 6B.4B2K reconciled them
+  by file state rather than by commit message and **ported six** — the journey
+  caret fix, its gate fix, `keep_vars = true` with Suite D's enforcement, and the
+  three insights readability fixes — leaving **17 files byte-identical to
+  production**. Three are documentation. **Five are a whole live product feature,
+  «Revisar categorías», that was deliberately NOT ported**: its migration `0022`
+  is applied and its file is already here, so the tables exist and only the code
+  is missing, and porting it is a merge of intent across the canonical rewrite
+  plus a genuine product question about its overlap with the canonical
+  qualitative sign-off. See `docs/CURRENT_STATE.md` for the side-by-side. **That
+  decision is still open and a deploy will make it silently.**
+- ⓘ **`keep_vars = true` IS BACK IN `wrangler.toml`, AND IT RECORDS A REAL
+  OUTAGE.** On 2026-08-28 a manual deploy deleted the Worker's
+  `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, every route
+  answered HTTP 500 for about nine minutes, and service returned only after a
+  rollback. With `keep_vars` at its default a `wrangler deploy` reconciles away
+  every dashboard-managed plain-text variable the file does not declare, and this
+  file declares none — deliberately, because it is committed. Suite D's D-g check
+  fails if the line is removed or flipped or if a `[vars]` block appears.

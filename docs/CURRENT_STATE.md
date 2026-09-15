@@ -6651,3 +6651,109 @@ and a new check PROVES each allowlisted name from its own migration: declared
 `authenticated`, granted only to `service_role`. A computed name is a mutation by
 default. **98 → 100 checks, 100 passed.**
 
+### The fourteen commits production has and neither branch had
+
+`becommunity-v1` serves version `e691ecd8`, built from **`4b0af06`** on
+`claude/bni-executive-preview-hotfix`. Fourteen commits are reachable from that
+commit and from neither `origin/main` nor this branch. **`main` does not have
+them either** — they were deployed directly, never merged — so merging *either*
+branch and deploying would remove them from production.
+
+Classified by CODE and BEHAVIOUR, not by commit message. No patch-id matched
+anything in this branch's 216 commits, so the test used was: does the FILE STATE
+exist here, and is it production's? For all ten non-documentation commits the
+answer was the same — **every file they touch exists here, byte-identical to
+`main`, and differs from production**. The surfaces are still served: this branch
+still renders the legacy dashboard through `StudyCard`, `NarrativeHome` and
+`PivotExplorer` (9 references from `/insights/e/[studyId]`), and still mounts
+`JourneyStagesFields` on two Studio screens.
+
+| # | commit | subject | classification | action |
+|---|---|---|---|---|
+| 1 | `8bea376` | journey moment named without losing the caret | REQUIRED_TO_PORT | **ported** |
+| 2 | `cda09ac` | stop the live journey gate tripping Suite D | REQUIRED_TO_PORT | **ported** |
+| 3 | `28d5748` | docs(p9): journey fix and safe deploy handoff | UNRELATED_TO_RELEASE | substance folded into this unit's docs |
+| 4 | `d25d0e4` | **keep the dashboard's variables when Wrangler deploys** | REQUIRED_TO_PORT | **ported** |
+| 5 | `022513e` | categories: a ledger for deciding two answers are one | TRUE_PRODUCT_DECISION_REQUIRED | **not ported — see below** |
+| 6 | `338e5a0` | «Revisar categorías», and the publication it can hold up | TRUE_PRODUCT_DECISION_REQUIRED | **not ported** |
+| 7 | `5828131` | categories: false-merge rate, and what turns AI on | TRUE_PRODUCT_DECISION_REQUIRED | **not ported** |
+| 8 | `cfdb558` | categories: let the live test clean up after itself | TRUE_PRODUCT_DECISION_REQUIRED | **not ported** |
+| 9 | `8231087` | categories: drive the review screen in a real browser | TRUE_PRODUCT_DECISION_REQUIRED | **not ported** |
+| 10 | `dd7ab0b` | docs: what `keep_vars` does not do | UNRELATED_TO_RELEASE | the flag itself is ported with its own comment |
+| 11 | `75620a4` | make a 123-result study readable instead of exhaustive | REQUIRED_TO_PORT | **ported** |
+| 12 | `a00cda1` | let the configuration choose the headline findings | REQUIRED_TO_PORT | **ported** |
+| 13 | `121d84e` | let a narrow phone shrink a select | REQUIRED_TO_PORT | **ported** |
+| 14 | `4b0af06` | docs: the preview repair and 54-vs-60 | UNRELATED_TO_RELEASE | — |
+
+**Seventeen files are now byte-identical to production**, checked one by one:
+`wrangler.toml`, `suite-d-supply-chain.mjs`, `PivotExplorer.tsx`,
+`StudyCard.tsx`, `NarrativeHome.tsx`, `dashboard/view.ts`, `narrative.ts`,
+`results.ts`, `language/results.ts`, `language/sample.ts`, `calc/engine.ts`,
+`JourneyStagesFields.tsx`, `journey-picker.ts`, `MappingWorkbench.tsx` and the
+three gates. `package.json` was merged by hand — the two ported test scripts and
+their chain entries were added, and the category scripts deliberately were not.
+
+#### `keep_vars = true` is back, and it records a real outage
+
+`d25d0e4` is the one the brief named at minimum, and its own comment says why:
+on **2026-08-28 a manual deploy deleted `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` from the Worker, every route answered HTTP 500
+for about nine minutes**, and service returned only after a rollback and a
+corrected preview promotion. With `keep_vars` at its default a `wrangler deploy`
+reconciles the dashboard's plain-text variables away, and this file declares
+none. Suite D's D-g check fails if the line is removed, flipped, or if a `[vars]`
+block appears — that enforcement is ported too.
+
+#### One adaptation the port needed, stated rather than hidden
+
+`75620a4` REMOVED `crosses` from `SafeStudyView`: a 123-result study rendered
+exhaustively was unreadable, so the study now opens on one comparison the reader
+picks and the series are computed on demand. This branch's shadow comparison read
+`legacy.view.crosses.length`.
+
+The number no longer exists. Putting a different quantity behind the same key
+would be the silent substitution this whole unit is about, so `legacy.crosses`
+keeps its finding — the legacy layer still compares and the canonical
+presentation still has no map for it — and loses its value, under a new closed
+code `legacy_cross_series_moved_behind_explorer`. The extent of the capability is
+still reported, unchanged, under `legacy.pivot.allowlist`.
+
+#### The one genuine product decision that remains
+
+Five commits build **«Revisar categorías»**: about 4 000 lines under
+`src/lib/categories` (a candidate generator, a decision ledger, an impact model,
+a language layer and an optional OpenAI advisor behind a flag), a Studio route
+`/studio/e/<id>/categorias`, a publication blocker, three gates and a 259-line
+document. **It is live in production.** Its migration `0022_semantic_category_review`
+is applied to the hosted project and **its file is already in this branch** — so
+the tables exist and are reachable, and only the code that reads them is absent.
+
+It was NOT ported, and the reason is not effort:
+
+* it edits `src/lib/studies/authorized.ts`, `src/lib/calc/load.ts`,
+  `src/lib/studio/study-workspace.ts`, `StudyTabs.tsx` and the LEGACY
+  `/studio/e/<id>/publicar` page — every one of which this branch rewrote for the
+  canonical architecture, so the port is a merge of intent, not of text;
+* it adds a publication blocker to a publication path this branch replaced;
+* and it raises a real question: the canonical release has its own
+  `canonical_qualitative_signoff` (migration 0031) over the same category labels.
+  They are NOT the same thing — the category review DECIDES that two free-text
+  answers are one category, the sign-off RECORDS that a person read the resulting
+  labels — but whether the canonical release ships one, the other or both is a
+  product decision, not a merge conflict.
+
+**Side by side, for the decision:**
+
+| | «Revisar categorías» (production) | canonical qualitative sign-off (this branch) |
+|---|---|---|
+| what a person does | merges two answers that mean the same thing | reads the final labels and signs that they read them |
+| when | before results are computed | before a publication |
+| storage | `category_decision`, `study_category_snapshot` (0022, applied) | `canonical_qualitative_signoff` (0031, applied) |
+| blocks publication | yes, the legacy publish page | yes, the canonical preflight |
+| in production | **yes** | no |
+| in this branch | **no** | yes |
+| AI | optional OpenAI advisor behind a flag | none |
+
+Nothing about this is urgent for the canonical release EXCEPT that a merge plus a
+deploy removes it from production. Deciding to drop it is a legitimate answer;
+dropping it by accident is not.
