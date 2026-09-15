@@ -6292,10 +6292,16 @@ it by any import path. A publication would have written an immutable snapshot,
 moved a pointer and recorded a named person's acknowledgement, and no client
 could have seen any of it.
 
-Production made that worse rather than better: the deployed Worker is built from
-`main`, whose tree stops at migration `0021` and contains none of the canonical
-code — so the deployed app has no code that could read a canonical publication
-even though the hosted database has the tables.
+Production made that worse rather than better: the deployed Worker contains none
+of the canonical code — so the deployed app has no code that could read a
+canonical publication even though the hosted database has the tables.
+
+ⓘ **This paragraph used to say the deployed Worker «is built from `main`, whose
+tree stops at migration `0021`». Unit 6B.4B2J read the account and found both
+halves wrong** — it is built from `4b0af06`, which is on no branch this work
+touches and carries migrations to `0022`. See that unit's section below and
+`docs/CANONICAL_CLIENT_READ_PATH.md` §6a. The conclusion — no canonical code is
+deployed — is unaffected.
 
 ### What changed — one route, one reader, one action
 
@@ -6412,3 +6418,111 @@ acknowledged, nothing was published, nothing was deployed, no PR was opened and
 
 External evidence, outside every Git repository: `~/becommunity-6b4b2i/`
 (`hosted-readonly.json`, `client-qa-result.json`, `screenshots/`).
+
+---
+
+## Unit 6B.4B2J — the protected release-candidate preview, and what it found
+
+Baseline `18dd8c563a8856f8b243b80ef0acfae68b07eed5`; `origin/main` unchanged at
+`c76762f428834b7401118b7d2ad7f0d40158d56a`. **No merge, no production deploy, no
+publication, no study-status change, no client account.**
+
+### What was deployed
+
+A **version**, not a deployment. `wrangler versions upload` on the existing
+Worker created **`e2cabbf9-7100-414d-bf32-66f4c2c0f3ba`**, tag
+`rc-6b4b2j-18dd8c5`, at
+**`https://e2cabbf9-becommunity-v1.ollinagencyllc.workers.dev`**.
+
+Built from a **clean worktree at the exact commit** with no `.env` file:
+`next build` + `opennextjs-cloudflare build`, worker.js
+`d05223bf4d44c84108a102ab62aa3bc9c5568f0c3ac2064c37be5cc65c64bc45`, BUILD_ID
+`ndKcGirfSH-dn5CmZH4gO`, compiled env snapshot **empty** (three empty objects),
+`test:secrets` passed, and the four configured credential values appear in **0**
+files of the artifact. The preview serves that BUILD_ID; production serves
+`vD8W7i8ruS3W_UdFMujl0`.
+
+**Production untouched, proved three ways:** active version `e691ecd8…` before
+and after, 10 deployments before and after, and an unchanged served-asset
+fingerprint `c033c593…`. Hosted state unchanged too — the read-only check
+**24/24** and the fingerprint gate **136/136**, still exactly one canonical
+draft at revision 3, publication tables empty, 15 decisions in force.
+
+### The topology was inferred for months. Three inferences were wrong.
+
+Full evidence in [`docs/CANONICAL_CLIENT_READ_PATH.md`](CANONICAL_CLIENT_READ_PATH.md) §6a.
+
+1. **Production is not built from `main`.** It runs `e691ecd8`, deployed
+   2026-08-28, built from `4b0af06` — on `claude/bni-executive-preview-hotfix`,
+   an ancestor of neither `main` nor this branch, carrying **14 commits present
+   in neither**, including the «Revisar categorías» feature and three insights
+   fixes. The previous unit's documentation said otherwise; it has been corrected.
+2. **A branch push DOES build, into a version, never a deployment.** Four pushes
+   produced four versions ~90 s later while the deployed version never moved. So
+   a protected preview already existed for this commit — Cloudflare's own
+   `fcdd9970`.
+3. **`keep_vars = true` is on the deployed commit and missing from this branch.**
+   Without it `wrangler deploy` deletes the dashboard-set variables before
+   applying the config's, and the config declares none. **Restore it before any
+   deploy from this branch.**
+
+### ⚠️ The finding: a canonical read fails on the Cloudflare edge, and nowhere else
+
+| where | `/revision/dolor` counters (unreviewed/approved/excluded/unresolved) |
+|---|---|
+| local Node, this commit, hosted database | **0 / 15 / 0 / 0** |
+| local workerd (`wrangler dev`), same artifact | **0 / 15 / 0 / 0** |
+| deployed `e2cabbf9` (built here) | **0 / 0 / 0 / 0** |
+| deployed `fcdd9970` (**built by Cloudflare**, same commit) | **0 / 0 / 0 / 0** |
+| deployed `2784061d` (Cloudflare, previous commit) | **0 / 0 / 0 / 0** |
+
+Not the build, not this commit, not workerd — **deployment on the edge**.
+`loadCuratedPainReviewEvidence` throws there; `loadJourneyPainReview` catches it
+and returns an applicable-but-empty review; the preflight raises
+`required_content_missing` and `journey_pain_review_incomplete` as **hard
+blockers** on a study whose fifteen decisions are all recorded and approved.
+
+Leading hypothesis: the **Workers free-plan 50-subrequest ceiling** — the late
+reads degrade (the qualitative sign-off also reads `pending` where it is
+`current` locally) and the early ones do not. **Not proven:** the thrown
+`CanonicalReadError` code is swallowed and surfaced nowhere, which is itself
+worth fixing. Pinning it needs one instrumented version.
+
+**Two consequences bigger than the cause.** A canonical read failure is shown to
+a reviewer as «the editorial review is unfinished» — indistinguishable from real
+unfinished work, on the screen whose whole job is to say whether the work is
+done. And the client's filtered read runs the same `readAndBuild` plus the same
+pain read, so **the canonical client path cannot be assumed to work on
+Cloudflare**. No gate has ever exercised it there; every one ran under Node or
+local workerd.
+
+### Preview QA — 72 checks, 62 passed, 10 failed
+
+All ten failures are that one finding. What passed: `/api/health` 200 `ok`; the
+CSP names exactly one Supabase project and it is the expected one; five
+protected routes answer `/login` to an anonymous visitor and leak nothing;
+internal sign-in and sign-out; an internal person on the client route is sent to
+the internal preview; three viewports compose without overflow and suppress no
+block; **a real client on a real published study with no canonical publication
+gets the documented legacy behaviour** — the `not_published` branch, on the
+hosted project, with a real account; another tenant's client is refused; and 23
+separate leak checks find nothing internal in the client's page.
+
+### Honest limitations of this preview
+
+It shares the hosted Supabase project, so it is **not** an isolated environment —
+only an isolated *version*. Cuicuilco is unpublished, so the preview proves the
+`not_published` branch and the protected internal surfaces, and **proves nothing
+about the hosted canonical-publication branch**; that was proved in disposable
+infrastructure. Login and logout do write hosted Auth state; no study,
+publication or editorial row was touched, and the fingerprint gate confirms it.
+
+### What is left
+
+Resolve the edge read failure, restore `keep_vars`, decide about the 14
+production-only commits — then merge, deploy explicitly, provision a client
+account, set the status, and publish. Cuicuilco remains **unpublished**.
+
+External evidence, outside every Git repository: `~/becommunity-6b4b2j/`
+(`preview-qa-result.json`, `hosted-before.json`, `hosted-after.json`,
+`cf-deployments-*.txt`, `dryrun.txt`, `screenshots/`).

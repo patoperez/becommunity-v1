@@ -77,11 +77,19 @@ client-facing route named any of them.
 
 > **What production URL would a client receive after publication today?**
 > `https://becommunity-v1.ollinagencyllc.workers.dev/insights/e/cd4d6acd-…`, and
-> it would render the **legacy P8 dashboard**. Production is built from `main`
-> (`c76762f4`), whose tree stops at migration `0021` and contains none of
-> `src/lib/studio/publication-workspace.ts`, `presentation-workspace.ts` or the
-> canonical presentation layer — so the deployed Worker has no code that could
-> read a canonical publication even though the hosted database has the tables.
+> it would render the **legacy P8 dashboard** — the deployed Worker has no code
+> that could read a canonical publication even though the hosted database has
+> the tables.
+
+> ⓘ **THE SENTENCE THAT USED TO STAND HERE WAS WRONG, AND UNIT 6B.4B2J MEASURED
+> IT.** It read «Production is built from `main` (`c76762f4`), whose tree stops
+> at migration `0021`». Neither half holds. `wrangler deployments list` shows the
+> Worker serving version **`e691ecd8-de9a-4a02-a8e3-13aad7e9e805`**, deployed
+> **2026-08-28T23:16:48Z** and built from commit **`4b0af06`** — which is on
+> `claude/bni-executive-preview-hotfix`, is **not an ancestor of `main`**, is not
+> an ancestor of this branch, and carries migrations up to **`0022`**. The claim
+> was inferred from the documented «merge to main deploys» rule rather than read
+> off the account. See §6a.
 
 **«Publicar para el cliente» did not mean a client route was connected.** It
 meant a row would be written that nothing a client can reach would read.
@@ -269,14 +277,103 @@ moment at which a client's screen changes.
    «verify with a real client account» has no account to verify with. One has to
    be provisioned through the backoffice first.
 
+## 6a · The deployment topology, as Unit 6B.4B2J OBSERVED it
+
+Everything in this section was read off the Cloudflare account with
+`wrangler deployments list` / `wrangler versions list`, or measured against the
+deployed hosts. It replaces what earlier units inferred.
+
+| | |
+|---|---|
+| Worker | one only: **`becommunity-v1`**, on `*.workers.dev`, no zone, no route, no custom domain |
+| Deployed version | **`e691ecd8-de9a-4a02-a8e3-13aad7e9e805`**, 100% of traffic |
+| Deployed since | **2026-08-28T23:16:48Z** — ten deployments in total, none since |
+| Built from | commit **`4b0af06`**, on `claude/bni-executive-preview-hotfix` |
+| Relation to `main` | **not an ancestor.** `main` last moved 2026-08-28T09:22Z, *before* this version was built |
+| Relation to this branch | **not an ancestor.** Their merge base is `c76762f4` (= `main`) |
+
+### A branch push builds a VERSION, and never a deployment
+
+The earlier docs called this «not determinable». It is determinable, and it was
+determined by correlating four pushes with the version list:
+
+| pushed commit | push time (UTC) | version created |
+|---|---|---|
+| `5176416` (6B.4B2E) | 10:48:27Z | 10:49:56Z |
+| `e1c5748` (6B.4B2G) | 19:41:35Z | 19:43:09Z |
+| `1a5385d` (6B.4B2H) | 00:04:38Z | 00:06:16Z |
+| `18dd8c5` (6B.4B2I) | 02:08:34Z | 02:10:24Z |
+
+Four for four, about ninety seconds after each push — while the deployed version
+has not moved since 2026-08-28. **Workers Builds is connected and builds this
+branch into versions; it does not deploy them.** So a protected
+release-candidate preview already exists for every push, at
+`https://<version-id-prefix>-becommunity-v1.ollinagencyllc.workers.dev`, and
+6B.4B2J's own upload (`e2cabbf9`, tag `rc-6b4b2j-18dd8c5`) is one more of the
+same kind rather than new infrastructure.
+
+### `keep_vars` is missing from this branch, and production has it
+
+`wrangler.toml` on the deployed commit `4b0af06` sets **`keep_vars = true`**
+(line 37) with a documented rationale. **Neither this branch's `wrangler.toml`
+nor `main`'s contains it.** With `keep_vars` at its default `false`, a
+`wrangler deploy` deletes every dashboard-set plain-text variable before
+applying those in the configuration — and the configuration declares none. A
+deploy of this branch as it stands would therefore strip
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from the Worker.
+
+The 14 commits in the deployed version that are on neither `main` nor this
+branch include `d25d0e4 fix(deploy): keep the dashboard's variables when
+Wrangler deploys` — the fix that added it — along with the «Revisar categorías»
+feature and three insights readability fixes. **Merging this branch to `main`
+and deploying would regress all fourteen.**
+
+### A canonical read fails on the Cloudflare edge and nowhere else
+
+Measured on `/studio/e/<cuicuilco>/revision/dolor`, whose counters read
+«unreviewed / approved / excluded / unresolved»:
+
+| where | counters |
+|---|---|
+| local Node, this commit, hosted database | **0 / 15 / 0 / 0** — correct |
+| local workerd (`wrangler dev`), the same artifact | **0 / 15 / 0 / 0** — correct |
+| deployed version `e2cabbf9` (built here) | **0 / 0 / 0 / 0** |
+| deployed version `fcdd9970` (**built by Cloudflare** from the same commit) | **0 / 0 / 0 / 0** |
+| deployed version `2784061d` (Cloudflare, previous commit) | **0 / 0 / 0 / 0** |
+
+So it is not the build, not this commit, and not workerd: it is **deployment on
+the Cloudflare edge**. `loadCuratedPainReviewEvidence` throws there, and
+`loadJourneyPainReview` catches it and returns an applicable-but-empty review —
+which the publication preflight then reports as two **hard blockers**,
+`required_content_missing` and `journey_pain_review_incomplete`, on a study
+whose fifteen decisions are all recorded and approved.
+
+**The leading hypothesis is the Workers free-plan 50-subrequest ceiling.** The
+revision page runs `readAndBuild`'s twenty-six paged reads before it reaches the
+curated-pain read, and the qualitative sign-off — later still — also comes back
+as `qualitative_review_pending` when it is `current` locally. Both late reads
+degrade; the early ones do not. It is a hypothesis, not a measurement: the
+thrown `CanonicalReadError` code is swallowed and surfaced nowhere, so pinning
+it needs one instrumented version.
+
+**Two consequences that matter more than the cause.** First, a canonical read
+failure is presented to a reviewer as «the editorial review is unfinished» —
+indistinguishable from real unfinished work, on the screen whose whole job is to
+say whether the work is done. Second, the client's own filtered read
+(`previewPublishedPresentationUnderSelection`) performs the same `readAndBuild`
+plus the same pain read, so **the canonical client path cannot be assumed to
+work on Cloudflare until this is resolved.** Nothing in this repository has ever
+exercised it there: every gate to date ran under Node or local workerd.
+
 ### The release sequence
 
 | # | Step | Why here |
 |---|---|---|
-| 1 | Merge `codex/canonical-experience-integration` into `main` by the ordinary review | Production builds from `main` |
-| 2 | Deploy to a **protected preview** Worker pointed at the hosted project | The reader is read-only and there is no publication, so a preview cannot change what a client sees |
-| 3 | Preview QA as an authorized client: the study still renders exactly as it does today | This is the `not_published` branch; it must be byte-identical to current behaviour |
-| 4 | Deploy to production and verify `/api/health` and one client route | Same reasoning; still no publication |
+| 0 | **Resolve the edge canonical-read failure**, and re-run the preview QA | Until this passes, the canonical experience does not work where it would be served |
+| 1 | **Restore `keep_vars = true`** to `wrangler.toml`, and decide what to do about the other 13 production-only commits | Otherwise a deploy strips the Worker's variables and regresses shipped work |
+| 2 | Merge `codex/canonical-experience-integration` into `main` by the ordinary review | — but note that merging does **not** deploy; see §6a |
+| 3 | Protected preview QA on the version Workers Builds produces from the merge commit | The reader is read-only and there is no publication, so a preview cannot change what a client sees |
+| 4 | **Deploy explicitly** — `wrangler versions deploy`, or the documented `wrangler deploy` — and verify `/api/health` and one client route | A merge alone leaves production on `e691ecd8` |
 | 5 | Provision a real client account in the Cuicuilco tenant | Blocker 2. Nothing can be verified as a client without one |
 | 6 | Set `study.status = 'published'` on `/studio/e/[id]/publicar` | Blocker 1. Until this, RLS hides the study from its own client |
 | 7 | **The controlled publication**: on `/studio/e/[id]/revision`, tick `granular_filter_dimensions`, tick the final confirmation, press «Publicar para el cliente» | The only step that changes a client's screen |

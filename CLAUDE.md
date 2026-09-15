@@ -665,15 +665,48 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
     LEGACY P8 previews** and are not evidence about the canonical client
     experience. `/api/studies/[id]/report` is legacy too and is NOT part of a
     publication;
-  * **DEPLOY BEFORE PUBLISHING.** Production builds from `main`, which has no
-    canonical code, so publishing first is a silent no-op with a misleading audit
-    record. With no publication the new reader answers on its `not_published`
-    branch and today's behaviour is preserved byte for byte, so the deployment is
-    safe to verify at leisure;
+  * **DEPLOY BEFORE PUBLISHING.** The deployed Worker has no canonical code, so
+    publishing first is a silent no-op with a misleading audit record. With no
+    publication the new reader answers on its `not_published` branch and today's
+    behaviour is preserved byte for byte, so the deployment is safe to verify at
+    leisure;
   * **`study.status` still gates visibility.** `published_study_select` gives a
     client a study only when it is `published`, and the canonical publish path
     does not touch that column. A canonical publication alone leaves the study
     invisible to its own client.
+- ⓘ **THE DEPLOYMENT TOPOLOGY WAS INFERRED FOR MONTHS AND IS NOW MEASURED —
+  UNIT 6B.4B2J.** Three of the inferences were wrong, and
+  `docs/CANONICAL_CLIENT_READ_PATH.md` §6a carries the evidence.
+
+  * **Production is NOT built from `main`.** `becommunity-v1` serves version
+    `e691ecd8`, deployed 2026-08-28, built from `4b0af06` — a `claude/*` branch
+    commit that is an ancestor of neither `main` nor the canonical branch, and
+    that carries 14 commits present in neither.
+  * **A push to a non-main branch DOES build — into a VERSION, never a
+    deployment.** Four pushes, four versions, ~90s each; the deployed version has
+    not moved since. So a protected preview already exists for every push at
+    `https://<version-id-prefix>-becommunity-v1.ollinagencyllc.workers.dev`, and
+    `wrangler versions upload` is the established way to make one deliberately.
+    **A merge to `main` does not by itself deploy.**
+  * **`keep_vars = true` is on the deployed commit and NOT on this branch.**
+    Without it `wrangler deploy` deletes the dashboard-set plain-text variables
+    before applying the config's, and the config declares none. Restore it before
+    any deploy from this branch.
+- ⚠️ **A CANONICAL READ FAILS ON THE CLOUDFLARE EDGE AND NOWHERE ELSE, AND THE
+  PRODUCT REPORTS IT AS UNFINISHED EDITORIAL WORK.** On every deployed version —
+  including ones Cloudflare built itself — `loadCuratedPainReviewEvidence`
+  throws; `loadJourneyPainReview` catches it and returns an applicable-but-empty
+  review; the preflight then raises `required_content_missing` and
+  `journey_pain_review_incomplete` as hard blockers on a study whose fifteen
+  decisions are all recorded and approved. The same artifact under local workerd
+  and under Node reports 15 approved.
+
+  Leading hypothesis: the Workers free-plan 50-subrequest ceiling, since the
+  late reads degrade and the early ones do not. It is NOT proven — the thrown
+  `CanonicalReadError` code is swallowed and surfaced nowhere, which is itself
+  worth fixing. **Do not assume the canonical client path works on Cloudflare:**
+  the client's filtered read runs the same `readAndBuild` plus the same pain
+  read, and no gate has ever exercised it on the edge.
 - ⓘ **A CANONICAL DRAFT AND A LEGACY DRAFT LIVE IN DIFFERENT TABLES, and that
   is the whole coexistence answer.** The question was put to a real PostgreSQL
   before it was answered. `study_experience_draft`'s primary key is `study_id`
