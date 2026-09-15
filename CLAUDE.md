@@ -1422,14 +1422,34 @@ cheaper than a leak or a wrong number shipped to a client.
   not editable: «No aplica» is excluded by methodology §6.1 under a registered
   authority. **There is no AI on this path at all** — no model, no provider, no
   key, no prompt, and no import that could reach one.
-- ⓘ **MIGRATION `0034` IS THE FIRST CANONICAL MIGRATION THIS REPOSITORY CARRIES
-  THAT IS *NOT* APPLIED TO THE HOSTED PROJECT.** It is proved against a
-  disposable PostgreSQL and applied nowhere else. Until it is applied the review
-  reads as NOT PROVISIONED — categories and counts shown, deciding disabled with
-  a sentence saying why, and the projection the empty one, which is exactly what
-  a study with no decisions already has. **That is a third state, not a
-  fallback**, and a FAILED read is a fourth that refuses rather than showing an
-  empty review. Do not apply `0034` without a separate authorization.
+- ⓘ **MIGRATION `0034` IS APPLIED TO THE HOSTED PROJECT**, by Unit 6B.4B2M on
+  2026-09-15, through `supabase db push` over the session pooler after a fresh
+  backup and a full restore rehearsal. The hosted ledger now reads `0000`–`0034`,
+  each version exactly once. The delta was measured on a restored copy BEFORE it
+  reached the project and matched object for object: one table, four indexes, one
+  trigger, one policy, three functions, fifteen check constraints, one grant of
+  `SELECT` to `service_role`, and **no existing object altered and no existing
+  row changed**. **Applying it grouped nothing** — the canonical category-review
+  ledger is empty, Cuicuilco's two qualitative families carry zero grouping
+  candidates, so an empty ledger is the CORRECT state rather than an unreviewed
+  one. `scripts/canonical-presentation-hosted-fingerprint.mjs` §[3d] pins all of
+  that by semantics.
+  - ⓘ **THE PROJECT'S DEFAULT PRIVILEGES GRANT `ALL ON TABLES` TO `anon` AND
+    `authenticated`,** for any table `postgres` creates in `public`
+    (`ALTER DEFAULT PRIVILEGES FOR ROLE postgres …`, restored from the hosted
+    dump). A canonical migration's `revoke all … from anon, authenticated` is
+    therefore **load-bearing, not decorative**: without it every new table would
+    ship readable by every signed-in browser. The rehearsal applied `0034` AS
+    `postgres` with those rules in force precisely so the resulting ACL was a
+    prediction rather than an artefact, and the hosted table's measured ACL is
+    `postgres=arwdDxtm/postgres | service_role=r/postgres` — exactly what the
+    copy produced.
+  - ⓘ **THE THIRD AND FOURTH STATES STILL EXIST AND ARE STILL REACHABLE.**
+    Provisioning removed neither: a project without `0034` still reads as NOT
+    PROVISIONED — categories and counts shown, deciding disabled with a sentence
+    saying why, and the projection the empty one — and a FAILED read still
+    refuses rather than showing an empty review. Do not delete those branches
+    because the hosted project no longer takes them.
 - ⓘ **THE PRE-CANONICAL `category_decision` LEDGER IS NOT REUSED, AND THE REASON
   WAS READ OFF THE APPLIED SQL.** `record_category_decision` ends by writing
   `segment_dimension.config.aliases` and INSERTS a `segment_dimension` row when

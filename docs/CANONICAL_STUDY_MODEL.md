@@ -651,14 +651,29 @@ an empty review.
 
 ## Migration 0034: a canonical ledger for «Revisar categorías»
 
-`0034_canonical_category_review.sql` is the ninth canonical migration and the
-first one this repository carries that is **NOT APPLIED to the hosted project**.
-Unit 6B.4B2L wrote it, proved it against a disposable PostgreSQL 17 and a real
-PostgREST, and deliberately stopped before applying it. Until it is applied, the
-canonical category review reads as **not provisioned**: the categories are shown
-with their real counts, no decision can be recorded, and the projection every
-calculation applies is the empty one — which is exactly what a study with no
-decisions already has, so no number moves.
+Migration `0034` **is applied to the hosted project**, by Unit 6B.4B2M on
+2026-09-15, through `supabase db push` over the session pooler, after a fresh
+backup and a full restore rehearsal. It is the ninth canonical migration. Unit
+6B.4B2L wrote it, proved it against a disposable PostgreSQL 17 and a real
+PostgREST, and deliberately stopped before applying it; 6B.4B2M reviewed the
+bytes, measured the delta on a restored copy first, applied it, and confirmed the
+observed delta matched the rehearsed one object for object. Applying it grouped
+nothing: the canonical category-review ledger is empty on the hosted project, and
+Cuicuilco's two qualitative families carry zero grouping candidates, so an empty
+ledger is the correct state rather than an unreviewed one.
+
+ⓘ **THE HEADER OF THE MIGRATION FILE STILL SAYS IT IS APPLIED TO NO PROJECT, AND
+THAT IS DELIBERATE.** An applied migration is never edited, including its
+comments: the hosted ledger stores the statements that ran, and changing the file
+would make the repository and the ledger disagree about what ran. The claim is
+corrected here and in the other governing documents instead.
+
+On a project that does NOT have it — a disposable database, or the hosted project
+before that day — the canonical category review reads as **not provisioned**: the
+categories are shown with their real counts, no decision can be recorded, and the
+projection every calculation applies is the empty one, which is exactly what a
+study with no decisions already has, so no number moves. That branch still exists
+and is still reachable; provisioning one project did not remove it.
 
 ### What it creates
 
@@ -670,6 +685,21 @@ plus what another study of the same client decided about the same question).
 
 It alters no existing table, adds no column to one, drops nothing, rewrites no
 row and changes no policy, grant, function or index outside its own objects.
+
+**Measured on the hosted project**, before and after: one table (0 rows), four
+indexes, one trigger, one policy, three functions, fifteen check constraints, one
+grant of `SELECT` to `service_role`, one ledger row — and nothing removed,
+nothing altered, and **no existing row changed** in any of the 67 pre-existing
+tables, whose 15 791 rows are byte-identical by digest.
+
+ⓘ **THE `revoke` IS LOAD-BEARING.** The hosted project carries
+`ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES
+TO anon, authenticated, service_role`, so a table created by `postgres` starts
+life readable and writable by every browser role. `0034`'s
+`revoke all … from anon, authenticated` is what takes that away, and the hosted
+table's measured ACL is `postgres=arwdDxtm/postgres | service_role=r/postgres` —
+nothing for `anon`, nothing for `authenticated`. Any future canonical migration
+must carry the same revoke for the same reason.
 
 ### Why it is not the pre-canonical `category_decision` table
 
@@ -709,8 +739,9 @@ differently.
 `supabase/rollbacks/0034_drop_canonical_category_review.sql`. It destroys every
 canonical category decision — there is no other copy, because raw evidence was
 never rewritten — and after it every study's categories read exactly as the
-source coded them, which is what they read today on any project where `0034` is
-not applied. Publications survive unchanged: a publication stores the resolved
+source coded them. On the hosted project that is what they read anyway, because
+the ledger is empty: rolling `0034` back today would remove storage and change no
+number. Publications survive unchanged: a publication stores the resolved
 render model, so the labels and counts inside an already-published snapshot are
 bytes in `canonical_presentation_revision` and are not reachable from there.
 

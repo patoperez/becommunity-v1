@@ -332,8 +332,10 @@ byte-identical to production — `keep_vars = true` among them, with Suite D's o
 enforcement. Three are documentation. The remaining five are «Revisar
 categorías», and Unit 6B.4B2L **replaced the capability canonically** rather
 than cherry-picking them: the surface is `/studio/e/<id>/revision/categorias`,
-the storage is migration `0034`, and the differences from the legacy feature are
-deliberate and listed in `docs/CURRENT_STATE.md`. **Nothing a merge would remove
+the storage is migration `0034` — **applied to the hosted project on 2026-09-15
+by Unit 6B.4B2M, and applying it grouped nothing: the category-review ledger is
+empty** — and the differences from the legacy feature are deliberate and listed
+in `docs/CURRENT_STATE.md`. **Nothing a merge would remove
 is now unaccounted for**, and the one thing it WOULD remove that has no canonical
 counterpart is the legacy screen's ability to merge participant ATTRIBUTE values
 — which canonically is a filter dimension with a named methodological authority
@@ -383,7 +385,8 @@ exercised it there: every gate to date ran under Node or local workerd.
 |---|---|---|
 | 0 | ~~Resolve the edge canonical-read failure~~ **DONE (6B.4B2K)** — the fifty-subrequest ceiling was measured and removed; the review page costs 26 requests and the category review 18 | Until this passed, the canonical experience did not work where it would be served |
 | 0b | ~~Decide what to do about the five «Revisar categorías» commits~~ **DONE (6B.4B2L)** — the capability is replaced canonically | A deploy would otherwise have made that decision silently |
-| 0c | **Apply migration `0034`** to the hosted project, by the documented path, with a fresh verified backup and a restore rehearsal first | Until it is applied the category review is read-only: it shows the categories and refuses to record a decision, which is safe but is not the feature |
+| 0c | ~~Apply migration `0034`~~ **DONE (6B.4B2M)** — applied 2026-09-15 by `supabase db push` after a fresh backup and a full restore rehearsal; the hosted ledger reads `0000`–`0034`, the category-review ledger is empty, and Cuicuilco has zero grouping candidates | The category review is now provisioned rather than read-only; applying the storage grouped nothing |
+| 0d | **Remove the dashboard variable `CANONICAL_EDGE_DIAGNOSTICS`** on the `becommunity-v1` Worker | `keep_vars = true` carries it into every version. No code reads it, so it is inert — but a future diagnostic behind that flag would arrive switched on |
 | 1 | ~~Restore `keep_vars = true`~~ **DONE (6B.4B2K)** — it is in `wrangler.toml` with its incident comment, and Suite D's D-g fails if it is removed or flipped | Otherwise a deploy strips the Worker's variables and regresses shipped work |
 | 2 | Merge `codex/canonical-experience-integration` into `main` by the ordinary review | — but note that merging does **not** deploy; see §6a |
 | 3 | Protected preview QA on the version Workers Builds produces from the merge commit | The reader is read-only and there is no publication, so a preview cannot change what a client sees |

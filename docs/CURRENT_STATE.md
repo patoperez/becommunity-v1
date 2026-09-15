@@ -6911,14 +6911,16 @@ excluded by methodology §6.1 under a registered authority, and an editorial
 screen that could overrule a registered authority would make the authority
 decorative.
 
-### Phase B — the data model, and the migration that is NOT applied
+### Phase B — the data model, and the migration this unit did not apply
 
 `0034_canonical_category_review.sql`. Its contract, the three measured reasons
 the pre-canonical ledger cannot carry a canonical decision, and its rollback are
-in `docs/CANONICAL_STUDY_MODEL.md`. It is proved against disposable
-infrastructure and **deliberately not applied to the hosted project**.
+in `docs/CANONICAL_STUDY_MODEL.md`. It was proved against disposable
+infrastructure and **this unit deliberately did not apply it**; Unit 6B.4B2M
+applied it to the hosted project on 2026-09-15, and the section for that unit
+records the measured delta.
 
-Until it is applied, the screen reads as **not provisioned**: the categories and
+Until a project has it, the screen reads as **not provisioned**: the categories and
 their counts are shown, deciding is disabled with a sentence saying why, and the
 projection is the empty one. That is a third state, not a fallback — a failed
 READ is a fourth, and it refuses instead of showing an empty review, which is
@@ -7129,10 +7131,11 @@ canonical publication, another tenant's client refused, and 27 leak checks clean
 the deployment listing byte-identical, `/api/health` 200.
 
 **The hosted project**, before and after: fingerprint gate **136/136**, 67
-tables, 42 functions — so `0034` is still **not applied** — the legacy
-`category_decision` still holding its two `separate` rows and
+tables, 42 functions — so at that moment `0034` had **not yet been applied** —
+the legacy `category_decision` still holding its two `separate` rows and
 `study_category_snapshot` still empty, and **Cuicuilco still `draft` and still
-unpublished**.
+unpublished**. (Unit 6B.4B2M applied `0034` later the same day; the section below
+records it.)
 
 ⓘ **One loose end from Unit 6B.4B2K, reported rather than quietly fixed.** That
 unit set a dashboard variable `CANONICAL_EDGE_DIAGNOSTICS = "on"` for its
@@ -7149,3 +7152,292 @@ External evidence, outside every Git repository: `~/becommunity-6b4b2l/`
 (`legacy-audit.json`, `preview-qa-result.json`, `cf-deployments-*.txt`,
 `cf-upload-raw.txt`, `hosted-before-qa.txt`, `hosted-after-qa.txt`,
 `screenshots/`).
+
+---
+
+## Unit 6B.4B2M — migration `0034` applied to the hosted project, and the release candidate frozen
+
+**`0034_canonical_category_review.sql` is applied to the hosted project**, on
+2026-09-15, through the repository's established mechanism — `supabase db push`
+over the session pooler — after a fresh backup and a full restore rehearsal. The
+hosted ledger now reads `0000`–`0034`, each version exactly once, and **applying
+it grouped nothing**: the canonical category-review ledger is empty, and
+Cuicuilco's two qualitative families carry **zero grouping candidates**, so an
+empty ledger is the CORRECT state rather than an unreviewed one.
+
+### The migration, before anything was touched
+
+sha256 `88d9ac40ee673c4929ab2e9b8274a6287c2c7d2c1c294e1b3bf99c3cf0f6a4f0`, 29 879
+bytes, 593 lines, 27 executable statements between one `begin` and one `commit`.
+The statement inventory was taken mechanically rather than by reading:
+
+* **one `drop`**, and it is `drop trigger if exists refuse_change on
+  public.canonical_category_decision` — against a table created four statements
+  earlier in the same transaction, so on any database it is a no-op that makes
+  the file re-runnable. No `truncate`, no `delete`, no `update`, no `insert` at
+  the migration level, and no drop of a table, function, index, policy, column,
+  constraint, schema, type or view;
+* **two `alter table`**, both the RLS flags on its own new table. Nothing alters
+  any other table and no column is added to one;
+* **exactly one write statement in the whole file**, `insert into
+  public.canonical_category_decision`, inside the `security definer` write
+  function. The bodies read three tables and write one: `public.study` supplies
+  the tenant so a caller can never name one, `public.profiles` answers whether
+  the actor is internal, and neither is written;
+* **the legacy ledger and the legacy publication are out of reach.**
+  `category_decision`, `study_category_snapshot`, `record_category_decision`,
+  `capture_study_category_snapshot` and `segment_dimension` appear in the header
+  commentary, where the argument lives, and in **no executable statement** —
+  measured after masking the canonical table's own name, which contains
+  `category_decision` as a substring;
+* **three grants, five revokes, and every grantee list is exactly
+  `[service_role]`.** `service_role` gets `SELECT` on the table — not `INSERT`,
+  `UPDATE` or `DELETE` — after its privileges are revoked wholesale.
+
+### The backup, and what the rehearsal measured
+
+A fresh timestamped backup was taken with the **versioned** PostgreSQL 17 client
+(`pg_dump 17.11`, not the `pg_wrapper` symlink that dispatches to 18) over the
+session pooler, and retained outside every Git repository at
+`~/becommunity-backups/u6b4b2m-pre-0034-20260915T214322Z/`:
+
+| file | bytes | sha256 |
+| --- | ---: | --- |
+| `database.dump` | 1 311 120 | `f700ea994fdcf5070110d4eb4526e626e7f42d83bb1e75c7ba4b50a7befc94e4` |
+| `schema.sql` | 467 540 | `610575c72736af90ea4c397358ee1e98a071456f6a0d7e40233a98bae3db033b` |
+
+917 TOC entries, 136 table definitions, 68 table-data blocks, 97 functions, 62
+policies, 92 indexes, 339 constraints, both schemas present, zero `pg_dump`
+warnings, and `canonical_category_decision` named **0 times** in the dumped
+schema — the artifact is genuinely pre-migration.
+
+It was restored into a disposable PostgreSQL 17.11 and the restored copy was
+proved to be the same database, with the three benign restore-role differences
+**normalised rather than ignored**: the owner NAME (`--no-owner` restores as the
+connecting user, so `postgres` becomes `patop` in every ACL — the name is
+normalised, the privileges are compared), the server patch level (17.6 hosted
+against 17.11 disposable), and `polroles` OID ordering (every list this capture
+emits is sorted by name, so nothing depends on an OID). **49 checks, 0 failures**:
+the same 67 tables, the same 15 791 rows table by table, the same RLS and FORCE
+RLS flags, the same 62 policies, the same 42 function identities with the same
+volatility and security, the same 215 index names, the same 8 triggers, the same
+312 check constraints, the same ledger version for version and body for body, the
+same grants after normalising the owner, and the same legacy ledger, Cuicuilco
+draft, qualitative vocabulary, publication tables and row digests.
+
+Two restore diagnostics are classified honestly and neither is data: `schema
+"public" already exists`, which `pg_restore` always reports against a fresh
+database, and three `ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin` failures
+on the first attempt, which disappeared once that role was created. **0 post-data
+errors** in the run that was measured.
+
+ⓘ **The rehearsal applied `0034` AS `postgres`, and that is not a detail.** The
+hosted project carries `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA
+public GRANT ALL ON TABLES TO anon, authenticated, service_role`. A table created
+by `postgres` therefore **starts life granted to the browser roles**, and a
+canonical migration's `revoke all … from anon, authenticated` is load-bearing
+rather than decorative. Restoring those rules and applying the migration as that
+role is what turned the resulting ACL into a prediction instead of an artefact of
+the disposable cluster — and the hosted table's measured ACL is
+`postgres=arwdDxtm/postgres | service_role=r/postgres`, exactly what the copy
+produced.
+
+The backup still restores: a second, independent database was created from the
+same artifact, and it carries 1 685 survey responses and 34 ledger rows.
+
+### The exact delta, measured on the copy and then observed on the project
+
+```
+tablesAdded            canonical_category_decision            (0 rows)
+indexesAdded           ..._pkey, ..._chain_idx, ..._study_idx, ..._memory_idx
+triggersAdded          refuse_change@canonical_category_decision
+policiesAdded          deny_browser_roles@canonical_category_decision
+functionsAdded         record_canonical_category_decision(...):v:definer
+                       read_canonical_category_decisions(...):s:definer
+                       refuse_canonical_category_change():v:invoker
+checkConstraintsAdded  15
+tableGrantsAdded       canonical_category_decision:postgres
+                       canonical_category_decision:service_role  -> [SELECT]
+ledgerRowsAdded        1
+objectsRemoved         none
+objectsAltered         none
+existingRowsChanged    0
+```
+
+**Fifteen check constraints, not sixteen.** The file contains sixteen `check (`
+clauses and one of them is the policy's `with check (false)`, which is a policy
+expression and not a constraint — twelve column-level checks and three named
+table-level ones. The first count was written from the file and the rehearsal
+corrected it; the measurement is what the gates now assert.
+
+### Phase C — the security proofs, against the restored hosted copy
+
+**67 checks, 0 failures**, run against the restored copy with the real hosted
+rows, the real policies and the real ACLs. Every refusal is asserted by SQLSTATE,
+never by «something failed»:
+
+* RLS **and** FORCE RLS on, one policy, and it is `false`/`false` for both
+  reading and writing;
+* `anon` and `authenticated` refused `42501` on direct `SELECT`, `INSERT`,
+  `UPDATE` and `DELETE`, and on executing either function — eight refusals each;
+* `service_role` may `SELECT` and is refused `42501` on `INSERT`, `UPDATE`,
+  `DELETE` and `TRUNCATE`;
+* **and the POLICY refuses even when a grant would not.** `SELECT` was granted to
+  `authenticated` inside a savepoint that the engine then rolled back: with rows
+  present and the privilege held, it still saw **none of them**. The observation
+  is carried out of the block in a plpgsql variable, because an `INSERT` into the
+  results table would have rolled back with the grant and silently lost the check;
+* the actor is server-derived: a NULL actor, an actor who is nobody and a real
+  **client** account are each refused `42501`, and a study that does not exist is
+  `P0002`. The write function takes **no tenant argument** and **no count, share,
+  total or percentage argument** at all;
+* unsorted member folds, repeated folds, a group of one, a malformed digest, a
+  postponement with no reason and a grouping with no name are each `22023`;
+  undoing what was never decided is `55000`;
+* **replay is idempotent** — the identical call returns `created:false` with the
+  same decision id and the same version — while the **same decision against a
+  moved source digest writes version 2**, because a decision recorded about a
+  family that has since moved is not the same decision;
+* a decision taken against a version that has moved is `55000`; the version
+  actually on screen is accepted;
+* the three flat-grouping rules are `23505` each: a label already in a category,
+  two categories sharing a name, and a name that is a member of another group;
+* the OWNER cannot `UPDATE` a decision or `DELETE` one while its study exists —
+  `2F002` both times;
+* reading is scoped by the database: another client's tenant selects nothing,
+  another client's study with this tenant selects nothing, and a study with no
+  decisions returns an empty pair rather than an error. The eleven returned keys
+  are exactly the eleven pinned, **who decided is never returned**, and no
+  respondent, session or free-text column reaches the caller;
+* and after all of it: raw imported answers, survey items, respondents, import
+  batches, the legacy category ledger, the legacy segment dimension and the
+  qualitative sign-off are **byte-identical**, `study_category_snapshot` is still
+  empty, and no publication exists.
+
+### What the hosted project did
+
+**44 checks, 0 failures.** The ledger holds 35 rows, `0000`–`0034`, each exactly
+once; every pre-existing row is byte-identical; the new row is
+`0034 canonical_category_review` with **27 stored statements** — the same 27 the
+offline inventory counted — and those statements **reconstruct the committed file
+exactly**, whitespace aside. The ledger's own joined-statement digest
+(`a592a0ff…`) legitimately differs from the file's sha256 (`88d9ac40…`): the CLI
+stores its own split of the file, not the file.
+
+The observed delta matched the rehearsed one object for object. No existing
+table's row count moved, total rows are still **15 791**, no existing table's RLS
+flags moved, no pre-existing table grant changed, and `anon` and `authenticated`
+hold **no privilege** on the new table.
+
+Nothing the review is about moved. The legacy `category_decision` still holds its
+**two historical rows, both `separate`**, at versions 1 and 2, on dimension
+`roi_membresia`, naming no category and consulting no model;
+`study_category_snapshot` is still **empty**; Cuicuilco is still `draft`, its
+draft still **revision 3**, its qualitative sign-off digest unmoved at
+`4ed838c4…`; «Miembros activos» still reads 11 / 4 / 3 / 1 and «Desertores» still
+reads 7 / 2 / 1 / 1; every publication table is still empty; and every study's
+status is unchanged.
+
+### The gates, inverted rather than deleted — and the finding that came with it
+
+ⓘ **Both old gates were run once against the applied project before they were
+changed, and NEITHER FAILED.** That is the finding, not a formality: as written,
+`test:migration-chain` and the hosted fingerprint could not tell that the hosted
+project had gained a migration, because nothing in either asked. The chain gate's
+`HOSTED_APPLIED_SLUG` and the REST transport's bound are offline claims about
+source constants, and the fingerprint pinned no fact that a new table moves. This
+is exactly why the new assertions are **semantic**.
+
+Three source points moved, by hand:
+
+* `scripts/lib/canonical-rest-transport.mjs` — `prepare(upTo = 34)` and its
+  refusal bound, plus a new refusal for a hosted target that has **lost**
+  `canonical_category_decision`. The bound spent all of Unit 6B.4B2L disagreeing
+  with the repository, which was correct, and the two numbers agreeing again is
+  another coincidence of a moment rather than a rule;
+* `scripts/migration-chain-test.mjs` — `HOSTED_APPLIED_SLUG` is now
+  `canonical_category_review`; the transport must name the new storage; every
+  governing document must now assert `0034` is applied **and** that applying it
+  grouped nothing; and six `WITHDRAWN` patterns retire the present-tense claims
+  that it is not;
+* `scripts/canonical-presentation-hosted-fingerprint.mjs` — a new §[3d], 33
+  assertions, taking the gate from **136** to **169**.
+
+§[3d] asserts semantics and not counts: the ledger exists and is **empty**, both
+functions are exposed and the **legacy write path still stands beside them**, the
+two families carry exactly the pinned labels and counts with nine answers set
+aside as «No aplica», **the review screen's own `scanFamily` finds zero grouping
+candidates in either**, every label the data carries today is a label the sign-off
+was taken over and the reverse, and the legacy ledger still holds its two
+`separate` rows with no category named, no model consulted and an empty snapshot
+beside them.
+
+ⓘ **And the new assertions were shown to fail.** Six copies of the gate were
+perturbed one place at a time and run against the same project — a count moved
+11 → 12, the legacy dimension renamed, the exclusion count moved 9 → 8, the
+ledger required non-empty, a candidate required, and the sign-off required over
+different labels. Each failed on **exactly its own assertion and nothing else**,
+while the committed gate passed 169/169. The perturbed copies had to live inside
+`scripts/`: run from anywhere else they fail because `./lib/hosted-target.mjs`
+does not resolve, which is a failure of the harness and proves nothing.
+
+ⓘ **The migration file itself was not edited, including its header**, which still
+says it is applied to no project. The hosted ledger records the bytes that ran;
+editing the file would make the repository and the ledger disagree about what ran.
+The claim is corrected in the governing documents instead.
+
+### An intermittent Cloudflare Error 1101, reported rather than explained away
+
+ⓘ **For about ninety seconds the preview Worker threw.** Between **22:34:54 and
+22:36:28 UTC on 2026-09-15**, seven consecutive edge requests returned
+Cloudflare **Error 1101 — «Worker threw exception»** instead of a page, across
+Ray IDs `a3bb19e57d4e485c`, `a3bb1a3c7902485c`, `a3bb1aa53c13485c`,
+`a3bb1b0b9842485c`, `a3bb1b72ac54485c`, `a3bb1bdb8f6f485c` and
+`a3bb1c426b59485c`. Two full QA runs failed 24 and 25 assertions inside that
+window, all of them downstream of it.
+
+**What it is not.** It is not the category review and it is not migration `0034`:
+
+* the outbound request budget was re-measured immediately afterwards and is
+  **unchanged** — `/revision` 26, `/revision/dolor` 26, `/revision/categorias`
+  18, against a proven ceiling of 50 — and `loadPublicationReview` returned `ok`;
+* `/revision` loaded **5 times out of 5** on its own, at 5 seconds, drawing
+  24 743 characters every time;
+* **`/login` was among the pages that threw**, and `/login` reads no study, no
+  ledger and no canonical package at all;
+* Unit 6B.4B2L's **untouched** QA script, run against the same preview and the
+  same migrated database as a control, passed **141 of 142**, its single failure
+  being the deliberate inversion of «this environment cannot record a decision»;
+* the sequence was then driven **eight more times** with the Worker version
+  tailed (`wrangler tail --version-id c18405d9…`): eight clean pairs, zero
+  exceptions captured, zero error outcomes;
+* and the full QA re-run immediately afterwards passed **152 of 152**.
+
+**What it might be is not known**, and this record does not pretend otherwise. A
+platform-side condition on that colo fits every observation — including a
+trivial page failing — better than any code path this branch owns, but nothing
+here proves it. `wrangler tail` captured no exception either during the window or
+after it, so the Worker's own view of those seven requests was never obtained.
+**Watch for it during the release preview QA**: a repeat that clusters the same
+way, or one that follows the category review specifically, would change the
+reading and must stop the deploy.
+
+### Nothing else moved
+
+**Production**, before and after: active version `e691ecd8…`, 10 deployments, the
+deployment listing byte-identical.
+
+**Cuicuilco** was not touched: no category was saved, renamed, merged, split,
+excluded or reassigned, `study.status` was not changed, nothing was published, and
+no client account was created. Because the study has zero grouping candidates
+there was nothing to decide, and **no decision was manufactured to exercise the
+write path** — the write path is proved against disposable infrastructure, where a
+wrong row costs nothing.
+
+External evidence, outside every Git repository: `~/becommunity-6b4b2m/`
+(`phase-a-migration-review.json`, `hosted-before.json`, `hosted-after.json`,
+`state-restored.json`, `state-rehearsed.json`, `phase-b-delta.json`,
+`phase-c-security.txt`, `phase-d-verify.txt`, `ledger-0034*.json`,
+`push-dryrun.log`, `push-apply.log`, `falsify/`, `cf-*.txt`, `screenshots/`), and
+the retained backup at
+`~/becommunity-backups/u6b4b2m-pre-0034-20260915T214322Z/`.
