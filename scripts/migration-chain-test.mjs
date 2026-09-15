@@ -363,11 +363,19 @@ const COMMIT_SLUG = "canonical_commit_and_rollback";
  * `canonical_presentation_draft` on 2026-09-08, when Unit 6B.3B applied 0029,
  * to `canonical_publication` on 2026-09-09, when Unit 6B.4B1 applied 0030, and
  * to `canonical_journey_pain_review` on 2026-09-14, when Unit 6B.4B2D applied
- * 0031 and 0032 together, and to `canonical_row_set_projection` on 2026-09-15,
- * when Unit 6B.4B2K applied 0033. It must be moved BY HAND again, after a
- * migration is applied there.
+ * 0031 and 0032 together, to `canonical_row_set_projection` on 2026-09-15,
+ * when Unit 6B.4B2K applied 0033, and to `canonical_category_review` later the
+ * same day, when Unit 6B.4B2M applied 0034. It must be moved BY HAND again,
+ * after a migration is applied there.
+ *
+ * FOR ONE WHOLE UNIT THIS CONSTANT DISAGREED WITH THE LAST FILE ON DISK, and
+ * that was the point. Unit 6B.4B2L wrote 0034 and deliberately did not apply
+ * it, so `canonical_row_set_projection` stayed here while the chain ended at
+ * `canonical_category_review`; the gate refused an attempt to raise the
+ * transport's bound to match the repository. The two coinciding again now is
+ * not permission to derive one from the other.
  */
-const HOSTED_APPLIED_SLUG = "canonical_row_set_projection";
+const HOSTED_APPLIED_SLUG = "canonical_category_review";
 const canonical = parsed.filter((e) => e.slug.startsWith("canonical_"));
 
 {
@@ -492,6 +500,10 @@ console.log("\n[5] The disposable-PostgreSQL runner omits nothing");
     check(
       /canonical_presentation_revision/.test(rest),
       "and one that has lost the publication migration's storage",
+    );
+    check(
+      /canonical_category_decision/.test(rest),
+      "and one that has lost the category-review migration's storage",
     );
   }
 
@@ -1007,6 +1019,49 @@ console.log("\n[7] The documentation does not claim an application that never ha
     );
 
   /**
+   * Sentences asserting the CATEGORY-REVIEW migration is applied — now required.
+   *
+   * A FIFTH separate requirement, for the reason each of the others exists: the
+   * facts became true on five different days — `0026`-`0028` on 2026-09-06,
+   * `0029` on 2026-09-08, `0030` on 2026-09-09, `0031` with `0032` on
+   * 2026-09-14, `0033` and then `0034` on 2026-09-15 — and a document recording
+   * only the older ones is out of date in a way the older rules cannot see.
+   *
+   * IT IS SEPARATE FROM `0033` DELIBERATELY, although both were applied on one
+   * day. They were applied by different units under different authorizations,
+   * and `0033` created no storage a document could name, so folding them into
+   * one rule would let a sentence about the row-set projection stand in for a
+   * sentence about the category-review ledger.
+   *
+   * The lookaround form is used for the reason it is above: `\b0034\b` does not
+   * match `0034_canonical_category_review.sql`, because `_` is a word character
+   * and there is no boundary after the digits.
+   */
+  const CATEGORY_APPLIED_SUBJECT =
+    /(?<![0-9])0034(?![0-9])|\bcanonical_category_decision\b|\bcategory[- ]review (?:migration|storage|ledger)\b|\bcanonical category review\b/i;
+  const assertsCategoryApplied = (text) =>
+    sentences(text).filter(
+      (s) => CATEGORY_APPLIED_SUBJECT.test(s) && APPLIED_VERB.test(s) && !NEGATOR.test(s),
+    );
+
+  /**
+   * And that NO CATEGORY DECISION WAS RECORDED — required in the same breath.
+   *
+   * The exact counterpart of `assertsNothingPublished` and
+   * `assertsNoReviewRecorded`, for the identical reason. Unit 6B.4B2M applied
+   * `0034` and grouped nothing; Cuicuilco's vocabulary has zero candidates, so
+   * an empty ledger is the CORRECT state rather than an unreviewed one — and a
+   * document recording the storage without the emptiness invites the next
+   * reader to assume a person merged two categories when nobody did.
+   */
+  const assertsNoCategoryRecorded = (text) =>
+    sentences(text).filter(
+      (s) =>
+        /\bcategory[- ](?:decisions?|review|ledger)\b|\bcanonical_category_decision\b|\bgrouping\b/i.test(s) &&
+        /\bno (?:canonical )?category decisions? (?:was|were|has been|have been|exists?)\b|\bnothing (?:was|has been) grouped\b|\bcategory[- ](?:review )?ledger (?:remain|remains|is|stays) empty\b|\bthe (?:new )?ledger is empty\b|\bzero (?:grouping )?candidates?\b/i.test(s),
+    );
+
+  /**
    * (a) Sentences RECORDING the real workbook import — now required.
    *
    * The subject deliberately tolerates a word between "real" and the noun,
@@ -1159,9 +1214,30 @@ console.log("\n[7] The documentation does not claim an application that never ha
       "0031 and 0032 ARE applied to the hosted project (2026-09-14)"],
     [/\b(?:qualitative sign-?off|journey[- ]pain review) migration is applied to no project\b/i,
       "that migration IS applied"],
-    [/\bthe hosted ledger ends at 0030\b/i, "the hosted ledger ends at 0032"],
+    [/\bthe hosted ledger ends at 003[0123]\b/i, "the hosted ledger ends at 0034"],
     [/\b(?:canonical_qualitative_signoff|canonical_journey_pain_decision)\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
       "that table EXISTS on the hosted project"],
+    // WITHDRAWN ON 2026-09-15 BY UNIT 6B.4B2M, when `0034` was applied.
+    //
+    // The same narrowness the 0030 and 0031/0032 blocks argue for: `0034`'s own
+    // migration header still says it is applied to no project, and it is NOT
+    // scanned here — an applied migration is never edited, because the hosted
+    // ledger records the bytes that ran. What these patterns withdraw is the
+    // claim in a GOVERNING DOCUMENT, which is the thing a reader acts on.
+    //
+    // NOTHING HERE WITHDRAWS "the category-review ledger is empty" or "Cuicuilco
+    // has zero grouping candidates" — both are still true, both are REQUIRED
+    // above, and neither may be confused with "the storage does not exist".
+    [/(?<![0-9])0034(?![0-9])[^.]{0,120}\bapplied to no project\b/i,
+      "0034 IS applied to the hosted project (2026-09-15)"],
+    [/\bcategory[- ]review migration is applied to no project\b/i, "that migration IS applied"],
+    [/\bcanonical_category_decision\b[^.]{0,60}\bdoes not exist (?:there|on the hosted)/i,
+      "that table EXISTS on the hosted project"],
+    [/\bthe (?:canonical )?category review reads as NOT PROVISIONED\b/i,
+      "it is provisioned on the hosted project since 2026-09-15"],
+    [/\bdo not apply\b[^.]{0,40}\b0034\b/i, "0034 was applied on 2026-09-15 under Unit 6B.4B2M's authorization"],
+    [/\b0034\b[^.]{0,120}\bis \*?not\*? applied to the hosted project\b/i,
+      "0034 IS applied to the hosted project (2026-09-15)"],
     // Withdrawn on 2026-09-06 by Unit 5 Phase 2, and guarded here only from
     // 2026-09-08 — this section spent five weeks asserting the opposite.
     //
@@ -1221,6 +1297,19 @@ console.log("\n[7] The documentation does not claim an application that never ha
       noReviewRecorded.length > 0,
       `${doc} records that applying them recorded NO sign-off and NO pain-item decision` +
         `${noReviewRecorded.length ? "" : " — it does not, and a reader could take applied storage for a human judgement"}`,
+    );
+
+    const categoryApplied = assertsCategoryApplied(text);
+    check(
+      categoryApplied.length > 0,
+      `${doc} records that the CATEGORY-REVIEW migration 0034 is applied too${categoryApplied.length ? "" : " — it does not, and it is, since 2026-09-15"}`,
+    );
+
+    const noCategoryRecorded = assertsNoCategoryRecorded(text);
+    check(
+      noCategoryRecorded.length > 0,
+      `${doc} records that applying it grouped NOTHING and left the ledger empty` +
+        `${noCategoryRecorded.length ? "" : " — it does not, and a reader could take applied storage for a merged category"}`,
     );
 
     const stillPending = sentences(text).filter((s) =>

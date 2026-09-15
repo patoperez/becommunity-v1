@@ -74,6 +74,10 @@ import { HostedTargetError, resolveHostedTarget } from "./lib/hosted-target.mjs"
 // number is the same number `encodePresentationForStorage` computed.
 import { serializeDeterministic } from "../src/lib/presentation/serialize.ts";
 import { sha256Hex } from "../src/lib/ingestion/canonical-commit/sha256.ts";
+// THE REVIEW SCREEN'S OWN SCANNER, so §[3d] can say «zero candidates» as a
+// measurement rather than a claim. It is pure: it reads no database, and it is
+// the same function the surface runs over the same labels.
+import { scanFamily } from "../src/lib/category-review/candidates.ts";
 
 /**
  * What the previous unit recorded, so this run compares rather than reports.
@@ -203,6 +207,54 @@ const EXPECTED = {
     /** Superseded rows, which must stay superseded and stay distinguishable. */
     supersededRows: 5,
     supersededDisposition: "unresolved",
+  },
+  /**
+   * THE CATEGORY REVIEW UNIT 6B.4B2M PROVISIONED, pinned by SEMANTICS.
+   *
+   * Not «the table exists». The exact closed-coded vocabulary and the exact
+   * count behind each label, so a grouping nobody authorized — the one thing
+   * migration 0034's storage makes possible — fails by name and by number
+   * rather than by a total that happens to move.
+   *
+   * THESE LABELS ARE NOT A CLIENT'S PROSE. They are the study's own short
+   * emergent coding vocabulary, already published to the client in a term cloud
+   * and already written into `canonical_qualitative_signoff.category_labels` on
+   * the hosted project. The public phrases of the journey decisions are kept out
+   * of this file for exactly the reason these are allowed in.
+   *
+   * ZERO CANDIDATES IS THE POINT. With no near-duplicates there is nothing a
+   * reviewer could legitimately decide, so an EMPTY ledger is the correct state
+   * and any row at all is a finding. §[3d] gets that zero from `scanFamily`
+   * itself rather than restating it.
+   */
+  categoryReview: {
+    families: {
+      cri_e: {
+        counts: {
+          "Malos resultados financieros": 11,
+          "Mala actitud que no abre negocios": 4,
+          Tiempo: 3,
+          "Situaciones personales": 1,
+        },
+        /** Answers set aside by the documented methodological exclusion. */
+        notApplicable: 9,
+      },
+      nps_desertores_f: {
+        counts: {
+          "Malos resultados financieros": 7,
+          "Mala actitud que no abre negocios": 2,
+          "Cambio de titular": 1,
+          "Otra oportunidad": 1,
+        },
+        notApplicable: 0,
+      },
+    },
+    /** The label the builder shows OUTSIDE the cloud; never a coded answer. */
+    excludedLabel: "No aplica",
+    /** The one legacy dimension the two historical rows belong to. */
+    legacyDimension: "roi_membresia",
+    /** And the exact pair of spellings both of them were about. */
+    legacyFolds: ["no he recuperado nada", "no recuperé nada"],
   },
 };
 
@@ -865,6 +917,236 @@ for (const [table, migration] of [
 }
 
 /* -------------------------------------------------------------------------- */
+console.log(
+  "\n[3d] Migration 0034 is applied, its ledger is EMPTY, and Cuicuilco has" +
+    " nothing to review — pinned by semantics, not counts",
+);
+
+/*
+ * INVERTED ON 2026-09-15, WHEN UNIT 6B.4B2M APPLIED `0034`.
+ *
+ * Unit 6B.4B2L wrote the canonical category review and deliberately left the
+ * migration unapplied, so until this section existed the hosted project had no
+ * category-review storage at all and the screen read NOT PROVISIONED. 6B.4B2M
+ * applied it, so the finding worth catching is now storage that has GONE — and,
+ * separately and just as importantly, storage that has acquired a ROW.
+ *
+ * ⓘ THE OLD GATES WERE RUN ONCE AGAINST THE APPLIED PROJECT BEFORE THEY WERE
+ * CHANGED, and neither failed. That is the finding, not a formality: as written,
+ * `test:migration-chain` and this file could not tell that the hosted project
+ * had gained a migration, because nothing in either asked. That is exactly why
+ * this section asserts SEMANTICS — the exact labels, the exact counts, the
+ * candidate scan's own verdict and the legacy ledger's two rows — instead of
+ * widening a count. It is recorded in `docs/CURRENT_STATE.md` §"Unit 6B.4B2M".
+ *
+ * WHY THE EMPTINESS MATTERS MOST HERE. Applying the storage and recording an
+ * editorial decision into it are different acts; this unit authorized the first
+ * and forbade the second. Cuicuilco's category set has zero grouping candidates,
+ * so there is nothing a reviewer could legitimately have decided, and any row at
+ * all would mean a grouping nobody asked for is already changing a published
+ * number.
+ */
+{
+  const { count, error } = await client
+    .from("canonical_category_decision")
+    .select("*", { count: "exact", head: true });
+  const present = error === null;
+  record.present.canonical_category_decision = present ? `present (${count} rows)` : `ABSENT (${error.code})`;
+  check(
+    present,
+    `canonical_category_decision is present, so 0034 is applied${
+      present ? "" : " — IT IS GONE, WHICH MEANS THE MIGRATION WAS REVERSED. Stop and investigate."
+    }`,
+  );
+  record.counts.canonical_category_decision = count ?? null;
+  check(
+    count === 0,
+    `and it is EMPTY (${count} rows)${count === 0 ? "" : " — SOMEBODY RECORDED A CATEGORY DECISION. Stop and investigate."}`,
+  );
+}
+
+/* ---- both functions are exposed, and still never called -------------------- */
+{
+  const description = await fetch(target.restUrl, {
+    headers: { apikey: target.serviceKey, Authorization: `Bearer ${target.serviceKey}` },
+  });
+  check(description.ok, `the API description reads a third time (${description.status})`);
+  const paths = description.ok ? Object.keys((await description.json())?.paths ?? {}) : [];
+  check(
+    paths.includes("/rpc/save_canonical_presentation_draft"),
+    "and still lists a function that IS there, so the readings below are not an empty answer",
+  );
+  for (const fn of ["record_canonical_category_decision", "read_canonical_category_decisions"]) {
+    const present = paths.includes(`/rpc/${fn}`);
+    record.present[fn] = present ? "present" : "ABSENT";
+    check(
+      present,
+      `${fn} is exposed${present ? "" : " — IT IS GONE, WHICH MEANS 0034 WAS REVERSED. Stop and investigate."}`,
+    );
+  }
+  // AND THE LEGACY WRITE PATH IS STILL THERE, UNREPLACED. 0034 adds a second
+  // ledger; it does not remove the first. A project where the canonical
+  // function appeared and `record_category_decision` vanished would mean the
+  // deployed legacy screen had silently lost its save button.
+  check(
+    paths.includes("/rpc/record_category_decision"),
+    "and the LEGACY category write path still exists beside it, not replaced by it",
+  );
+}
+
+/* ---- the vocabulary, measured from the rows rather than assumed ----------- */
+{
+  const { data: items, error: itemsError } = await client
+    .from("survey_item")
+    .select("id, key")
+    .eq("study_id", EXPECTED.canonicalDraft.studyId)
+    .in("key", Object.keys(EXPECTED.categoryReview.families));
+  check(itemsError === null, `the two qualitative items read${itemsError ? ` — ${itemsError.code}` : ""}`);
+  check(
+    (items ?? []).length === Object.keys(EXPECTED.categoryReview.families).length,
+    `both qualitative families are present by key (${(items ?? []).map((i) => i.key).sort().join(", ")})`,
+  );
+
+  const measured = {};
+  for (const item of items ?? []) {
+    const { data: rows, error } = await client
+      .from("survey_response")
+      .select("value_text, status")
+      .eq("survey_item_id", item.id);
+    check(error === null, `${item.key} answers read${error ? ` — ${error.code}` : ""}`);
+    const counts = new Map();
+    let notApplicable = 0;
+    for (const row of rows ?? []) {
+      if (row.status !== "answered") {
+        if (row.status === "not_applicable") notApplicable += 1;
+        continue;
+      }
+      if (typeof row.value_text !== "string" || row.value_text.trim() === "") continue;
+      counts.set(row.value_text, (counts.get(row.value_text) ?? 0) + 1);
+    }
+    measured[item.key] = { counts: Object.fromEntries([...counts].sort()), notApplicable };
+  }
+  record.categoryReview = { measured };
+
+  for (const [key, expected] of Object.entries(EXPECTED.categoryReview.families)) {
+    const got = measured[key] ?? { counts: {}, notApplicable: -1 };
+    check(
+      JSON.stringify(got.counts) === JSON.stringify(Object.fromEntries(Object.entries(expected.counts).sort())),
+      `${key} carries EXACTLY the pinned labels and counts — ${JSON.stringify(got.counts)}`,
+    );
+    check(
+      got.notApplicable === expected.notApplicable,
+      `${key} sets ${expected.notApplicable} answer(s) aside as «No aplica» (${got.notApplicable})`,
+    );
+  }
+
+  /* ---- ZERO CANDIDATES, from the scanner itself and not from a claim ------ */
+  //
+  // The same function the review screen runs, over the same labels, with no
+  // decision in force — because there are none. If the vocabulary ever gained a
+  // near-duplicate this would stop being zero, and the operator would have a
+  // real decision to make before publishing.
+  for (const [key, expected] of Object.entries(EXPECTED.categoryReview.families)) {
+    const labels = Object.entries(measured[key]?.counts ?? {}).map(([label, count]) => ({ label, count }));
+    const scan = scanFamily(key, labels);
+    record.categoryReview[`scan:${key}`] = {
+      candidates: scan.candidates.length,
+      distinctLabels: scan.distinctLabels,
+      tooWide: scan.tooWide,
+    };
+    check(
+      scan.distinctLabels === Object.keys(expected.counts).length,
+      `${key} scans ${scan.distinctLabels} distinct labels`,
+    );
+    check(scan.tooWide === false, `${key} is a coding vocabulary, not free text`);
+    check(
+      scan.candidates.length === 0,
+      `${key} has ZERO grouping candidates${
+        scan.candidates.length === 0
+          ? " — there is nothing for a reviewer to decide, so an empty ledger is the CORRECT state"
+          : ` — ${scan.candidates.length} APPEARED: ${scan.candidates.map((c) => c.suggestedLabel).join(", ")}`
+      }`,
+    );
+  }
+
+  /* ---- and the sign-off is still for the vocabulary that is there --------- */
+  //
+  // NOT a second copy of §[3c]'s digest check. That one pins the digest against
+  // a constant; this one relates the LABELS somebody signed for to the labels
+  // the data carries today. `qualitativeEvidenceDigest` is over exactly those
+  // labels, so two sets that agree are a sign-off that cannot have gone stale.
+  {
+    const { data, error } = await client
+      .from("canonical_qualitative_signoff")
+      .select("category_labels")
+      .eq("study_id", EXPECTED.canonicalDraft.studyId);
+    check(error === null, `the sign-off's labels read${error ? ` — ${error.code}` : ""}`);
+    const signed = new Set((data?.[0]?.category_labels ?? []).filter((l) => l !== EXPECTED.categoryReview.excludedLabel));
+    const live = new Set(Object.values(measured).flatMap((m) => Object.keys(m.counts)));
+    const missing = [...live].filter((l) => !signed.has(l));
+    const stranger = [...signed].filter((l) => !live.has(l));
+    check(
+      missing.length === 0,
+      `every label the data carries today was signed for${missing.length ? ` — NOT SIGNED: ${missing.join(", ")}` : ""}`,
+    );
+    check(
+      stranger.length === 0,
+      `and every label signed for is still in the data${stranger.length ? ` — GONE: ${stranger.join(", ")}` : ""}`,
+    );
+  }
+}
+
+/* ---- the LEGACY ledger is untouched, row for row -------------------------- */
+//
+// 0034's whole argument is that a canonical decision must not reach the legacy
+// projection. The two historical rows the hosted project carries are the control
+// for that claim: if a canonical decision had leaked into the legacy ledger, or
+// if `capture_study_category_snapshot` had folded one into the legacy
+// publication, this is where it would show.
+{
+  const { data, error } = await client
+    .from("category_decision")
+    .select("dimension_key, decision, version, scope_kind, member_folds, canonical_label, suggestion_source, advisor")
+    .order("version");
+  check(error === null, `the legacy category ledger reads${error ? ` — ${error.code}` : ""}`);
+  const rows = data ?? [];
+  record.counts.category_decision = rows.length;
+  check(rows.length === 2, `it holds exactly TWO historical rows (${rows.length})`);
+  check(
+    rows.every((r) => r.decision === "separate"),
+    `and both are «separate» (${[...new Set(rows.map((r) => r.decision))].join(", ")})`,
+  );
+  check(
+    rows.every((r) => r.dimension_key === EXPECTED.categoryReview.legacyDimension),
+    `both belong to the one legacy dimension «${EXPECTED.categoryReview.legacyDimension}»`,
+  );
+  check(
+    JSON.stringify(rows.map((r) => r.version)) === "[1,2]",
+    `at versions 1 and 2 — the duplicate the canonical write path refuses to repeat (${JSON.stringify(rows.map((r) => r.version))})`,
+  );
+  check(
+    rows.every((r) => r.canonical_label === null),
+    "neither names a category, because neither grouped anything",
+  );
+  check(
+    rows.every((r) => r.advisor === null),
+    "and no model was ever consulted for either",
+  );
+  const folds = JSON.stringify(rows.map((r) => r.member_folds));
+  check(
+    folds === JSON.stringify([EXPECTED.categoryReview.legacyFolds, EXPECTED.categoryReview.legacyFolds]),
+    `about exactly the pinned pair of spellings (${folds})`,
+  );
+
+  const snapshot = await client.from("study_category_snapshot").select("*", { count: "exact", head: true });
+  record.counts.study_category_snapshot = snapshot.count ?? null;
+  check(
+    snapshot.error === null && snapshot.count === 0,
+    `the legacy category SNAPSHOT is still empty (${snapshot.error ? snapshot.error.code : snapshot.count}) — no decision was ever folded into the legacy publication projection`,
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 console.log("\n[4] The canonical and legacy row counts");
 
 const COUNTED = [
@@ -913,6 +1195,14 @@ console.log(
     "        canonical touchpoint, ZERO unresolved, ZERO undecided against the source's own\n" +
     "        fifteen journey pain rows, and five older rows still superseded and still\n" +
     "        distinguishable from the decisions in force; the 0030 publish function still stands\n" +
-    "        beside its 0031 wrapper, and every protected table was counted. Nothing was\n" +
+    "        beside its 0031 wrapper; migration 0034 is applied and its category-review ledger\n" +
+    "        exists and is EMPTY, both its functions are exposed and the LEGACY write path still\n" +
+    "        stands beside them, the two qualitative families carry exactly the pinned labels and\n" +
+    "        counts with nine answers set aside as «No aplica», the review screen's own scanner\n" +
+    "        finds ZERO grouping candidates in either — so an empty ledger is the correct state\n" +
+    "        rather than an unreviewed one — every label the data carries today is a label the\n" +
+    "        sign-off was taken over and the reverse, and the legacy ledger still holds its two\n" +
+    "        historical «separate» rows with no category named, no model consulted and an empty\n" +
+    "        snapshot beside them; and every protected table was counted. Nothing was\n" +
     "        written, and no client's words were read into this record.",
 );
