@@ -311,10 +311,14 @@ export function restSuiteTransport(target, { journal, registry, censusTables, ob
       // when Unit 6B.4B2D applied BOTH `0031_canonical_qualitative_signoff.sql`
       // and `0032_canonical_journey_pain_review.sql` on 2026-09-14, and it now
       // reads 33, because Unit 6B.4B2K applied
-      // `0033_canonical_row_set_projection.sql` on 2026-09-15. The two numbers
-      // agreeing is a coincidence of this moment, not the rule: the moment a
-      // migration is written and not yet applied, they diverge, and this bound
-      // must follow the PROJECT.
+      // `0033_canonical_row_set_projection.sql` on 2026-09-15. It STAYS at 33
+      // while the repository moved to 34: Unit 6B.4B2L wrote
+      // `0034_canonical_category_review.sql`, proved it against disposable
+      // infrastructure and deliberately did not apply it. The two numbers
+      // agreeing was a coincidence of a moment, never the rule, and the
+      // divergence the comment above predicted is now the actual state: this
+      // bound follows the PROJECT, and raising it to match the repository would
+      // make this transport certify a schema the hosted project does not have.
       if (upTo !== 33) {
         refuse(
           `this transport cannot roll the schema back to ${upTo}: it applies no migration and reverses none.`,

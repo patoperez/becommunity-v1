@@ -94,6 +94,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CanonicalReadError } from "@/lib/canonical-source";
 import { loadCanonicalResultSource } from "@/lib/canonical-source/server";
+import { CategoryLedgerError, readCategoryLedger, resolutionOf } from "./category-ledger";
+import type { CategoryLedgerState } from "@/lib/category-review";
 import {
   buildPresentationRead,
   resolveUnderSelection,
@@ -269,6 +271,22 @@ export async function readAndBuild(
   client: SupabaseClient,
   scope: ComposerScope,
 ): Promise<CanonicalPresentationRead> {
+  return (await readAndBuildWithLedger(client, scope)).read;
+}
+
+/**
+ * The same read, plus the ledger STATE the projection was derived from.
+ *
+ * Only the category review surface needs the state itself: it has to tell a
+ * reviewer that this environment cannot record a decision, which the projection
+ * alone cannot say — an unprovisioned ledger and a study nobody has decided
+ * anything about both project to nothing, and they are not the same sentence.
+ * Every other caller takes the resolution and is right not to care.
+ */
+export async function readAndBuildWithLedger(
+  client: SupabaseClient,
+  scope: ComposerScope,
+): Promise<{ read: CanonicalPresentationRead; ledger: CategoryLedgerState }> {
   // ONE READ, MANY BUILDS.
   //
   // The source is read from the database once and every filtered recomputation
@@ -284,10 +302,37 @@ export async function readAndBuild(
     tenantId: scope.tenantId,
     studyId: scope.studyId,
   });
-  return buildPresentationRead(source);
+
+  // THE EDITORIAL CATEGORY PROJECTION, READ HERE AND NOWHERE ELSE.
+  //
+  // It costs exactly ONE outbound request whatever the study holds, and it is
+  // read at the door rather than by each caller on purpose: a surface that
+  // forgot it would publish the source's ungrouped categories while the review
+  // screen beside it showed the grouped ones, and nothing would say so. One
+  // read, one registry, one resolution.
+  //
+  // A LEDGER THAT COULD NOT BE READ FAILS THE WHOLE LOAD. `refusalFor` turns it
+  // into the typed unavailable every caller already renders, which is the
+  // opposite of the defect Unit 6B.4B2K removed: an unknown projection must
+  // never quietly become the empty one, because the empty one is a real answer
+  // that means «nobody has decided anything».
+  const ledger = await readCategoryLedger(client, {
+    tenantId: scope.tenantId,
+    studyId: scope.studyId,
+  });
+  const projection = resolutionOf(ledger);
+  if (!projection.ok) throw new CategoryLedgerError(projection.code, projection.detail);
+
+  return { read: buildPresentationRead(source, projection.resolution), ledger };
 }
 
 export function refusalFor(error: unknown): ComposerUnavailable {
+  // A LEDGER FAILURE IS A READ REFUSAL, and it is reported as one rather than
+  // as an absence of decisions. The code is closed and the sentence is prepared;
+  // neither the database's message nor the study's own state appears in it.
+  if (error instanceof CategoryLedgerError) {
+    return { reason: "canonical_read_refused", detail: error.detail };
+  }
   if (error instanceof CanonicalReadError) {
     return (
       READ_REFUSALS[error.code] ?? {
@@ -563,6 +608,18 @@ export {
  * avoid. One import statement, one path, one door.
  */
 export { painItemToken, painSourceDigest, painSourceVersion } from "@/lib/publication/journey-pain-digest";
+/**
+ * THE CATEGORY FAMILY DIGESTS AND THE SOURCE VOCABULARY, for the same reason
+ * twice over.
+ *
+ * `src/lib/category-review/digest.ts` reaches the product's SHA-256, and
+ * `buildCategorySourceCounts` is a results build. Importing either directly
+ * from the category review workspace would give that module its own edge into
+ * the canonical graph — exactly what the two blocks above were moved here to
+ * avoid. One import statement, one path, one door.
+ */
+export { categorySourceDigest, categorySourceVersion } from "@/lib/category-review/digest";
+export { buildCategorySourceCounts } from "@/lib/results";
 /**
  * THE CURATED PAIN EVIDENCE READER, likewise, and it is the one that matters
  * most: it is a genuine canonical read, so it MUST arrive through the declared

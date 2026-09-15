@@ -981,6 +981,40 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
       loaders: ["src/lib/studio/presentation-workspace.ts"],
       via: null,
     },
+    /**
+     * THE FIFTH DOOR, AND IT IS STILL NOT A FIFTH LOADER — ARGUED HERE FIRST.
+     *
+     * The standing rule is «if a surface needs canonical data it goes through
+     * one of the loaders above, or a new one is argued for in the gate first,
+     * not registered afterwards». This is the argument.
+     *
+     * Unit 6B.4B2L adds the canonical category review, INSIDE the publication
+     * review's own route segment, beside the journey pain editor. It needs
+     * canonical data for a reason neither of its two neighbours covers: a person
+     * deciding whether two differently written answers are ONE category has to
+     * read the study's own coding vocabulary with its counts, and has to be
+     * shown what a grouping would do to the numbers a client reads. Both are
+     * facts about the study's current canonical results.
+     *
+     * It adds no loader. `category-review-workspace.ts` holds no canonical
+     * reader: it imports `presentation-workspace.ts` through a SINGLE import
+     * statement, exactly as `publication-workspace.ts` and
+     * `journey-pain-workspace.ts` do, and takes the results build, the family
+     * digest and the source vocabulary from that one path.
+     *
+     * AND THE LEDGER IT READS IS NOT CANONICAL EVIDENCE.
+     * `canonical_category_decision` holds category LABELS a person selected and
+     * the name they chose; it carries no canonical row identifier and no foreign
+     * key into `survey_response`, `survey_item` or `response_option`. The
+     * canonical read model does not move, the results contract does not move,
+     * and golden parity is untouched — a study with no decisions builds the
+     * byte-identical document it built before this existed.
+     */
+    {
+      page: "src/app/studio/e/[studyId]/revision/categorias/page.tsx",
+      loaders: ["src/lib/studio/presentation-workspace.ts"],
+      via: null,
+    },
   ];
   /**
    * THE ONE SERVER ACTION THAT MAY REACH IT, and why the class stays closed.
@@ -1500,7 +1534,7 @@ console.log("\n[8] La frontera de dependencias, recorrida de verdad");
    * function must exist in a migration, be declared `stable`, and contain no
    * DML. Adding a name without that migration fails.
    */
-  const READ_ONLY_RPCS = ["read_canonical_row_set"];
+  const READ_ONLY_RPCS = ["read_canonical_row_set", "read_canonical_category_decisions"];
 
   check("nada alcanzable desde la sombra puede mutar la base de datos", () => {
     // THE WRITE PATH, precisely. `canonical-commit/result.ts` is the SAFE error

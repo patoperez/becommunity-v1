@@ -2015,6 +2015,26 @@ const APPROVED_PRESENTATION_DOORS = [
     entry: "src/app/studio/e/[studyId]/revision/dolor/page.tsx",
     loader: "src/lib/studio/presentation-workspace.ts",
   },
+  // UNIT 6B.4B2L — the canonical category review, in the same segment.
+  //
+  // A person deciding whether two differently written answers are ONE category
+  // has to read the study's own coding vocabulary WITH ITS COUNTS, and those
+  // counts are the qualitative groups of the results the presentation is
+  // resolved over. It reaches the server half for that, and for nothing else:
+  // it resolves no document, binds none and stores none.
+  //
+  // Its declared loader is the same one, through the same single import
+  // statement. `category-review-workspace.ts` holds no reader of its own
+  // either — the results build, the family digest and the source vocabulary all
+  // arrive from `presentation-workspace.ts` — so this door's path runs through
+  // the composer's loader by construction.
+  //
+  // Its ACTION is the review's own `actions.ts`, already above: the category
+  // review adds no second action module and no second authorization path.
+  {
+    entry: "src/app/studio/e/[studyId]/revision/categorias/page.tsx",
+    loader: "src/lib/studio/presentation-workspace.ts",
+  },
   // UNIT 6B.4B2I — the CLIENT'S OWN published study, and its filter action.
   //
   // The first two doors on this list that are not internal. A client opening

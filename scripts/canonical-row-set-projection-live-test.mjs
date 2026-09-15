@@ -99,7 +99,7 @@ console.log("Be Community — Unit 6B.4B2K: one round trip for the canonical row
 console.log("=".repeat(86));
 
 await withDisposableDatabase(target, "rowset", async (db) => {
-  console.log("\n[setup] bootstrap + migrations 0000-0033, one tenant, one committed package");
+  console.log("\n[setup] bootstrap + migrations 0000-0034, one tenant, one committed package");
   const transport = psqlSuiteTransport(db);
   await transport.prepare(33);
 

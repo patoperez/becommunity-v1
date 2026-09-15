@@ -12,6 +12,7 @@
  * on. There is no second place where a business metric may be computed.
  */
 
+import type { CategoryCount, CategoryResolution } from "../category-review";
 import { authorities } from "./authorities";
 import {
   CANONICAL_RESULTS_CONTRACT_VERSION,
@@ -25,7 +26,11 @@ import { buildJourney } from "./journey";
 import { buildLookup } from "./lookup";
 import { buildPerformance } from "./performance";
 import { buildPopulation } from "./population";
-import { buildQualitativeGroups, buildCuratedFindingCounts } from "./qualitative";
+import {
+  buildCuratedFindingCounts,
+  buildQualitativeGroups,
+  qualitativeSourceCounts,
+} from "./qualitative";
 import { buildRecommendation } from "./recommendation";
 import { buildRenewal } from "./renewal";
 import { buildRetention } from "./retention";
@@ -39,6 +44,21 @@ export type BuildResultsOptions = {
   period?: StudyPeriod;
   /** Override the study's results specification. Defaults to the registered one. */
   spec?: StudyResultsSpec;
+  /**
+   * THE EDITORIAL CATEGORY PROJECTION IN FORCE, AND WHY IT IS AN OPTION RATHER
+   * THAN A FIELD OF THE SOURCE.
+   *
+   * A category decision is not evidence. `CanonicalResultSource` is the study's
+   * evidence — rows as they were imported — and putting a person's editorial
+   * judgement inside it would make the two indistinguishable to every
+   * calculator, every parity gate and every reader of this contract.
+   *
+   * Omitted, the empty resolution applies and this builder produces exactly the
+   * document it produced before the projection existed. That is what keeps
+   * golden parity a measurement rather than a re-baselining: the parity gates
+   * pass no resolution, so 531/531 is still the same 531.
+   */
+  categoryResolution?: CategoryResolution;
 };
 
 function specFor(source: CanonicalResultSource, override?: StudyResultsSpec): StudyResultsSpec {
@@ -107,6 +127,32 @@ function collectConfigurationRequirements(results: {
   return items;
 }
 
+/**
+ * THE SOURCE'S OWN CATEGORY VOCABULARY, per qualitative family.
+ *
+ * What the study coded, before any editorial grouping — the evidence a category
+ * decision is taken about. It is this builder run with the empty resolution
+ * over the unfiltered population, so «what the source said» is by construction
+ * «what would be published if nobody had decided anything».
+ *
+ * Pure and offline: it reads the already-loaded source and touches no
+ * transport. Only the review surface calls it, so no reading path pays for it.
+ */
+export function buildCategorySourceCounts(
+  source: CanonicalResultSource,
+  override?: StudyResultsSpec,
+): Map<string, CategoryCount[]> {
+  const spec = specFor(source, override);
+  const lookup = buildLookup(source);
+  const evaluation = applyFilters(source, spec, []);
+  return qualitativeSourceCounts(
+    source,
+    spec,
+    { participantIds: evaluation.participantIds, filtered: false },
+    lookup,
+  );
+}
+
 export function buildCanonicalStudyResults(
   source: CanonicalResultSource,
   options: BuildResultsOptions = {},
@@ -143,7 +189,7 @@ export function buildCanonicalStudyResults(
     journey,
     performance: { dimensions: buildPerformance(source, spec, scope, lookup) },
     qualitative: {
-      groups: buildQualitativeGroups(source, spec, scope, lookup),
+      groups: buildQualitativeGroups(source, spec, scope, lookup, options.categoryResolution),
       curatedFindingCounts,
     },
     // Empty, and empty is the healthy state: every question this document

@@ -1537,16 +1537,34 @@ for (const [label, source] of [["la acción", actionSource], ["el cargador", loa
   check(forbidden.length === 0, `${label} no escribe directamente en ninguna tabla${forbidden.length ? `: ${forbidden.join(", ")}` : ""}`);
 }
 
-// EL ÚNICO RPC QUE ESTA RUTA PUEDE NOMBRAR.
+// LOS DOS RPC QUE ESTA RUTA PUEDE NOMBRAR, Y POR QUÉ SON DOS.
+//
+// La unidad 6B.4B2L añade una segunda lectura al cargador: el proyecto editorial
+// de categorías, que se lee EN LA PUERTA para que ninguna superficie pueda
+// olvidarlo. La llamada vive en `category-ledger.ts`, un módulo propio, y ese
+// archivo se incluye aquí A PROPÓSITO: dejarlo fuera habría convertido la regla
+// en una que se cumple moviendo la llamada de archivo, que es justo lo que una
+// compuerta no debe premiar.
+//
+// El segundo nombre es de SÓLO LECTURA y eso se prueba en
+// `shadow-boundary-test.mjs`, leyendo su migración: declarado `stable`, sin DML
+// y con la ejecución revocada a PUBLIC, `anon` y `authenticated`. El RPC que
+// ESCRIBE una decisión de categorías no está aquí ni puede estarlo: vive en
+// `category-review-workspace.ts` y `category-review-test.mjs` comprueba que no
+// aparece en ningún otro sitio.
+const LEDGER = "src/lib/studio/category-ledger.ts";
+const ledgerSource = read(LEDGER);
+check(ledgerSource.length > 0, "el lector del historial de categorías existe");
+const ROUTE_RPCS = ["save_canonical_presentation_draft", "read_canonical_category_decisions"];
 const rpcNames = new Set();
-for (const source of [pageSource, actionSource, loaderSource]) {
+for (const source of [pageSource, actionSource, loaderSource, ledgerSource]) {
   for (const match of stripComments(source).matchAll(/\.rpc\(\s*["'`]([a-z_]+)["'`]/g)) {
     rpcNames.add(match[1]);
   }
 }
 check(
-  rpcNames.size <= 1 && [...rpcNames].every((name) => name === "save_canonical_presentation_draft"),
-  `el único RPC que la ruta nombra es el guardado del borrador canónico (${[...rpcNames].join(", ") || "ninguno"})`,
+  [...rpcNames].every((name) => ROUTE_RPCS.includes(name)),
+  `los únicos RPC que la ruta nombra son el guardado del borrador y la lectura del historial de categorías (${[...rpcNames].join(", ") || "ninguno"})`,
 );
 // Y CADA `.rpc(` LLEVA UN NOMBRE LITERAL. Una lista de permitidos que sólo mira
 // literales se burla escribiendo `client.rpc(name, …)`: el nombre deja de estar
@@ -1556,7 +1574,7 @@ check(
 {
   let calls = 0;
   let literal = 0;
-  for (const source of [pageSource, actionSource, loaderSource]) {
+  for (const source of [pageSource, actionSource, loaderSource, ledgerSource]) {
     const code = stripComments(source);
     calls += [...code.matchAll(/\.rpc\(/g)].length;
     literal += [...code.matchAll(/\.rpc\(\s*["'`][a-z_]+["'`]/g)].length;

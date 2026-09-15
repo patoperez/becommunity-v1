@@ -59,6 +59,7 @@
  * over; it never chooses what the answer is.
  */
 
+import { EMPTY_CATEGORY_RESOLUTION, type CategoryResolution } from "../category-review";
 import { buildCanonicalStudyResults } from "../results/build";
 import type { CanonicalStudyResults } from "../results/contract";
 import type { CanonicalResultSource } from "../results/source";
@@ -90,12 +91,31 @@ export type CanonicalPresentationRead = {
   source: CanonicalResultSource;
   results: CanonicalStudyResults;
   registry: CanonicalPresentationRegistry;
+  /**
+   * THE CATEGORY PROJECTION THIS READ WAS BUILT UNDER, CARRIED SO EVERY
+   * RECOMPUTATION USES THE SAME ONE.
+   *
+   * A filtered recomputation is a fresh build over the same evidence. If it
+   * built without the resolution the unfiltered results were built with, a
+   * reader ticking one filter would watch two merged categories come apart —
+   * and `filter_registry_drift` would report it as a registry problem, which it
+   * is not. One read, one registry, one resolution.
+   */
+  categoryResolution: CategoryResolution;
 };
 
 /** Build the unfiltered pair from evidence that has already been read. */
-export function buildPresentationRead(source: CanonicalResultSource): CanonicalPresentationRead {
-  const results = buildCanonicalStudyResults(source);
-  return { source, results, registry: buildCanonicalPresentationRegistry(results) };
+export function buildPresentationRead(
+  source: CanonicalResultSource,
+  categoryResolution: CategoryResolution = EMPTY_CATEGORY_RESOLUTION,
+): CanonicalPresentationRead {
+  const results = buildCanonicalStudyResults(source, { categoryResolution });
+  return {
+    source,
+    results,
+    registry: buildCanonicalPresentationRegistry(results),
+    categoryResolution,
+  };
 }
 
 /** Why a selection could not be honoured. Codes and paths only, never prose. */
@@ -153,7 +173,10 @@ export function resolveUnderSelection(
       // function documented to throw on one.
       return { ok: false, issues: [{ code: "unknown_filter_option", path: "$.viewer" }] };
     }
-    const filtered = buildCanonicalStudyResults(read.source, { filters: applied });
+    const filtered = buildCanonicalStudyResults(read.source, {
+      filters: applied,
+      categoryResolution: read.categoryResolution,
+    });
     views.set(recomputation.key, {
       results: filtered,
       registry: buildCanonicalPresentationRegistry(filtered),

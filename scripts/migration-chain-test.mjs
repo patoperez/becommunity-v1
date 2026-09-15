@@ -321,6 +321,23 @@ const CANONICAL_ORDER = [
   // and additive to all of them: it creates no table, alters none, and replaces
   // no function but its own.
   "canonical_row_set_projection",
+  // Unit 6B.4B2L. The canonical category review: a person deciding that two or
+  // more differently written closed-coded answers are ONE category, for one
+  // qualitative family of one study. Last because it presupposes the read model
+  // the projection above serves and the sign-off it makes stale, and additive to
+  // all of them: it creates one table and three functions, alters no existing
+  // table and — in particular — never touches `survey_response`, `survey_item`
+  // or `response_option`. Grouping happens on the way OUT, in the results
+  // builder, so raw evidence is not rewritten and the total number of answers
+  // cannot move.
+  //
+  // IT DOES NOT SHARE THE PRE-CANONICAL SEMANTIC-REVIEW LEDGER, and that is the
+  // reason it exists at all: that ledger's only rule-enforcing write path ends
+  // by writing `segment_dimension.config.aliases`, and its snapshot function
+  // folds every decision of a study into the LEGACY publication's projection.
+  // Two independent projection systems folding one ledger into two different
+  // read paths is not shared storage; it is two writers for one meaning.
+  "canonical_category_review",
 ];
 
 /**

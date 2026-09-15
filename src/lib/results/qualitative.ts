@@ -26,6 +26,13 @@
  * people had no applicable reason, which is itself a finding.
  */
 
+import {
+  EMPTY_CATEGORY_RESOLUTION,
+  categoryLabelMap,
+  foldCategoryLabel,
+  type CategoryCount,
+  type CategoryResolution,
+} from "../category-review";
 import type {
   CuratedFindingCount,
   QualitativeGroupResult,
@@ -45,8 +52,30 @@ export function buildQualitativeGroups(
   spec: StudyResultsSpec,
   scope: ResultScope,
   lookup: ResultLookup = buildLookup(source),
+  /**
+   * THE EDITORIAL PROJECTION, AND THE ONLY THING ON THIS PATH THAT MAY MOVE A
+   * LABEL.
+   *
+   * A person deciding that two differently written answers are one category
+   * contributes one entry to a map from folded label to the name it counts
+   * under; this loop consults it while counting. Nothing is rewritten: the
+   * source's own spelling stays in `survey_response`, so reconciliation against
+   * the workbooks is exact and revoking the decision simply makes the next build
+   * group differently.
+   *
+   * IT IS APPLIED AFTER THE EXCLUSION TEST, NOT BEFORE. A documented «not a
+   * reason» category is kept out of the cloud by a named methodological
+   * authority; an editorial grouping is a different kind of act and may not
+   * reach into that decision from the side.
+   *
+   * THE DEFAULT IS THE EMPTY RESOLUTION, so a study with no decisions — and a
+   * caller that has none to give — produces byte-identical results to the ones
+   * this builder produced before the projection existed.
+   */
+  resolution: CategoryResolution = EMPTY_CATEGORY_RESOLUTION,
 ): QualitativeGroupResult[] {
   return spec.qualitative.map((groupSpec) => {
+    const grouping = categoryLabelMap(resolution, groupSpec.key);
     const item = lookup.itemByKey.get(groupSpec.itemKey);
     const instrumentKey = item?.instrumentKey ?? null;
     const sessionIds = new Set(
@@ -103,7 +132,8 @@ export function buildQualitativeGroups(
       // `coded` — which becomes `base.valid` — stays the denominator every
       // `share` below actually rests on, whichever way a category is excluded.
       coded += 1;
-      counts.set(label, (counts.get(label) ?? 0) + 1);
+      const counted = grouping.get(foldCategoryLabel(label)) ?? label;
+      counts.set(counted, (counts.get(counted) ?? 0) + 1);
     }
 
     const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
@@ -153,6 +183,30 @@ export function buildQualitativeGroups(
       }),
     };
   });
+}
+
+/**
+ * THE SOURCE'S OWN DISTRIBUTION — the evidence a category decision is about.
+ *
+ * It is not a second counting path, and that is the point: it is THIS builder,
+ * run with the empty resolution, so «what the source coded» is by construction
+ * «what would be published if nobody had decided anything». A separate loop
+ * somewhere else is exactly how the evidence a reviewer reads comes to disagree
+ * with the numbers a client reads.
+ */
+export function qualitativeSourceCounts(
+  source: CanonicalResultSource,
+  spec: StudyResultsSpec,
+  scope: ResultScope,
+  lookup: ResultLookup = buildLookup(source),
+): Map<string, CategoryCount[]> {
+  const groups = buildQualitativeGroups(source, spec, scope, lookup, EMPTY_CATEGORY_RESOLUTION);
+  return new Map(
+    groups.map((group) => [
+      group.key,
+      group.terms.map((term) => ({ label: term.label, count: term.count })),
+    ]),
+  );
 }
 
 /** Counts of curated findings per curated entity. Labels of ENTITIES, never of findings. */

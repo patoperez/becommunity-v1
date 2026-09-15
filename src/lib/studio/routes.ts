@@ -65,6 +65,21 @@ export const studioStudyReview = (studyId: string) => `/studio/e/${studyId}/revi
  * has journey pain material, and most do not.
  */
 export const studioStudyJourneyPain = (studyId: string) => `/studio/e/${studyId}/revision/dolor`;
+/**
+ * The canonical category review (Unit 6B.4B2L).
+ *
+ * INSIDE the review's own segment, beside the journey pain editor, and declared
+ * immediately after it for the same reason: it is a part of that review rather
+ * than a sixth process step. A person opens it from the review, decides whether
+ * two differently written answers are one category, and comes back.
+ *
+ * It is deliberately NOT in the study's process navigation. The legacy screen
+ * this replaces was a tab on every study, which told every study it had
+ * categories worth reviewing; a study with no qualitative family has nothing to
+ * decide here and should not be told otherwise.
+ */
+export const studioStudyCategoryReview = (studyId: string) =>
+  `/studio/e/${studyId}/revision/categorias`;
 export const studioStudyPreview = (studyId: string) => `/studio/e/${studyId}/vista-cliente`;
 export const studioStudyPublish = (studyId: string) => `/studio/e/${studyId}/publicar`;
 
@@ -99,6 +114,11 @@ export function qualitativeReturnPaths(studyId: string): string[] {
 
 export function interpretationReturnPaths(studyId: string): string[] {
   return [studioStudyInterpretation(studyId)];
+}
+
+/** The one Studio address that may host the canonical category review. */
+export function categoryReviewReturnPaths(studyId: string): string[] {
+  return [studioStudyCategoryReview(studyId)];
 }
 
 /** Every Studio address that may host the configuration of one study. */

@@ -13,7 +13,7 @@
  * DOCUMENT; it never imports a calculator.
  */
 
-export { buildCanonicalStudyResults } from "./build";
+export { buildCanonicalStudyResults, buildCategorySourceCounts } from "./build";
 export type { BuildResultsOptions } from "./build";
 
 export { CANONICAL_RESULTS_CONTRACT_VERSION, emptyAccounting, emptyBase } from "./contract";

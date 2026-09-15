@@ -557,6 +557,27 @@ export function PublicationReviewView({
                 : signOffOutcome.detail}
             </p>
           ) : null}
+          {/*
+            WHERE THE CATEGORIES THEMSELVES ARE DECIDED.
+
+            Signing is a statement about a set of words; deciding that two of
+            those words are one category is a different act, and it happens on
+            its own screen. The link is here because this is where a reviewer
+            discovers that the set is not what they expected — and because a
+            decision taken there makes the signature above stale, which the
+            sentence says rather than leaving to be discovered.
+          */}
+          <a
+            href={`/studio/e/${studyId}/revision/categorias`}
+            className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken"
+            data-testid="ir-a-categorias"
+          >
+            Revisar las categorías
+          </a>
+          <p className="mt-2 max-w-prose text-sm text-muted">
+            Ahí se decide si la misma respuesta llegó escrita de dos formas. Si cambias algo, esta
+            revisión deja de estar al día y habrá que registrarla otra vez.
+          </p>
         </section>
       ) : null}
 

@@ -65,6 +65,7 @@ import { z } from "zod";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { recordCategoryDecision } from "@/lib/studio/category-review-workspace";
 import {
   previewStoredPresentationUnderSelection,
   publishStoredPresentation,
@@ -83,6 +84,32 @@ import type {
 } from "@/lib/publication";
 
 const uuid = z.string().uuid();
+
+/**
+ * One canonical category decision, bounded and shaped before anything is read.
+ *
+ * WHAT A BROWSER MAY NAME HERE IS A FAMILY KEY, LABELS AND A VERSION NUMBER —
+ * and not one of them is believed without checking. The family key is compared
+ * against the families the server just read; the labels are re-folded, re-sorted
+ * and matched against the study's own inventory, so a spelling the study does
+ * not carry cannot enter a record; and the version is checked against the chain
+ * head by the database, under the study's advisory lock.
+ *
+ * THERE IS NO DIGEST PARAMETER, exactly as there is none for the qualitative
+ * sign-off. The digest a decision is stored against is recomputed on the server
+ * from the server's own read of the family's vocabulary.
+ */
+const CATEGORY_DECISION = z
+  .object({
+    familyKey: z.string().regex(/^[a-z0-9_]{1,64}$/),
+    memberLabels: z.array(z.string().min(1).max(400)).min(2).max(12),
+    disposition: z.enum(["grouped", "separate", "postponed", "revoked"]),
+    canonicalLabel: z.string().max(200).nullable(),
+    rationale: z.string().max(400).nullable(),
+    /** The version the screen displayed. Zero when the group has no history. */
+    expectedVersion: z.number().int().min(0).max(100_000),
+  })
+  .strict();
 
 /**
  * The idempotency key's shape, repeated here rather than trusted from the round
@@ -461,6 +488,52 @@ export async function recordCanonicalQualitativeSignOff(
  * still say what they said, and whether each chosen touchpoint is one this
  * document draws are all decided on the server against a fresh read.
  */
+/**
+ * Record one canonical category decision.
+ *
+ * IT DECIDES NOTHING. Every path requires an explicit human act — a chosen
+ * disposition and, for a grouping, a chosen final name — and there is no
+ * confidence value from any source anywhere on this path, because there is no
+ * source of one: this unit ships no model, no provider and no advisor.
+ *
+ * AUTHORIZATION IS RE-ESTABLISHED HERE AND AGAIN IN SQL.
+ * `authorizedStudioScope` revalidates the session with `getUser()` and reads the
+ * role from the database; `record_canonical_category_decision` then
+ * independently refuses an actor who is not internal. A caller that never opened
+ * the review screen gets nowhere, and neither does one that opened it and then
+ * lost the role.
+ */
+export async function recordCanonicalCategoryDecision(
+  studyId: string,
+  input: unknown,
+): Promise<{ ok: true; created: boolean; version: number } | { ok: false; code: string; detail: string }> {
+  const authorized = await authorizedStudioScope(studyId);
+  if (!authorized.ok) {
+    return { ok: false, code: "not_authorized", detail: authorized.detail };
+  }
+  // A SERVER ACTION'S ARGUMENTS ARE DESERIALIZED BEFORE ANYTHING VALIDATES THEM,
+  // so the whole object is parsed as one — an unknown key, a wrong type or a
+  // missing field is refused here rather than reaching a function whose
+  // parameter types the runtime never checked.
+  const parsed = CATEGORY_DECISION.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      code: "write_failed",
+      detail:
+        "Lo que se envió no describe una decisión sobre las categorías de este estudio, o excede el tamaño que esta capa admite.",
+    };
+  }
+  return recordCategoryDecision(authorized.admin, authorized.scope, authorized.userId, {
+    familyKey: parsed.data.familyKey,
+    memberLabels: parsed.data.memberLabels,
+    disposition: parsed.data.disposition,
+    canonicalLabel: parsed.data.canonicalLabel,
+    rationale: parsed.data.rationale,
+    expectedVersion: parsed.data.expectedVersion,
+  });
+}
+
 export async function recordCanonicalJourneyPainDecision(
   studyId: string,
   input: PainDecisionInput,
