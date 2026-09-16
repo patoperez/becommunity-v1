@@ -4,7 +4,21 @@
 # proxy, RLS-scoped reads, and Node libs all work. See docs/DEPLOYMENT.md.
 
 name = "becommunity-v1"
-main = ".open-next/worker.js"
+
+# -----------------------------------------------------------------------------
+# THE ENTRY IS THIS PROJECT'S, AND IT WRAPS THE GENERATED ONE.
+# -----------------------------------------------------------------------------
+# This was `.open-next/worker.js`, the entry the OpenNext adapter generates. Read
+# that file: it awaits the middleware handler, performs a REQUEST-TIME `import()`
+# of the server handler, and awaits that — with no `try`/`catch` anywhere. A
+# rejection from any of the three reaches Cloudflare, which answers **Error 1101,
+# "Worker threw a JavaScript exception"**, on whatever route the reader asked
+# for. Unit 6B.4B2N recorded thirteen of those, on routes including `/login`.
+#
+# `src/worker-entry.ts` imports the generated entry, re-exports its Durable
+# Object classes unchanged, and calls it inside one `try`/`catch`. It adds no
+# behaviour to a request that succeeds.
+main = "src/worker-entry.ts"
 
 # OpenNext requires a recent compatibility date + nodejs_compat.
 compatibility_date = "2025-09-23"
@@ -35,6 +49,28 @@ compatibility_flags = ["nodejs_compat"]
 # Suite D's D-g check fails if this line is removed, flipped, or if a `[vars]`
 # block ever appears below.
 keep_vars = true
+
+# -----------------------------------------------------------------------------
+# WORKERS LOGS. THE REASON THE 1101 HAS NO EXPLANATION IS THAT THIS WAS OFF.
+# -----------------------------------------------------------------------------
+# Cloudflare's own answer to "what threw?" is Workers Logs, filtered on
+# `$workers.outcome = "exception"`. The API reported `observability: null` for
+# this Worker — it was never enabled — so nothing was retained for any of the
+# Ray IDs Unit 6B.4B2N recorded, and `wrangler tail` saw nothing because it was
+# not running at the time. Retention is 7 days on a paid plan and 3 on free, and
+# it is NOT retroactive: a log not taken is gone.
+#
+# `head_sampling_rate = 1` is deliberate. The event being hunted is rare and
+# bursty, and a sampled log of a rare event is a log that misses it. Turn the
+# rate down, or remove this block, once the failure is understood.
+#
+# THIS BLOCK MUST STAY BELOW THE TOP-LEVEL KEYS. A TOML table swallows every key
+# that follows it, so placing it above `compatibility_date` silently made that
+# key — and `keep_vars` — fields of `observability`; wrangler warned, and the
+# build failed.
+[observability]
+enabled = true
+head_sampling_rate = 1
 
 # Static assets emitted by the OpenNext build.
 [assets]

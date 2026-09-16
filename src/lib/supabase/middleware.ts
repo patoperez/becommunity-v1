@@ -1,6 +1,23 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { recordRuntimeFailure, unavailableResponse } from "@/lib/runtime/unavailable";
+
+/**
+ * HOW LONG THE SESSION CHECK MAY TAKE BEFORE IT IS A FAILURE.
+ *
+ * `getUser()` revalidates the JWT against the Supabase Auth server, so the
+ * middleware makes a network call on EVERY authenticated request to EVERY
+ * route. It had no bound at all: fault injection against the built Worker under
+ * workerd showed that an auth service which accepts the connection and never
+ * answers leaves the request open until something above gives up — measured at
+ * over forty-five seconds, with no response and no log.
+ *
+ * Eight seconds is generous against a p99 of well under one, and short enough
+ * that a reader gets an answer rather than a spinner.
+ */
+const SESSION_CHECK_TIMEOUT_MS = 8_000;
+
 /**
  * Build the Content-Security-Policy (§5.2). Nonce-based `script-src` with
  * `strict-dynamic` (the Next-supported pattern — Next stamps the nonce onto its
@@ -40,6 +57,22 @@ function buildCsp(nonce: string): string {
  * its own scripts, and the CSP is set on the response that renders the document.
  */
 export async function updateSession(request: NextRequest) {
+  // THE MIDDLEWARE RUNS ON EVERY ROUTE AND SITS OUTSIDE EVERY ERROR BOUNDARY.
+  // `error.tsx` and `global-error.tsx` catch a Server Component that throws;
+  // neither can see this function. A rejection here reaches the Worker's fetch
+  // handler, and Cloudflare answers Error 1101 — on `/login` as readily as on a
+  // review screen. So it is wrapped, and what it answers with is the product's
+  // own controlled 503 rather than the edge's error page.
+  try {
+    return await runUpdateSession(request);
+  } catch {
+    const { pathname } = request.nextUrl;
+    recordRuntimeFailure({ code: "middleware_unhandled", pathname, method: request.method });
+    return unavailableResponse("middleware_unhandled", pathname);
+  }
+}
+
+async function runUpdateSession(request: NextRequest) {
   // Per-request CSP nonce (16 random bytes, base64). getRandomValues + btoa work
   // on the Edge runtime (Buffer is not guaranteed there).
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
@@ -56,6 +89,18 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      /*
+        EVERY CALL THIS CLIENT MAKES IS BOUNDED. The bound goes on the client's
+        own `fetch` rather than on one call site, so a library that adds a
+        request later inherits it instead of escaping it. `AbortSignal.timeout`
+        is the platform's own; the abort carries NO reason, because a custom
+        reason stops `@supabase/postgrest-js` recognising a cancellation and
+        turns it into a retried network failure.
+      */
+      global: {
+        fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+          fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS) }),
+      },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -76,9 +121,25 @@ export async function updateSession(request: NextRequest) {
   // getUser() revalidates the JWT against the Supabase Auth server. NEVER use
   // getSession() for an authorization decision — it only decodes the cookie and
   // can be spoofed. This is the core of "defense in depth" (§6.4).
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  //
+  // ⓘ «NO SESSION» AND «COULD NOT CHECK THE SESSION» ARE DIFFERENT FACTS, and
+  // the client returns both the same way: `{ data: { user: null }, error }`.
+  // Fault injection confirmed it — a refused connection, a reset, malformed
+  // JSON, a truncated body and HTTP 500 all came back as «no user», so an auth
+  // outage silently presents every signed-in person as a stranger. The
+  // AUTHORIZATION decision below is unchanged and still fails closed on both,
+  // because refusing a reader we cannot vouch for is correct either way. What is
+  // new is that the second case is now NAMED, so it is visible in the logs
+  // instead of looking like a quiet afternoon of people signing out.
+  const attempt = await supabase.auth.getUser();
+  const user = attempt.data.user;
+  if (!user && isTransportFailure(attempt.error)) {
+    recordRuntimeFailure({
+      code: attempt.error?.name === "AbortError" ? "session_timeout" : "session_unverifiable",
+      pathname: request.nextUrl.pathname,
+      method: request.method,
+    });
+  }
 
   const { pathname } = request.nextUrl;
   const isAuthRoute = pathname.startsWith("/login");
@@ -102,4 +163,25 @@ export async function updateSession(request: NextRequest) {
   // Next stamped onto its scripts via the request header above).
   supabaseResponse.headers.set("content-security-policy", csp);
   return supabaseResponse;
+}
+
+/**
+ * Did the session check fail to REACH an answer, as opposed to receiving one?
+ *
+ * `AuthApiError` means the service answered and the token is not good — an
+ * ordinary «not signed in». `AuthRetryableFetchError`, an `AbortError` and a
+ * bare `TypeError: fetch failed` mean nothing was learned about the token at
+ * all. The two must not be confused: the first is a fact about the reader, the
+ * second is a fact about the infrastructure.
+ */
+function isTransportFailure(error: unknown): boolean {
+  if (!error) return false;
+  const name = (error as { name?: string }).name ?? "";
+  const status = (error as { status?: number }).status;
+  if (name === "AbortError" || name === "TimeoutError") return true;
+  if (name === "AuthRetryableFetchError") return true;
+  // An auth error the service itself produced carries a 4xx status; a transport
+  // failure carries none, or a 5xx the gateway produced.
+  if (typeof status === "number") return status >= 500;
+  return name === "TypeError" || name === "FetchError";
 }
