@@ -7845,6 +7845,15 @@ The bounded observation that followed, concurrency ONE, ~2.5 s between requests:
 | window | requests | preview anon | production control | preview authenticated | Error 1101 |
 |---|---|---|---|---|---|
 | 1 · 03:54:20 → 03:59:14 UTC | 80 | 30 (20×200, 10×307), p50 316 ms | 20 × 200, p50 289 ms | 30 ready, p50 2 641 ms, max 3 964 ms | **0** |
+| 2 · 04:03:55 → 04:08:51 UTC | 80 | 30 (20×200, 10×307), p50 318 ms | 20 × 200, p50 297 ms | 30 ready, p50 2 702 ms, max 3 382 ms | **0** |
+
+**160 requests across two separate windows, at concurrency one, and not one
+Error 1101** — on the same version that produced thirteen of them an hour
+earlier. Fifty Cloudflare Ray IDs were captured per window, so the requests
+demonstrably reached Cloudflare rather than being served from anywhere closer.
+Every endpoint the brief names is in both windows: `/api/health`, `/login`, a
+protected-route redirect, the authenticated revision screen, the category review
+and the journey review.
 
 **It was not reproduced during the bounded observation. That is not the same as
 «it cannot recur»**, and this document does not say the stronger thing: it
@@ -7869,3 +7878,37 @@ not changed.
 | editorial decisions and sign-off unchanged | ✅ digest `4ed838c4…`, 15 pain decisions approved |
 | no client account created | ✅ |
 | category-review ledger still empty | ✅ 0 rows |
+
+And the asymmetry was confirmed once more, in this same session and by accident:
+the documentation commit `9ff777f` was pushed to the **source branch**, Workers
+Builds created version **`a70aadc6-d7b6-4eca-9feb-10239aba08c7`** at 04:04:55Z,
+and **no deployment followed**. A branch push builds; a `main` push deploys.
+
+### Where this leaves the repository
+
+* `origin/main` = **`1c05276383ddd6d3a7d88de5ceab5170aafbf6f7`** — the canonical
+  release, 136 commits, integrated by strict fast-forward.
+* `origin/codex/canonical-experience-integration` = **`9ff777f…`**, one
+  documentation commit ahead. **`main` is deliberately NOT moved to it**, because
+  moving it would deploy.
+* **Production runs `e691ecd8`**, the pre-canonical build, on purpose: a
+  canonical build in production with no client account, no `published` status and
+  no publication is a build nobody can use.
+* The canonical release is built, uploaded and QA'd: version
+  **`1e17160e-0984-40f8-9b85-5e3126843bc7`**, three runs at 194/194.
+
+**The production deployment still pending**, in order: remove
+`CANONICAL_EDGE_DIAGNOSTICS` in the dashboard; deploy `1e17160e` explicitly with
+`wrangler versions deploy 1e17160e-0984-40f8-9b85-5e3126843bc7@100%` (or push
+`main` and treat the automatic deployment as that step); verify `/api/health` and
+one client route; provision a real client account in the Cuicuilco tenant; set
+`study.status`; publish; verify as the real client at three viewports. Rollback
+remains `wrangler versions deploy e691ecd8-de9a-4a02-a8e3-13aad7e9e805@100%`,
+which this unit has now executed once and measured.
+
+**One blocker stands**: the intermittent Error 1101. It is not understood, it
+recurred on this version an hour before two clean observation windows, and
+`wrangler tail` still captures nothing for it. Deploying is a decision to accept
+it — which is defensible, since production has been serving a Worker with the
+same symptom since before this branch existed, but it is a decision and not an
+absence of one.
