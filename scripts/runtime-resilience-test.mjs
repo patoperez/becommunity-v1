@@ -350,6 +350,44 @@ check("and it records the second case without recording the first", () => {
   assert.match(MIDDLEWARE, /session_unverifiable/);
 });
 
+/* --------------------------------------------------------------------------- */
+console.log("\n[7] «Tu contraseña está mal» y «no pudimos preguntar» son cosas distintas");
+
+const LOGIN_ACTION = readFileSync(new URL("../src/app/login/actions.ts", import.meta.url), "utf8");
+const LOGIN_ACTION_CODE = stripComments(LOGIN_ACTION);
+const loginErrors = await import("../src/app/login/errors.ts");
+
+check("the sign-in vocabulary gained a code for «the service did not answer»", () => {
+  assert.ok("service_unavailable" in loginErrors.AUTH_ERROR_MESSAGES);
+  assert.equal(loginErrors.authErrorMessage("service_unavailable"), loginErrors.AUTH_ERROR_MESSAGES.service_unavailable);
+});
+check("and its sentence does not blame the reader's password", () => {
+  const message = loginErrors.AUTH_ERROR_MESSAGES.service_unavailable;
+  assert.match(message, /No es tu contraseña/);
+  assert.doesNotMatch(message, /inválid/i);
+  assert.match(message, /vuelve a intentarlo/i);
+});
+check("the allowlist is still an allowlist — an unknown code renders nothing", () => {
+  assert.equal(loginErrors.authErrorMessage("<script>alert(1)</script>"), null);
+  assert.equal(loginErrors.authErrorMessage(undefined), null);
+  assert.equal(loginErrors.authErrorMessage("service_unavailable "), null);
+});
+check("the action chooses between the two codes rather than answering one for both", () => {
+  assert.match(LOGIN_ACTION_CODE, /isAuthTransportFailure\(error\) \? "service_unavailable" : "invalid_credentials"/);
+});
+check("and neither branch carries the error's own text", () => {
+  assert.doesNotMatch(LOGIN_ACTION_CODE, /error\.message/);
+  assert.doesNotMatch(LOGIN_ACTION_CODE, /\$\{error/);
+});
+check("the same closed rules are used in both places, so the two cannot drift apart", () => {
+  const rules = (source) =>
+    [...stripComments(source).matchAll(/name === "([A-Za-z]+)"|status >= (\d+)/g)].map((m) => m[1] ?? m[2]).join(",");
+  const inMiddleware = rules(MIDDLEWARE.slice(MIDDLEWARE.indexOf("function isTransportFailure")));
+  const inAction = rules(LOGIN_ACTION.slice(LOGIN_ACTION.indexOf("function isAuthTransportFailure")));
+  assert.equal(inAction, inMiddleware, "the two classifiers disagree");
+  assert.ok(inAction.includes("AuthRetryableFetchError") && inAction.includes("AbortError") && inAction.includes("500"));
+});
+
 console.log("\n" + "=".repeat(78));
 console.log(`RESUMEN: ${passed + failed} comprobaciones, ${passed} aprobadas, ${failed} falladas.`);
 if (failed > 0) {

@@ -8,6 +8,15 @@
 export const AUTH_ERROR_MESSAGES = {
   missing_fields: "Correo y contraseña son obligatorios.",
   invalid_credentials: "Credenciales inválidas.",
+  /*
+    ⓘ «TU CONTRASEÑA ESTÁ MAL» AND «NO PUDIMOS PREGUNTAR» ARE DIFFERENT FACTS.
+    The sign-in call returns both as an `error`, and the action used to answer
+    both with `invalid_credentials` — so during an auth outage every person
+    trying to sign in was told their own credentials were wrong, which is untrue,
+    unactionable, and sends them to reset a password that was never the problem.
+  */
+  service_unavailable:
+    "No pudimos comprobar tus datos ahora mismo. No es tu contraseña: vuelve a intentarlo en unos segundos.",
 } as const;
 
 export type AuthErrorCode = keyof typeof AUTH_ERROR_MESSAGES;
