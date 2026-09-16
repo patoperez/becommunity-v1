@@ -7534,3 +7534,74 @@ External evidence, outside every Git repository: `~/becommunity-6b4b2m/`
 `push-dryrun.log`, `push-apply.log`, `falsify/`, `cf-*.txt`, `screenshots/`), and
 the retained backup at
 `~/becommunity-backups/u6b4b2m-pre-0034-20260915T214322Z/`.
+
+---
+
+## Unit 6B.4B2N — main integration, and the QA harness that was reporting slow as broken
+
+### Phase C — a fixed sleep replaced by a bounded wait on a named state
+
+Unit 6B.4B2M's release QA needed **three runs** to reach 152/152. The two before
+it failed **eight assertions each, with an identical signature**: a filter value
+ticked, the filtered banner not found, «Ver el estudio completo» then not found,
+the desktop viewport reading an undrawn preview. Minutes later the same version
+served the same page and every one of them passed.
+
+The cause was in the harness, not the product. The script clicked, slept a fixed
+`sleep(5000)`, and asserted. A click that costs a server round trip sometimes
+takes longer than five seconds — so a healthy server was reported as a broken
+screen. **Lengthening the sleep would have hidden the opposite mistake just as
+well**, which is the real objection to it: a fixed duration cannot tell a slow
+answer from a wrong one, and a QA run whose verdict depends on which it got is
+not evidence about anything.
+
+`scripts/lib/harness-browser.mjs` gained `awaitUiState`. The caller names what
+**ready** looks like and, optionally, what the page's **own failure** looks
+like; whichever appears first ends the wait; the maximum is explicit; and the
+answer is one of five readings rather than a thrown error:
+
+| reading | what it means | what a report should do with it |
+| --- | --- | --- |
+| `ready` | the named state appeared | continue, and print how long it took |
+| `application` | the page's own failure state appeared | fail — the product said no |
+| `timeout` | the bound was exhausted | fail, naming the bound and the elapsed time |
+| `browser` | the page or its CDP session went away | not a product verdict; re-run and say so |
+| `probe` | the predicate itself is malformed | the harness's own defect, fixed in a different file |
+
+Elapsed time is measured on **both** clocks and both are reported — the page's
+own `performance.now()` for how long the condition took, Node's monotonic
+`process.hrtime.bigint()` for how long the call took. A large gap between them
+is itself a finding. Nothing is rounded off into a bare pass or fail.
+
+The observation costs **one** CDP round trip and issues **no application
+request**: a `MutationObserver` catches every DOM change, and a bounded in-page
+sampler catches the conditions a mutation does not announce. §4.4.1 is intact —
+Node never polls, and neither timer asks the server anything. `waitForDom` is
+untouched, so the twenty call sites that already depended on it did not move.
+
+### The gate, and the seven ways it was made to fail
+
+`npm run test:harness-condition` — **33 checks, offline, no browser, in
+`npm test`** (inserted after `test:canonical-viewer-filters`). It does not read
+the wait; it **executes** it, against a scripted page in a `node:vm` context, and
+watches all four outcomes happen.
+
+The one worth naming: **a condition that becomes true with no DOM change at
+all** is still observed. That is the case a `MutationObserver` alone never sees,
+and it is the only reason a bounded sampler is in the page.
+
+Discrimination was proved by seven single-point perturbations of a **copy** of
+the harness — the real file's digest is identical before and after, which is
+recorded rather than asserted:
+
+| perturbation | gate's answer |
+| --- | --- |
+| the sampler stops looking | 4 failures, led by the no-mutation case |
+| a failure state is consulted before ready | 1 — `ready` no longer wins a tie |
+| observer and interval left running | 3 — one per outcome |
+| a malformed probe called a lost browser | 1 — the two are fixed in different files |
+| the lost-browser reading drops its clock | 1 — "every reading reports elapsed time" |
+| a throwing predicate counted as satisfied | 1 — a broken probe must never read as ready |
+| the absent failure predicate defaults to true | 1 — it must be a predicate that is never true |
+
+Unperturbed: 33/33.

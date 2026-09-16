@@ -235,6 +235,15 @@ npm run test:canonical-presentation-hosted-fingerprint # READ-ONLY. Proves the t
                                     #   since the 6B.4B2E rebind, with its pinned binding and
                                     #   definition digest, under a draft_created and a draft_saved
                                     #   — and that no other study has one.
+npm run test:harness-condition # the browser harness's BOUNDED CONDITION WAIT — `awaitUiState`
+                                    #   executed against a scripted page in a vm context: a state
+                                    #   that appears on a mutation, one that appears with NO
+                                    #   mutation at all, the page's own failure state, an exhausted
+                                    #   bound, a lost CDP session and a malformed probe, told apart
+                                    #   as five readings that each report elapsed time. 33 checks,
+                                    #   offline, no browser, in `npm test`. It exists because a
+                                    #   fixed `sleep` ahead of an assertion reports a slow server
+                                    #   as a broken screen — twice, in 6B.4B2M's release QA.
 npm run suite:d      # Suite D — dependency advisories, pins, lockfile, git history, artifacts
 npm run cf:build     # opennextjs-cloudflare build  -> .open-next/worker.js
 npm run cf:preview   # build + local Worker preview (wrangler dev)

@@ -180,6 +180,94 @@ new Promise((resolve, reject) => {
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
 })`;
 
+/**
+ * Bounded condition waiting whose OUTCOME a report can tell apart.
+ *
+ * `waitForDom` answers one question — did the condition hold? — and throws one
+ * error for every reason it did not. That is enough for a gate driving a local
+ * server and not enough for QA against a real edge, where three different
+ * things produce the same silence: the server is slow, the server said no, or
+ * the browser lost the page underneath us. A fixed `sleep` ahead of the
+ * assertion collapses all three into a fourth reading, «the product is broken»,
+ * and that is exactly the false failure this replaces.
+ *
+ * So the wait names a SETTLED state, not a duration: the caller says what ready
+ * looks like and, optionally, what the page's own failure looks like. Whichever
+ * appears first ends the wait, and the bound is explicit.
+ *
+ * The observation is in-page and costs ONE round trip. A MutationObserver
+ * catches every DOM change; a sampler catches the conditions a mutation does
+ * not announce — a value set by a script, an attribute a framework writes on a
+ * node already observed — which is why a bounded interval is here at all. It
+ * issues no application request, so §4.4.1 is intact: Node never polls, and
+ * neither loop asks the server anything.
+ *
+ * Elapsed time is measured on BOTH sides and both are reported. The page's own
+ * clock says how long the condition took; Node's says how long the call took,
+ * and a large gap between them is itself a finding.
+ */
+const AWAIT_UI_STATE = (readySource, failedSource, timeoutMs, sampleMs) => `
+new Promise((resolve) => {
+  const started = performance.now();
+  const ready = ${readySource};
+  const failed = ${failedSource ?? "() => false"};
+  let ticks = 0, mutations = 0, predicateError = null;
+  const ask = (test) => { try { return !!test(); } catch (error) { predicateError = String((error && error.message) || error); return false; } };
+  const settle = (outcome) => {
+    observer.disconnect();
+    clearInterval(sampler);
+    clearTimeout(timer);
+    resolve({ outcome, inPageMs: Math.round(performance.now() - started), ticks, mutations, predicateError });
+  };
+  const look = () => {
+    if (ask(ready)) { settle("ready"); return true; }
+    if (ask(failed)) { settle("failed"); return true; }
+    return false;
+  };
+  const observer = new MutationObserver(() => { mutations += 1; look(); });
+  const sampler = setInterval(() => { ticks += 1; look(); }, ${sampleMs});
+  const timer = setTimeout(() => settle("timeout"), ${timeoutMs});
+  observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  look();
+})`;
+
+/**
+ * The classifier, separated from the transport so an offline gate can prove it.
+ *
+ * `raw` is whatever the in-page promise resolved to; `error` is whatever the
+ * evaluate threw instead. Exactly one of the two is given.
+ */
+export function classifyUiWait({ raw, error, elapsedMs, what }) {
+  if (error) {
+    const detail = String(error.message ?? error);
+    // A malformed probe is the harness's own fault and must not be reported as
+    // the browser dropping the page: they are fixed in different files.
+    const kind = /SyntaxError|ReferenceError|is not a function|Unexpected token/.test(detail)
+      ? "probe"
+      : "browser";
+    return { ok: false, kind, elapsedMs, what, detail };
+  }
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, kind: "probe", elapsedMs, what, detail: `the wait resolved to ${typeof raw}, not an outcome` };
+  }
+  const shared = {
+    elapsedMs,
+    what,
+    inPageMs: raw.inPageMs,
+    ticks: raw.ticks,
+    mutations: raw.mutations,
+    ...(raw.predicateError ? { predicateError: raw.predicateError } : {}),
+  };
+  if (raw.outcome === "ready") return { ok: true, kind: "ready", ...shared };
+  if (raw.outcome === "failed") return { ok: false, kind: "application", ...shared };
+  return { ok: false, kind: "timeout", ...shared };
+}
+
+/** Exposed so a gate can assert what is actually injected, rather than trust it. */
+export function uiStateSource(readySource, failedSource, timeoutMs, sampleMs) {
+  return AWAIT_UI_STATE(readySource, failedSource, timeoutMs, sampleMs);
+}
+
 export async function launchBrowser() {
   const binary = findBrowserBinary();
   if (!binary) {
@@ -351,6 +439,27 @@ export async function launchBrowser() {
       /** Event-driven DOM wait; bounded in-page and by the CDP deadline. */
       waitForDom(predicateSource, timeoutMs = DOM_MS) {
         return context.evaluate(WAIT_FOR_DOM(predicateSource, timeoutMs), { awaitPromise: true });
+      },
+
+      /**
+       * Waits for a NAMED settled state and reports which one arrived.
+       *
+       * Returns rather than throws, because «it timed out» and «the page said
+       * no» are both answers a QA report has to print, and an exception forces
+       * the caller to reconstruct which it was from a message.
+       */
+      async awaitUiState(readySource, { failedWhen = null, timeoutMs = DOM_MS, sampleMs = 100, what = "a UI state" } = {}) {
+        const started = process.hrtime.bigint();
+        const since = () => Number((process.hrtime.bigint() - started) / 1_000_000n);
+        try {
+          const raw = await context.evaluate(
+            AWAIT_UI_STATE(readySource, failedWhen, timeoutMs, sampleMs),
+            { awaitPromise: true },
+          );
+          return classifyUiWait({ raw, elapsedMs: since(), what });
+        } catch (error) {
+          return classifyUiWait({ error, elapsedMs: since(), what });
+        }
       },
 
       /**
