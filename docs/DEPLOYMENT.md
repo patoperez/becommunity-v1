@@ -92,14 +92,51 @@ Workers Builds created version `1e17160e` at 00:18:26.620Z and **deployed it to
 command run. Production was restored to `e691ecd8` at 03:23:12.485Z by an
 explicitly authorized `wrangler versions deploy e691ecd8…@100%`.
 
-The Cloudflare Git-integration settings themselves still have not been read
-through configured read-only tooling, so *why* it deploys is still inferred —
-but *that* it deploys is no longer an assumption, and nothing in this repository
-may say otherwise. ⚠️ CLAUDE.md carried the opposite sentence («a merge to
-`main` does not by itself deploy», from Unit 6B.4B2J, which had measured only
-non-main branches) for eight days while this page said what turned out to be
-true. When two pages of this repository disagree about a deploy, the one that
-predicts a deploy is the one to act on until an experiment settles it.
+⚠️ CLAUDE.md carried the opposite sentence («a merge to `main` does not by itself
+deploy», from Unit 6B.4B2J, which had measured only non-main branches) for eight
+days while this page said what turned out to be true. When two pages of this
+repository disagree about a deploy, the one that predicts a deploy is the one to
+act on until an experiment settles it.
+
+### Why it deploys — Unit 6B.4B2O read it from Cloudflare
+
+Workers Builds gives a Worker **up to two triggers**, and they differ in ONE
+setting:
+
+| trigger | Deploy command (default) | effect |
+|---|---|---|
+| production branch (`main`) | `npx wrangler deploy` | uploads a version **and creates a deployment** — traffic moves |
+| every other branch | `npx wrangler versions upload` | a version with a preview URL, **no deployment** |
+
+The version annotations confirm it: branch builds carry
+`{"workers/alias":"codex-canonical-experience-integration","workers/triggered_by":"version_upload"}`,
+the `main` build carried no alias, and a separate deployment record appeared 2.4
+seconds later. `wrangler deploy` is upload-then-deploy, which is why both records
+exist.
+
+### ⚠️ HOW TO DISARM `main`, AND WHY IT IS NOT YET DONE
+
+**Settings → Build → Deploy command**, changed from `npx wrangler deploy` to
+`npx wrangler versions upload`.
+
+That one setting preserves the Worker, the Git integration and preview builds; it
+changes no variable, secret, route, DNS record or active version; it shifts no
+traffic; and Cloudflare's documentation states that **saving build settings
+applies to the next build and does not itself trigger a deployment**. The API
+equivalent is `PATCH /accounts/{account_id}/builds/triggers/{trigger_uuid}` with
+`{"deploy_command": "npx wrangler versions upload"}`.
+
+**It has not been applied.** Every `/builds/` endpoint answers **403 · 10000
+Authentication error** for the wrangler OAuth token, which does not carry
+*Workers Builds Configuration: Edit*; that permission needs a user-scoped API
+token, and Unit 6B.4B2O was instructed not to create one. Until an operator makes
+that change in the dashboard:
+
+> **DO NOT PUSH `main`.** A push is a production deployment.
+
+Afterwards, production is moved only by an explicit
+`wrangler versions deploy <id>@100%`, and a push to `main` leaves a version
+waiting to be promoted.
 
 The rules that follow from it:
 

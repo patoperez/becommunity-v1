@@ -424,18 +424,25 @@ exercised it there: every gate to date ran under Node or local workerd.
 
 ### The release sequence
 
-⚠️ **WHERE IT STANDS AFTER 6B.4B2N.** `origin/main` is at `1c05276`; **production
+⚠️ **WHERE IT STANDS AFTER 6B.4B2O.** `origin/main` is at `1c05276`; **production
 is deliberately NOT.** The merge deployed `1e17160e` automatically and it was
 rolled back, so production runs `e691ecd8` — the pre-canonical build — while
 `main` carries the canonical release. That is a *chosen* state, not drift: steps
 5–7 below are not ready, and a canonical build in production with no client
 account, no `published` status and no publication is a build nobody can use.
 
-**Do not push to `main` again until the day of the release.** A push is a
-deployment. When that day comes, either push `main` and treat the automatic
-deployment as step 4, or deploy an existing version explicitly with
-`wrangler versions deploy <id>@100%` — `1e17160e` is already built, uploaded and
-QA'd three times at 194/194.
+**⚠️ `main` IS STILL ARMED. DO NOT PUSH IT.** Unit 6B.4B2O found the exact
+Cloudflare setting that disarms it — *Settings → Build → Deploy command*, set to
+`npx wrangler versions upload` — and could not apply it: the Workers Builds API
+answers 403 for the wrangler OAuth credential, and the unit was told not to
+create a token. `docs/DEPLOYMENT.md` carries the steps. **That change is the
+first thing the production-deploy unit does**, before anything else on this list.
+
+The release itself no longer needs a `main` push at all: deploy an existing
+version explicitly with `wrangler versions deploy <id>@100%`. The candidate is
+now **`b80e30da-8690-4673-96aa-47c84f6c1ff7`** (tag `rc-6b4b2o-e27f877`), which
+is `1e17160e` plus the Worker exception boundary, the bounded session check and
+Workers Logs.
 
 | # | Step | Why here |
 |---|---|---|

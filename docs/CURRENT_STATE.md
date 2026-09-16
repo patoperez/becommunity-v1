@@ -7912,3 +7912,281 @@ recurred on this version an hour before two clean observation windows, and
 it — which is defensible, since production has been serving a Worker with the
 same symptom since before this branch existed, but it is a decision and not an
 absence of one.
+
+---
+
+## Unit 6B.4B2O — Error 1101 has a definition, the Worker had no boundary, and `main` is still armed
+
+### Phase A — the Git deployment configuration, read from Cloudflare rather than from this repository
+
+Read through the Cloudflare API with the OAuth credential wrangler already holds.
+No new credential was requested; no value is reproduced anywhere.
+
+**The mechanism, and why it did what it did.** Workers Builds gives a Worker up
+to **two triggers**: one for the production branch and one for every other
+branch. The production trigger's **Deploy command** defaults to
+`npx wrangler deploy` — upload a version **and create a deployment**. The
+non-production trigger's defaults to `npx wrangler versions upload` — a version
+with a preview URL and **no deployment**. The version records match exactly:
+branch-built versions carry
+`{"workers/alias":"codex-canonical-experience-integration","workers/triggered_by":"version_upload"}`,
+while `main`-built `1e17160e` carries no alias and a separate deployment record
+appeared 2.4 seconds later.
+
+**The Worker as the API describes it**, and three facts in it matter:
+
+* **`observability: null`** — Workers Logs has NEVER been enabled. `logpush:
+  false`, `tail_consumers: []`.
+* **`routes: []`** — no custom route and no DNS record at all; production is the
+  `workers.dev` subdomain, with preview URLs enabled.
+* versions `total_count: 248` (`e691ecd8` is 157, `1e17160e` is 246); the
+  deployments endpoint returns **exactly ten with no total**, so ⓘ **«the
+  deployment count is 12» from Unit 6B.4B2N was arithmetic, not an observation**,
+  and the API does not confirm it. The ACTIVE VERSION is the observable that
+  means something.
+
+**The safe setting exists and is documented**: *Settings → Build → Deploy
+command*, changed from `npx wrangler deploy` to `npx wrangler versions upload`.
+It preserves the Worker, the Git integration and preview builds; it changes no
+variable, secret, route, DNS record or active version; it shifts no traffic; and
+Cloudflare's documentation states that saving build settings applies to the next
+build and does not itself trigger a deployment. The API equivalent is
+`PATCH /accounts/{account}/builds/triggers/{trigger}` with
+`{"deploy_command": "npx wrangler versions upload"}`.
+
+⚠️ **IT WAS NOT APPLIED, AND NOT FOR ANY OF THE REASONS THE BRIEF SAID TO STOP
+FOR.** No repository would be disconnected, no project deleted, no route changed,
+no Worker recreated. Every `/builds/` endpoint answers **403 · 10000
+Authentication error**: Workers Builds requires a user-scoped token carrying
+*Workers Builds Configuration: Edit*, the wrangler OAuth token does not carry it,
+and this unit was told not to request a new API token. **`main` is still armed,
+and must not be pushed until that setting is changed.**
+
+### Phase B — what Error 1101 is, and why there is no record of these ones
+
+Cloudflare's own documentation: **1101 = «Worker threw a JavaScript exception»**.
+It is not the documented CPU code (1102), the request cap (1027) or a routing
+failure (1022). Taken at face value that places it inside application control,
+and this unit acted on that reading first — ⓘ **and the reading turned out to be
+incomplete: the analytics below show these invocations are TERMINATED, not
+throwing, and Cloudflare draws the same 1101 page for both.** The error page
+alone cannot tell you which you have.
+
+Cloudflare gives two ways to see the exception: Workers Logs filtered on
+`$workers.outcome = "exception"`, or `wrangler tail` running at the time.
+
+**Neither existed.** `observability` was `null` on this Worker, retention is 7
+days on a paid plan and 3 on free, and **logs are not retroactive**. So for
+`a3bccd61adbf464a`, the `a3bccd61…`–`a3bccd97…` burst, and the `a3bcd0d4…` /
+`a3bcd0ea…` burst, **Cloudflare retains nothing that can be retrieved**. That is
+a precisely located visibility limitation — a setting that was off — and not a
+shrug, and it is the first thing this unit fixed. The Workers Observability query
+API is behind the same 403 as the Builds API.
+
+### ⭐ AND THEN CLOUDFLARE'S OWN ANALYTICS ANSWERED IT: `exceededResources`
+
+The GraphQL analytics API is NOT behind that wall. `workersInvocationsAdaptive`,
+for this Worker, over the twenty-four hours to 2026-09-16 20:05 UTC:
+
+| status | requests |
+|---|---|
+| `success` | **8 889** |
+| **`exceededResources`** | **87** |
+| `clientDisconnected` | 17 |
+
+`scriptThrewException` does not appear at all. **The failing invocations are not
+throwing — they are being terminated for exceeding a runtime resource limit**,
+and Cloudflare renders that termination to the reader as Error 1101.
+
+And the hours line up with every burst this project has recorded:
+`2026-09-15T22:00` (31), `23:00` (24), `2026-09-16T03:00` (12), `19:00` (20) —
+6B.4B2M's two bursts, 6B.4B2N's, and this unit's.
+
+**CPU is excluded, by the numbers.** For the failing population, `cpuTimeP50` is
+10 000 µs and `cpuTimeP99` 218 457 µs; for the SUCCESSFUL population, `cpuTimeP99`
+is 329 780 µs and `cpuTimeP999` 631 242 µs. Successful invocations routinely use
+far more CPU than the failing ones, which die early — at ~10 ms of CPU, ~73 ms of
+wall time, having made about two subrequests each. Cloudflare exposes no memory
+dimension, so **memory pressure on the isolate is the supported inference** and
+is labelled as one; what is measured is that the limit exceeded is not CPU, not
+subrequests and not the daily request cap.
+
+### Phase C — the exception-boundary audit
+
+| path | classification |
+|---|---|
+| **Worker entry (`.open-next/worker.js`)** | **UNHANDLED** — no `try`/`catch` anywhere; it awaits the middleware handler, performs a request-time `import()` of the server handler, and awaits that |
+| OpenNext adapter internals | OUTSIDE_APPLICATION_CONTROL — generated; now wrapped |
+| asset / server-function dispatch | OUTSIDE_APPLICATION_CONTROL — now wrapped |
+| **Next middleware (`updateSession`)** | **UNHANDLED** — runs on every route and sits outside `error.tsx` and `global-error.tsx`, which can only catch a Server Component |
+| Supabase session creation / auth lookup | **CONTROLLED_BUT_MISCLASSIFIED** — a transport failure returns `{ data: { user: null }, error }`, indistinguishable from «nobody is signed in»; and the call was **unbounded** |
+| `/login` sign-in action | **CONTROLLED_BUT_MISCLASSIFIED** — a transport failure was answered `invalid_credentials`, telling people their own password was wrong |
+| protected-route redirect | ALREADY_CONTROLLED — fails closed |
+| internal layout / `requireInternal` | ALREADY_CONTROLLED — a throw renders `/studio/error.tsx` |
+| canonical revision loader | ALREADY_CONTROLLED — typed read failures since 6B.4B2K |
+| category review | ALREADY_CONTROLLED — `categorias-no-disponible` is its own branch |
+| journey review | ALREADY_CONTROLLED — `PainReviewOutcome.ok === false` |
+| publication workspace | ALREADY_CONTROLLED |
+| `/api/health` | ALREADY_CONTROLLED — `try`/`catch` with a 5 s abort, answers 503 `degraded` |
+
+### Phase D — fault injection against the real artifact, and what it falsified
+
+The rig runs `.open-next/worker.js` under **workerd** through `wrangler dev
+--local`, with a stand-in on `127.0.0.1` as its only upstream. It contacts no
+Supabase project, no Cloudflare account and no production. Every probe carries a
+synthetic session cookie, because **without one `getUser()` short-circuits in the
+client and makes no network call at all** — a detail that would have made an
+anonymous rig prove nothing.
+
+**Thirty-two cases: a refused connection, a reset mid-body, malformed JSON, a
+truncated body, HTTP 500, HTTP 503 and a hang, applied to the auth lookup, to the
+data reads and to the whole upstream — and the Worker NEVER THREW.** Every one
+produced a controlled answer.
+
+ⓘ **SO THE LEADING HYPOTHESIS IS FALSIFIED.** «An unguarded `supabase.auth.getUser()`
+in the middleware rejects during a Supabase blip» is a good story, it fits the
+bursts and the fact that `/login` was hit, and **it is not what happens**:
+supabase-js turns every one of those into `{ user: null, error }` and the
+middleware fails closed with a redirect.
+
+**Two real defects the rig did find:**
+
+1. **THE SESSION CHECK WAS UNBOUNDED.** An auth service that accepts the
+   connection and never answers left the request open past forty-five seconds
+   with no response and no log. Bounded at eight seconds now, on the client's own
+   `fetch`; measured after the change: **8.32 s on `/login`, 8.04 s on
+   `/studio`**, against 0.02 s healthy. Of thirty-two cases, exactly **two**
+   changed, and they are those two.
+2. **TWO DIFFERENT FACTS WORE ONE FACE.** «Nobody is signed in» and «the auth
+   service did not answer» arrive identically. The authorization decision is
+   unchanged and still fails closed on both — refusing a reader we cannot vouch
+   for is right either way — but the second is now named in the logs.
+
+**And the boundary was watched doing its job.** The GENERATED entry was perturbed
+to throw on a header — the exact Error 1101 condition — and `/login`,
+`/api/health`, `/studio` and the review screen each answered **503** with
+`x-becommunity-unavailable`, `retry-after: 15`, HTML for a document and JSON for
+an API path, and **no trace of the exception**. A thrown string classified as
+`worker_unhandled`, a failed module import as `module_load_failed`. Twenty-one
+log lines carried a code, a route CLASS, a method and a server-generated id, and
+**zero** carried a path, a query, a cookie or a stack. The build output was
+restored byte-identically, digest printed on both sides.
+
+**The sign-in path was proved end to end, in a real browser, against the real
+built Worker: 10 checks, 10 passed.** Control → `/dashboard`; refused connection
+→ `?error=service_unavailable` and the sentence «No es tu contraseña»; HTTP 500 →
+the same; a genuinely wrong password → `invalid_credentials`, generic and
+unchanged. The diagnostic used to identify the error shape
+(`AuthRetryableFetchError`, status 0 and 500) was a temporary perturbation of
+`src/app/login/actions.ts`, restored to the committed blob byte for byte.
+
+### Phases E and F — what changed
+
+* **`src/worker-entry.ts`** is the new `main`. It imports the generated entry,
+  re-exports its three Durable Object classes unchanged, and calls it inside ONE
+  `try`/`catch`. It does not retry, does not touch a cookie, and never puts the
+  thrown value into the answer — the response builder takes a CODE and has no
+  parameter an exception could travel through.
+* **`src/lib/runtime/unavailable.ts`** holds the five closed codes, the 503 with
+  `Retry-After`, the self-contained failure page (no script, stylesheet, font or
+  image — every one of those is another request that can fail in the same
+  moment), and the one structured log line.
+* **`[observability] enabled = true, head_sampling_rate = 1`** in `wrangler.toml`.
+  A sampled log of a rare event is a log that misses it. ⓘ The block must stay
+  BELOW the top-level keys: placed above them, the TOML table silently swallowed
+  `compatibility_date` and `keep_vars`, and the build failed.
+* **The middleware** is wrapped, bounded and classifies its two failures apart.
+* **The sign-in action** answers a transport failure with `service_unavailable`
+  and its own sentence.
+* `CANONICAL_EDGE_DIAGNOSTICS` is **not** reused; the instrumentation reads no
+  environment variable at all.
+
+`npm run test:runtime-resilience` — **36 checks**, offline, no browser, no build
+output, in `npm test`.
+
+### Phase G — the obsolete variable, deferred with its reason
+
+Proved: **no source file of any kind names `CANONICAL_EDGE_DIAGNOSTICS`** — it
+appears only in documentation. It holds no credential; it is a plain-text
+variable reading `"on"`.
+
+It was **not removed**, for two reasons that compound. Removing a Worker variable
+is a change to the Worker's settings, which creates a version **and makes it the
+active deployment** — precisely the traffic change this unit is forbidden to
+make. And with `keep_vars = true` a wrangler deploy will not remove it anyway;
+the dashboard is the only place, and that is the same credential wall as Phase A.
+**It is the first action of the production-deploy unit**, where a deployment is
+happening on purpose.
+
+### Phase H — the gates, and the preview
+
+Every gate green at the corrected tip: `test:runtime-resilience` **36/36**,
+`test:harness-condition` 33/33, migration chain PASSED, hosted fingerprint
+**169/169**, row-set-live 56/56, category-review-live 88/88, signoff-live,
+journey-pain-live and publication-live all PASSED, results parity **531/531**,
+presentation parity PASSED, `test:secrets` PASSED, client-boundary,
+publication-boundary and data-scope PASSED, typecheck 0, lint 0 errors / 58
+warnings, `npm test` exit 0 over **120 scripts**, the 30 trailing gates 30/30,
+`build` and `cf:build` clean. The hosted project did not move across any of it.
+
+**Version `b80e30da-8690-4673-96aa-47c84f6c1ff7`**, tag `rc-6b4b2o-e27f877`, at
+`https://b80e30da-becommunity-v1.ollinagencyllc.workers.dev`, BUILD_ID
+`wDPLox8BIFjgpZtkQ4MdX`, 12 381.14 KiB / gzip 2 647.74 KiB, startup **21 ms**.
+Uploaded with `versions upload`; production stayed `e691ecd8` and the deployment
+listing was byte-identical across the upload. ⓘ The first attempt FAILED —
+«Upload took too long. Asset upload took too long on bucket 1/1» after five
+retries, creating no version. It is recorded because an environmental failure
+that is not recorded becomes a mystery later.
+
+### ⚠️ Phase I — THE BLOCKER, REPRODUCED ON DEMAND AND CHARACTERISED
+
+Three QA passes: **195/199, 195/199, 154/199**. Three bounded observation windows
+at concurrency one, ~2.5 s apart, with production as a read-only control:
+
+| window | authenticated canonical pages | anonymous preview | production | Error 1101 |
+|---|---|---|---|---|
+| 1 · 19:53:12 → 19:56:48 | `.........XXXXXXXXXXXXXXX` — **9/24** | 24/24 | 16/16 | **15** |
+| 2 · 19:57:17 → 20:01:29 | `........................` — 24/24 | 24/24 | 16/16 | 0 |
+| 3 · 20:02:30 → 20:06:04 | `.........XXXXXXXXXXXXXXX` — **9/24** | 24/24 | 16/16 | **15** |
+
+**Nine, then fifteen. Twice, exactly.** The pattern is not noise:
+
+* it is **confined to the heavy authenticated canonical pages** — `/revision`,
+  `/revision/categorias`, `/revision/dolor`. `/api/health`, `/login` and the
+  anonymous protected redirect answered **72 / 72** across the three windows;
+* once it starts it **does not recover inside the window** — every subsequent
+  request fails, which is what a poisoned isolate looks like;
+* a fresh window minutes later is **perfectly clean**, which is what isolate
+  replacement looks like;
+* **production was unaffected throughout**, 48 / 48.
+
+⚠️ **AND THE NEW BOUNDARY DID NOT CATCH ONE OF THEM — WHICH IS THE POINT.**
+`b80e30da` cannot let a handler rejection escape, and Cloudflare still served
+Error 1101, with `x-becommunity-unavailable` absent from every one. **The
+invocation is killed by the runtime; no handler runs; there is nothing to
+catch.** The boundary removes a different category and keeps its value, and it
+does not touch this one.
+
+Ray IDs from window 1: `a3c26d3a2c9d6b7d` … `a3c26fa94c936b7d`; window 3:
+`a3c27b8f3e3feaac` … `a3c27d3eab3beaac`; run 3 of the QA: `a3c263449c894608` …
+`a3c26374ff324608`. All recorded in `~/becommunity-6b4b2o/soak-window-*.json`.
+
+**No database mutation** across three authenticated QA runs: 15 791 rows,
+Cuicuilco `draft` revision 3, publication tables 0/0/0/0/0/0.
+
+### What this leaves
+
+**The canonical review screen — the screen the whole release exists for — cannot
+be loaded about ten times in a row on Cloudflare without the runtime killing the
+invocation.** That is a release blocker, it is measured rather than suspected,
+and it is not fixed by anything in this unit.
+
+The direction of the fix is what the evidence supports: the per-request footprint
+of the canonical review pages. They render a whole resolved presentation document
+server-side, and 6B.4B2K already found their request budget at the edge of a
+different ceiling. Reducing what one invocation holds is a piece of engineering,
+not a switch, and it is the next unit's.
+
+The operational mitigation until then: **do not deploy the canonical build to
+production**; production runs `e691ecd8`, which does not serve these pages at
+all. Rollback remains `wrangler versions deploy e691ecd8-de9a-4a02-a8e3-13aad7e9e805@100%`.

@@ -710,6 +710,51 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
     explicitly authorized `wrangler versions deploy`.
     **TREAT EVERY PUSH TO `main` AS A PRODUCTION DEPLOYMENT.** Branch pushes
     still build versions only; that half was measured correctly.
+  * ⓘ **AND UNIT 6B.4B2O READ THE MECHANISM FROM CLOUDFLARE.** Workers Builds
+    gives a Worker up to TWO triggers. The production trigger's **Deploy
+    command** defaults to `npx wrangler deploy` — a version AND a deployment. The
+    non-production trigger's defaults to `npx wrangler versions upload` — a
+    version with a preview URL and no deployment. The version annotations prove
+    it: branch builds carry `workers/alias`, the `main` build carried none.
+    **The one safe setting that disarms `main` is Settings → Build → Deploy
+    command, changed to `npx wrangler versions upload`**; Cloudflare's docs state
+    that saving build settings does not itself trigger a deployment.
+    ⚠️ **IT IS NOT DONE.** Every `/builds/` API endpoint answers 403 for the
+    wrangler OAuth token, which lacks *Workers Builds Configuration: Edit*.
+    **DO NOT PUSH `main` UNTIL IT IS**, and `docs/DEPLOYMENT.md` carries the
+    exact steps.
+- ⓘ **ERROR 1101 IS «WORKER THREW A JAVASCRIPT EXCEPTION», AND THE WORKER HAD NO
+  EXCEPTION BOUNDARY.** That is Cloudflare's own definition — not a CPU limit
+  (1102), not a request cap (1027), not a routing failure (1022) — so it is an
+  uncaught exception inside the Worker. The entry the OpenNext adapter generates
+  awaits the middleware handler, performs a REQUEST-TIME `import()` of the server
+  handler and awaits that, with no `try`/`catch` anywhere.
+  `wrangler.toml` now points `main` at **`src/worker-entry.ts`**, which imports
+  the generated entry, re-exports its Durable Object classes unchanged, and calls
+  it inside ONE try/catch. A failure answers **HTTP 503** with `Retry-After`, the
+  product's own page, and a closed code in `x-becommunity-unavailable`. It does
+  not retry, does not touch a cookie, and never puts the thrown value into the
+  answer. `npm run test:runtime-resilience` (36 checks, in `npm test`) holds it.
+  - ⓘ **THE CAUSE OF THE RECORDED BURSTS IS STILL UNKNOWN, AND THE LEADING
+    HYPOTHESIS WAS FALSIFIED.** Fault injection against the real built artifact
+    under workerd — refused connection, reset mid-body, malformed JSON, truncated
+    body, HTTP 500, HTTP 503 and a hang, on the auth lookup, the data reads and
+    the whole upstream, thirty-two cases — produced a controlled answer every
+    time and **never made the Worker throw**. An unguarded `getUser()` is NOT the
+    explanation: supabase-js returns `{ user: null, error }` for all of them.
+  - ⓘ **WORKERS LOGS WAS NEVER ENABLED, WHICH IS WHY THERE IS NO EXCEPTION TO
+    READ.** The API reported `observability: null`; retention is 7 days paid / 3
+    free and is not retroactive, so nothing exists for any recorded Ray ID.
+    `wrangler.toml` now sets `[observability] enabled = true,
+    head_sampling_rate = 1`. **The block must stay BELOW the top-level keys** — a
+    TOML table swallows what follows it, and placed above them it silently made
+    `compatibility_date` and `keep_vars` fields of `observability`.
+  - ⓘ **AN AUTH OUTAGE IS NOT A WRONG PASSWORD, AND NO LONGER SAYS SO.** The
+    session check is bounded at eight seconds (measured: 8.32 s on `/login` where
+    it used to hang past forty-five), a transport failure is told apart from a
+    refusal in both the middleware and the sign-in action by the same closed
+    rules, and the authorization decision is unchanged and still fails closed on
+    both.
   * **`keep_vars = true` is on the deployed commit and NOT on this branch.**
     Without it `wrangler deploy` deletes the dashboard-set plain-text variables
     before applying the config's, and the config declares none. Restore it before
