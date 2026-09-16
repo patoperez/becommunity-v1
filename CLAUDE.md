@@ -696,7 +696,20 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
     not moved since. So a protected preview already exists for every push at
     `https://<version-id-prefix>-becommunity-v1.ollinagencyllc.workers.dev`, and
     `wrangler versions upload` is the established way to make one deliberately.
-    **A merge to `main` does not by itself deploy.**
+    ⚠️ **THE SENTENCE THAT STOOD HERE — «a merge to `main` does not by itself
+    deploy» — WAS FALSE, AND UNIT 6B.4B2N PROVED IT BY DOING IT.** 6B.4B2J
+    measured four pushes to a NON-MAIN branch and generalised the result to
+    `main`, which it never tested. `docs/DEPLOYMENT.md` said the opposite in as
+    many words — «merging to `main` rebuilds and deploys that beta
+    automatically», «merge approval is deployment approval» — and the two
+    documents sat in the same repository contradicting each other until a
+    strict fast-forward of `main` to `1c05276` at **2026-09-16 00:16:46Z**
+    produced version `1e17160e` at 00:18:26Z and **deployed it to 100% of
+    production traffic at 00:18:29Z**, 103 seconds after the push, with no
+    command run. Production was restored to `e691ecd8` at 03:23:12Z by an
+    explicitly authorized `wrangler versions deploy`.
+    **TREAT EVERY PUSH TO `main` AS A PRODUCTION DEPLOYMENT.** Branch pushes
+    still build versions only; that half was measured correctly.
   * **`keep_vars = true` is on the deployed commit and NOT on this branch.**
     Without it `wrangler deploy` deletes the dashboard-set plain-text variables
     before applying the config's, and the config declares none. Restore it before

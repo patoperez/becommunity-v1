@@ -312,6 +312,49 @@ release-candidate preview already exists for every push, at
 6B.4B2J's own upload (`e2cabbf9`, tag `rc-6b4b2j-18dd8c5`) is one more of the
 same kind rather than new infrastructure.
 
+### ⚠️ A PUSH TO `main` DOES DEPLOY, AND THAT WAS LEARNED BY DOING IT
+
+Everything above was measured on a **non-main** branch. 6B.4B2J then wrote that
+«a merge to `main` does not by itself deploy», which it had not tested, and
+CLAUDE.md carried that sentence forward as a standing rule. `DEPLOYMENT.md` §
+"Deployment discipline" said the opposite in as many words — *merging to `main`
+rebuilds and deploys that beta automatically*, *merge approval is deployment
+approval* — and the two documents sat in this repository contradicting each
+other for eight days.
+
+Unit 6B.4B2N settled it, unintentionally:
+
+| what | when (UTC) |
+|---|---|
+| strict fast-forward of `origin/main` to `1c05276` | 2026-09-16 00:16:46 |
+| Workers Builds created version `1e17160e` | 2026-09-16 00:18:26.620 |
+| **that version was deployed to 100% of production traffic** | 2026-09-16 00:18:29.026 |
+| authorized rollback to `e691ecd8` at 100% | 2026-09-16 03:23:12.485 |
+
+103 seconds from push to live, with no deploy command run by anyone. The
+earlier branch pushes had produced a version and stopped because they were on a
+branch; `main` is the deploy branch, exactly as `DEPLOYMENT.md` had said since
+PR #29.
+
+Two things kept the incident small, and both were prior work rather than luck.
+**`keep_vars = true`** meant the auto-deploy did not strip the Worker's
+variables, so there was no repeat of the nine-minute 2026-08-28 outage: the
+Worker answered `200` throughout. And **the deployed code was the code that had
+already passed Edge QA** — no file under `src/`, `public/`, `wrangler.toml` or
+the build config differs between the QA'd release candidate's commit `09178f4`
+and `1c05276`; the only files that moved are `CLAUDE.md`, `docs/CURRENT_STATE.md`,
+`package.json` and two `scripts/` files, none of which ships.
+
+Nothing about the study changed while the merged build was live: the hosted
+database was byte-identical before and after (15 791 rows, ledger `0000`–`0034`,
+Cuicuilco `draft` at revision 3, all publication tables empty), because a
+deployment changes code and not data, and no publication existed to serve.
+
+**The rule this leaves behind: a push to `main` IS a production deployment.**
+Plan it as one, with the client account, `study.status` and the publication
+decided beforehand — or keep the work on the branch and deploy explicitly from a
+version, which is what every release candidate in this unit's history did.
+
 ### `keep_vars` is missing from this branch, and production has it
 
 `wrangler.toml` on the deployed commit `4b0af06` sets **`keep_vars = true`**
@@ -381,6 +424,19 @@ exercised it there: every gate to date ran under Node or local workerd.
 
 ### The release sequence
 
+⚠️ **WHERE IT STANDS AFTER 6B.4B2N.** `origin/main` is at `1c05276`; **production
+is deliberately NOT.** The merge deployed `1e17160e` automatically and it was
+rolled back, so production runs `e691ecd8` — the pre-canonical build — while
+`main` carries the canonical release. That is a *chosen* state, not drift: steps
+5–7 below are not ready, and a canonical build in production with no client
+account, no `published` status and no publication is a build nobody can use.
+
+**Do not push to `main` again until the day of the release.** A push is a
+deployment. When that day comes, either push `main` and treat the automatic
+deployment as step 4, or deploy an existing version explicitly with
+`wrangler versions deploy <id>@100%` — `1e17160e` is already built, uploaded and
+QA'd three times at 194/194.
+
 | # | Step | Why here |
 |---|---|---|
 | 0 | ~~Resolve the edge canonical-read failure~~ **DONE (6B.4B2K)** — the fifty-subrequest ceiling was measured and removed; the review page costs 26 requests and the category review 18 | Until this passed, the canonical experience did not work where it would be served |
@@ -388,9 +444,9 @@ exercised it there: every gate to date ran under Node or local workerd.
 | 0c | ~~Apply migration `0034`~~ **DONE (6B.4B2M)** — applied 2026-09-15 by `supabase db push` after a fresh backup and a full restore rehearsal; the hosted ledger reads `0000`–`0034`, the category-review ledger is empty, and Cuicuilco has zero grouping candidates | The category review is now provisioned rather than read-only; applying the storage grouped nothing |
 | 0d | **Remove the dashboard variable `CANONICAL_EDGE_DIAGNOSTICS`** on the `becommunity-v1` Worker | `keep_vars = true` carries it into every version. No code reads it, so it is inert — but a future diagnostic behind that flag would arrive switched on |
 | 1 | ~~Restore `keep_vars = true`~~ **DONE (6B.4B2K)** — it is in `wrangler.toml` with its incident comment, and Suite D's D-g fails if it is removed or flipped | Otherwise a deploy strips the Worker's variables and regresses shipped work |
-| 2 | Merge `codex/canonical-experience-integration` into `main` by the ordinary review | — but note that merging does **not** deploy; see §6a |
-| 3 | Protected preview QA on the version Workers Builds produces from the merge commit | The reader is read-only and there is no publication, so a preview cannot change what a client sees |
-| 4 | **Deploy explicitly** — `wrangler versions deploy`, or the documented `wrangler deploy` — and verify `/api/health` and one client route | A merge alone leaves production on `e691ecd8` |
+| 2 | ~~Merge `codex/canonical-experience-integration` into `main`~~ **DONE (6B.4B2N)** — `origin/main` is at `1c05276` by strict fast-forward, 136 commits, no merge commit | ⚠️ **THIS STEP DEPLOYS.** It did, 103 seconds after the push; see §6a. Do not reach it until steps 5–7 are ready to follow immediately, or accept that production runs the new build with the study still unpublished |
+| 3 | ~~Preview QA on the version Workers Builds produces from the merge commit~~ **DONE (6B.4B2N)** — `1e17160e`, three independent runs, **194/194 each**, no database mutation, and a bounded 1101 observation that did not reproduce it | The reader is read-only and there is no publication, so a preview cannot change what a client sees |
+| 4 | ~~**Deploy explicitly**~~ — **no longer a separate step for a `main` push.** It is a separate step only when releasing a version that `main` did not produce, e.g. after the rollback: `wrangler versions deploy <id>@100%` | The merge already moved traffic. Verify `/api/health` and one client route either way |
 | 5 | Provision a real client account in the Cuicuilco tenant | Blocker 2. Nothing can be verified as a client without one |
 | 6 | Set `study.status = 'published'` on `/studio/e/[id]/publicar` | Blocker 1. Until this, RLS hides the study from its own client |
 | 7 | **The controlled publication**: on `/studio/e/[id]/revision`, tick `granular_filter_dimensions`, tick the final confirmation, press «Publicar para el cliente» | The only step that changes a client's screen |

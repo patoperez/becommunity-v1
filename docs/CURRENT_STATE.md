@@ -7605,3 +7605,267 @@ recorded rather than asserted:
 | the absent failure predicate defaults to true | 1 — it must be a predicate that is never true |
 
 Unperturbed: 33/33.
+
+### Phase A — the final integration audit
+
+`origin/main` `c76762f4…` was an ancestor of the source tip, the merge base WAS
+`origin/main`, and the range carried **zero merge commits** — so a strict
+fast-forward was available and no rebase, squash or rewrite was required. Every
+worktree clean; no `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `BISECT_LOG`,
+`rebase-*` or `sequencer` anywhere.
+
+**136 commits, 268 files, +123 273 / −355**, grouped and with nothing
+unaccounted for:
+
+| group | files | new | modified |
+|---|---|---|---|
+| tests and gate wiring | 77 | 70 | 7 |
+| presentation / editor | 52 | 47 | 5 |
+| canonical ingestion / model | 37 | 36 | 1 |
+| results / calculations | 28 | 18 | 10 |
+| migrations and rollbacks | 26 | 26 | 0 |
+| review workflows | 23 | 23 | 0 |
+| documentation | 11 | 6 | 5 |
+| client read path | 7 | 6 | 1 |
+| publication | 5 | 5 | 0 |
+| Cloudflare / runtime | 1 | 0 | 1 |
+| **unclassified** | **0** | | |
+
+Migrations `0000`–`0034`: 35 files, each number once, no gaps, nothing above
+`0034` — and **every one is in the hosted ledger**, version and name, in order,
+each exactly once (35 rows, diffed against the repository rather than eyeballed).
+`keep_vars = true` present, no `[vars]` block.
+
+Nothing forbidden enters Git: no `.env`, dump, archive, workbook, key, log,
+screenshot or evidence path in the range; **zero binary files**; and every one of
+the 268 blobs carries **no CR, no NUL, no BOM, no other C0 control byte**, and
+ends in a newline. The secret scan over all 123 273 added lines found no JWT, no
+`sb_secret_`/`sb_publishable_`, no password-bearing Postgres URI, no PEM block,
+no AWS or GitHub token. Eleven `KEY`/`PASSWORD` assignments are environment
+variable NAMES and three single-use passwords for **disposable** local test
+targets; the only 40-character literals are commit SHAs and a table name.
+
+### Phase B — every gate the brief names, at the exact tip that became `main`
+
+| gate | result |
+|---|---|
+| `test:harness-condition` (new) | 33 / 33 |
+| `test:migration-chain` | PASSED |
+| hosted fingerprint | 169 / 169 |
+| `test:canonical-row-set-live` | 56 / 56 |
+| `test:category-review-live` | 88 / 88 |
+| `test:canonical-qualitative-signoff-live` | 63 / 63 |
+| `test:canonical-journey-pain-live` | 68 / 68 |
+| `test:canonical-publication-live` | 188 / 188 |
+| results parity | `ofrecidas=534 ejecutadas=531 aprobadas=531 falladas=0` |
+| presentation parity | PASSED |
+| `test:secrets` | no leak |
+| typecheck / lint | 0 errors / 0 errors, 58 warnings |
+| `npm test` | exit 0, **118 scripts** |
+| the 30 trailing gates | 30 / 30 |
+| `build`, `cf:build` | clean |
+
+ⓘ **FOUR OF THOSE GATES REFUSED ON THE FIRST PASS AND WERE NOT COUNTED.**
+`test:canonical-row-set-live`, `…-qualitative-signoff-live`, `…-journey-pain-live`
+and `…-publication-live` are DISPOSABLE gates: they exit 2 when a configured
+project is in scope, which is the point of them. They were re-run with every
+application and hosted credential `env -u`'d. A refusal is not a pass and was
+never reported as one.
+
+The hosted project was measured on both sides of the whole run: **fields that
+moved: NONE**, 15 791 rows, 68 tables, 45 functions, ledger 35 rows.
+
+### Phase D — the strict fast-forward
+
+From a clean dedicated worktree whose tree object was proved **identical** to the
+one every gate ran against (`dfba2097…`), and immediately after a fresh fetch:
+
+```
+git push origin 1c05276383ddd6d3a7d88de5ceab5170aafbf6f7:refs/heads/main
+   c76762f..1c05276  1c05276383ddd6d3a7d88de5ceab5170aafbf6f7 -> main
+```
+
+A dry run first, two dots and no `+`. Verified **from the remote** with
+`ls-remote`, not from a cache: `origin/main` and the source branch both at
+`1c05276`; all 136 commits reachable from `main`; 0 behind; 0 merge commits; the
+old baseline still an ancestor; `main`'s tree equal to the gated tree. Exactly
+**two** remote-tracking refs moved. Every worktree still clean.
+
+### ⚠️ THE MERGE DEPLOYED PRODUCTION, AND THAT IS THE FINDING OF THIS UNIT
+
+| what | when (UTC) |
+|---|---|
+| `origin/main` fast-forwarded to `1c05276` | 00:16:46 |
+| Workers Builds created version `1e17160e-0984-40f8-9b85-5e3126843bc7` | 00:18:26.620 |
+| **that version deployed to 100 % of production traffic** | 00:18:29.026 |
+| authorized rollback to `e691ecd8` at 100 % | 03:23:12.485 |
+
+**103 seconds from push to live, with no deploy command run.** The unit's own
+brief listed «merging does not deploy production traffic» as accepted state, on
+the authority of CLAUDE.md's 6B.4B2J bullet — which generalised four measurements
+of NON-MAIN branches to `main`, a case it never tested. `docs/DEPLOYMENT.md` had
+said the opposite since PR #29, in as many words. The two documents contradicted
+each other for eight days and the wrong one was the one being acted on.
+
+The operator authorized the rollback explicitly. `wrangler versions deploy
+e691ecd8-de9a-4a02-a8e3-13aad7e9e805@100%` succeeded in 0.78 s and production's
+served asset set became **byte-identical to `e691ecd8`'s own preview host**
+(`7f6c9470a2e91c09…`) and no longer matches the merged build
+(`e0b3eab62573f8a3…`). Health `200`, and all protected routes `307 → /login`,
+before, during and after.
+
+**Exposure: 3 h 04 m 43 s**, and two things kept it uneventful, both prior work
+rather than luck:
+
+* **`keep_vars = true`** meant the automatic deploy did not strip the Worker's
+  variables — no repeat of the nine-minute 2026-08-28 outage. The Worker answered
+  `200` throughout.
+* **The deployed code was code that had already passed Edge QA.** No file under
+  `src/`, `public/`, `wrangler.toml` or the build configuration differs between
+  the release candidate's commit `09178f4` and `1c05276`; the five files that
+  moved are `CLAUDE.md`, `docs/CURRENT_STATE.md`, `package.json` and two
+  `scripts/` files, none of which ships.
+
+And nothing about the study moved while it was live: the hosted database was
+identical before and after — 15 791 rows, ledger `0000`–`0034`, Cuicuilco `draft`
+at revision 3, category ledger empty, every publication table 0 — because a
+deployment changes code, not data, and no publication existed to serve.
+
+⚠️ **The deployment COUNT is no longer 10.** It is 12: the automatic one and the
+rollback. `wrangler deployments list` pages at ten, so «still shows ten records»
+is an artefact of the page size and not a fact about the Worker. The ACTIVE
+VERSION is the check that means something, and it is `e691ecd8` again.
+
+### Phase E — the merged version, and what can and cannot be proved about it
+
+Two versions appeared, sixty-two and a hundred seconds after their pushes:
+
+| version | created (UTC) | produced by |
+|---|---|---|
+| `7e9d47d5-0c64-43f4-aa06-6d61f3dedefd` | 00:16:41.169 | the push to the source branch (00:15:39) — a VERSION, no deployment |
+| **`1e17160e-0984-40f8-9b85-5e3126843bc7`** | 00:18:26.620 | the push to `main` (00:16:46) — a version AND a deployment |
+
+`wrangler versions view` on both: handlers `fetch`, compatibility date
+`2025-09-23`, flags `nodejs_compat`, the secret `SUPABASE_SERVICE_ROLE_KEY`
+present by name only, and bindings `env.ASSETS`,
+`env.CANONICAL_EDGE_DIAGNOSTICS ("on")`, `env.NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+`env.NEXT_PUBLIC_SUPABASE_URL`. `/api/health` 200 on both.
+
+ⓘ **WHAT CANNOT BE PROVED, AND IS THEREFORE NOT CLAIMED.** Wrangler reports
+`Source: Unknown (version_upload)` with no tag, message or commit, so the build's
+commit is not readable from its metadata. Both refs pointed at `1c05276` when
+both builds ran, so either version is a build of that commit — but *which push
+produced which version* rests on the timing and on the deployment record, not on
+provenance metadata. The `/login` chunk-filename set is **identical across the
+merged build, the release candidate, the previous production version and
+production itself**, so it discriminates nothing and was discarded as evidence;
+the full asset-path fingerprint does discriminate and is what the rollback proof
+uses. `CANONICAL_EDGE_DIAGNOSTICS` was NOT removed: removing it is a
+dashboard change that would create and deploy a version, and this unit does not
+touch traffic again.
+
+### Phase F — three independent runs, 194 / 194 each
+
+Against `https://1e17160e-becommunity-v1.ollinagencyllc.workers.dev`, three fresh
+browsers and three fresh profiles, no warmed state:
+
+| run | executed | passed | failed | Error 1101 |
+|---|---|---|---|---|
+| 1 | 194 | **194** | 0 | 0 |
+| 2 | 194 | **194** | 0 | 0 |
+| 3 | 194 | **194** | 0 | 0 |
+
+Twenty-two bounded waits per run, **22 of 22 reaching their named state**, and
+the totals are the argument for the whole exercise: **13 258 ms, 11 919 ms and
+13 189 ms of waiting in total**, where a fixed five seconds each would have been
+110 000 ms — and in all three runs the number of waits that took longer than five
+seconds was **zero**, so the old constant was both eight times too slow and, on a
+bad minute, too fast.
+
+Covered: health; authentication; internal authorization; the category review; the
+qualitative sign-off; the journey review at 0 / 15 / 0 / 0; the
+revision/prepublication screen; the canonical internal preview; the client route
+with no publication; desktop, tablet and phone; one filter, two filters and a
+deterministic clear back to the byte; `show_all`; anonymous refusal; cross-tenant
+refusal; no internal metadata; and **no database mutation** — the hosted project
+was measured before and after all three authenticated runs and **nothing moved**.
+
+The anonymous refusal is asserted at the HTTP level, with no browser involved:
+seven protected routes, each `307` to `/login`, none leaking any of the study's
+words.
+
+#### What the deterministic harness found that a sleep had been hiding
+
+Four things, and none of them is a product defect:
+
+1. **A click on a hydrating page is DISCARDED.** Measured directly: a filter
+   ticked 500 ms after the canonical block first drew came back unticked while
+   the block grew from 14 766 to 15 692 characters. «The element exists» is not
+   readiness. The waits now require the DOM to go QUIET — a MutationObserver
+   that records when it last fired, plus the sampler asking «nothing for 600 ms».
+2. **«Ver el estudio completo» is `disabled` while a recomputation is in
+   flight**, so a click during one does nothing and reports nothing. Three runs
+   read that as «clearing the filters is broken». The wait now uses the app's own
+   idle signal — the control present and NOT disabled — and the in-page click
+   returns `absent` / `disabled` / `clicked` instead of a boolean.
+3. **The manual grouping button stayed disabled with two labels chosen**, for the
+   same hydration reason; probed directly it reads `disabled=false,
+   selectedOptions=2`, exactly as the screen should.
+4. **A cross-tenant refusal is 150 characters long**, and a wait demanding 200
+   was demanding the leak it exists to prove the absence of.
+
+ⓘ **AND ONE CORRECTION TO 6B.4B2M'S OWN EVIDENCE.** That unit asserted
+«Desertores excludes nothing» and counted it among its 152. Probed five times
+three seconds apart, on this build **and on 6B.4B2M's own release candidate**,
+the family draws ONE excluded row — «No aplica · fuera de la nube», carrying a
+**zero**. The family genuinely has no not-applicable responses; the screen says
+so by drawing the label with a nought rather than by omitting it, which is what
+the hosted fingerprint's §[3d] has pinned all along (`notApplicable: 0`). The old
+assertion passed by reading a page that had not finished.
+
+Two waits per run legitimately have their execution context destroyed by the very
+navigation they are waiting for — the client-route redirect and the sign-out. The
+harness calls that `browser`, correctly; the QA re-asks once in the context that
+replaced it and **says in its output that this is what happened**.
+
+### Phase G — the Error 1101, caught in the act and then not reproduced
+
+ⓘ **IT REPRODUCED, AND THE NEW HARNESS PINNED IT IN FOUR MILLISECONDS.** During
+the QA's own development, a burst on the merged preview produced
+**Error 1101, Ray ID `a3bccd61adbf464a`, 2026-09-16 03:32:10 UTC**, followed by
+ten more Ray IDs through `a3bccd974fc3464a`, across `/revision`,
+`/revision/categorias`, `/studio` and `/insights/e/…`. A second, smaller burst
+followed in the next run — `a3bcd0d429b24677`, `a3bcd0eabbf44677` — and then it
+stopped. Where 6B.4B2M burned five seconds and reported «the screen is wrong»,
+this harness named it as the page's own failure state after **4 ms** and printed
+the Cloudflare code and the Ray ID beside it.
+
+The bounded observation that followed, concurrency ONE, ~2.5 s between requests:
+
+| window | requests | preview anon | production control | preview authenticated | Error 1101 |
+|---|---|---|---|---|---|
+| 1 · 03:54:20 → 03:59:14 UTC | 80 | 30 (20×200, 10×307), p50 316 ms | 20 × 200, p50 289 ms | 30 ready, p50 2 641 ms, max 3 964 ms | **0** |
+
+**It was not reproduced during the bounded observation. That is not the same as
+«it cannot recur»**, and this document does not say the stronger thing: it
+recurred twice within the preceding hour, on this very version, and three clean
+QA runs and a clean soak came after. The cause remains unknown; `wrangler tail`
+captured nothing at all for either version in 6B.4B2M, and that limitation has
+not changed.
+
+### Phase H — production non-impact, stated honestly
+
+| claim | status |
+|---|---|
+| active production version is `e691ecd8-de9a-4a02-a8e3-13aad7e9e805` | ✅ restored and verified |
+| deployment count remains 10 | ❌ **it is 12** — the auto-deploy and the rollback |
+| production asset fingerprint unchanged | ✅ identical to `e691ecd8`'s own preview host |
+| production health 200 | ✅ throughout |
+| no production traffic changed | ❌ **it changed twice**, and both are recorded above |
+| hosted row counts unchanged | ✅ 15 791, before and after everything |
+| Cuicuilco remains `draft` | ✅ |
+| publication tables empty | ✅ all six, 0 |
+| draft remains revision 3 | ✅ |
+| editorial decisions and sign-off unchanged | ✅ digest `4ed838c4…`, 15 pain decisions approved |
+| no client account created | ✅ |
+| category-review ledger still empty | ✅ 0 rows |

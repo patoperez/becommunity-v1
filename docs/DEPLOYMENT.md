@@ -82,14 +82,24 @@ it. It is a **synthetic-data beta environment**. It is *not* the future
 real-client production environment — that environment, with its own separate
 Supabase project, does not exist yet.
 
-**Observed behavior indicates that merging to `main` rebuilds and deploys that
-beta automatically.** PR #29 was documentation-only, no manual deployment was
-performed for it, and Cloudflare version `2a508633-b985-474a-bc2d-e1ddf38a6c79`
-appeared afterward serving 100% of traffic. The Cloudflare Git-integration
-settings themselves have **not** been read directly through configured read-only
-tooling, so this is inferred from deployment evidence rather than from an
-inspected dashboard configuration. Treat it as the operating assumption unless
-later evidence disproves it.
+**Merging to `main` rebuilds and deploys that beta automatically.** This was
+first inferred from PR #29 — documentation-only, no manual deployment, and
+Cloudflare version `2a508633-b985-474a-bc2d-e1ddf38a6c79` appeared afterward
+serving 100% of traffic — and it is now **measured to the second**. Unit
+6B.4B2N fast-forwarded `origin/main` to `1c05276` at **2026-09-16 00:16:46Z**;
+Workers Builds created version `1e17160e` at 00:18:26.620Z and **deployed it to
+100% of traffic at 00:18:29.026Z**, 103 seconds after the push, with no deploy
+command run. Production was restored to `e691ecd8` at 03:23:12.485Z by an
+explicitly authorized `wrangler versions deploy e691ecd8…@100%`.
+
+The Cloudflare Git-integration settings themselves still have not been read
+through configured read-only tooling, so *why* it deploys is still inferred —
+but *that* it deploys is no longer an assumption, and nothing in this repository
+may say otherwise. ⚠️ CLAUDE.md carried the opposite sentence («a merge to
+`main` does not by itself deploy», from Unit 6B.4B2J, which had measured only
+non-main branches) for eight days while this page said what turned out to be
+true. When two pages of this repository disagree about a deploy, the one that
+predicts a deploy is the one to act on until an experiment settles it.
 
 The rules that follow from it:
 
