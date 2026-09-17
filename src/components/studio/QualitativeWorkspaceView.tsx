@@ -66,6 +66,7 @@ export function QualitativeWorkspaceView({
               const active = state === value;
               return (
                 <Link
+                  prefetch={false}
                   key={value}
                   href={pageHref(basePath, { ...filterParams, estado: active ? null : value }, 1)}
                   aria-current={active ? "true" : undefined}
@@ -102,6 +103,7 @@ export function QualitativeWorkspaceView({
           <section className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-muted">Mostrando:</span>
             <Link
+              prefetch={false}
               href={pageHref(basePath, { ...filterParams, estado: null }, 1)}
               className={state === null ? FILTER_ON : FILTER_OFF}
             >
@@ -109,6 +111,7 @@ export function QualitativeWorkspaceView({
             </Link>
             {REVIEW_STATES.map((value) => (
               <Link
+                prefetch={false}
                 key={value}
                 href={pageHref(basePath, { ...filterParams, estado: value }, 1)}
                 className={state === value ? FILTER_ON : FILTER_OFF}

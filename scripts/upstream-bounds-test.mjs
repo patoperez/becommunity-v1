@@ -30,8 +30,17 @@
 //      each something else — for reads, for the session check and for sign-in.
 //   6. STUDIO'S DOOR DECIDES FROM WHAT WAS LEARNED, and every non-internal
 //      branch refuses.
-//   7. THE REAL MIDDLEWARE redirects a failed session check to /login AND names
-//      the outage — and names nothing when the answer was an ordinary «no».
+//   7. THE REAL MIDDLEWARE TELLS A VERDICT FROM AN OUTAGE. A session the service
+//      answered «no» to is a redirect to /login; a session it never answered for
+//      is a controlled 503 on a route that needs one, and `/login` still renders.
+//      (⚠️ CHANGED IN UNIT 6B.4B2Q — the check this replaces asserted the
+//      opposite, «an OUTAGE … still redirected», which dressed an infrastructure
+//      failure as a statement about the reader.)
+//   8. THE BOUND IS RELEASED WHEN THE ANSWER IS COMPLETE (Unit 6B.4B2Q): no
+//      timer left armed and no listener left attached after a successful body,
+//      a stalled body still bounded exactly once, and no late abort.
+//   9. AN EXPIRED OPERATION CANCELS ITS CONVERSATION (Unit 6B.4B2Q): the attempt
+//      in flight is aborted and the retry after it never reaches the network.
 // =============================================================================
 
 import assert from "node:assert/strict";
@@ -95,7 +104,7 @@ console.log("Be Community — el límite de toda llamada a Supabase (offline, st
 console.log("=".repeat(78));
 
 const {
-  boundedFetch, withinDeadline, upstreamSurface, upstreamAbort,
+  boundedFetch, withinDeadline, upstreamSurface, upstreamAbort, upstreamOperation,
   UPSTREAM_ATTEMPT_TIMEOUT_MS, UPSTREAM_TIMEOUT_MESSAGE, UPSTREAM_CANCELLED_MESSAGE, RETRY_AFTER_CEILING_SECONDS,
 } = await import("../src/lib/upstream/bounded-fetch.ts");
 const { classifyRead, classifySession, classifySignIn } = await import("../src/lib/upstream/outcome.ts");
@@ -111,15 +120,30 @@ const { createClient } = await import("@supabase/supabase-js");
  * ------------------------------------------------------------------------- */
 let handler = (_req, res) => { res.writeHead(500); res.end(); };
 let arrivals = [];
+/**
+ * How each request ENDED at the stand-in, which is how a late abort becomes
+ * visible. A hung response from an EARLIER check closes whenever its client
+ * gives up, which can be after the next check has begun — so each request is
+ * tagged with the epoch it arrived in and counted only into that one.
+ */
+let finished = 0;
+let abandoned = 0;
+let epoch = 0;
 const sockets = new Set();
 const server = createServer((req, res) => {
+  const arrivedIn = epoch;
   arrivals.push(`${req.method} ${req.url.split("?")[0]}`);
+  res.on("close", () => {
+    if (arrivedIn !== epoch) return;
+    if (res.writableFinished) finished += 1; else abandoned += 1;
+  });
   handler(req, res);
 });
 server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const ORIGIN = `http://127.0.0.1:${server.address().port}`;
-const serve = (fn) => { handler = fn; arrivals = []; };
+const serve = (fn) => { handler = fn; arrivals = []; finished = 0; abandoned = 0; epoch += 1; };
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const json = (res, status, body, headers = {}) => { res.writeHead(status, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(body)); };
 const HANG = () => {};
 /**
@@ -207,6 +231,276 @@ await record("withinDeadline answers at the deadline, and a late rejection belon
   } finally {
     process.off("unhandledRejection", onUnhandled);
   }
+});
+
+/* ------------------------------------------------------------------------- */
+console.log("\n[1b] El límite se suelta cuando la respuesta termina, y una operación vencida se cancela");
+
+/**
+ * WHAT THE BOUND LEFT BEHIND.
+ *
+ * `boundedFetch` arms exactly ONE timer per bounded request, at the delay it was
+ * configured with. Nothing else in this process arms a timer at these exact
+ * delays, so counting by delay counts the policy's own timers and nothing else —
+ * no seam is added to the module to make it observable. The caller's signal is a
+ * real `AbortController`'s, with its two listener methods wrapped ON THE
+ * INSTANCE, so what is counted is what the policy actually attached and removed.
+ */
+const observing = async (boundMs, work) => {
+  const armed = new Set();
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = (fn, ms, ...rest) => {
+    const timer = realSetTimeout(fn, ms, ...rest);
+    if (ms === boundMs) armed.add(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => { armed.delete(timer); return realClearTimeout(timer); };
+  const caller = new AbortController();
+  const signal = caller.signal;
+  let listeners = 0;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  signal.addEventListener = (...args) => { listeners += 1; return add(...args); };
+  signal.removeEventListener = (...args) => { listeners -= 1; return remove(...args); };
+  try {
+    const bounded = boundedFetch({ timeoutMs: { auth: boundMs, rest: boundMs } });
+    // `counts()` reads them MID-FLIGHT. A bound released late but before the
+    // check looks is still a bound held too long, and only this sees it.
+    const counts = () => ({ outstanding: armed.size, listeners });
+    const value = await work({ signal, caller, bounded, counts });
+    return { value, outstanding: armed.size, listeners };
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+    for (const timer of armed) realClearTimeout(timer);
+  }
+};
+
+// Long enough that a leaked timer could not have expired by the time the check
+// reads the count — a bound that leaked would still be sitting there.
+const LEAK_BOUND_MS = 7_777;
+
+await record("a successful body leaves NO armed timer and NO listener behind", async () => {
+  serve((_req, res) => json(res, 200, [{ role: "internal" }]));
+  const { value, outstanding, listeners } = await observing(LEAK_BOUND_MS, async ({ signal, bounded }) => {
+    const response = await bounded(`${ORIGIN}/rest/v1/profiles`, { signal });
+    return await response.json();
+  });
+  assert.deepEqual(value, [{ role: "internal" }], "the body must survive the wrap");
+  assert.equal(outstanding, 0, `${outstanding} timer(s) still armed after a successful read`);
+  assert.equal(listeners, 0, `${listeners} listener(s) still attached to the caller's signal`);
+});
+
+await record("a response with no body at all releases the bound at once", async () => {
+  serve((_req, res) => { res.writeHead(204); res.end(); });
+  const { value, outstanding, listeners } = await observing(LEAK_BOUND_MS, async ({ signal, bounded }) => {
+    const response = await bounded(`${ORIGIN}/rest/v1/profiles`, { signal });
+    assert.equal(response.body, null, "a 204 carries no body to watch");
+    return response.status;
+  });
+  assert.equal(value, 204);
+  assert.equal(outstanding, 0, "a bodiless response must not leave the bound armed");
+  assert.equal(listeners, 0);
+});
+
+await record("a body NOBODY READS holds nothing — the shape every auth outage takes", async () => {
+  // auth-js throws AuthRetryableFetchError for a 5xx BEFORE it calls .json(), so
+  // on every outage the body is abandoned unread. A bound armed at the headers
+  // would sit there for its whole limit and then abort a finished request.
+  serve((_req, res) => json(res, 503, { msg: "boom" }));
+  const { value, outstanding, listeners } = await observing(LEAK_BOUND_MS, async ({ signal, bounded, counts }) => {
+    const response = await bounded(`${ORIGIN}/auth/v1/user`, { signal });
+    return { status: response.status, ...counts() }; // the body is deliberately never read
+  });
+  assert.equal(value.status, 503);
+  assert.equal(value.outstanding, 0, "an abandoned body must leave no timer armed");
+  assert.equal(value.listeners, 0, "and no listener attached");
+  assert.equal(outstanding, 0);
+  assert.equal(listeners, 0);
+});
+
+await record("the REAL auth client on a 503 leaves nothing armed, though it never reads the body", async () => {
+  serve((_req, res) => json(res, 503, { msg: "boom" }));
+  const { value, outstanding, listeners } = await observing(LEAK_BOUND_MS, async ({ bounded, counts }) => {
+    const { value: attempt } = await quietly(() => client(bounded).auth.getUser("stand-in-access-token"));
+    return { outcome: classifySession(attempt), ...counts() };
+  });
+  assert.equal(value.outcome, "upstream_failure");
+  assert.equal(value.outstanding, 0, `${value.outstanding} timer(s) armed after an outage auth-js never read the body of`);
+  assert.equal(value.listeners, 0);
+  assert.equal(outstanding, 0);
+  assert.equal(listeners, 0);
+});
+
+await record("a body that STALLS after its headers is still bounded — once — and releases when it fires", async () => {
+  serve((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.write('[{"role":"inte'); });
+  const { value, outstanding, listeners } = await observing(331, async ({ signal, bounded }) => {
+    const response = await bounded(`${ORIGIN}/rest/v1/profiles`, { signal });
+    return await response.text().then(() => "read to the end", (thrown) => `${thrown.name}:${thrown.message}`);
+  });
+  assert.equal(value, `AbortError:${UPSTREAM_TIMEOUT_MESSAGE}`, "a stalled body must end as the bound's own timeout");
+  assert.equal(arrivals.length, 1, "and must not be retried");
+  assert.equal(outstanding, 0, "the fired bound must release what it held");
+  assert.equal(listeners, 0);
+});
+
+await record("a fast success gets NO late abort: the stand-in saw it completed, and nothing fires afterwards", async () => {
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    serve((_req, res) => json(res, 200, [{ role: "internal" }]));
+    const { value: atCompletion, outstanding, listeners } = await observing(250, async ({ signal, bounded, counts }) => {
+      const response = await bounded(`${ORIGIN}/rest/v1/profiles`, { signal });
+      await response.json();
+      const measured = counts(); // the instant the answer is complete — nothing may still be armed
+      await sleep(600); // more than twice the bound, with the request long finished
+      return measured;
+    });
+    assert.deepEqual(atCompletion, { outstanding: 0, listeners: 0 }, "a bound still armed here fires into a request that already succeeded");
+    assert.equal(outstanding, 0);
+    assert.equal(listeners, 0);
+    // ⓘ THE DISCRIMINATING MEASUREMENT IS `atCompletion`, NOT THESE TWO. The
+    // stand-in's view is the same whether or not the bound was released, because
+    // a small response is fully written before anything could abort it; they are
+    // kept as corroboration that the exchange really did complete, and they are
+    // not evidence about a late abort.
+    assert.equal(finished, 1, "the stand-in must have seen the response completed");
+    assert.equal(abandoned, 0, "and must not have seen it abandoned");
+    assert.equal(unhandled.length, 0, "nothing may reject into nobody's hands");
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+await record("a caller cancellation: ONE upstream request, ONE cancellation, nothing left armed", async () => {
+  serve(HANG);
+  const { value, outstanding, listeners } = await observing(5_000, async ({ signal, caller, bounded }) => {
+    setTimeout(() => caller.abort(), 60);
+    return await bounded(`${ORIGIN}/rest/v1/profiles`, { signal }).then(() => "resolved", (thrown) => `${thrown.name}:${thrown.message}`);
+  });
+  assert.equal(value, `AbortError:${UPSTREAM_CANCELLED_MESSAGE}`, "a caller's cancel wins over the bound");
+  assert.equal(arrivals.length, 1);
+  assert.equal(outstanding, 0);
+  assert.equal(listeners, 0);
+});
+
+await record("a body the consumer CANCELS half-read releases the bound and cancels the upstream", async () => {
+  // The third way a body can finish, and the one neither gate reached before.
+  serve((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.write('[{"role":"internal"}');
+    // deliberately never ended: the consumer gives up mid-body
+  });
+  const { value, outstanding, listeners } = await observing(LEAK_BOUND_MS, async ({ signal, bounded, counts }) => {
+    const response = await bounded(`${ORIGIN}/rest/v1/profiles`, { signal });
+    const reader = response.body.getReader();
+    const first = await reader.read();
+    assert.ok(!first.done && first.value.length > 0, "a first chunk must arrive");
+    const armedWhileReading = counts();
+    await reader.cancel("the reader gave up");
+    return { armedWhileReading, afterCancel: counts() };
+  });
+  assert.equal(value.armedWhileReading.outstanding, 1, "while a read is outstanding the body IS bounded");
+  assert.deepEqual(value.afterCancel, { outstanding: 0, listeners: 0 }, "a cancelled body must release everything");
+  assert.equal(outstanding, 0);
+  assert.equal(listeners, 0);
+});
+
+await record("the body STREAMS rather than being buffered: a chunk arrives before the rest is written", async () => {
+  let writeTheRest;
+  serve((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.write("[");
+    writeTheRest = () => { res.write('{"role":"internal"}]'); res.end(); };
+  });
+  const response = await boundedFetch({ timeoutMs: { rest: 5_000 } })(`${ORIGIN}/rest/v1/profiles`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  // If the policy buffered the body, this read could not resolve — the rest has
+  // not been written yet — and the check's own deadline would fail it.
+  const first = await reader.read();
+  assert.equal(decoder.decode(first.value), "[");
+  writeTheRest();
+  let rest = "";
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    rest += decoder.decode(next.value);
+  }
+  assert.equal(rest, '{"role":"internal"}]');
+});
+
+await record("status, statusText, headers and repeated Set-Cookie all survive the wrap", async () => {
+  serve((_req, res) => {
+    res.writeHead(418, "I am a teapot", {
+      "content-type": "application/json",
+      "x-upstream": "kept",
+      "set-cookie": ["a=1; Path=/", "b=2; Path=/"],
+    });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  const response = await boundedFetch({ timeoutMs: { rest: 5_000 } })(`${ORIGIN}/rest/v1/x`);
+  assert.equal(response.status, 418);
+  assert.equal(response.statusText, "I am a teapot");
+  assert.equal(response.headers.get("x-upstream"), "kept");
+  assert.deepEqual(response.headers.getSetCookie(), ["a=1; Path=/", "b=2; Path=/"], "two cookies must not be joined into one");
+  assert.deepEqual(await response.json(), { ok: true });
+});
+
+await record("the two headers that describe the ENCODED body do not travel with the decoded one", async () => {
+  serve((_req, res) => {
+    // Node sets content-length itself; content-encoding is the one that would lie.
+    res.writeHead(200, { "content-type": "application/json", "content-encoding": "identity" });
+    res.end(JSON.stringify([{ role: "internal" }]));
+  });
+  const response = await boundedFetch({ timeoutMs: { rest: 5_000 } })(`${ORIGIN}/rest/v1/profiles`);
+  assert.equal(response.headers.get("content-type"), "application/json", "the type must survive");
+  assert.equal(response.headers.get("content-encoding"), null, "the body handed on is already decoded");
+  assert.equal(response.headers.get("content-length"), null, "and its length is no longer the encoded one");
+  assert.deepEqual(await response.json(), [{ role: "internal" }]);
+});
+
+await record("an EXPIRED operation refuses the next attempt without touching the network", async () => {
+  serve((_req, res) => json(res, 200, []));
+  const operation = upstreamOperation();
+  const f = boundedFetch({ signal: operation.signal, timeoutMs: { rest: 5_000 } });
+  assert.equal((await f(`${ORIGIN}/rest/v1/x`)).status, 200);
+  assert.equal(arrivals.length, 1);
+  operation.expire();
+  await assert.rejects(f(`${ORIGIN}/rest/v1/x`), (e) => e.name === "AbortError" && e.message === UPSTREAM_TIMEOUT_MESSAGE);
+  assert.equal(arrivals.length, 1, "an expired operation must make no further request at all");
+});
+
+await record("expiring an operation IN FLIGHT ends that attempt, and a caller's own cancel is still a cancel", async () => {
+  serve(HANG);
+  const operation = upstreamOperation();
+  const expiring = boundedFetch({ signal: operation.signal, timeoutMs: { rest: 5_000 } });
+  setTimeout(() => operation.expire(), 60);
+  const { value, ms } = await elapsed(() =>
+    expiring(`${ORIGIN}/rest/v1/x`).then(() => "resolved", (thrown) => `${thrown.name}:${thrown.message}`));
+  assert.equal(value, `AbortError:${UPSTREAM_TIMEOUT_MESSAGE}`);
+  assert.ok(ms < 2_000, `the in-flight attempt must end at the expiry, not at the bound (${ms.toFixed(0)} ms)`);
+  serve(HANG);
+  const other = upstreamOperation();
+  const cancelling = boundedFetch({ signal: other.signal, timeoutMs: { rest: 5_000 } });
+  const caller = new AbortController();
+  setTimeout(() => caller.abort(), 60);
+  const cancelled = await cancelling(`${ORIGIN}/rest/v1/x`, { signal: caller.signal })
+    .then(() => "resolved", (thrown) => `${thrown.name}:${thrown.message}`);
+  assert.equal(cancelled, `AbortError:${UPSTREAM_CANCELLED_MESSAGE}`, "a reader who left is not a timeout");
+});
+
+await record("withinDeadline expires the operation it was given — and only when the work loses", async () => {
+  const inTime = upstreamOperation();
+  assert.deepEqual(await withinDeadline(Promise.resolve(1), 1_000, inTime), { settled: true, value: 1 });
+  assert.equal(inTime.signal.aborted, false, "work that finished in time must never be cancelled");
+  const expired = upstreamOperation();
+  assert.deepEqual(await withinDeadline(new Promise(() => {}), 50, expired), { settled: false });
+  assert.equal(expired.signal.aborted, true);
+  assert.equal(expired.signal.reason.name, "AbortError", "postgrest-js must recognise it as an abort");
+  assert.equal(expired.signal.reason.message, UPSTREAM_TIMEOUT_MESSAGE);
 });
 
 /* ------------------------------------------------------------------------- */
@@ -314,6 +608,10 @@ await record("the canonical readers' own classifier agrees: the bound's timeout 
 console.log("\n[3] Auth real contra el stand-in: la sesión y el inicio de sesión");
 
 const USER = { id: "00000000-0000-0000-0000-0000000000a1", aud: "authenticated", role: "authenticated", email: "stand-in@becommunity.test", app_metadata: {}, user_metadata: {}, created_at: "2026-01-01T00:00:00Z" };
+const COOKIE_NAME = "sb-127-auth-token"; // @supabase/ssr's key for a 127.0.0.1 origin
+const SESSION = { access_token: "stand-in-access-token", token_type: "bearer", expires_in: 3600, expires_at: 9_999_999_999, refresh_token: "stand-in-refresh", user: USER };
+/** A session auth-js must REFRESH before it can answer — the one path it retries on its own. */
+const STALE_SESSION = { ...SESSION, expires_at: 1_600_000_000 };
 const getUser = () => quietly(() => client().auth.getUser("stand-in-access-token"));
 const signIn = () => quietly(() => client().auth.signInWithPassword({ email: "stand-in@becommunity.test", password: "not-a-real-password" }));
 
@@ -357,6 +655,29 @@ await record("withinDeadline over a REAL hung auth client resolves unsettled, an
   });
   assert.deepEqual(attempt, { settled: false });
   assert.equal(classifySession(attempt.settled ? attempt.value : null), "timeout");
+});
+
+await record("AN EXPIRING OPERATION STOPS AUTH-JS'S OWN RETRY LOOP: the count at the answer is the count two seconds later", async () => {
+  // The one path auth-js retries by itself is a token refresh, so the session
+  // handed to it is one that must be refreshed before it can answer. The bounds
+  // are short here ON PURPOSE: the product's are 8 s and 9 s, and at that scale
+  // the second attempt is still in flight when the deadline passes, so nothing a
+  // two-second window could see would tell the two implementations apart.
+  const { createServerClient } = await import("@supabase/ssr");
+  const staleReader = (fetchImpl) =>
+    createServerClient(ORIGIN, "sb_publishable_stand_in", {
+      global: { fetch: fetchImpl },
+      cookies: { getAll: () => [{ name: COOKIE_NAME, value: JSON.stringify(STALE_SESSION) }], setAll: () => {} },
+    });
+  serve(HANG);
+  const operation = upstreamOperation();
+  const supabase = staleReader(boundedFetch({ signal: operation.signal, timeoutMs: { auth: 150 } }));
+  const { value: attempt } = await quietly(() => withinDeadline(supabase.auth.getUser(), 900, operation));
+  const atTheAnswer = arrivals.length;
+  assert.deepEqual(attempt, { settled: false }, "the refresh must lose its race");
+  assert.ok(atTheAnswer >= 2, `auth-js must have retried at least once before the deadline (${atTheAnswer} request(s))`);
+  await sleep(2_000);
+  assert.equal(arrivals.length, atTheAnswer, `${arrivals.length - atTheAnswer} request(s) began AFTER the deadline expired`);
 });
 
 await record("sign-in: only the service's 4xx says «invalid credentials»; every outage says «not your password»", async () => {
@@ -417,9 +738,10 @@ await record("the Studio door and every reader's client are wired to the policy"
   const guard = readSource("src/lib/studio/guard.ts");
   const server = readSource("src/lib/supabase/server.ts");
   const admin = readSource("src/lib/supabase/admin.ts");
-  assert.match(server, /global: \{ fetch: boundedFetch\(\) \}/, "the reader's client must be bounded");
+  assert.match(server, /global: \{ fetch: boundedFetch\(\{ signal: options\.signal \}\) \}/, "the reader's client must be bounded, and must carry its request's operation");
   assert.match(admin, /options\.bounded \? \{ global: \{ fetch: boundedFetch\(\) \} \}/, "the admin client must offer the bound");
-  assert.match(guard, /withinDeadline\(supabase\.auth\.getUser\(\), SESSION_CHECK_DEADLINE_MS\)/);
+  assert.match(guard, /const operation = upstreamOperation\(\);\s*const supabase = await createClient\(\{ signal: operation\.signal \}\);/, "the door's client belongs to the door's own operation");
+  assert.match(guard, /withinDeadline\(supabase\.auth\.getUser\(\), SESSION_CHECK_DEADLINE_MS, operation\)/, "expiring the deadline must cancel the check, not merely stop waiting for it");
   assert.match(guard, /\.eq\("user_id", user\.id\)\s*\.limit\(2\)/, "the role is read as a LIST, so only an array proves an answer");
   assert.match(guard, /profileOutcome = classifyRead\(read, "many"\);/);
   assert.match(guard, /if \(profileOutcome === "ok" && read\.data\?\.length !== 1\) profileOutcome = "upstream_failure";/, "a second row is not an answer");
@@ -465,21 +787,21 @@ await record("the Studio door and every reader's client are wired to the policy"
 /* ------------------------------------------------------------------------- */
 console.log("\n[5] El middleware REAL contra el stand-in");
 
-const COOKIE_NAME = "sb-127-auth-token"; // @supabase/ssr's key for a 127.0.0.1 origin
-const SESSION = { access_token: "stand-in-access-token", token_type: "bearer", expires_in: 3600, expires_at: 9_999_999_999, refresh_token: "stand-in-refresh", user: USER };
 const savedEnv = { url: process.env.NEXT_PUBLIC_SUPABASE_URL, key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY };
 process.env.NEXT_PUBLIC_SUPABASE_URL = ORIGIN;
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_stand_in";
 const { NextRequest } = await import("next/server");
 const { updateSession } = await import("../src/lib/supabase/middleware.ts");
-const visit = (path, withSession = true) =>
+const visit = (path, withSession = true, session = SESSION) =>
   quietly(() =>
     updateSession(
       new NextRequest(`https://becommunity.test${path}`, {
-        headers: withSession ? { cookie: `${COOKIE_NAME}=${encodeURIComponent(JSON.stringify(SESSION))}` } : {},
+        headers: withSession ? { cookie: `${COOKIE_NAME}=${encodeURIComponent(JSON.stringify(session))}` } : {},
       }),
     ),
   );
+/** The controlled answer's own marker, or null when the answer was not one. */
+const unavailableCode = (res) => (res.status === 503 ? res.headers.get("x-becommunity-unavailable") : null);
 /** Where a redirect points. The middleware keeps the original query string, so compare the PATH. */
 const redirectedTo = (res) => { const location = res.headers.get("location"); return location ? new URL(location).pathname : null; };
 const runtimeLines = (lines) => lines.filter((line) => line.startsWith('{"event":"runtime_failure"')).map((line) => JSON.parse(line));
@@ -508,11 +830,13 @@ try {
     assert.equal(runtimeLines(lines).length, 0);
   });
 
-  await record("a HUNG session check on the REAL middleware: redirected at its eight-second bound, and named session_timeout once", async () => {
+  await record("a HUNG session check on a protected route: the CONTROLLED 503, never a redirect, named session_timeout once", async () => {
     serve(HANG);
     const { value: outcome, ms } = await elapsed(() => visit("/studio"));
     const { value: res, lines } = outcome;
-    assert.equal(redirectedTo(res), "/login", "a session nobody could verify is refused");
+    assert.equal(unavailableCode(res), "session_timeout", "a session nobody could verify is an outage, not a sign-out");
+    assert.equal(res.headers.get("location"), null, "an outage must not send anybody to type a password");
+    assert.equal(res.headers.get("retry-after"), "15");
     const named = runtimeLines(lines);
     assert.equal(named.length, 1);
     assert.equal(named[0].code, "session_timeout", "the timeout must be recorded AS a timeout");
@@ -520,17 +844,84 @@ try {
     assert.ok(ms >= 7_500 && ms < 10_500, `answered after ${ms.toFixed(0)} ms — the eight-second attempt bound, inside the nine-second deadline`);
   });
 
-  await record("an OUTAGE (500, dead connection, a gateway 401 with no code): still redirected — fails closed — and named session_unverifiable once", async () => {
+  // ⚠️ THIS REPLACES 6B.4B2P'S «an OUTAGE … still redirected», which approved
+  // the conflation the rest of this gate exists to prevent.
+  await record("an OUTAGE (500, dead connection, a gateway 401 with no code) on a protected route: 503 session_unverifiable, no redirect, nothing leaked", async () => {
     for (const respond of [(_req, res) => json(res, 500, { msg: "boom" }), (req) => req.socket.destroy(), GATEWAY_REFUSAL]) {
       serve(respond);
       const { value: res, lines } = await visit(`/studio/e/cd4d6acd-88b9-4804-829f-75b6d91a32b7/revision?email=carla%40becommunitymx.com`);
-      assert.equal(redirectedTo(res), "/login");
+      assert.equal(unavailableCode(res), "session_unverifiable");
+      assert.equal(res.headers.get("location"), null);
+      const body = await res.text();
       const named = runtimeLines(lines);
       assert.equal(named.length, 1);
       assert.equal(named[0].code, "session_unverifiable");
       assert.equal(named[0].routeClass, "studio");
-      assert.ok(!lines.join("\n").includes("cd4d6acd"), "the study id reached a log line");
-      assert.ok(!lines.join("\n").includes("carla"), "the query reached a log line");
+      for (const secret of ["cd4d6acd", "carla", "127.0.0.1", "boom", "Invalid API key"]) {
+        assert.ok(!lines.join("\n").includes(secret), `«${secret}» reached a log line`);
+        assert.ok(!body.includes(secret), `«${secret}» reached the page`);
+      }
+    }
+  });
+
+  await record("THE DISCRIMINATION: the same route, one named «no» and one outage, answered differently", async () => {
+    serve((_req, res) => gotrue(res, 403, { code: "bad_jwt", message: "invalid JWT" }));
+    const verdict = await visit("/studio/e/cd4d6acd-88b9-4804-829f-75b6d91a32b7/revision");
+    assert.equal(redirectedTo(verdict.value), "/login", "a session the service refused BY NAME is a sign-out");
+    assert.equal(verdict.value.status, 307);
+    assert.equal(runtimeLines(verdict.lines).length, 0, "and a sign-out is not an incident");
+    serve((_req, res) => json(res, 500, { msg: "boom" }));
+    const outage = await visit("/studio/e/cd4d6acd-88b9-4804-829f-75b6d91a32b7/revision");
+    assert.equal(unavailableCode(outage.value), "session_unverifiable");
+    assert.equal(redirectedTo(outage.value), null);
+    assert.equal(runtimeLines(outage.lines).length, 1);
+  });
+
+  await record("/login and /api/health still answer during the same outage — neither needs the session", async () => {
+    serve((_req, res) => json(res, 500, { msg: "boom" }));
+    const login = await visit("/login?error=service_unavailable");
+    assert.equal(login.value.status, 200, "the sign-in form must render when the session cannot be checked");
+    assert.equal(login.value.headers.get("location"), null, "and must never redirect on a session nobody could verify");
+    assert.equal(runtimeLines(login.lines).length, 1, "the outage is still named");
+    const health = await visit("/api/health");
+    assert.equal(health.value.status, 200);
+    assert.equal(health.value.headers.get("x-becommunity-unavailable"), null);
+    const root = await visit("/");
+    assert.equal(root.value.status, 200);
+  });
+
+  await record("the outage answer KEEPS the cookies the refresh had already written — nobody is signed out by it", async () => {
+    serve((req, res) => {
+      if (req.url.startsWith("/auth/v1/token")) {
+        gotrue(res, 200, { ...SESSION, access_token: "refreshed-access-token", expires_at: 9_999_999_999 });
+        return;
+      }
+      json(res, 500, { msg: "boom" }); // the user read fails right after the refresh succeeded
+    });
+    const { value: res } = await visit("/studio", true, STALE_SESSION);
+    assert.equal(unavailableCode(res), "session_unverifiable");
+    const written = res.cookies.getAll().map((cookie) => cookie.name);
+    assert.ok(written.length > 0, "the refreshed session must survive the outage answer");
+    assert.ok(written.every((name) => name.startsWith("sb-")), `unexpected cookie names: ${written.join(", ")}`);
+    assert.ok(!(await res.text()).includes("refreshed-access-token"), "no token may reach the page");
+  });
+
+  await record("AN EXPIRED OPERATION MAKES NO FURTHER REQUEST: the count at the answer is the count two seconds later", async () => {
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      serve(HANG); // a session that must be refreshed first, against an upstream that never answers
+      const { value: outcome, ms } = await elapsed(() => visit("/studio", true, STALE_SESSION));
+      const atTheAnswer = arrivals.length;
+      assert.equal(unavailableCode(outcome.value), "session_timeout");
+      assert.ok(atTheAnswer >= 1, "the refresh must have been attempted at least once");
+      assert.ok(ms < 10_500, `answered after ${ms.toFixed(0)} ms`);
+      await sleep(2_000);
+      assert.equal(arrivals.length, atTheAnswer, `auth-js opened ${arrivals.length - atTheAnswer} more request(s) after the deadline expired`);
+      assert.equal(unhandled.length, 0, "the abandoned attempt's rejection must belong to nobody");
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
     }
   });
 } finally {

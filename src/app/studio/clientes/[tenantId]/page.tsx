@@ -306,6 +306,7 @@ export default async function StudioClientPage({
                     </p>
                   </div>
                   <Link
+                    prefetch={false}
                     href={studioStudy(study.id)}
                     className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
                   >

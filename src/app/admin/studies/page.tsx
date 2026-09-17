@@ -174,9 +174,9 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
-                  <Link className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={studioStudy(study.id)}>Abrir el estudio <Forward /></Link>
-                  <Link className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={`/admin/upload?tenant=${study.tenant_id}&study=${study.id}`}>Cargar datos <Forward /></Link>
-                  <Link className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={`/admin/preview/${study.id}`}>Ver como el cliente <Forward /></Link>
+                  <Link prefetch={false} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={studioStudy(study.id)}>Abrir el estudio <Forward /></Link>
+                  <Link prefetch={false} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={`/admin/upload?tenant=${study.tenant_id}&study=${study.id}`}>Cargar datos <Forward /></Link>
+                  <Link prefetch={false} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline" href={`/admin/preview/${study.id}`}>Ver como el cliente <Forward /></Link>
                 </div>
               </li>
             ))}

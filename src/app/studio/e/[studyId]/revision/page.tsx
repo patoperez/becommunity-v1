@@ -137,6 +137,7 @@ export default async function StudioStudyReviewPage({
           </h2>
           <p className="mt-1.5 max-w-prose text-sm text-caution">{review.unavailable.detail}</p>
           <Link
+            prefetch={false}
             href={studioStudyConstruction(study.id)}
             className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken"
           >

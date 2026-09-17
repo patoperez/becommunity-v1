@@ -51,7 +51,7 @@ export function Pager({
       </p>
       <div className="flex items-center gap-2">
         {view.hasPrevious ? (
-          <Link className={CONTROL} href={pageHref(basePath, params, view.page - 1)} rel="prev">
+          <Link prefetch={false} className={CONTROL} href={pageHref(basePath, params, view.page - 1)} rel="prev">
             <span aria-hidden="true">‹</span> Anterior
           </Link>
         ) : (
@@ -60,7 +60,7 @@ export function Pager({
           </span>
         )}
         {view.hasNext ? (
-          <Link className={CONTROL} href={pageHref(basePath, params, view.page + 1)} rel="next">
+          <Link prefetch={false} className={CONTROL} href={pageHref(basePath, params, view.page + 1)} rel="next">
             Siguiente <span aria-hidden="true">›</span>
           </Link>
         ) : (

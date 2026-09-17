@@ -11,7 +11,7 @@ export default function StudioError({ error, reset }: { error: Error & { digest?
     <PageState
       kicker="Studio"
       title="No pudimos abrir esta parte del trabajo"
-      action={<><button type="button" onClick={reset} className={primaryAction}>Reintentar</button><Link href="/studio" className={secondaryAction}>Volver al inicio de Studio</Link></>}
+      action={<><button type="button" onClick={reset} className={primaryAction}>Reintentar</button><Link prefetch={false} href="/studio" className={secondaryAction}>Volver al inicio de Studio</Link></>}
     >
       <p>Lo que ya guardaste sigue intacto. Reintenta ahora; si vuelve a ocurrir, comparte con el equipo en qué paso estabas.</p>
     </PageState>

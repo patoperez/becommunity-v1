@@ -42,6 +42,7 @@ export default async function ClientPreviewPage({ params }: { params: Promise<{ 
         needs no shared state to coordinate the two.
       */
       utility={<Link
+        prefetch={false}
         href={STUDIES_LIST.href}
         className="inline-flex min-h-11 min-w-0 max-w-full items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-strong hover:bg-surface-sunken"
       >
@@ -72,6 +73,7 @@ function PublishEntry({ studyId }: { studyId: string }) {
         Acabas de ver la pantalla real. Decidir la publicación se hace desde aquí.
       </p>
       <Link
+        prefetch={false}
         href={studioStudyPublish(studyId)}
         className="mt-4 inline-flex min-h-11 items-center rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-paper hover:bg-[#183b5c]"
       >

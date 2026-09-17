@@ -5,13 +5,16 @@ import { recordRuntimeFailure } from "@/lib/runtime/unavailable";
 import { decideInternalAccess, type InternalAccessDecision } from "@/lib/studio/internal-access";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { withinDeadline } from "@/lib/upstream/bounded-fetch";
+import { upstreamOperation, withinDeadline } from "@/lib/upstream/bounded-fetch";
 import { classifyRead, classifySession, type ReadOutcome } from "@/lib/upstream/outcome";
 
 /**
  * The whole session check, including any token refresh auth-js decides to
  * retry. Each attempt is already bounded by the client's fetch; this bounds the
  * OPERATION, so a reader is answered in seconds rather than after a retry loop.
+ *
+ * ⚠️ CORRECTED IN UNIT 6B.4B2Q: expiring the deadline now CANCELS the operation
+ * rather than merely abandoning it, so no attempt outlives the answer.
  */
 const SESSION_CHECK_DEADLINE_MS = 9_000;
 
@@ -51,8 +54,10 @@ export class InternalAccessUnavailableError extends Error {
  * privileged client exists on a request that was never authorized.
  */
 export async function requireInternal() {
-  const supabase = await createClient();
-  const attempt = await withinDeadline(supabase.auth.getUser(), SESSION_CHECK_DEADLINE_MS);
+  // This request's own cancellation, never shared with another reader's.
+  const operation = upstreamOperation();
+  const supabase = await createClient({ signal: operation.signal });
+  const attempt = await withinDeadline(supabase.auth.getUser(), SESSION_CHECK_DEADLINE_MS, operation);
   const session = classifySession(attempt.settled ? attempt.value : null);
   const user = attempt.settled ? attempt.value.data.user : null;
 

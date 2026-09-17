@@ -1,8 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { recordRuntimeFailure, unavailableResponse } from "@/lib/runtime/unavailable";
-import { boundedFetch, withinDeadline } from "@/lib/upstream/bounded-fetch";
+import { recordRuntimeFailure, unavailableResponse, type RuntimeFailureCode } from "@/lib/runtime/unavailable";
+import { boundedFetch, upstreamOperation, withinDeadline } from "@/lib/upstream/bounded-fetch";
 import { classifySession } from "@/lib/upstream/outcome";
 
 /**
@@ -20,6 +20,12 @@ import { classifySession } from "@/lib/upstream/outcome";
  * But auth-js retries a token refresh on its own for up to thirty seconds,
  * re-arming a fresh per-attempt bound each time, so a session near expiry could
  * still hold a request for about forty seconds. This bounds the whole OPERATION.
+ *
+ * ⚠️ CORRECTED IN UNIT 6B.4B2Q. Until this unit the operation bound stopped the
+ * WAIT and let the work run on, so a hung check kept its socket and auth-js
+ * stayed free to open the next attempt of a refresh nobody was waiting for. The
+ * deadline now EXPIRES the operation: the attempt in flight is aborted, and the
+ * next retry is refused before it reaches the network.
  */
 const SESSION_CHECK_DEADLINE_MS = 9_000;
 
@@ -77,6 +83,26 @@ export async function updateSession(request: NextRequest) {
   }
 }
 
+/**
+ * The controlled answer, KEEPING WHATEVER COOKIES THE SESSION WORK PRODUCED.
+ *
+ * An outage must not sign anybody out. If auth-js managed to refresh the token
+ * before the service stopped answering, `setAll` has already put the new pair on
+ * the response being built; dropping it would invalidate a refresh token the
+ * browser no longer has. The page itself is `unavailableResponse`'s and nothing
+ * else: no message, no path, no identifier.
+ */
+function unavailableCarryingCookies(
+  code: RuntimeFailureCode,
+  pathname: string,
+  carrying: NextResponse,
+): NextResponse {
+  const answer = unavailableResponse(code, pathname);
+  const response = new NextResponse(answer.body, { status: answer.status, headers: answer.headers });
+  for (const cookie of carrying.cookies.getAll()) response.cookies.set(cookie);
+  return response;
+}
+
 async function runUpdateSession(request: NextRequest) {
   // Per-request CSP nonce (16 random bytes, base64). getRandomValues + btoa work
   // on the Edge runtime (Buffer is not guaranteed there).
@@ -89,6 +115,10 @@ async function runUpdateSession(request: NextRequest) {
   requestHeaders.set("content-security-policy", csp);
 
   let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
+
+  // THIS REQUEST'S OWN CANCELLATION, created here and never shared: expiring it
+  // can cancel nothing but this request's own session check.
+  const operation = upstreamOperation();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -106,8 +136,12 @@ async function runUpdateSession(request: NextRequest) {
         harmless here only because this client makes auth calls alone. The
         shared policy aborts with an `AbortError` carrying a sentinel message,
         and honours a caller's own signal.
+
+        It also carries THIS REQUEST'S operation signal (Unit 6B.4B2Q), so the
+        deadline below cancels the conversation rather than merely stopping the
+        wait for it.
       */
-      global: { fetch: boundedFetch() },
+      global: { fetch: boundedFetch({ signal: operation.signal }) },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -143,15 +177,17 @@ async function runUpdateSession(request: NextRequest) {
   // `error.name === "AbortError"`, which can never be true — auth-js renames
   // every fetch rejection `AuthRetryableFetchError` — so `session_timeout` was
   // unreachable. The shared classifier reads the bound's sentinel instead.
-  const attempt = await withinDeadline(supabase.auth.getUser(), SESSION_CHECK_DEADLINE_MS);
+  const attempt = await withinDeadline(supabase.auth.getUser(), SESSION_CHECK_DEADLINE_MS, operation);
   const session = classifySession(attempt.settled ? attempt.value : null);
   const user = session === "authenticated" && attempt.settled ? attempt.value.data.user : null;
-  if (session === "timeout" || session === "cancelled" || session === "upstream_failure") {
-    recordRuntimeFailure({
-      code: session === "upstream_failure" ? "session_unverifiable" : "session_timeout",
-      pathname: request.nextUrl.pathname,
-      method: request.method,
-    });
+  const outage: RuntimeFailureCode | null =
+    session === "timeout" || session === "cancelled"
+      ? "session_timeout"
+      : session === "upstream_failure"
+        ? "session_unverifiable"
+        : null;
+  if (outage) {
+    recordRuntimeFailure({ code: outage, pathname: request.nextUrl.pathname, method: request.method });
   }
 
   const { pathname } = request.nextUrl;
@@ -159,6 +195,17 @@ async function runUpdateSession(request: NextRequest) {
   // /api/health is the public anti-pause endpoint (§9.1) — Uptime Robot must
   // reach it without a session.
   const isPublicRoute = isAuthRoute || pathname === "/" || pathname.startsWith("/api/health");
+
+  // ⓘ AN OUTAGE IS NOT A SIGN-OUT (Unit 6B.4B2Q). Until this unit a session the
+  // auth service never answered for was handled exactly like a verified «nobody
+  // is signed in»: the reader was redirected to `/login`, where — their cookies
+  // still perfectly valid — they were invited to type a password that could not
+  // be checked either. That is the conflation this whole policy exists to
+  // prevent, committed by the code that names it. It fails closed the same way,
+  // and now it says which thing happened: a controlled 503 carrying the closed
+  // code, never a redirect, on every route that needs a session. `/login`, `/`
+  // and `/api/health` still render, because none of them needs the answer.
+  if (outage && !isPublicRoute) return unavailableCarryingCookies(outage, pathname, supabaseResponse);
 
   if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();

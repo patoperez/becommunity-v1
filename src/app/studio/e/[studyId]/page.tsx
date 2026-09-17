@@ -83,6 +83,7 @@ export default async function StudioStudyPage({
           <p className="mt-1 text-sm text-body">{readiness.summary}</p>
           {next ? (
             <Link
+              prefetch={false}
               href={next.href}
               className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-paper hover:bg-[#183b5c]"
             >

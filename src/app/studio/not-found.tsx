@@ -19,8 +19,8 @@ export default function StudioNotFound() {
       title="Eso ya no está en Studio"
       action={
         <>
-          <ActionLink href={STUDIO_STUDIES}>Ver los estudios</ActionLink>
-          <ActionLink href={STUDIO_ROOT} variant="secondary">
+          <ActionLink prefetch={false} href={STUDIO_STUDIES}>Ver los estudios</ActionLink>
+          <ActionLink prefetch={false} href={STUDIO_ROOT} variant="secondary">
             Ir al inicio de Studio
           </ActionLink>
         </>

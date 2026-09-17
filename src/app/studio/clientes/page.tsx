@@ -119,13 +119,13 @@ export default async function StudioClientsPage({ searchParams }: { searchParams
         {archivedCount > 0 || filter !== null ? (
           <section aria-label="Filtros" className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-muted">Mostrando:</span>
-            <Link href={pageHref(STUDIO_CLIENTS, { ...filters, estado: null }, 1)} className={filter === null ? FILTER_ON : FILTER_OFF}>
+            <Link prefetch={false} href={pageHref(STUDIO_CLIENTS, { ...filters, estado: null }, 1)} className={filter === null ? FILTER_ON : FILTER_OFF}>
               Todos ({tenantList.length})
             </Link>
-            <Link href={pageHref(STUDIO_CLIENTS, { ...filters, estado: "activos" }, 1)} className={filter === "activos" ? FILTER_ON : FILTER_OFF}>
+            <Link prefetch={false} href={pageHref(STUDIO_CLIENTS, { ...filters, estado: "activos" }, 1)} className={filter === "activos" ? FILTER_ON : FILTER_OFF}>
               Activos ({tenantList.length - archivedCount})
             </Link>
-            <Link href={pageHref(STUDIO_CLIENTS, { ...filters, estado: "archivados" }, 1)} className={filter === "archivados" ? FILTER_ON : FILTER_OFF}>
+            <Link prefetch={false} href={pageHref(STUDIO_CLIENTS, { ...filters, estado: "archivados" }, 1)} className={filter === "archivados" ? FILTER_ON : FILTER_OFF}>
               Archivados ({archivedCount})
             </Link>
           </section>
@@ -149,6 +149,7 @@ export default async function StudioClientsPage({ searchParams }: { searchParams
                 return (
                   <li key={tenant.id}>
                     <Link
+                      prefetch={false}
                       href={studioClient(tenant.id)}
                       className="flex h-full flex-col rounded-xl border border-line bg-surface p-5 transition-colors duration-[var(--motion-state)] hover:border-line-strong hover:bg-surface-sunken/40"
                     >

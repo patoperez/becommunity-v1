@@ -107,12 +107,14 @@ export default async function StudioStudiesPage({ searchParams }: { searchParams
 
         <section className="flex flex-wrap gap-3 rounded-xl border border-line bg-surface p-4">
           <Link
+            prefetch={false}
             href="/admin/studies"
             className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-paper hover:bg-[#183b5c]"
           >
             Comenzar un estudio <Forward />
           </Link>
           <Link
+            prefetch={false}
             href={STUDIO_TEMPLATES}
             className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken"
           >
@@ -123,11 +125,12 @@ export default async function StudioStudiesPage({ searchParams }: { searchParams
         <section aria-label="Filtros" className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-muted">Estado:</span>
-            <Link href={pageHref(STUDIO_STUDIES, { ...filters, estado: null }, 1)} className={state === null ? FILTER_ON : FILTER_OFF}>
+            <Link prefetch={false} href={pageHref(STUDIO_STUDIES, { ...filters, estado: null }, 1)} className={state === null ? FILTER_ON : FILTER_OFF}>
               Todos
             </Link>
             {STUDY_STATES.map((value) => (
               <Link
+                prefetch={false}
                 key={value}
                 href={pageHref(STUDIO_STUDIES, { ...filters, estado: value }, 1)}
                 className={state === value ? FILTER_ON : FILTER_OFF}
@@ -139,11 +142,12 @@ export default async function StudioStudiesPage({ searchParams }: { searchParams
           {tenantList.length > 1 ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-muted">Cliente:</span>
-              <Link href={pageHref(STUDIO_STUDIES, { ...filters, cliente: null }, 1)} className={client === null ? FILTER_ON : FILTER_OFF}>
+              <Link prefetch={false} href={pageHref(STUDIO_STUDIES, { ...filters, cliente: null }, 1)} className={client === null ? FILTER_ON : FILTER_OFF}>
                 Todos
               </Link>
               {tenantList.map((tenant) => (
                 <Link
+                  prefetch={false}
                   key={tenant.id}
                   href={pageHref(STUDIO_STUDIES, { ...filters, cliente: tenant.id }, 1)}
                   className={client === tenant.id ? FILTER_ON : FILTER_OFF}
@@ -193,6 +197,7 @@ export default async function StudioStudiesPage({ searchParams }: { searchParams
                     </div>
                   </div>
                   <Link
+                    prefetch={false}
                     href={studioStudy(study.id)}
                     className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
                   >

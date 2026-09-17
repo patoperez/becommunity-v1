@@ -117,6 +117,7 @@ export function StudioShell({
               return (
                 <li key={stop.href} className="shrink-0">
                   <Link
+                    prefetch={false}
                     href={stop.href}
                     aria-current={current ? "page" : undefined}
                     className={`inline-flex min-h-11 items-center border-b-[3px] px-3 text-sm font-medium transition-colors duration-[var(--motion-state)] ${

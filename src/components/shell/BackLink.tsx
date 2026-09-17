@@ -46,6 +46,7 @@ export const CLIENTS_LIST: StudioParent = {
 export function BackLink({ parent }: { parent: StudioParent }) {
   return (
     <Link
+      prefetch={false}
       href={parent.href}
       className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-evidence underline-offset-4 hover:underline"
     >

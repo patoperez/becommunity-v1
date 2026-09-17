@@ -15,15 +15,22 @@ import { boundedFetch } from "@/lib/upstream/bounded-fetch";
  * with no answer at all. The bound is on the client's own `fetch`, so a call
  * added later inherits it. It changes no authorization and no RLS: the same
  * key, the same session, the same requests — with an end.
+ *
+ * `signal` — ONE REQUEST'S OWN CANCELLATION (Unit 6B.4B2Q). A caller that bounds
+ * a whole OPERATION rather than one attempt passes `upstreamOperation().signal`
+ * here, so expiring that operation cancels the call in flight and refuses the
+ * next retry instead of leaving abandoned work running. It is created per
+ * request and never shared; omitting it leaves the per-attempt bound alone,
+ * exactly as before.
  */
-export async function createClient() {
+export async function createClient(options: { signal?: AbortSignal } = {}) {
   const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      global: { fetch: boundedFetch() },
+      global: { fetch: boundedFetch({ signal: options.signal }) },
       cookies: {
         getAll() {
           return cookieStore.getAll();

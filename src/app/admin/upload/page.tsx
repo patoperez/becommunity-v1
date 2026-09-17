@@ -47,7 +47,7 @@ export default async function UploadPage({
           <p className="mt-2 text-sm text-danger">
             Esta sección es solo para el equipo interno de Be Community.
           </p>
-          <Link href="/dashboard" className="mt-4 inline-block min-h-11 text-sm font-semibold text-danger underline underline-offset-4">
+          <Link prefetch={false} href="/dashboard" className="mt-4 inline-block min-h-11 text-sm font-semibold text-danger underline underline-offset-4">
             Volver al portal
           </Link>
         </div>

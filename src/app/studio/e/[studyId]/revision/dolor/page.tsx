@@ -88,6 +88,7 @@ export default async function StudioJourneyPainPage({ params }: { params: Params
     >
       <div className="space-y-5">
         <Link
+          prefetch={false}
           href={studioStudyReview(study.id)}
           className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-strong hover:bg-surface-sunken"
           data-testid="volver-a-revision"

@@ -95,6 +95,7 @@ export default async function StudioStudyDataPage({
           El asistente lee el archivo, te muestra qué entendió y no escribe nada hasta que confirmas.
         </p>
         <Link
+          prefetch={false}
           href={importHref}
           className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-paper hover:bg-[#183b5c]"
         >

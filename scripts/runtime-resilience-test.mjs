@@ -49,16 +49,26 @@
 //      by the one shared classifier, run against the auth library's own error
 //      classes. (This used to be a hand copy of the classifier tested against
 //      itself; a copy stays green when the original changes.)
+//   8. AN OUTAGE IS ANSWERED, NOT REDIRECTED, and the internal navigation does
+//      not prefetch (Unit 6B.4B2Q). The second is a POLICY check on source —
+//      within five named directories — plus the study navigation EXECUTED and
+//      its real `next/link` elements inspected. It is not evidence about any
+//      CPU limit.
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let passed = 0;
 let failed = 0;
 const check = (label, fn) => {
   try {
-    fn();
+    const returned = fn();
+    // A sync check handed an async body would "pass" the instant it was called:
+    // the promise is not awaited and the assertion inside it is never seen.
+    if (returned !== undefined && typeof returned?.then === "function") throw new Error("this check is asynchronous — use checkAsync");
     passed += 1;
     console.log("  ✓", label);
   } catch (thrown) {
@@ -471,12 +481,15 @@ check("the session check's deadline and its two logged outcomes are pinned", () 
   assert.match(MIDDLEWARE_CODE, /const SESSION_CHECK_DEADLINE_MS = 9_000;/);
   assert.match(
     MIDDLEWARE_CODE,
-    /if \(session === "timeout" \|\| session === "cancelled" \|\| session === "upstream_failure"\) \{\s*recordRuntimeFailure\(\{\s*code: session === "upstream_failure" \? "session_unverifiable" : "session_timeout",/,
+    /const outage: RuntimeFailureCode \| null =\s*session === "timeout" \|\| session === "cancelled"\s*\? "session_timeout"\s*: session === "upstream_failure"\s*\? "session_unverifiable"\s*: null;/,
   );
+  assert.match(MIDDLEWARE_CODE, /if \(outage\) \{\s*recordRuntimeFailure\(\{ code: outage, pathname: request\.nextUrl\.pathname, method: request\.method \}\);/);
 });
 check("the middleware adopts the SHARED bound and the SHARED classifier, and keeps no copy of either", () => {
-  assert.match(MIDDLEWARE_CODE, /global: \{ fetch: boundedFetch\(\) \}/);
-  assert.match(MIDDLEWARE_CODE, /withinDeadline\(supabase\.auth\.getUser\(\), SESSION_CHECK_DEADLINE_MS\)/);
+  assert.match(MIDDLEWARE_CODE, /global: \{ fetch: boundedFetch\(\{ signal: operation\.signal \}\) \}/);
+  assert.match(MIDDLEWARE_CODE, /const operation = upstreamOperation\(\);/);
+  assert.equal((MIDDLEWARE_CODE.match(/upstreamOperation\(\)/g) ?? []).length, 1, "one operation per request, created where the request is handled");
+  assert.match(MIDDLEWARE_CODE, /withinDeadline\(supabase\.auth\.getUser\(\), SESSION_CHECK_DEADLINE_MS, operation\)/, "the deadline must CANCEL the check, not merely stop waiting for it");
   assert.match(MIDDLEWARE_CODE, /classifySession\(/);
   assert.doesNotMatch(MIDDLEWARE_CODE, /AbortSignal\.timeout\(/, "a TimeoutError abort is retried by postgrest-js");
   assert.doesNotMatch(MIDDLEWARE_CODE, /function isTransportFailure/, "a private classifier drifts from the shared one");
@@ -487,6 +500,23 @@ check("the authorization decision is unchanged and still fails closed", () => {
   assert.doesNotMatch(MIDDLEWARE_CODE, /getSession\(\)/, "getSession must never make an authorization decision");
   // A user only exists when the shared classifier said «authenticated».
   assert.match(MIDDLEWARE_CODE, /const user = session === "authenticated" && attempt\.settled \? attempt\.value\.data\.user : null;/);
+});
+check("AN OUTAGE IS ANSWERED, NOT REDIRECTED, and it is decided BEFORE the sign-out branch", () => {
+  assert.match(MIDDLEWARE_CODE, /if \(outage && !isPublicRoute\) return unavailableCarryingCookies\(outage, pathname, supabaseResponse\);/);
+  assert.ok(
+    MIDDLEWARE_CODE.indexOf("if (outage && !isPublicRoute)") < MIDDLEWARE_CODE.indexOf("if (!user && !isPublicRoute)"),
+    "a session nobody could verify must be answered before it can be read as «nobody is signed in»",
+  );
+  // The controlled answer is the shared one, and it carries the session work's cookies.
+  assert.match(MIDDLEWARE_CODE, /const answer = unavailableResponse\(code, pathname\);/);
+  assert.match(MIDDLEWARE_CODE, /for \(const cookie of carrying\.cookies\.getAll\(\)\) response\.cookies\.set\(cookie\);/);
+  // ⓘ THERE IS NO «the word outage never appears near a redirect» ASSERTION HERE.
+  // One was written and removed: its window was far shorter than the distance
+  // between the two tokens in any real spelling of the defect, so it passed on
+  // the very behaviour this unit removed. What proves it is the EXECUTED check
+  // in `npm run test:upstream-bounds` §[5], which drives the real middleware
+  // through an outage and reads the answer.
+  assert.equal((MIDDLEWARE_CODE.match(/NextResponse\.redirect\(url\)/g) ?? []).length, 2, "exactly two redirects: the sign-out and the already-signed-in one");
 });
 
 /* --------------------------------------------------------------------------- */
@@ -586,6 +616,202 @@ check("the action uses the shared classifier and the pure code choice, and neith
 check("the middleware and the action import the SAME classifier module — drift is impossible by construction", () => {
   assert.match(MIDDLEWARE_CODE, /import \{ classifySession \} from "@\/lib\/upstream\/outcome";/);
   assert.match(LOGIN_ACTION_CODE, /import \{ classifySignIn \} from "@\/lib\/upstream\/outcome";/);
+});
+
+/* --------------------------------------------------------------------------- */
+console.log("\n[8] La navegación interna no descarga pantallas que nadie pidió");
+
+/**
+ * THE PREFETCH STORM (Unit 6B.4B2Q).
+ *
+ * Next's `<Link>` prefetches its destination as soon as the anchor enters the
+ * viewport. Studio's frame puts THIRTEEN of them on screen at once — four shell
+ * stops and the nine steps of the process — and every one of those destinations
+ * is an authenticated, server-rendered route. ONE settled visit to a study
+ * therefore made 1 document request and 21 background RSC requests for screens
+ * nobody asked for — every destination twice, under two different `?_rsc=` cache
+ * keys. Each of those REACHES THE WORKER and runs the middleware's session
+ * check. It is NOT a page render: 6B.4B2P measured a prefetch at 5–15 ms of CPU,
+ * because Next short-circuits a non-PPR prefetch of a route with no `loading`
+ * boundary to router state. Removing 26 of them saves ~0.13–0.39 s of CPU and 26
+ * auth round trips per visit.
+ *
+ * `prefetch={false}` turns off the viewport, hover and touch prefetches (Next
+ * 16.3.2, `client/app-dir/link.js`: `prefetchEnabled = prefetchProp !== false`)
+ * and changes nothing about clicking, the href, `aria-current` or the markup.
+ *
+ * ⓘ THIS IS A POLICY CHECK ON SOURCE, and it is not evidence that the routes
+ * fit any CPU limit — they do not. What it prevents is a navigation surface
+ * silently going back to prefetching, which is invisible in review and shows up
+ * only as load. The MEASUREMENT lives in the preview QA, not here.
+ *
+ * ⓘ ITS SCOPE IS FOUR DIRECTORIES, AND NOTHING OUTSIDE THEM. `src/app/error.tsx`,
+ * `src/app/not-found.tsx` and `src/components/insights/` each still prefetch an
+ * authenticated destination and are deliberately left alone — one link apiece on
+ * a page nobody stays on. «Complete» below means complete WITHIN the walk.
+ */
+/** The directories the completeness walk covers. «Complete» means complete within these. */
+const WALKED_AREAS = ["src/app/studio", "src/app/admin", "src/app/dashboard", "src/components/studio", "src/components/shell"];
+
+const NAVIGATION_SURFACES = [
+  "src/app/admin/clients/page.tsx",
+  "src/app/admin/preview/[studyId]/page.tsx",
+  "src/app/admin/studies/StudyConfigurator.tsx",
+  "src/app/admin/studies/page.tsx",
+  "src/app/admin/upload/page.tsx",
+  "src/app/studio/clientes/[tenantId]/page.tsx",
+  "src/app/studio/clientes/page.tsx",
+  "src/app/studio/e/[studyId]/datos/page.tsx",
+  "src/app/studio/e/[studyId]/page.tsx",
+  "src/app/studio/e/[studyId]/publicar/page.tsx",
+  "src/app/studio/e/[studyId]/revision/categorias/page.tsx",
+  "src/app/studio/e/[studyId]/revision/dolor/page.tsx",
+  "src/app/studio/e/[studyId]/revision/page.tsx",
+  "src/app/studio/e/[studyId]/vista-cliente/page.tsx",
+  "src/app/studio/error.tsx",
+  "src/app/studio/estudios/page.tsx",
+  "src/app/studio/not-found.tsx",
+  "src/components/shell/BackLink.tsx",
+  "src/components/shell/PreviewNotice.tsx",
+  "src/components/shell/StudioShell.tsx",
+  "src/components/studio/Pager.tsx",
+  "src/components/studio/QualitativeWorkspaceView.tsx",
+  "src/components/studio/StudioHomeView.tsx",
+  "src/components/studio/StudyTabs.tsx",
+  "src/components/studio/StudyWorkSurface.tsx",
+];
+
+/**
+ * The TEXT of each JSX opening tag, so the rule is about the tag rather than
+ * about where in the file the prop happens to sit. Braces and strings are
+ * tracked, because both `className={`…${x}`}` and `aria-label="a > b"` contain
+ * characters that would otherwise end the tag early.
+ *
+ * ⓘ IT FAILS LOUDLY RATHER THAN RUNNING ON. A scanner that loses its place — an
+ * apostrophe it reads as an unterminated string, a brace it never closes — would
+ * otherwise return the whole REST OF THE FILE as one "tag", and that slice
+ * contains some later link's `prefetch={false}`, so the check would pass on a
+ * file it had stopped reading. Two guards make that impossible: a tag that never
+ * finds its `>` throws, and a tag that swallowed another opener throws.
+ */
+function openingTags(code, name) {
+  const tags = [];
+  const opener = new RegExp(`<${name}(?=[\\s>])`, "g");
+  let match;
+  while ((match = opener.exec(code)) !== null) {
+    let depth = 0;
+    let quote = null;
+    let closed = false;
+    let i = match.index + name.length + 1;
+    for (; i < code.length; i += 1) {
+      const character = code[i];
+      if (quote !== null) {
+        if (character === "\\") i += 1;
+        else if (character === quote) quote = null;
+        continue;
+      }
+      if (character === '"' || character === "'" || character === "`") quote = character;
+      else if (character === "{") depth += 1;
+      else if (character === "}") depth -= 1;
+      else if (character === ">" && depth === 0) { closed = true; break; }
+    }
+    if (!closed) throw new Error(`unterminated <${name} opening tag at offset ${match.index} — the scanner lost its place`);
+    const tag = code.slice(match.index, i + 1);
+    if (/<(?:Link|ActionLink)(?=[\s>])/.test(tag.slice(1))) {
+      throw new Error(`the <${name} opening tag at offset ${match.index} swallowed another link — the scanner lost its place`);
+    }
+    tags.push(tag);
+  }
+  return tags;
+}
+
+check("the tag scanner reads a real tag, ignores a commented-out one, and REFUSES to guess", () => {
+  const real = `<Link\n  prefetch={false}\n  href={a > b ? x : y}\n  aria-label="ir a >> Estudios"\n  className={\`p-\${n > 1 ? "2" : "1"}\`}\n>text</Link>`;
+  const [tag] = openingTags(real, "Link");
+  assert.match(tag, /\bprefetch=\{false\}/);
+  assert.ok(!tag.includes("text"), "the tag must end at its own '>' and not swallow the children");
+  // A commented-out link is not a link.
+  assert.equal(openingTags(stripComments(`{/* <Link href="/studio">x</Link> */}`), "Link").length, 0);
+  assert.equal(openingTags(stripComments(`// <Link href="/studio" />`), "Link").length, 0);
+  // And a scanner that loses its place must say so rather than return the rest
+  // of the file — which would contain some later link's prefetch={false}.
+  assert.throws(() => openingTags(`<Link href={"unclosed}\n<Link prefetch={false} href="/x">`, "Link"), /lost its place/);
+  assert.throws(() => openingTags(`<Link href={a\n<Link prefetch={false} href="/x">y</Link>`, "Link"), /lost its place/);
+});
+
+check("the declared list is COMPLETE WITHIN the directories it walks", () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const found = [];
+  const walk = (directory) => {
+    for (const entry of readdirSync(directory)) {
+      const full = join(directory, entry);
+      if (statSync(full).isDirectory()) { walk(full); continue; }
+      if (!/\.tsx$/.test(entry)) continue;
+      const code = readFileSync(full, "utf8");
+      const where = relative(root, full).split("\\").join("/");
+      // THE SCANNER KNOWS TWO NAMES. A file that imported `next/link` under any
+      // other local name would render links this policy cannot see, so the name
+      // is pinned at the import rather than trusted at the tag.
+      const link = /import\s+([A-Za-z_$][\w$]*)[^;]*?from\s*["']next\/link["']/.exec(code);
+      if (link) assert.equal(link[1], "Link", `${where}: next/link is imported as «${link[1]}», which the policy scanner cannot see`);
+      const actions = /import\s*\{([^}]*)\}\s*from\s*["']@\/components\/Actions["']/.exec(code);
+      if (actions) assert.doesNotMatch(actions[1], /\bActionLink\s+as\s+/, `${where}: ActionLink is renamed, which the policy scanner cannot see`);
+      if (/<(?:Link|ActionLink)[\s>]/.test(code)) found.push(where);
+    }
+  };
+  for (const area of WALKED_AREAS) {
+    walk(join(root, area));
+  }
+  assert.deepEqual(found.sort(), [...NAVIGATION_SURFACES].sort(), "inside the walked directories a navigation surface appeared, moved or lost its links without the policy being updated");
+});
+
+check("every link on those surfaces declares prefetch={false}", () => {
+  const offenders = [];
+  let total = 0;
+  for (const file of NAVIGATION_SURFACES) {
+    // Comments removed, for the same reason every other detector in this file
+    // removes them: a link inside a commented-out block is not a link.
+    const code = stripComments(readSource(file));
+    const tags = [...openingTags(code, "Link"), ...openingTags(code, "ActionLink")];
+    assert.ok(tags.length > 0, `${file}: declared as a navigation surface but renders no link`);
+    total += tags.length;
+    for (const tag of tags) {
+      if (!/\bprefetch=\{false\}/.test(tag)) offenders.push(`${file}: ${tag.replace(/\s+/g, " ").slice(0, 70)}…`);
+    }
+  }
+  assert.deepEqual(offenders, [], "these links still prefetch an authenticated screen nobody asked for");
+  assert.equal(total, 48, "the number of internal navigation links changed — re-measure before adjusting this");
+});
+
+check("the shared ActionLink still FORWARDS the prop, so a call site's prefetch={false} is not silently dropped", () => {
+  const actions = stripComments(readSource("src/components/Actions.tsx"));
+  assert.match(actions, /<Link href=\{href\} className=\{className\} \{\.\.\.rest\}>/);
+  assert.match(actions, /\}: \{[\s\S]*?\} & Omit<ComponentProps<typeof Link>, "href" \| "children">/, "the wrapper must accept every Link prop it forwards");
+});
+
+await checkAsync("EXECUTED: the study navigation builds nine real next/link elements, every one with prefetching off", async () => {
+  const Link = (await import("next/link")).default;
+  const { StudyTabs, studySteps } = await import("../src/components/studio/StudyTabs.tsx");
+  const workspace = {
+    study: { id: "00000000-0000-0000-0000-0000000000ff", stages: [], status: "draft" },
+    counts: { quantResponses: 0, confirmedObservations: 0, pendingObservations: 0, respondents: 0, unfinishedImports: 0 },
+    readiness: { blocking: [] },
+  };
+  const links = [];
+  const walk = (node) => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (node === null || typeof node !== "object") return;
+    if (node.type === Link) links.push(node.props);
+    if (node.props && "children" in node.props) walk(node.props.children);
+  };
+  walk(StudyTabs({ workspace, current: "resumen" }));
+  assert.equal(links.length, studySteps(workspace).length, "every step must be a link");
+  assert.equal(links.length, 9, "the nine steps of the consultant's process");
+  for (const props of links) {
+    assert.equal(props.prefetch, false, `${props.href} would still be prefetched`);
+    assert.ok(typeof props.href === "string" && props.href.startsWith("/studio/e/"), "the destination must be unchanged");
+  }
+  assert.equal(links.filter((props) => props["aria-current"] === "page").length, 1, "the active state must be unchanged");
 });
 
 console.log("\n" + "=".repeat(78));

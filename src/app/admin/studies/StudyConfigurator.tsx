@@ -92,10 +92,10 @@ export default function StudyConfigurator({ study, sections, initialStages, metr
             Publicar, despublicar o archivar se decide después de mirar la vista del cliente.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Link href={previewHref} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong hover:bg-surface-sunken">
+            <Link prefetch={false} href={previewHref} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong hover:bg-surface-sunken">
               Ver como el cliente
             </Link>
-            <Link href={publishHref} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong hover:bg-surface-sunken">
+            <Link prefetch={false} href={publishHref} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-semibold text-strong hover:bg-surface-sunken">
               Decidir la publicación
             </Link>
           </div>

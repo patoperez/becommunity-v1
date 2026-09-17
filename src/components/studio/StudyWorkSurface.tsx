@@ -77,6 +77,7 @@ export function StudyWorkSurface({
           </span>
           <p className="min-w-0 text-sm text-muted">
             <Link
+              prefetch={false}
               href={studioClient(study.tenantId)}
               className="font-semibold text-evidence underline-offset-4 hover:underline"
             >

@@ -45,6 +45,7 @@ export function PreviewNotice({ back = STUDIES_LIST }: { back?: StudioParent }) 
         */}
         <div className="flex min-w-0 items-center gap-1">
           <Link
+            prefetch={false}
             href={back.href}
             className="inline-flex min-h-11 min-w-0 items-center rounded-lg px-2.5 text-sm font-semibold text-caution underline underline-offset-4"
           >

@@ -88,6 +88,7 @@ export async function StudioHomeView() {
               {board.shown.map((item) => (
                 <li key={item.key}>
                   <Link
+                    prefetch={false}
                     href={item.href}
                     className="flex h-full min-w-0 items-start gap-3.5 rounded-xl border p-4 transition-colors duration-[var(--motion-state)] hover:shadow-raised"
                     style={{ borderColor: item.accent.line, backgroundColor: item.accent.surface }}
@@ -120,6 +121,7 @@ export async function StudioHomeView() {
               <p className="mt-3 text-sm text-muted">
                 Hay {board.hidden} pendiente{board.hidden === 1 ? "" : "s"} más.{" "}
                 <Link
+                  prefetch={false}
                   href={STUDIO_STUDIES}
                   className="font-semibold text-evidence underline-offset-4 hover:underline"
                 >
@@ -140,6 +142,7 @@ export async function StudioHomeView() {
           {STUDIO_STOPS.filter((stop) => stop.href !== "/studio").map((stop) => (
             <li key={stop.href}>
               <Link
+                prefetch={false}
                 href={stop.href}
                 className="flex h-full min-w-0 flex-col rounded-xl border border-line bg-surface p-5 transition-colors duration-[var(--motion-state)] hover:border-line-strong hover:bg-surface-sunken/50"
               >
@@ -186,6 +189,7 @@ export async function StudioHomeView() {
                     {studyStateLabel(study.status)}
                   </span>
                   <Link
+                    prefetch={false}
                     href={studioStudy(study.id)}
                     className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-evidence underline-offset-4 hover:underline"
                   >
@@ -199,6 +203,7 @@ export async function StudioHomeView() {
         <p className="mt-4 text-sm text-muted">
           ¿Necesitas dar o quitar acceso a alguien?{" "}
           <Link
+            prefetch={false}
             href={STUDIO_CLIENTS}
             className="font-semibold text-evidence underline-offset-4 hover:underline"
           >

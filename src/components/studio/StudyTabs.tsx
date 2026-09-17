@@ -157,6 +157,7 @@ export function StudyTabs({
           return (
             <li key={step.id}>
               <Link
+                prefetch={false}
                 href={step.href}
                 aria-current={active ? "page" : undefined}
                 className={`flex min-h-11 flex-col justify-center rounded-lg border px-3.5 py-2 transition-colors duration-[var(--motion-state)] ${
