@@ -442,7 +442,24 @@ The release itself no longer needs a `main` push at all: deploy an existing
 version explicitly with `wrangler versions deploy <id>@100%`. The candidate is
 now **`b80e30da-8690-4673-96aa-47c84f6c1ff7`** (tag `rc-6b4b2o-e27f877`), which
 is `1e17160e` plus the Worker exception boundary, the bounded session check and
-Workers Logs.
+~~Workers Logs~~ a committed `[observability]` block. *(Corrected in Unit
+6B.4B2P: observability is a script-level, non-versioned setting that
+`versions upload` ignores; it was never applied to the Worker, and a version
+cannot carry it.)*
+
+⚠️ **IT IS NOT RELEASABLE — recorded in Unit 6B.4B2P.** On that very version,
+6B.4B2O's soak saw the authenticated canonical review pages answer with
+Cloudflare's Error 1101 fifteen times in each of two windows out of three — in
+minutes where Cloudflare recorded fourteen `exceededResources` terminations per
+window and no thrown exception — and QA passed 195/199, 195/199 and 154/199. The
+exception boundary answered none of them, because a runtime termination never
+reaches a `catch`. Unit 6B.4B2P found every `exceededResources` termination in
+the 90 days Cloudflare retains on a 10 ms CPU floor — the Workers Free limit —
+while one review page costs 91–1 012 ms of CPU on the runtime
+(`docs/CURRENT_STATE.md` § «Unit 6B.4B2P»). **No candidate
+built from this branch is releasable on a 10 ms CPU limit.** The step before
+step 5 below is therefore an operator decision about the Workers plan, followed by
+a fresh bounded observation of the candidate under the new limit.
 
 | # | Step | Why here |
 |---|---|---|

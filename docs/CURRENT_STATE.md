@@ -7913,6 +7913,18 @@ it — which is defensible, since production has been serving a Worker with the
 same symptom since before this branch existed, but it is a decision and not an
 absence of one.
 
+⚠️ **SUPERSEDED — recorded in Unit 6B.4B2P.** «Defensible» no longer holds. Unit
+6B.4B2O reproduced the failure on demand and confined it to the authenticated
+canonical review pages; production stayed at 48 / 48 and does not serve those
+pages at all. Unit 6B.4B2P then measured what the runtime is terminating (§ «Unit
+6B.4B2P» below), and found the sentence above half right: production `e691ecd8`
+DID record `exceededResources` — seven terminations, all in the minute of
+2026-08-28 23:44 UTC, the day it was deployed — and none in the 90 days of
+retained analytics since. The same limit applies to it; its light traffic rarely
+reaches it. That is not a reason to ship pages that reach it on demand. **The
+release is blocked**; the canonical build is not deployed while the review pages
+are killed.
+
 ---
 
 ## Unit 6B.4B2O — Error 1101 has a definition, the Worker had no boundary, and `main` is still armed
@@ -7920,7 +7932,23 @@ absence of one.
 ### Phase A — the Git deployment configuration, read from Cloudflare rather than from this repository
 
 Read through the Cloudflare API with the OAuth credential wrangler already holds.
-No new credential was requested; no value is reproduced anywhere.
+No new credential was requested, and the OAuth token's value appears nowhere.
+
+⚠️ **CORRECTED IN UNIT 6B.4B2P.** This said «no value is reproduced anywhere», and
+the unit's final report added that no evidence file held a credential-shaped
+value. **Both were literally false.** A count-only scan in Unit 6B.4B2P found the
+public Supabase publishable key (`sb_publishable_…`) by VALUE in three files —
+`api/worker-settings.json`, `api/version-1e17160e.json` and
+`api/version-e691ecd8.json`, the Worker's settings and version records exactly as
+the API returned them — and in their copies under `C:\dev\becommunity-review-6b4b2o\`.
+The scan that backed «0 files» looked for JWTs, `sb_secret_` and `oauth_token`,
+and not for publishable keys. No `sb_secret_`, JWT, OAuth token or
+password-bearing URI was found in any of them. That key
+is public by design and RLS is what protects the data behind it; it is not the
+service-role secret. It is still a credential-shaped value in an evidence file.
+The evidence stays outside every Git repository, and an evidence directory is
+not to be described as credential-free unless a scan that looks for publishable
+keys too says so.
 
 **The mechanism, and why it did what it did.** Workers Builds gives a Worker up
 to **two triggers**: one for the production branch and one for every other
@@ -7982,6 +8010,15 @@ days on a paid plan and 3 on free, and **logs are not retroactive**. So for
 a precisely located visibility limitation — a setting that was off — and not a
 shrug, and it is the first thing this unit fixed. The Workers Observability query
 API is behind the same 403 as the Builds API.
+ⓘ *Corrected in Unit 6B.4B2P:* «nothing» meant no PER-INVOCATION log. The section
+below retrieves Cloudflare's AGGREGATE analytics for those very hours, and Unit
+6B.4B2P read them down to the minute and the script version. ⚠️ And «the first
+thing this unit fixed» was not fixed: observability is a SCRIPT-LEVEL,
+NON-VERSIONED setting that `wrangler versions upload` ignores (wrangler 4.125.0
+sets it to `undefined` with the comment «logpush and observability are
+non-versioned settings»). This unit only uploaded, and on 2026-09-16 22:15 UTC
+the Worker still reported `observability: null`. The committed block takes effect
+at the next deploy, not before, and no Workers Log was ever recorded.
 
 ### ⭐ AND THEN CLOUDFLARE'S OWN ANALYTICS ANSWERED IT: `exceededResources`
 
@@ -7994,6 +8031,12 @@ for this Worker, over the twenty-four hours to 2026-09-16 20:05 UTC:
 | **`exceededResources`** | **87** |
 | `clientDisconnected` | 17 |
 
+ⓘ *Corrected in Unit 6B.4B2P:* this query asked for 24 h to 20:05 but ran at about
+19:52:30 UTC, so its counts stop there — before the Phase I observation windows —
+and «19:00 (20)» below is that hour only through 19:48. Re-queried by 6B.4B2P for
+2026-09-15 20:05 → 2026-09-16 20:05 UTC: `exceededResources` **107**,
+`clientDisconnected` 17, `success` **10 212**.
+
 `scriptThrewException` does not appear at all. **The failing invocations are not
 throwing — they are being terminated for exceeding a runtime resource limit**,
 and Cloudflare renders that termination to the reader as Error 1101.
@@ -8002,14 +8045,47 @@ And the hours line up with every burst this project has recorded:
 `2026-09-15T22:00` (31), `23:00` (24), `2026-09-16T03:00` (12), `19:00` (20) —
 6B.4B2M's two bursts, 6B.4B2N's, and this unit's.
 
-**CPU is excluded, by the numbers.** For the failing population, `cpuTimeP50` is
+~~**CPU is excluded, by the numbers.**~~ For the failing population, `cpuTimeP50` is
 10 000 µs and `cpuTimeP99` 218 457 µs; for the SUCCESSFUL population, `cpuTimeP99`
 is 329 780 µs and `cpuTimeP999` 631 242 µs. Successful invocations routinely use
 far more CPU than the failing ones, which die early — at ~10 ms of CPU, ~73 ms of
-wall time, having made about two subrequests each. Cloudflare exposes no memory
+wall time, having made about two subrequests each. ~~Cloudflare exposes no memory
 dimension, so **memory pressure on the isolate is the supported inference** and
 is labelled as one; what is measured is that the limit exceeded is not CPU, not
-subrequests and not the daily request cap.
+subrequests and not the daily request cap.~~
+
+⚠️ **CORRECTED IN UNIT 6B.4B2P — THREE STATEMENTS IN THE PARAGRAPH ABOVE WERE
+WRONG, AND THEY ARE STRUCK THROUGH RATHER THAN DELETED.**
+
+1. **«CPU is excluded» did not follow from the numbers.** It compared two
+   populations. A terminated invocation's CPU stops where it was killed, so the
+   failing figures are cut short by the very event being explained, and a
+   successful tail of 630 ms says nothing about the limit a killed invocation
+   reached. The number that mattered was sitting in the paragraph unread: the
+   failing median is **exactly 10 000 µs — ten milliseconds.**
+2. **«Cloudflare exposes no memory dimension» was false.** The same dataset
+   exposes `memoryUsageBytesP25` … `memoryUsageBytesP999` and `max.memoryUsageBytes`.
+   An independent audit queried them and reported the failing population's
+   `memoryUsageBytesP99` at ~65.6 MB against ~67.8 MB for the successful one
+   (decimal megabytes; its exact window is not recorded here), under a 128 MB
+   limit. 6B.4B2P's own query of the 24 h to 20:05, in bytes: failing p99
+   **65 620 150** (62.6 MiB), successful p99 **72 876 160** (69.5 MiB). The
+   successful figures differ from the audit's, which is what a different window
+   or sampling would produce; both place the failures below the successes at p99.
+3. **«Memory pressure is the supported inference» therefore had no support.** No
+   terminated invocation measured more than **65 628 200 bytes (62.6 MiB)** —
+   about half the limit. ⓘ The comparison of populations is NOT the argument,
+   for the same reason it was not one for CPU: at the median the killed
+   invocations used slightly MORE memory than the successful ones (56.9 against
+   53.4 MiB over that 24 h, and higher in three of the four builds). The ceiling
+   is the argument.
+
+«Not subrequests» and «not the daily request cap» stand. What was measured
+instead, and what it supports, is in § «Unit 6B.4B2P» below: every one of the
+**196** `exceededResources` invocations in the dataset's whole 90-day retention —
+all between 2026-08-23 and 2026-09-16, on ten builds including production
+`e691ecd8` — used **at least 10.0 ms of CPU** (in 36 of 39 minute rows the
+smallest was exactly 10.0 ms), and none used more than 62.6 MiB.
 
 ### Phase C — the exception-boundary audit
 
@@ -8022,7 +8098,7 @@ subrequests and not the daily request cap.
 | Supabase session creation / auth lookup | **CONTROLLED_BUT_MISCLASSIFIED** — a transport failure returns `{ data: { user: null }, error }`, indistinguishable from «nobody is signed in»; and the call was **unbounded** |
 | `/login` sign-in action | **CONTROLLED_BUT_MISCLASSIFIED** — a transport failure was answered `invalid_credentials`, telling people their own password was wrong |
 | protected-route redirect | ALREADY_CONTROLLED — fails closed |
-| internal layout / `requireInternal` | ALREADY_CONTROLLED — a throw renders `/studio/error.tsx` |
+| internal layout / `requireInternal` | ~~ALREADY_CONTROLLED — a throw renders `/studio/error.tsx`~~ ⚠️ *Corrected in Unit 6B.4B2P:* **CONTROLLED_BUT_MISCLASSIFIED.** A session check that failed or never answered redirected to `/login` like a signed-out visitor; a role read that failed redirected to `/dashboard` like a client (the rig's `reset`/`malformed`/`http500 /rest/v1` → 307); neither read had a bound (`hang /rest/v1` → no response). Every branch refused, and each outage was reported as a verdict about the person. Since 6B.4B2P `decideInternalAccess` (`src/lib/studio/internal-access.ts`) redirects only for a verdict and an outage throws `InternalAccessUnavailableError` with a closed code |
 | canonical revision loader | ALREADY_CONTROLLED — typed read failures since 6B.4B2K |
 | category review | ALREADY_CONTROLLED — `categorias-no-disponible` is its own branch |
 | journey review | ALREADY_CONTROLLED — `PainReviewOutcome.ok === false` |
@@ -8040,14 +8116,26 @@ anonymous rig prove nothing.
 
 **Thirty-two cases: a refused connection, a reset mid-body, malformed JSON, a
 truncated body, HTTP 500, HTTP 503 and a hang, applied to the auth lookup, to the
-data reads and to the whole upstream — and the Worker NEVER THREW.** Every one
-produced a controlled answer.
+data reads and to the whole upstream — and no case was seen to make the Worker
+throw.** ~~Every one produced a controlled answer.~~
+
+⚠️ **CORRECTED IN UNIT 6B.4B2P: «every one produced a controlled answer» WAS
+FALSE.** The rig's own evidence (`faults-before.tsv`, `faults-after.tsv`) records
+three probes with **no HTTP response at all** — `hang /auth/v1/user` on `/login`
+and on `/studio` before the fix, and **`hang /rest/v1` on the review page both
+before AND after it** — written as `000000`. The rig labelled them «controlled»
+because of a defect in its own verdict: `curl … || echo "000"` produced `000000`,
+the check compared against `000`, and the fallback verdict was «controlled». No
+response is not a controlled answer. The bound this unit added covered the
+middleware's session check only; the data read stayed unbounded until 6B.4B2P.
 
 ⓘ **SO THE LEADING HYPOTHESIS IS FALSIFIED.** «An unguarded `supabase.auth.getUser()`
 in the middleware rejects during a Supabase blip» is a good story, it fits the
 bursts and the fact that `/login` was hit, and **it is not what happens**:
-supabase-js turns every one of those into `{ user: null, error }` and the
-middleware fails closed with a redirect.
+supabase-js turns a refused connection, a reset, malformed JSON, a truncated body
+and HTTP 500 into `{ user: null, error }` and the middleware fails closed with a
+redirect. *(Corrected in 6B.4B2P: this said «every one of those»; a hang is not
+one of them — it returns nothing until something bounds it.)*
 
 **Two real defects the rig did find:**
 
@@ -8061,9 +8149,18 @@ middleware fails closed with a redirect.
    service did not answer» arrive identically. The authorization decision is
    unchanged and still fails closed on both — refusing a reader we cannot vouch
    for is right either way — but the second is now named in the logs.
+   ⓘ *Corrected in Unit 6B.4B2P:* named, but never as a timeout. The middleware
+   chose `session_timeout` when `error.name === "AbortError"`, and auth-js renames
+   every fetch rejection `AuthRetryableFetchError`, so that branch was
+   unreachable. And the bound's `AbortSignal.timeout()` rejects with a
+   `TimeoutError`, which postgrest-js retries three times on a GET — harmless
+   only because that client made auth calls alone. Both are replaced by one
+   shared policy (§ «Unit 6B.4B2P»).
 
 **And the boundary was watched doing its job.** The GENERATED entry was perturbed
-to throw on a header — the exact Error 1101 condition — and `/login`,
+to throw on a header — the condition Cloudflare's 1101 definition names (ⓘ *6B.4B2P:*
+not what the recorded bursts turned out to be; those were `exceededResources`
+terminations) — and `/login`,
 `/api/health`, `/studio` and the review screen each answered **503** with
 `x-becommunity-unavailable`, `retry-after: 15`, HTML for a document and JSON for
 an API path, and **no trace of the exception**. A thrown string classified as
@@ -8071,6 +8168,17 @@ an API path, and **no trace of the exception**. A thrown string classified as
 log lines carried a code, a route CLASS, a method and a server-generated id, and
 **zero** carried a path, a query, a cookie or a stack. The build output was
 restored byte-identically, digest printed on both sides.
+
+ⓘ *Scope, corrected in Unit 6B.4B2P:* those are the Worker's OWN structured lines,
+counted under local workerd. They are not «what Workers Logs holds»: with
+`[observability] enabled = true` applied, Cloudflare's automatic INVOCATION log
+would record every request's method and full URL — path, query, study id — beside
+them, and libraries write their own console lines (`@supabase/auth-js` logs every
+failed auth fetch's raw rejection). This unit committed that block at a rate of 1
+without saying so; it was never applied to the Worker, because observability is
+non-versioned and only a deploy applies it. 6B.4B2P set
+`[observability.logs] invocation_logs = false` for the deploy that eventually
+applies it, and closed the method field to a list.
 
 **The sign-in path was proved end to end, in a real browser, against the real
 built Worker: 10 checks, 10 passed.** Control → `/dashboard`; refused connection
@@ -8092,7 +8200,12 @@ unchanged. The diagnostic used to identify the error shape
   image — every one of those is another request that can fail in the same
   moment), and the one structured log line.
 * **`[observability] enabled = true, head_sampling_rate = 1`** in `wrangler.toml`.
-  A sampled log of a rare event is a log that misses it. ⓘ The block must stay
+  A sampled log of a rare event is a log that misses it. ⚠️ *Corrected in Unit
+  6B.4B2P:* at a rate of 1 that block would also switch on Cloudflare's
+  invocation logs, which carry the method and full URL of EVERY request; 6B.4B2P
+  adds `invocation_logs = false`. And none of it was in effect: observability is
+  a non-versioned setting that `versions upload` ignores, the Worker still
+  reported `observability: null` afterwards, and only a deploy applies it. ⓘ The block must stay
   BELOW the top-level keys: placed above them, the TOML table silently swallowed
   `compatibility_date` and `keep_vars`, and the build failed.
 * **The middleware** is wrapped, bounded and classifies its two failures apart.
@@ -8155,9 +8268,15 @@ at concurrency one, ~2.5 s apart, with production as a read-only control:
   `/revision/categorias`, `/revision/dolor`. `/api/health`, `/login` and the
   anonymous protected redirect answered **72 / 72** across the three windows;
 * once it starts it **does not recover inside the window** — every subsequent
-  request fails, which is what a poisoned isolate looks like;
-* a fresh window minutes later is **perfectly clean**, which is what isolate
-  replacement looks like;
+  request fails ~~, which is what a poisoned isolate looks like~~;
+* a fresh window minutes later is **perfectly clean** ~~, which is what isolate
+  replacement looks like~~;
+* ⓘ *Corrected in Unit 6B.4B2P:* the struck clauses named a mechanism nobody
+  measured and read as a memory diagnosis. What the pattern matches, measured in
+  6B.4B2P, is Cloudflare's documented CPU behaviour: «each isolate has some
+  built-in flexibility» for a Worker that «infrequently runs over the configured
+  limit», and «if your Worker starts hitting the limit consistently, its execution
+  will be terminated»;
 * **production was unaffected throughout**, 48 / 48.
 
 ⚠️ **AND THE NEW BOUNDARY DID NOT CATCH ONE OF THEM — WHICH IS THE POINT.**
@@ -8181,12 +8300,267 @@ be loaded about ten times in a row on Cloudflare without the runtime killing the
 invocation.** That is a release blocker, it is measured rather than suspected,
 and it is not fixed by anything in this unit.
 
-The direction of the fix is what the evidence supports: the per-request footprint
+~~The direction of the fix is what the evidence supports: the per-request footprint
 of the canonical review pages. They render a whole resolved presentation document
 server-side, and 6B.4B2K already found their request budget at the edge of a
 different ceiling. Reducing what one invocation holds is a piece of engineering,
-not a switch, and it is the next unit's.
+not a switch, and it is the next unit's.~~
+
+⚠️ *Corrected in Unit 6B.4B2P:* the struck paragraph pointed the fix at «what one
+invocation holds» — the memory reading, which rested on the corrections above. The
+pages ARE expensive, and 6B.4B2P measured how: 91 ms to 1 012 ms of CPU for one
+document on Cloudflare's runtime. The exhausted resource and the next action are
+in § «Unit 6B.4B2P».
 
 The operational mitigation until then: **do not deploy the canonical build to
 production**; production runs `e691ecd8`, which does not serve these pages at
 all. Rollback remains `wrangler versions deploy e691ecd8-de9a-4a02-a8e3-13aad7e9e805@100%`.
+
+---
+
+## Unit 6B.4B2P — the terminations sit on a 10 ms CPU floor, every page-serving Supabase read now ends, and 6B.4B2O's record is corrected
+
+Baseline verified before anything, 2026-09-16 22:13 UTC: branch and remote at
+`6dcb065`, `origin/main` at `1c05276`, production `e691ecd8` at 100 % (health 200,
+asset fingerprint `7f6c9470…` identical to its own preview host), candidate
+`b80e30da` present, hosted project 15 791 rows / ledger `0000`–`0034` / Cuicuilco
+`draft` revision 3 / publication tables empty — unmoved since 6B.4B2O closed.
+**No deploy, no `main` push, no publication, no `study.status` change, no hosted
+write, no migration, no credential change.** Evidence: `~/becommunity-6b4b2p/`
+(WSL), copied to `C:\dev\becommunity-review-6b4b2p\` — outside every repository.
+ⓘ Three files in it (`api/worker-settings.json`, `api/version-b80e30da.json`,
+`api/version-e691ecd8.json`) carry the PUBLIC publishable key by value, exactly as
+the API returns it; a scan for `sb_secret_`, JWTs, OAuth tokens and
+password-bearing URIs finds nothing. It is not described as credential-free.
+
+### The Git deployment setting — still not verifiable from here
+
+`GET /accounts/{account}/builds/workers/becommunity-v1` and `…/triggers` answer
+**403 · 10000** for the wrangler OAuth token, as in 6B.4B2O. Whether the operator
+has changed *Deploy command* to `npx wrangler versions upload` is **externally
+unverifiable** with this credential. Every rule stays: **do not push `main`.**
+The branch push of `fd8effc` produced Workers Builds version `c0a995e7` with
+`workers/alias` and no deployment, exactly as a non-production trigger should.
+
+### The resource limit, read from Cloudflare — and what is still not read
+
+| evidence | what it says |
+|---|---|
+| `workersInvocationsAdaptive`, whole 90-day retention (queried in 30-day slices under `maxDuration`) | **196** `exceededResources` invocations, 2026-08-23 → 2026-09-16, on **ten** builds — `c18405d9` 23, `2995bd70` 32, `1e17160e` 12, `b80e30da` 49, `868574e6` 16, `c60df1ec` 23, `677979fc` 28, `5487a684` 5, `9b218701` 1, and **production `e691ecd8` 7** (all in 2026-08-28 23:44, its deploy day) |
+| smallest CPU of any terminated invocation | **10 000 µs** — no terminated invocation used less than 10.0 ms; in 36 of 39 minute rows the minimum is exactly 10.0 ms |
+| largest memory of any terminated invocation | **65 628 200 bytes (62.6 MiB)** of a 128 MB limit |
+| 24 h to 2026-09-16 20:05, by status | failing p50 / p99 **56.9 / 62.6 MiB**; successful p50 / p99 **53.4 / 69.5 MiB**, max 73.5 MiB — memory is nowhere near its limit; the medians do not order the populations and are not the argument |
+| Worker script settings | `usage_model: "standard"`; **no `limits` field** — no `limits.cpu_ms` override; account `default_usage_model: "standard"` |
+| the uploaded versions' `script_runtime` | no `limits` |
+| subrequest ceiling | 6B.4B2K measured the runtime refusing request **#51** — the Workers Free figure (Paid allows 10 000) |
+| Cloudflare's limits page | Free: **10 ms** CPU per HTTP request; Paid: 30 s default, up to 5 min via `limits.cpu_ms`; per-isolate «built-in flexibility» for a Worker that only infrequently runs over, termination for one that runs over consistently |
+| `GET /accounts/{account}/subscriptions`, `GET /user/subscriptions` | **403 · 10000** |
+
+**The reading this supports:** the terminations are Workers **CPU**-limit
+terminations under a **10 ms** limit — the Free-plan limit — and the «nine good
+loads, then every one killed» pattern is the documented per-isolate flexibility
+running out. Memory is excluded by its ceiling, not by comparing populations.
+
+**What is NOT established, stated exactly:** the plan is not READ. The
+subscriptions endpoints refuse this token, and the effective CPU limit is not
+exposed on any endpoint the token can read. «Workers Free, 10 ms» is inferred
+from two independent limit signatures (the 10.0 ms CPU floor on every termination
+in 90 days, and the fifty-first subrequest refused) plus the absence of any
+override. **What settles it:** the operator reading *Workers & Pages → Plans*
+(or *Manage Account → Billing → Subscriptions*) in the dashboard, or a token with
+*Billing: Read*. Cloudflare's dataset carries no Ray ID, so no individual 1101 is
+tied to an individual termination: every statement here is about populations in
+the same minutes and versions.
+
+### The heavy routes, measured before anything changed
+
+**On Cloudflare's runtime** (`b80e30da`, one request kind per minute, four
+requests fifteen seconds apart, CPU read back per minute from the analytics):
+
+| request | CPU ms min / p50 / max | subrequests each |
+|---|---|---|
+| `GET /api/health` (anonymous) | 10.4 / 13.5 / 289 | 1 |
+| `GET /login` (anonymous) | 25.3 / 32.6 / 478 | 0 |
+| `GET /revision` (document) | **222 / 375 / 1 012** | 27 |
+| `GET /revision/categorias` (document) | **122 / 344 / 389** | 19 |
+| `GET /revision/dolor` (document) | **91 / 109 / 360** | 27 |
+
+ⓘ **One browser visit is 28 Worker invocations, not one:** the document, the icon
+and **26 RSC prefetches** — the Studio navigation's 13 links, fetched twice each
+(~500 B, then ~1 KB). Each prefetch runs the middleware and its auth call; they
+cost 5–15 ms of CPU apiece, so a single visit spends 1.1–4.1 s of CPU. Not changed
+in this unit; recorded because it multiplies both the Worker's CPU and the auth
+service's load per page view.
+
+**Where the time goes** (Node 24, the same loaders against the hosted project
+read-only, zod forced onto the interpreted path the Worker takes, CPU profiles;
+module loading, TLS and decompression excluded as the runtime's rather than the
+isolate's JavaScript; per call):
+
+| loader | application JS | largest inclusive blocks |
+|---|---|---|
+| `loadStudioStudy` (every Studio page) | ~113 ms | `journeyMetricOptions` **28 ms** — 123 metrics computed over 3 282 rows, whose values these pages never render |
+| `loadPublicationReview` (`/revision`) | ~191 ms | `buildPresentationRead` 33 ms (results 20, registry 12); canonical row set → source 14 ms; three resolutions 11 ms; two deterministic serialisations 8 ms; draft decode 7 ms |
+| `loadCategoryReview` (`/revision/categorias`) | ~160 ms | `buildPresentationRead` 34 ms, of which the registry (12 ms) is never read by this page |
+| `loadJourneyPainEditor` (`/revision/dolor`) | ~206 ms | `buildPresentationRead` 37 ms; a third, unread resolution and two serialisations |
+
+Garbage collection is 20–30 % of every loader. Zod is 4–7 % (7–13 ms) and is
+**not** the bottleneck; 4.4.3 is left as it is. **No single removable block is
+more than ~15 % of a page, and the unavoidable remainder is still an order of
+magnitude above 10 ms** — which is why this unit changed no route code: trimming
+cannot move a 100–1 000 ms page under a 10 ms limit, and each candidate touches
+calculation-adjacent code. The ranked candidates, for when the limit is not 10 ms:
+the Studio prefetch storm; a key-only metric inventory for pages that render no
+metric; skipping the registry on the category review and the review-only
+resolution on the pain editor; hoisting the journey tally's per-call sets.
+
+### Every page-serving Supabase read now ends — one policy
+
+`src/lib/upstream/bounded-fetch.ts` and `outcome.ts`. The rules the installed
+libraries force, each proved against the real clients:
+
+* **An abort must be a `DOMException` NAMED `AbortError`.** postgrest-js 2.108.2
+  retries any other rejection on a GET; `AbortSignal.timeout()` rejects with
+  `TimeoutError`, so 6B.4B2O's bound would have turned one hung read into four
+  (the gate's CONTROL shows it). The abort carries a sentinel message and nothing
+  else.
+* **auth-js renames every fetch rejection `AuthRetryableFetchError`** and keeps
+  only the message — so 6B.4B2O's `session_timeout` branch was unreachable. The
+  sentinel is how a timeout is recognised.
+* **A 4xx is a verdict only when the auth service NAMED it.** Measured against the
+  hosted project (`gotrue-shape.txt`): a refused sign-in is `400 {code:
+  "invalid_credentials"}`, a bad token `403 {code: "bad_jwt"}`; the gateway's bad-key
+  refusal is `401 {"message":"Invalid API key"}` with no code — an outage.
+* **A 404, or a 2xx, with an empty body resolves with no error and no data.** It is
+  never «empty». The Studio door reads its role as a LIST for that reason.
+* Per attempt: auth 8 s, PostgREST 10 s, the timer armed through the body; a
+  caller's signal honoured (pre-aborted → no request; in flight → cancellation);
+  a runaway `Retry-After` dropped; the middleware and `requireInternal()` add a 9 s
+  deadline over auth-js's own refresh retries.
+
+Adopted by the reader's cookie client, the middleware, `requireInternal()`, every
+admin client that reads to serve a page (client study page and filter preview,
+legacy client loader, Studio home, `/admin` pages) and the read-only Studio actions
+(the scope helper takes `"read" | "write"`). Admin clients that commit writes stay
+unbounded on purpose. `requireInternal()` decides through a pure
+`decideInternalAccess()`: a verdict redirects exactly as before; an outage records
+`session_timeout`, `session_unverifiable`, `authorization_timeout` or
+`authorization_unverifiable` and throws `InternalAccessUnavailableError`. The
+sign-in action logs `sign_in_timeout` / `sign_in_unverifiable`. No RLS or
+service-role authorization changed.
+
+**The discrimination, on the real built Worker under workerd** (`fd8effc`, clean
+build, stand-in upstream, `faults-after-2p.tsv`):
+
+| fault | 6B.4B2O after its fix | 6B.4B2P |
+|---|---|---|
+| `hang /auth/v1/user` on `/login`, `/studio` | 8.32 s / 8.04 s | **8.15 s / 8.05 s**, `session_timeout` logged — the code 6B.4B2O could never record |
+| `hang /rest/v1` on the review page | **no response (`000000`)** | **10.1 s**, Studio's error state, `authorization_timeout` |
+| `hang /rest/v1/profiles` (role read) | — | 10.1 s, `authorization_timeout` |
+| `http500 /rest/v1/profiles` | (as `http500 /rest/v1`) 307 — an outage answered as a verdict | 0.08 s, Studio's error state, `authorization_unverifiable` |
+| `hang /rest/v1/study` (bounded admin read) | — | 10.1 s, Studio's error state |
+| `reset /rest/v1/study` | — | 7.2 s (postgrest-js's own 1+2+4 s retries of a network failure, each bounded) |
+
+Every probe answered; no hang was retried; 19 structured lines, **0** carrying a
+path, study id, email or token. **Sign-in, in a real browser against the same
+Worker: 13 of 13** — a hung auth service ends **8 190 ms** after pressing
+«Entrar» with «No es tu contraseña»; a genuinely wrong password still answers
+`invalid_credentials`.
+
+### Observability — the decision, and what is actually in effect
+
+`[observability.logs] invocation_logs = false` is added: Cloudflare's invocation
+log records every request's method and FULL URL (study ids, query strings), and
+the resource diagnosis above does not use it — it rests on the analytics dataset,
+and the observability query API is not readable with this token. The structured
+line's method field is closed to a list (`OTHER` otherwise).
+
+⚠️ **None of it is in effect, and none of 6B.4B2O's block ever was.**
+Observability is a script-level, NON-VERSIONED setting: `wrangler versions upload`
+ignores it, the Worker still reports `observability: null`, and only a deploy
+applies it — to every version, production included. Libraries also write console
+lines of their own (auth-js logs every failed auth fetch).
+
+### The gates — Windows and WSL
+
+* `npm run test:runtime-resilience` — **47 checks.** Normalises line endings and
+  proves its own detectors give the same verdict on CRLF and LF copies; executes the
+  boundary (`src/lib/runtime/boundary.ts`) with counted delegates; runs the real
+  `updateSession`; classifies the auth library's real error classes rather than a
+  hand copy of the classifier.
+* `npm run test:upstream-bounds` — **31 checks, new, in `npm test`.** Real
+  supabase-js, auth-js and postgrest-js against a local stand-in, including the
+  real middleware hanging for its eight-second bound. Every check has a 30 s
+  watchdog.
+
+| where | runtime-resilience | upstream-bounds |
+|---|---|---|
+| Windows PowerShell 5.1, before this unit (CRLF working copies) | **34 / 36 — 2 failed** | — |
+| Windows PowerShell 5.1, `fd8effc`, files re-checked-out so `git ls-files --eol` reads `w/crlf` | **47 / 47** | **31 / 31** |
+| WSL, user `patop`, `fd8effc` | **47 / 47** | **31 / 31** |
+
+WSL at `fd8effc` (all 36 changed files byte-identical to their git blobs): typecheck
+0, lint 0 errors / 58 warnings, `npm test` exit 0 over 122 scripts, the 30 trailing
+gates 30 / 30, migration chain PASSED, hosted fingerprint **169 / 169**, row-set-live
+56 / 56, category-review-live 88 / 88, sign-off / journey-pain / publication live
+PASSED, results parity **531 / 531**, presentation parity **59 / 59**,
+client-boundary, publication-boundary and data-scope PASSED; clean build with
+**nothing inlined** (no Supabase variable in the shell, 0 files carrying the hosted
+URL), `test:secrets` PASSED over that exact build. The hosted project did not move.
+
+### The candidate, on the real runtime
+
+**Version `bda4df63-f892-4f83-9eea-8d8d155bb5e9`**, tag `rc-6b4b2p-fd8effc`,
+`https://bda4df63-becommunity-v1.ollinagencyllc.workers.dev`, BUILD_ID
+`a_3LTfU6vsV5dxaWNA4fJ`, 12 741.96 KiB / gzip 2 718.07 KiB, startup 19 ms. Uploaded
+with `versions upload`; the deployment listing was byte-identical across it.
+
+Per-route CPU on it, same method: `/revision` 190 / 290 / 1 401 ms,
+`/revision/categorias` 106 / 196 / 315, `/revision/dolor` 119 / 249 / 393,
+`/login` 22 / 30 / 617, `/api/health` 17 / 17 / 382 — unchanged in kind, as expected
+of a unit that did not touch the routes.
+
+**QA: 199 / 199, 199 / 199, 199 / 199**; 22 bounded waits per run, all reached
+ready (12.4–14.4 s of waiting in total per run); no forty-five-second filter wait;
+Cloudflare recorded no termination in any QA run's span.
+
+⚠️ **The bounded observation reproduced the blocker.**
+
+| window (UTC) | authenticated canonical pages | anonymous | production | Error 1101 | controlled 503 | `exceededResources` (Cloudflare, `bda4df63`) |
+|---|---|---|---|---|---|---|
+| 1 · 01:02:50 → 01:06:50 | 21 / 24 | 24 / 24 | 16 / 16 | **3** | 0 | **3** — CPU min / p50 10.0 / 10.0 ms, max 38.0; memory max 46.9 MiB |
+| 2 · 01:07:20 → 01:11:21 | 24 / 24 | 24 / 24 | 16 / 16 | 0 | 0 | 0 |
+| 3 · 01:11:52 → 01:15:19 | **6 / 24** | 24 / 24 | 16 / 16 | **18** | 0 | **25** — CPU min / p50 10.0 / 10.0 ms, max 74.3; memory max 58.2 MiB |
+
+Successful invocations in the same windows: CPU p99 188–504 ms, memory p99 57–66 MiB.
+Across the whole span Cloudflare recorded 2 370 successes and **28 terminations on
+`bda4df63`**, every terminated minute with a minimum of exactly 10.0 ms, and **no
+failure on production `e691ecd8`** (42 successes). No probe went unanswered.
+
+**The candidate fails the pass condition.** It is not deployable, and nothing in
+this unit changes that: the bound makes hung reads end; it does not make a
+100–1 000 ms page fit a 10 ms limit.
+
+### Production and the hosted project
+
+Production `e691ecd8` at 100 % throughout — deployment listing byte-identical to
+this unit's baseline at the close, `/api/health` 200, asset fingerprint
+`7f6c9470a2e91c09322a080d3ad6d110` identical to its own preview host. The hosted
+project's closing capture is **byte-identical** to the baseline (`ccff0739…` both):
+15 791 rows, ledger `0000`–`0034`, Cuicuilco `draft` revision 3, publication tables
+0/0/0/0/0/0, category ledger 0.
+
+### What this leaves, and the next action
+
+**The release blocker is NOT resolved.** Its cause is now measured: the canonical
+review pages consume 90 ms to 1.4 s of CPU per request on the runtime, and every
+recorded termination sits on a 10 ms CPU floor.
+
+**The next action is an operator's, not code's:** read the Workers plan in the
+Cloudflare dashboard. If it is Workers Free, the decision is whether to move this
+account to Workers Paid (30 s default CPU per request). Then, with no rebuild —
+the limit applies to every version — repeat this unit's three bounded windows
+against `bda4df63` and read `workersInvocationsAdaptive` for them. Only zero
+terminations there reopens the deploy sequence (disarm `main`, remove
+`CANONICAL_EDGE_DIAGNOSTICS`, `wrangler versions deploy`, client account,
+`study.status`, publish). Until then: **do not push `main`, do not deploy.**

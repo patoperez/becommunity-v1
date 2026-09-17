@@ -590,15 +590,19 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   SINK IS INERT — `src/lib/shadow/sink.ts` is server-only, reads no environment
   variable, records only codes and totals and no numbers at all, and adds no
   route. `npm run test:shadow-sink` (17 checks, in `npm test`) proves it.
-- ⓘ **`controller.abort()` TAKES NO ARGUMENT, and that is load-bearing.**
+- ⓘ **AN ABORT MUST REJECT AS `AbortError`, and that is load-bearing.**
   `@supabase/postgrest-js` decides whether a rejected `fetch` was cancelled by
   reading the rejection's identity — `name === "AbortError"` or
-  `code === "ABORT_ERR"`. A CUSTOM abort reason replaces the platform's own
-  `AbortError`, is not recognised, and the request is then treated as a network
-  failure — and because a canonical read is a GET, it is RETRIED three times
-  with backoff. The hosted rehearsal measured exactly three extra requests
-  after a 1 ms budget expired. Never pass a reason to `abort()` on this path;
-  the budget's verdict comes from its own `expired` flag, not from the reason.
+  `code === "ABORT_ERR"`. A reason that is NOT an `AbortError` — an `Error`, a
+  string, or the `TimeoutError` `AbortSignal.timeout()` rejects with — is not
+  recognised, and the request is then treated as a network failure — and
+  because a canonical read is a GET, it is RETRIED three times with backoff. The
+  hosted rehearsal measured exactly three extra requests after a 1 ms budget
+  expired. The shadow budget calls `abort()` with no argument and reads its
+  verdict from its own `expired` flag. ⚠️ *Corrected in Unit 6B.4B2P:* this
+  bullet said «`controller.abort()` TAKES NO ARGUMENT» and «never pass a
+  reason». Too broad: a `DOMException` NAMED `AbortError` is recognised, and
+  `src/lib/upstream/bounded-fetch.ts` uses exactly that to carry its sentinel.
 - ⓘ **The canonical read is bounded-concurrent at SIX, and six is not arbitrary.**
   A Cloudflare Worker allows six simultaneous open outbound connections per
   invocation. `loadCanonicalRowSet` reads its twenty-six independent families
@@ -723,38 +727,99 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
     wrangler OAuth token, which lacks *Workers Builds Configuration: Edit*.
     **DO NOT PUSH `main` UNTIL IT IS**, and `docs/DEPLOYMENT.md` carries the
     exact steps.
-- ⓘ **ERROR 1101 IS «WORKER THREW A JAVASCRIPT EXCEPTION», AND THE WORKER HAD NO
-  EXCEPTION BOUNDARY.** That is Cloudflare's own definition — not a CPU limit
-  (1102), not a request cap (1027), not a routing failure (1022) — so it is an
-  uncaught exception inside the Worker. The entry the OpenNext adapter generates
+- ⓘ **ERROR 1101 IS THE PAGE CLOUDFLARE DRAWS, NOT THE CAUSE — AND THE WORKER HAD
+  NO EXCEPTION BOUNDARY.** Cloudflare defines 1101 as «Worker threw a JavaScript
+  exception». ⚠️ *Corrected in Unit 6B.4B2P:* this bullet went on to say the code
+  rules out a CPU limit (1102), a request cap and a routing failure, «so it is an
+  uncaught exception inside the Worker». The recorded bursts were not exceptions:
+  in the minutes they occurred Cloudflare's analytics record `exceededResources`
+  terminations and no `scriptThrewException`, while readers were shown 1101 —
+  a match for the population, not proved request by request. **The page cannot
+  tell a throw from a termination, and it rules no resource out.** The entry the OpenNext adapter generates
   awaits the middleware handler, performs a REQUEST-TIME `import()` of the server
   handler and awaits that, with no `try`/`catch` anywhere.
   `wrangler.toml` now points `main` at **`src/worker-entry.ts`**, which imports
   the generated entry, re-exports its Durable Object classes unchanged, and calls
-  it inside ONE try/catch. A failure answers **HTTP 503** with `Retry-After`, the
-  product's own page, and a closed code in `x-becommunity-unavailable`. It does
-  not retry, does not touch a cookie, and never puts the thrown value into the
-  answer. `npm run test:runtime-resilience` (36 checks, in `npm test`) holds it.
-  - ⓘ **THE CAUSE OF THE RECORDED BURSTS IS STILL UNKNOWN, AND THE LEADING
-    HYPOTHESIS WAS FALSIFIED.** Fault injection against the real built artifact
-    under workerd — refused connection, reset mid-body, malformed JSON, truncated
-    body, HTTP 500, HTTP 503 and a hang, on the auth lookup, the data reads and
-    the whole upstream, thirty-two cases — produced a controlled answer every
-    time and **never made the Worker throw**. An unguarded `getUser()` is NOT the
-    explanation: supabase-js returns `{ user: null, error }` for all of them.
-  - ⓘ **WORKERS LOGS WAS NEVER ENABLED, WHICH IS WHY THERE IS NO EXCEPTION TO
-    READ.** The API reported `observability: null`; retention is 7 days paid / 3
-    free and is not retroactive, so nothing exists for any recorded Ray ID.
-    `wrangler.toml` now sets `[observability] enabled = true,
-    head_sampling_rate = 1`. **The block must stay BELOW the top-level keys** — a
-    TOML table swallows what follows it, and placed above them it silently made
-    `compatibility_date` and `keep_vars` fields of `observability`.
-  - ⓘ **AN AUTH OUTAGE IS NOT A WRONG PASSWORD, AND NO LONGER SAYS SO.** The
-    session check is bounded at eight seconds (measured: 8.32 s on `/login` where
-    it used to hang past forty-five), a transport failure is told apart from a
-    refusal in both the middleware and the sign-in action by the same closed
-    rules, and the authorization decision is unchanged and still fails closed on
-    both.
+  it through ONE try/catch (`src/lib/runtime/boundary.ts`, executed by the gate).
+  A failure answers **HTTP 503** with `Retry-After`, the product's own page, and a
+  closed code in `x-becommunity-unavailable`. It does not retry, does not touch a
+  cookie, and never puts the thrown value into the answer.
+  `npm run test:runtime-resilience` (47 checks, in `npm test`) holds it.
+  **It catches REJECTIONS ONLY. A runtime termination never reaches it.**
+  - ⚠️ **EVERY RETAINED TERMINATION SITS ON A 10 ms CPU FLOOR — THE WORKERS FREE
+    LIMIT — AND THE RELEASE IS BLOCKED (Unit 6B.4B2P).** Cloudflare's
+    `workersInvocationsAdaptive` records the bursts as `exceededResources`. All
+    **196** in the dataset's whole 90-day retention (2026-08-23 → 2026-09-16, ten
+    builds, production `e691ecd8` among them with seven on its deploy day) used
+    **at least 10.0 ms of CPU**, and none measured more than 65 628 200 bytes
+    (62.6 MiB) of a 128 MB limit. Say MiB or bytes: the dataset reports bytes, and
+    «MB» has already been used for both in this repository.
+    Ten milliseconds is the documented CPU limit of the **Workers Free** plan; the
+    Worker carries no `limits.cpu_ms` override; and it was already measured under
+    Free's other signature, the fifty-subrequest ceiling (6B.4B2K). **The plan
+    itself is NOT read** — the subscriptions endpoint answers 403 to the wrangler
+    OAuth token — so «Free, 10 ms» is the strongly supported reading, not a read
+    fact; an operator settles it in the dashboard. Measured on the runtime, one
+    review page costs **91–1 012 ms** of CPU and even `/login` ~33 ms, so no amount
+    of trimming fits under 10 ms. **Do not deploy the canonical build while this
+    stands.** The aggregates support a population-level diagnosis; they do not
+    prove any single Ray ID's cause.
+    ⚠️ *Corrected in 6B.4B2P:* 6B.4B2O excluded CPU because successful requests
+    had larger CPU quantiles (a killed invocation's CPU stops where it is
+    killed), called memory «the supported inference», and said Cloudflare
+    «exposes no memory dimension» — it exposes `memoryUsageBytesP25…P999`.
+  - ⓘ **THE LEADING HYPOTHESIS — AN UNGUARDED `getUser()` — WAS FALSIFIED.** Fault
+    injection against the real built artifact under workerd — refused connection,
+    reset mid-body, malformed JSON, truncated body, HTTP 500, HTTP 503 and a hang,
+    thirty-two cases — **never showed the Worker throwing**. ⚠️ *Corrected in
+    6B.4B2P:* this also said every case «produced a controlled answer». Three got
+    **no response at all** (`000000`, including `hang /rest/v1` after the fix),
+    and the rig's verdict column mislabelled them.
+  - ⓘ **WORKERS LOGS WAS NEVER ENABLED, SO NO PER-INVOCATION RECORD EXISTS FOR ANY
+    RECORDED RAY ID.** The API reported `observability: null`; retention is 7 days
+    paid / 3 free and is not retroactive. The AGGREGATE analytics do exist.
+    `wrangler.toml` sets `[observability] enabled = true, head_sampling_rate = 1`
+    **and `[observability.logs] invocation_logs = false`** (6B.4B2P): Cloudflare's
+    invocation log records every request's method and FULL URL — study ids,
+    query strings. **Observability is a SCRIPT-LEVEL, NON-VERSIONED setting:
+    `wrangler versions upload` ignores the block**, so 6B.4B2O's committed
+    `enabled = true` never reached the Worker (still `observability: null` after
+    its upload) and no Workers Log of any kind was recorded. It applies at the
+    next `deploy` / `versions deploy` — to every version, production included.
+    **Never describe logs as path-free unless invocation logs are off, and never
+    describe a logging setting as in effect before a deploy.** Libraries write
+    their own console lines too (auth-js logs every failed auth fetch). The block
+    must stay BELOW the top-level keys — a TOML table swallows what follows it.
+  - ⓘ **USER-FACING SUPABASE READS ARE BOUNDED BY ONE POLICY (6B.4B2P):
+    `src/lib/upstream/bounded-fetch.ts` + `outcome.ts`.** The reader's client
+    (`src/lib/supabase/server.ts`), `requireInternal()`'s clients, the middleware,
+    and every admin client that READS TO SERVE A PAGE (`createAdminClient({
+    bounded: true })` — the client study page and filter preview, the legacy
+    client loader, the Studio home, the `/admin` pages, the composer preview and
+    the read-only Studio actions, whose scope helper takes `"read" | "write"`)
+    adopt it through `global.fetch`. Admin clients in ACTIONS that commit writes
+    stay unbounded on purpose: a limit on a long write abandons an operation whose outcome is then
+    unknown. Storage is not bounded by the policy; a page-serving listing passes
+    `upstreamDeadlineSignal()`. **A new page-serving admin client must pass
+    `{ bounded: true }`** — `npm run test:upstream-bounds` lists the sites. Rules that are easy to break: **abort with a `DOMException`
+    named `AbortError`** — postgrest-js retries any other rejection on a GET, and
+    `AbortSignal.timeout()` rejects with `TimeoutError`; **auth-js renames every
+    fetch rejection `AuthRetryableFetchError` and keeps only the message**, so a
+    timeout is recognised by the policy's sentinel message, never by the error's
+    name; **a 404 with an empty body, and a 2xx with an empty body, resolve with
+    no error and no data** and are not «empty» — which is why the Studio door
+    reads its role as a LIST, not with `maybeSingle`; **a 4xx is a verdict only
+    when the auth service NAMED it** (GoTrue always sends a `code`; the gateway's
+    «Invalid API key» 401 does not, and is an outage). `requireInternal()` redirects for a verdict and throws
+    `InternalAccessUnavailableError` (a closed code, Studio's error page) for an
+    outage. `npm run test:upstream-bounds` drives the real clients against a
+    local stand-in and proves each rule.
+  - ⓘ **AN AUTH OUTAGE IS NOT A WRONG PASSWORD, AND NO LONGER SAYS SO.** A
+    transport failure, a timeout, a throttle (429) and a code-less gateway 4xx
+    answer `service_unavailable`; only a named 4xx from the auth service answers
+    `invalid_credentials`. The
+    middleware and the sign-in action import the SAME classifier, and the
+    authorization decision still fails closed on both.
   * **`keep_vars = true` is on the deployed commit and NOT on this branch.**
     Without it `wrangler deploy` deletes the dashboard-set plain-text variables
     before applying the config's, and the config declares none. Restore it before

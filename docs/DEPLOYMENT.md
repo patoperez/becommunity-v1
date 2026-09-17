@@ -69,7 +69,11 @@ a reviewed merge to `main` — see "Deployment discipline" below.
 > it succeeds. Enable Windows "Developer Mode" if you want it to run locally.
 
 `wrangler.toml` encodes the Worker name `becommunity-v1`, the entry point
-`main = .open-next/worker.js`, `nodejs_compat`, the compatibility date, and the
+`main = "src/worker-entry.ts"` (ⓘ *corrected in Unit 6B.4B2P:* this said
+`.open-next/worker.js`; since 6B.4B2O the entry wraps that file in an exception
+boundary, which catches rejections and never a runtime termination),
+`nodejs_compat`, the compatibility date, the `[observability]` block — with
+**invocation logs off**, because they record every request's full URL — and the
 static-assets binding. The name must match the live Worker: if it names a script
 that does not exist on the account, an ad-hoc `npm run cf:deploy` silently
 publishes a **second, separate** Worker instead of updating the running one.
@@ -211,7 +215,7 @@ How the connected Worker was created — Workers & Pages → **Create** → **Wo
 |---------|-------|
 | Build command | `npx opennextjs-cloudflare build` |
 | Deploy command | `npx wrangler deploy` |
-| (Output) | configured by `wrangler.toml` (`.open-next/worker.js` + assets) |
+| (Output) | configured by `wrangler.toml` (`src/worker-entry.ts`, which wraps `.open-next/worker.js`, + assets) — corrected in Unit 6B.4B2P |
 
 ## Environment variables (Worker → Settings → Variables)
 
@@ -264,3 +268,20 @@ and says so loudly; it is **not** the gate. `npm run suite:d` on Linux CI is.
   the canonical read faster — it would only misdescribe what the code is doing.
   Recorded here because a constant that encodes a platform limit needs somewhere
   a human can find the limit.
+- ⚠️ **CPU time per request — the limit the release is blocked on (Unit
+  6B.4B2P).** Cloudflare documents 10 ms per HTTP request on Workers Free, and 30 s
+  by default (up to 5 min through `limits.cpu_ms`) on Workers Paid, with some
+  per-isolate flexibility for a Worker that only occasionally runs over; a Worker
+  that runs over consistently is terminated at the limit. (What this project
+  OBSERVED — not what Cloudflare documents — is that readers were shown Error
+  1101 in the minutes those terminations were recorded.) Every `exceededResources`
+  termination in the 90 days Cloudflare retains for this Worker (196, on ten
+  builds) used at least 10.0 ms of CPU, and the Worker has no `limits.cpu_ms`
+  override. Measured on the runtime, a Studio canonical review page
+  costs 91–1 012 ms per request, and one browser visit makes 28 Worker invocations
+  (26 of them link prefetches). **The plan is not readable with the wrangler OAuth
+  token** (the subscriptions endpoint answers 403): read it in the dashboard before
+  any release decision. `docs/CURRENT_STATE.md` § «Unit 6B.4B2P» has the numbers.
+- **Fifty subrequests per request on Workers Free** (10 000 on Paid). Unit 6B.4B2K
+  measured this Worker's refusal at exactly the fifty-first — the Free plan's
+  other signature — and cut the canonical read to one round trip.
