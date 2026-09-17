@@ -744,7 +744,7 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   A failure answers **HTTP 503** with `Retry-After`, the product's own page, and a
   closed code in `x-becommunity-unavailable`. It does not retry, does not touch a
   cookie, and never puts the thrown value into the answer.
-  `npm run test:runtime-resilience` (47 checks, in `npm test`) holds it.
+  `npm run test:runtime-resilience` (53 checks, in `npm test`) holds it.
   **It catches REJECTIONS ONLY. A runtime termination never reaches it.**
   - ⚠️ **EVERY RETAINED TERMINATION SITS ON A 10 ms CPU FLOOR — THE WORKERS FREE
     LIMIT — AND THE RELEASE IS BLOCKED (Unit 6B.4B2P).** Cloudflare's
@@ -756,14 +756,36 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
     «MB» has already been used for both in this repository.
     Ten milliseconds is the documented CPU limit of the **Workers Free** plan; the
     Worker carries no `limits.cpu_ms` override; and it was already measured under
-    Free's other signature, the fifty-subrequest ceiling (6B.4B2K). **The plan
-    itself is NOT read** — the subscriptions endpoint answers 403 to the wrangler
-    OAuth token — so «Free, 10 ms» is the strongly supported reading, not a read
-    fact; an operator settles it in the dashboard. Measured on the runtime, one
-    review page costs **91–1 012 ms** of CPU and even `/login` ~33 ms, so no amount
-    of trimming fits under 10 ms. **Do not deploy the canonical build while this
-    stands.** The aggregates support a population-level diagnosis; they do not
-    prove any single Ray ID's cause.
+    Free's other signature, the fifty-subrequest ceiling (6B.4B2K). Measured on the
+    runtime, one review page costs **91–1 012 ms** of CPU and even `/login` ~33 ms,
+    so no amount of trimming fits under 10 ms. **Do not deploy the canonical build
+    while this stands.** The aggregates support a population-level diagnosis; they
+    do not prove any single Ray ID's cause.
+    - ⓘ **THE PLAN IS NOW A READ FACT, AND IT IS A DIFFERENT KIND OF EVIDENCE FROM
+      THE ANALYTICS (Unit 6B.4B2Q).** 6B.4B2P could not read it — the subscriptions
+      endpoint answers 403 to the wrangler OAuth token — and recorded «Free, 10 ms»
+      as the strongly supported reading. An **operator read the Cloudflare dashboard
+      directly on 2026-09-17**: the Workers plan is **Free**, the Free card shows
+      *Current plan*, the Paid card shows *Upgrade*, the Free limits shown are
+      **10 ms CPU per request and 50 subrequests**, and Paid is offered at
+      *$5/month + usage*. Keep the two apart when quoting them: the PLAN is
+      operator-observed in the dashboard; the terminations and the CPU quantiles
+      are population-level analytics with no Ray ID dimension; the API still cannot
+      read the plan. Do not change the billing plan without the owner's explicit
+      instruction.
+    - ⓘ **CLOUDFLARE'S OWN TERMS ARE MORE SPECIFIC THAN THE DATASET'S, AND THE
+      CODES DO NOT LINE UP. RECORD THE DISCREPANCY; DO NOT REWRITE EITHER SIDE.**
+      The docs give a CPU overrun its own error code — **1102**, «Worker exceeded
+      CPU time limit» on the errors page and «Worker exceeded resource limits» on
+      the limits page, two wordings for one code — and the dashboard has an
+      *Exceeded Memory* chart series. What is actually recorded here is neither:
+      the analytics status is the generic **`exceededResources`**, documented as
+      «Worker exceeded runtime limits … The most common cause is excessive CPU
+      time, but is also caused by a Worker exceeding startup time or free tier
+      limits», and the page readers were served is **1101**, the code for a thrown
+      exception. So the browser code, the dataset status and the documented CPU
+      code are three different labels for these bursts. The 10 ms floor is what
+      the evidence rests on, not the naming.
     ⚠️ *Corrected in 6B.4B2P:* 6B.4B2O excluded CPU because successful requests
     had larger CPU quantiles (a killed invocation's CPU stops where it is
     killed), called memory «the supported inference», and said Cloudflare
@@ -814,16 +836,92 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
     `InternalAccessUnavailableError` (a closed code, Studio's error page) for an
     outage. `npm run test:upstream-bounds` drives the real clients against a
     local stand-in and proves each rule.
+    - ⓘ **THE BOUND IS RELEASED WHEN THE ANSWER IS COMPLETE, NOT ONLY WHEN IT
+      FAILS (Unit 6B.4B2Q).** 6B.4B2P cleared the timer and detached the caller's
+      listener on the rejection path alone, so every SUCCESSFUL call left a timer
+      armed for the rest of its eight or ten seconds — dozens per page — and a
+      listener attached to a signal it no longer cared about. The policy now wraps
+      the response body in a pull-based stream (never buffers it: status,
+      statusText, headers, backpressure and cancellation all survive) and releases
+      at EOF, at a cancellation, at a read failure and when the timer itself fires;
+      a response with no body releases at once. The timer stays armed THROUGH the
+      body on purpose — headers that arrive and then stall are still a hang.
+    - ⓘ **A DEADLINE CANCELS ITS OPERATION; IT DOES NOT MERELY STOP WAITING
+      (Unit 6B.4B2Q).** `withinDeadline(work, ms, operation)` takes an
+      `upstreamOperation()` — one per request, NEVER shared — whose signal the
+      request's Supabase client carries in `boundedFetch({ signal })`. On expiry
+      the attempt in flight is aborted and the next attempt is refused before it
+      reaches the network, which is what stops `auth-js`'s own token-refresh retry
+      loop from outliving the answer. The middleware and `requireInternal()` each
+      create their own. Expiry aborts with an `AbortError` carrying the timeout
+      sentinel, so postgrest-js still does not retry it.
   - ⓘ **AN AUTH OUTAGE IS NOT A WRONG PASSWORD, AND NO LONGER SAYS SO.** A
     transport failure, a timeout, a throttle (429) and a code-less gateway 4xx
     answer `service_unavailable`; only a named 4xx from the auth service answers
     `invalid_credentials`. The
     middleware and the sign-in action import the SAME classifier, and the
     authorization decision still fails closed on both.
+    - ⓘ **AND AN AUTH OUTAGE IS NOT A SIGN-OUT EITHER (Unit 6B.4B2Q).** Until this
+      unit the middleware named the outage and then continued with `user = null`,
+      so a reader whose cookies were perfectly valid was redirected to `/login` to
+      type a password that could not be checked — the same conflation, committed by
+      the code that names it. A protected route now gets the **controlled 503**
+      carrying the closed code (`session_timeout` / `session_unverifiable`) and
+      never a redirect; the outage answer CARRIES OVER any cookies the refresh had
+      already written, so nobody is signed out by it. A session the service refused
+      BY NAME still redirects to `/login`, and `/login`, `/` and `/api/health`
+      still render — none of them needs the answer. **Never redirect on a session
+      nobody could verify.**
+      ⚠️ **THAT IS THE MIDDLEWARE AND `requireInternal()`, AND NOWHERE ELSE YET.**
+      Defense in depth (§6.4) means every protected page and every Server Action
+      re-checks the session on its own, and **seventeen** of those sites outside
+      the two corrected ones still read only `!user` and answer with a verdict: a
+      page `redirect("/login")` (e.g. `src/app/dashboard/page.tsx`, the four
+      `/admin` pages, `src/app/insights/e/[studyId]/page.tsx`) or «Acceso
+      denegado» (e.g. `authorizedStudioScope` in
+      `src/app/studio/e/[studyId]/revision/actions.ts` and `construccion/actions.ts`,
+      and the `/admin` action helpers). During an outage the middleware now
+      answers 503 before they run, so the reachable case is narrow — the service
+      failing BETWEEN the middleware's check and the page's — but it is the same
+      conflation, and several of those sites also read the role with
+      `maybeSingle`, which cannot tell «no profile» from «no answer». Unit 6B.4B2Q
+      measured and recorded this; it did not change it, because seventeen
+      authorization call sites are a unit of their own and authorization is a
+      declared human-review zone.
   * **`keep_vars = true` is on the deployed commit and NOT on this branch.**
     Without it `wrangler deploy` deletes the dashboard-set plain-text variables
     before applying the config's, and the config declares none. Restore it before
     any deploy from this branch.
+- ⓘ **STUDIO'S NAVIGATION DOES NOT PREFETCH (Unit 6B.4B2Q).** Next prefetches a
+  `<Link>` as soon as it enters the viewport, and Studio's frame shows thirteen at
+  once — four shell stops plus the nine steps of the process — every one of them an
+  authenticated, server-rendered route. Measured in the browser on `b80e30da`, one
+  settled visit to a study made **1 document request and 21 background RSC
+  requests** (11 on `/studio`, 22 on the review): every destination twice, under
+  two different `?_rsc=` cache keys, which is how thirteen links become
+  twenty-six. Every one of those **reaches the Worker and runs the middleware's
+  session check** — the matcher excludes only static assets. **A PREFETCH IS NOT A
+  PAGE RENDER, and the difference is two orders of magnitude.** 6B.4B2P measured
+  them at **5–15 ms of CPU apiece**, because Next short-circuits a non-PPR
+  prefetch of a route with no `loading` boundary to router state, so
+  `requireInternal()`'s role read and the page's own render never run. Removing 26
+  of them saves roughly **0.13–0.39 s of CPU and 26 auth round trips per visit** —
+  real, and nothing like the 2–36 s a «full render each» reading would suggest.
+  Every link on an internal navigation surface therefore declares
+  **`prefetch={false}`**, which turns off the viewport, hover and touch prefetches
+  and changes nothing about clicking, the href, `aria-current` or the markup.
+  §[8] of `npm run test:runtime-resilience` holds it: **within the five
+  directories it walks** — `src/app/studio`, `src/app/admin`, `src/app/dashboard`,
+  `src/components/studio` and `src/components/shell` — the declared list must be
+  exactly the set of files rendering a link, so a surface cannot appear there
+  undeclared; every opening tag on them must carry the prop; and the study
+  navigation is EXECUTED and its nine real `next/link` elements inspected. **It
+  says nothing about anywhere else**: `src/app/error.tsx`, `src/app/not-found.tsx`
+  and `src/components/insights/` each still prefetch an authenticated destination,
+  deliberately — they are one link apiece on a page nobody stays on, and no storm
+  was measured there. `/insights` is the client's surface and is out of scope for
+  the same reason. **This is a load fix and nothing more — it does not make any
+  route fit the Free CPU limit.**
 - ⚠️ **A CANONICAL READ FAILS ON THE CLOUDFLARE EDGE AND NOWHERE ELSE, AND THE
   PRODUCT REPORTS IT AS UNFINISHED EDITORIAL WORK.** On every deployed version —
   including ones Cloudflare built itself — `loadCuratedPainReviewEvidence`
@@ -1235,6 +1333,21 @@ contract is documented in `docs/CANONICAL_STUDY_MODEL.md`.
   `scripts/lib/secret-patterns.mjs` is security configuration, a declared
   human-review zone — so it is RECOMMENDED SEPARATELY and was not changed here.
   Do not "fix" this by renaming the local until it stops matching.
+  ⚠️ **CORRECTED IN UNIT 6B.4B2Q: it now reports SIXTY-THREE, and fifty-six of
+  them are that one false positive.** Measured at the branch tip `4b2a3ad`:
+  21 passed, 63 failed — 6 blocking advisories (`@opennextjs/cloudflare` is no
+  longer among them), 56 `assigned-secret-env` blobs and the secret-leak exit.
+  **Every one of the 63 is pre-existing**: each blob names the commit it was first
+  seen in, and all of them are ancestors of `4b2a3ad` except the gate's own
+  self-test sample, which has been in the repository since 2026-08-29. The growth
+  is documentary: 19 of the blobs are **CLAUDE.md** and 23 are
+  **docs/CURRENT_STATE.md** — every revision of a document that QUOTES the
+  matching line is itself a new matching blob, and D-d scans history, so an
+  earlier revision can never be un-scanned. **Editing that prose to dodge the
+  detector would be the wrong fix and is forbidden here for the same reason
+  renaming the local is**; narrowing the pattern remains the right one, and it is
+  still a human-review zone. Expect the count to rise by one per revision of
+  either document until it is done.
 - ⓘ **`0031` AND `0032` ARE APPLIED to the hosted project** (2026-09-14, Unit
   6B.4B2D, both in one `db push`). **No qualitative sign-off exists and no pain
   item was decided.** Those are two facts and the second is the one people get

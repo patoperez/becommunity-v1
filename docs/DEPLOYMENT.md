@@ -279,9 +279,17 @@ and says so loudly; it is **not** the gate. `npm run suite:d` on Linux CI is.
   builds) used at least 10.0 ms of CPU, and the Worker has no `limits.cpu_ms`
   override. Measured on the runtime, a Studio canonical review page
   costs 91–1 012 ms per request, and one browser visit makes 28 Worker invocations
-  (26 of them link prefetches). **The plan is not readable with the wrangler OAuth
-  token** (the subscriptions endpoint answers 403): read it in the dashboard before
-  any release decision. `docs/CURRENT_STATE.md` § «Unit 6B.4B2P» has the numbers.
+  (26 of them link prefetches). ⚠️ **CORRECTED IN UNIT 6B.4B2Q, twice.**
+  (1) **The plan IS read.** The sentence here said it was not readable with the
+  wrangler OAuth token — that is still true of the API, where the subscriptions
+  endpoint answers 403 — but an operator read the Cloudflare dashboard directly on
+  **2026-09-17**: the Workers plan is **Free**, with 10 ms CPU and 50 subrequests
+  shown on the current-plan card. Quote it as an operator observation, never as an
+  API read. (2) **The 26 link prefetches are gone.** Every link on an internal
+  navigation surface now declares `prefetch={false}`; the measured before/after is
+  in `docs/CURRENT_STATE.md` § «Unit 6B.4B2Q». **That changed the LOAD and not the
+  LIMIT: the pages still do not fit 10 ms and the release is still blocked.**
+  `docs/CURRENT_STATE.md` § «Unit 6B.4B2P» has the rest of the numbers.
 - **Fifty subrequests per request on Workers Free** (10 000 on Paid). Unit 6B.4B2K
   measured this Worker's refusal at exactly the fifty-first — the Free plan's
   other signature — and cut the canonical read to one round trip.

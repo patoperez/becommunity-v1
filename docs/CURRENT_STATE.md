@@ -8564,3 +8564,342 @@ against `bda4df63` and read `workersInvocationsAdaptive` for them. Only zero
 terminations there reopens the deploy sequence (disarm `main`, remove
 `CANONICAL_EDGE_DIAGNOSTICS`, `wrangler versions deploy`, client account,
 `study.status`, publish). Until then: **do not push `main`, do not deploy.**
+
+---
+
+## Unit 6B.4B2Q — the bound releases when the answer does, an outage stops pretending to be a sign-out, and Studio stops downloading screens nobody asked for
+
+Unit 6B.4B2P left three residual correctness defects and one load amplification.
+This unit closes all four. **It changes nothing about the release blocker**, which
+is the Workers Free 10 ms CPU limit, and nothing here should be read as progress
+against it — the characterization window below reproduced the terminations on the
+new candidate.
+
+Baseline verified before anything was touched: branch tip `4b2a3ad` local and
+remote, `origin/main` `1c05276`, worktree clean, no merge/rebase/cherry-pick in
+progress, production serving `e691ecd8` at 100 % with its deployment listing
+byte-identical to 6B.4B2P's closing capture, `bda4df63` present as a version and
+absent from every deployment, hosted project byte-identical (`ccff0739…`).
+
+### The plan is a read fact now, and it is a different kind of evidence
+
+6B.4B2P could not read the account plan: every `subscriptions` endpoint answers
+403 to the wrangler OAuth token, so «Workers Free, 10 ms» was recorded as the
+strongly supported reading rather than as a read fact.
+
+**An operator read the Cloudflare dashboard directly on 2026-09-17.** The Workers
+plan is **Free**; the Free card shows *Current plan* and the Paid card shows
+*Upgrade*; the Free limits shown are **10 ms CPU per request and 50 subrequests**;
+Paid is offered at *$5/month + usage*. No billing change was made and none is
+authorized.
+
+Three kinds of evidence are now in play and must not be merged when quoted:
+
+| Fact | How it is known | What it can support |
+|---|---|---|
+| The account is on Workers Free, 10 ms CPU, 50 subrequests | an operator read the dashboard | which limit applies |
+| 196 terminations in 90 days, every one at ≥ 10.0 ms CPU, memory never above 62.6 MiB | `workersInvocationsAdaptive`, population level, **no Ray ID dimension** | that resource termination under those limits is what the data identifies |
+| A review document costs 91–1 012 ms of CPU on `b80e30da` and 190–1 401 ms on `bda4df63` | one request kind per minute per version, read back per minute | that no trimming fits those pages under 10 ms |
+
+The analytics cannot attribute any single browser 1101 to any single invocation,
+and this unit does not claim otherwise.
+
+### Cloudflare's own terms are more specific than the dataset's, and the codes do not line up
+
+Recorded rather than reconciled, because rewriting either source would lose the
+discrepancy:
+
+* Cloudflare's **errors** page gives a CPU overrun its own code — **1102**,
+  «Worker exceeded CPU time limit». Its **limits** page gives the same code a
+  different message: «Worker exceeded resource limits». One code, two wordings.
+* The dashboard's Worker Errors chart has an **Exceeded Memory** series; the
+  documentation assigns no runtime error code to it.
+* The analytics status actually recorded for these bursts is the generic
+  **`exceededResources`**, documented as «Worker exceeded runtime limits … The
+  most common cause is excessive CPU time, but is also caused by a Worker
+  exceeding startup time or free tier limits» — broader than CPU alone.
+* The page readers are actually served is **1101**, the code for a thrown
+  exception, which is neither of the above.
+
+So the browser code, the dataset status and the documented CPU code are three
+different labels for the same bursts. **The 10 ms floor in the measurements is
+what the diagnosis rests on, not the naming.**
+
+### A. The bound is released when the answer is complete
+
+`src/lib/upstream/bounded-fetch.ts` cleared its per-attempt timer and detached the
+caller's abort listener **only on the rejection path**. Every SUCCESSFUL call
+therefore left a timer armed for the remainder of its eight or ten seconds and a
+listener attached to a signal it no longer cared about — on a page that makes
+dozens of reads, dozens of live timers per request, and an abort the caller raised
+after a call had already succeeded would still fire into it.
+
+The bound is now held **per phase** and released at the end of each: once for
+reaching the headers, once for reading the body. The body is wrapped in a
+pull-based `ReadableStream` at **`highWaterMark: 0`** — load-bearing, because a
+default stream pulls one chunk the moment it is constructed — so the body's bound
+is armed by the FIRST read and released at EOF, at a cancellation, at a read
+failure, or when it fires.
+
+**A response whose body is never read therefore holds nothing, and that is the
+shape every auth outage takes:** `@supabase/auth-js` throws
+`AuthRetryableFetchError` for a 5xx BEFORE it calls `response.json()`, so on every
+outage the body is abandoned unread. The first version of this unit's fix kept the
+bound in that case; the adversarial review measured it and it was corrected.
+
+Nothing is buffered: one chunk per `pull`, so backpressure and cancellation still
+reach the upstream. Status, statusText and headers survive the re-wrap, repeated
+`Set-Cookie` values are kept apart rather than joined with a comma, and
+`content-encoding` / `content-length` are dropped because the body handed on is
+the decoded one.
+
+### B. A deadline cancels its operation; it does not merely stop waiting
+
+`withinDeadline()` said so in as many words: «the operation keeps running if it
+loses the race; the READER stops waiting». That left a hung `getUser()` holding
+its socket, and `auth-js` free to open the NEXT attempt of a token refresh it had
+already been told nobody was waiting for.
+
+`upstreamOperation()` is one request's own cancellation — created where a request
+is handled and **never shared**, so expiring one can cancel nothing but that
+request's work. Its signal travels into the request's Supabase client through
+`boundedFetch({ signal })`, composed with the per-attempt timer and with any
+caller-provided signal. On expiry the attempt in flight is aborted and the next
+attempt is refused **before it reaches the network**. The abort is an `AbortError`
+carrying the timeout sentinel, so postgrest-js still does not retry it, and the
+abandoned promise's rejection is still absorbed rather than left to nobody.
+
+Measured against the real `@supabase/ssr` server client and a stale session — the
+one path auth-js retries on its own — with a 150 ms attempt bound and a 900 ms
+deadline: at least two attempts before the deadline, and **the request count at
+the answer is the count two seconds later**. The product's own bounds (8 s and
+9 s) are too far apart for a two-second window to tell the two implementations
+apart, which is why the proof uses short ones.
+
+The middleware and `requireInternal()` each create their own operation; the
+reader's client factory takes the signal as an option and defaults to none.
+
+### C. An auth outage is not a sign-out, and no longer says so
+
+Until this unit the middleware named the outage — `session_timeout` /
+`session_unverifiable` — and then continued with `user = null`, so a reader whose
+cookies were perfectly valid was redirected to `/login` and invited to type a
+password that could not be checked either. That is the conflation this whole
+policy exists to prevent, committed by the code that names it.
+
+| What happened | What a protected route gets now |
+|---|---|
+| the service answered, and there is no valid session | redirect to `/login` — unchanged |
+| the session check timed out, was cancelled, or the service did not answer | **HTTP 503**, the product's own page, `x-becommunity-unavailable: session_timeout` or `session_unverifiable`, `Retry-After: 15` — and **never** a redirect |
+
+`/login`, `/` and `/api/health` still render during the same outage: none of them
+needs the answer, and `/login` cannot redirect on a session nobody could verify
+because there is no verified user to redirect. **Nobody is signed out by it**: any
+cookies the refresh had already written are carried onto the 503.
+
+**Proved on the real runtime**, not only in the offline gate: fault injection
+against the built Worker under workerd, with a stand-in as the only upstream,
+24 probes —
+
+| Fault on `/auth/v1/user` | `/login` | `/studio` |
+|---|---|---|
+| refused connection | 200 answered | **503 `session_unverifiable`** |
+| reset mid-body | 200 | **503 `session_unverifiable`** |
+| malformed JSON | 200 | **503 `session_unverifiable`** |
+| truncated body | 200 (6.1 s) | **503 `session_unverifiable`** (6.0 s) |
+| HTTP 500 | 200 | **503 `session_unverifiable`** |
+| HTTP 503 | 200 | **503 `session_unverifiable`** |
+| hang | 200 (8.1 s) | **503 `session_timeout`** (8.0 s) |
+
+**Zero probes got no response, and zero showed the Worker throwing** — 6B.4B2P's
+run had three of the former. The role read failing still renders Studio's own
+error state (`authorization_unverifiable` / `authorization_timeout`, 1 + 2 lines),
+and a hung role read ends at its 10 s bound. **19 structured lines, none carrying
+a path, a study id, an email or a token.** No hang was retried.
+
+### D. The Studio prefetch storm is gone
+
+Next prefetches a `<Link>` as soon as the anchor enters the viewport. Studio's
+frame puts thirteen on screen at once — four shell stops and the nine steps of the
+process — and every one of those destinations is an authenticated, server-rendered
+route. Every one of those RSC requests reaches the Worker and runs the
+middleware's session check; a prefetch is NOT a page render (6B.4B2P measured them
+at 5–15 ms of CPU apiece, because Next short-circuits a non-PPR prefetch of a
+route with no `loading` boundary to router state), so removing them saves roughly
+0.13–0.39 s of CPU and 26 auth round trips per visit — real, and nothing like the
+2–36 s a «full render each» reading would suggest.
+
+Measured in the browser, one settled visit, from a cold navigation, the count of
+requests the page itself made:
+
+| Screen | before (`b80e30da`) documents / background app requests | after (`28da64ac`) |
+|---|---|---|
+| `/studio` | 1 / **11** | 1 / **0** |
+| `/studio/e/<id>` | 1 / **21** | 1 / **0** |
+| `/studio/e/<id>/revision` | 1 / **22** | 1 / **0** |
+
+Before, every destination was requested **twice**, under two different `?_rsc=`
+cache keys — which is how thirteen links became twenty-six requests. After, the
+document is the only request the app makes; static assets (15, 15, 19) are
+unchanged and are served by the assets binding rather than by the Worker.
+
+48 link sites across 25 files now declare **`prefetch={false}`**: the Studio
+frame, the Studio bodies, and the same internal surface under its legacy `/admin`
+paths, each of which wears `<StudioShell/>` and is listed in
+`STUDIO_STOPS[].matches`. In Next 16.3.2 that turns off the viewport, hover and
+touch prefetches (`prefetchEnabled = prefetchProp !== false`) and changes nothing
+about clicking, the href, `aria-current`, the markup or accessibility.
+
+`/insights` is deliberately NOT included: it is the client's surface, a different
+audience, and no storm was measured there. `src/app/error.tsx`,
+`src/app/not-found.tsx` and `src/components/insights/` each still prefetch an
+authenticated destination — one link apiece on a page nobody stays on — and §[8]
+of the gate says so rather than implying it covers them.
+
+**This is a load fix and nothing more. It does not make any route fit the Free CPU
+limit**, and the window below shows that directly.
+
+### The candidate, and what one bounded characterization window found
+
+Version **`28da64ac-d1b7-4702-8e44-71fd77cf6b4b`**, tag `rc-6b4b2q-8c971f7`,
+`https://28da64ac-becommunity-v1.ollinagencyllc.workers.dev` — uploaded with
+`wrangler versions upload`, and the deployment listing is byte-identical across
+the upload. BUILD_ID `lJYZ8hwmfjYHrccR99s0f`, `worker.js` sha256 `d05223bf…`,
+`.open-next` digest `ea1ea268…`, 12 764.70 KiB / gzip 2 722.14 KiB, startup 18 ms.
+Built with no `.env` file and no Supabase variable in the shell: the compiled env
+snapshot names nothing, and the hosted project's ref appears in 0 build files.
+
+**The authenticated QA never got past its first page.** `/login` answered Error
+1101 four milliseconds in (Ray `a3cb7f3d59236b38`), so the run was abandoned
+rather than retried — the brief's own instruction, because repeating it expecting
+a pass is what would waste the time.
+
+**One bounded window, concurrency one, 192 requests over ten minutes**
+(2026-09-17 22:20:33Z → 22:30:22Z):
+
+| Arm | n | Result |
+|---|---|---|
+| preview, authenticated (the three review screens) | 72 | 12 ready, **60 in Cloudflare's error state** |
+| preview, anonymous (`/login`, `/api/health`, `/revision`) | 72 | 38 × 200, 24 × 307, **10 × 500** (7 of them `/login`) |
+| production, control (`/login`, `/api/health`) | 48 | **48 × 200, nothing else** |
+
+**68 browser-visible Error 11xx. ZERO controlled 503s** — none of these is the
+boundary answering, because a termination never reaches a `catch`.
+
+Cloudflare's analytics for that exact window, by status and version:
+
+| Version | status | n | CPU ms min / p50 / p90 / p99 / max | memory MiB p50 / max |
+|---|---|---|---|---|
+| `28da64ac` | success | 117 | 2.0 / 12.8 / 281.8 / 338.2 / 380.6 | 27.5 / 56.2 |
+| `28da64ac` | **`exceededResources`** | **73** | **10.0 / 10.0 / 10.0 / 21.8 / 21.8** | 34.0 / 35.7 |
+| `e691ecd8` (production) | success | 53 | 8.2 / 30.1 / 309.7 / 350.6 / 350.6 | 24.5 / 28.4 |
+
+Every terminated minute's CPU **minimum is exactly 10.0 ms**, and the whole
+terminated distribution is pinned at that floor; memory never passed 37 386 206
+bytes (35.7 MiB) of a 128 MB limit. Production, on the same account in the same
+ten minutes, recorded **no terminations at all** — its successful requests reach
+350 ms of CPU, so the account is not throttling; what differs is which build is
+asked to run.
+
+### Verification
+
+| Gate | WSL (`patop`) | Windows, working copies confirmed CRLF |
+|---|---|---|
+| `test:runtime-resilience` | **53 / 53** | **53 / 53** |
+| `test:upstream-bounds` | **50 / 50** | **50 / 50** |
+
+At the committed sha `8c971f7`, tree clean: `typecheck` 0 errors; `lint` 0 errors,
+58 warnings; **`npm test` exit 0 over 122 scripts** (60 gates, the chain reaching
+its end); the **30 gates the chain does not reach** run individually, 30 passed;
+`test:migration-chain` PASSED; `test:canonical-presentation-hosted-fingerprint`
+169 / 169; canonical **results parity 531 / 531**; **presentation parity 59 checks,
+0 failures**; `test:harness-condition` 33 / 33; the Studio navigation and
+authorization gates — `studio-workflows` 22, `studio-completion` 49,
+`design-tokens` 59, `p8-acceptance` 59, `executive-preview` 63, `insights-story`
+25, `client-admin`, `client-preview`, `journey-pain-review` 296,
+`category-review`, `canonical-publication`, `canonical-composer`,
+`canonical-client-publication` 99, `client-boundary`, `publication-boundary`,
+`data-scope` — all pass; a clean build, and **`test:secrets` PASSED with a real
+subject** (it exits 0 having scanned for nothing when `SUPABASE_SERVICE_ROLE_KEY`
+is absent, so the run records that the key was present).
+
+**Every new check was proved to DISCRIMINATE**: twelve defects reintroduced one at
+a time at the committed sha — the bound armed at the headers, the attempt's bound
+never released, the bound never released at EOF, the encoded body's headers
+carried over, a buffered body, `withinDeadline` abandoning instead of expiring,
+the operation signal not threaded, the middleware's client without it, the outage
+redirected again (twice, executed and pinned), the study navigation prefetching
+again, and an undeclared navigation surface. **12 of 12 were caught**, and all
+eleven mutated files were restored **byte-identically** (SHA-256 compared).
+
+### What the adversarial review found, and what was deliberately left
+
+Five reviewers read the diff against the unit's own contract; every finding was
+put to an independent verifier whose instruction was to refute it. Eighteen
+findings, three survived verification, and eleven were acted on — several of the
+refuted ones still identified a genuine weakness. What changed because of it: the
+unread-body defect above (found by measurement, not by reading); the tag scanner
+now refuses to guess instead of returning the rest of the file, and pins the
+import name so an alias cannot hide a link; the completeness walk covers
+`src/app/dashboard` too; a vacuous `doesNotMatch` assertion was deleted rather
+than kept; the body-cancellation path got the check it never had; the prefetch
+cost claim was cut back to what 6B.4B2P measured; 6B.4B2P's CPU figures were put
+back where this unit had silently swapped them; and `docs/DEPLOYMENT.md` was
+brought up to date.
+
+**Two findings were recorded and NOT fixed**, and the reason is scope rather than
+doubt:
+
+* **Seventeen page-level and action-level session re-checks still read `!user`
+  alone** and answer with a verdict — a `redirect("/login")` or «Acceso denegado» —
+  when the auth service simply did not answer. Defense in depth (§6.4) means every
+  protected page and Server Action re-checks the session, and the middleware's
+  correction does not reach them: the reachable case is the service failing BETWEEN
+  the middleware's check and the page's, which is narrow but real. Several also
+  read the role with `maybeSingle`, which cannot tell «no profile» from «no
+  answer». Seventeen authorization call sites is a unit of its own, and
+  authorization is a declared human-review zone; the list is in CLAUDE.md.
+* **Suite D is red, and it was red before this unit began.** Measured at the branch
+  tip: 21 passed, 63 failed — 6 blocking advisories, 56 `assigned-secret-env` blobs
+  and the consequent secret-leak exit. Every one of the 63 names a first-seen
+  commit that is an ancestor of `4b2a3ad`, except the gate's own self-test sample,
+  which has been in the repository since 2026-08-29. CLAUDE.md said «SUITE D
+  REPORTS FIFTEEN»; that is corrected there. The growth is documentary — 19 of the
+  blobs are CLAUDE.md and 23 are this file, because every revision of a document
+  that QUOTES the matching line is itself a new matching blob, and D-d scans
+  history. This unit adds two more for the same reason. Narrowing the pattern in
+  `scripts/lib/secret-patterns.mjs` remains the right fix and remains a
+  human-review zone; editing the prose to dodge the detector would be the wrong
+  one.
+
+### Production and the hosted project
+
+Production `e691ecd8` at 100 % throughout, and in the characterization window it
+was the clean control. At the close: deployment listing **byte-identical** to this
+unit's baseline, `/api/health` 200, asset fingerprint `7f6c9470a2e91c09322a080d3ad6d110`
+identical to its own preview host. The hosted project's closing capture is
+**byte-identical** to the baseline (`ccff0739…` both): 15 791 rows, ledger
+`0000`–`0034`, Cuicuilco `draft` revision 3, publication tables 0/0/0/0/0/0,
+category ledger 0. No migration, no publication, no `study.status` change, no
+credential touched, no billing change, no deploy, no push to `main`.
+
+Evidence is outside every Git repository, in `C:\dev\becommunity-review-6b4b2q\`
+(113 files); scanned for `sb_publishable_`, `sb_secret_`, a JWT shape,
+`oauth_token` and a password-bearing Postgres URI — **no match of any kind**.
+
+### What this leaves, and the next action
+
+**The release blocker is NOT resolved, and this unit never expected to resolve
+it.** The four defects it was asked to close are closed and proved; the prefetch
+storm is gone; and the same candidate, on the same account, produced 73
+terminations in ten minutes, every one on the 10 ms CPU floor, while production
+produced none.
+
+**The next action is the owner's.** The account is on Workers Free — read in the
+dashboard, not inferred — and the decision is whether to move it to Workers Paid
+(30 s default CPU per request, $5/month + usage). Nobody here may make that
+change. After it, with no rebuild — the limit applies to every version — repeat
+this unit's bounded window against `28da64ac`, then the three clean observation
+windows the release condition asks for. Only zero terminations reopens the deploy
+sequence (disarm `main`, `wrangler versions deploy`, client account,
+`study.status`, publish). Until then: **do not push `main`, do not deploy.**
