@@ -334,7 +334,9 @@ check(
 const painDecisionBody = actionSource.slice(
   actionSource.indexOf("export async function recordCanonicalJourneyPainDecision("),
 );
-const authAt = painDecisionBody.indexOf("await authorizedStudioScope(studyId)");
+// `(studyId` without the closing parenthesis: since Unit 6B.4B2P the helper also
+// takes whether the action reads or writes; the rule is about the call's position.
+const authAt = painDecisionBody.indexOf("await authorizedStudioScope(studyId");
 const writeAt = painDecisionBody.indexOf("recordStoredJourneyPainDecision(");
 check(authAt >= 0 && writeAt > authAt, "y la acción autoriza antes de escribir");
 

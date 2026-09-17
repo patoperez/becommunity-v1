@@ -1605,7 +1605,7 @@ check(
 // un cliente privilegiado, en la región que la contiene.
 {
   const code = stripComments(actionSource);
-  const adminSites = [...code.matchAll(/createAdminClient\(\)/g)].map((m) => m.index ?? -1);
+  const adminSites = [...code.matchAll(/createAdminClient\(/g) /* with or without { bounded } since 6B.4B2P */].map((m) => m.index ?? -1);
   check(adminSites.length > 0, `el archivo construye un cliente privilegiado (${adminSites.length} sitio(s))`);
   for (const [index, at] of adminSites.entries()) {
     // La región es todo lo que precede a esta construcción desde la anterior,

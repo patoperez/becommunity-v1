@@ -1,5 +1,5 @@
 /**
- * THE WORKER'S EXCEPTION BOUNDARY.
+ * THE WORKER'S ENTRY, WRAPPED IN THE EXCEPTION BOUNDARY.
  *
  * `wrangler.toml` points at THIS file rather than at `.open-next/worker.js`,
  * for one reason: the generated entry has no `try`/`catch` anywhere. Read it —
@@ -8,29 +8,23 @@
  * straight to the edge, and Cloudflare answers **Error 1101, «Worker threw a
  * JavaScript exception»**, on whatever route the reader happened to ask for.
  *
- * Unit 6B.4B2N recorded thirteen of those on routes including `/login`, which
- * reads no study, no ledger and no canonical package. Unit 6B.4B2O could not
- * reproduce them: against the real built artifact under workerd, every upstream
- * failure it could inject — a refused connection, a reset mid-body, malformed
- * JSON, a truncated body, HTTP 500, HTTP 503 and a hang, on the auth lookup and
- * on the data reads — produced a CONTROLLED answer and never a throw. And the
- * exception itself is not recoverable from Cloudflare: Workers Logs was not
- * enabled on this Worker when it happened, so nothing was retained.
+ * Unit 6B.4B2N recorded thirteen 1101s on routes including `/login`, which reads
+ * no study, no ledger and no canonical package. Unit 6B.4B2O's fault injection
+ * could not reproduce them: against the real built artifact under workerd, no
+ * injected upstream failure was seen to make the Worker throw.
  *
- * SO THIS FILE DOES NOT CLAIM TO KNOW WHAT THREW. It removes the category.
- * Whatever rejects inside the Worker — a module that fails to load at request
- * time, an upstream that dies in a way no injection reproduced, a runtime limit,
- * something not yet imagined — the reader gets the product's own «no disponible
- * por ahora» with HTTP 503 and `Retry-After`, and Workers Logs gets one
- * structured line naming a closed code and a route CLASS.
+ * ⚠️ CORRECTED IN UNIT 6B.4B2P. This comment used to say every injected failure
+ * «produced a CONTROLLED answer». Three did not: before 6B.4B2O's session bound,
+ * `hang /auth/v1/user` on `/login` and on `/studio`, and `hang /rest/v1`, got no
+ * response at all (`000000`), and `hang /rest/v1` still got none after it. The
+ * rig's own verdict column mislabelled them. And the recorded 1101s were not
+ * throws: in the minutes they occurred, Cloudflare's analytics record
+ * `exceededResources` TERMINATIONS and no thrown exception.
  *
- * WHAT IT MUST NOT DO, and does not:
- *   * it does not retry. A boundary that retries turns one failing request into
- *     several and an outage into a storm;
- *   * it does not serve stale, cached, empty or legacy content in place of what
- *     was asked for. «Unavailable» never becomes «empty»;
- *   * it does not read, alter or clear a cookie, so a session survives a blip;
- *   * it does not inspect or forward the thrown value. The reader gets a code.
+ * SO THIS FILE DOES NOT CLAIM TO KNOW WHAT FAILED. It removes ONE category —
+ * rejections. The boundary itself lives in `src/lib/runtime/boundary.ts`, where
+ * the offline gate can execute it; this file only connects it to the build
+ * output.
  */
 
 // The generated OpenNext entry. `.open-next/` is a build output and is not in
@@ -45,8 +39,8 @@
 import openNextWorker from "../.open-next/worker.js";
 
 // A RELATIVE import on purpose: wrangler bundles this file with esbuild, which
-// does not necessarily honour the `@/*` path alias that Next resolves.
-import { recordRuntimeFailure, unavailableResponse } from "./lib/runtime/unavailable";
+// does not necessarily honour the path alias that Next resolves.
+import { withRuntimeBoundary } from "./lib/runtime/boundary";
 
 // The adapter's Durable Object classes must stay exported from the entry
 // module. Nothing in `wrangler.toml` binds them today, but dropping them would
@@ -69,40 +63,7 @@ interface WorkerContext {
 }
 
 const worker = {
-  async fetch(request: Request, env: Env, ctx: WorkerContext): Promise<Response> {
-    const started = Date.now();
-    try {
-      return await openNextWorker.fetch(request, env, ctx);
-    } catch (thrown) {
-      // The pathname is used for TWO decisions and is never logged: which shape
-      // of response to build, and which route CLASS to record.
-      let pathname = "/";
-      try {
-        pathname = new URL(request.url).pathname;
-      } catch {
-        // A request URL that will not parse is itself the failure; the default
-        // route class is the honest answer.
-      }
-      const code = isModuleLoadFailure(thrown) ? "module_load_failed" : "worker_unhandled";
-      recordRuntimeFailure({
-        code,
-        pathname,
-        method: request.method,
-        elapsedMs: Date.now() - started,
-      });
-      return unavailableResponse(code, pathname);
-    }
-  },
+  fetch: withRuntimeBoundary<Env, WorkerContext>((request, env, ctx) => openNextWorker.fetch(request, env, ctx)),
 };
 
 export default worker;
-
-/**
- * The request-time `import()` in the generated entry is the one failure with a
- * name worth keeping apart: it means the artifact could not be loaded, not that
- * the application refused. Everything else is `worker_unhandled`.
- */
-function isModuleLoadFailure(thrown: unknown): boolean {
-  const message = thrown instanceof Error ? thrown.message : String(thrown ?? "");
-  return /dynamic module|Failed to fetch dynamically imported module|Cannot find module|module not found/i.test(message);
-}

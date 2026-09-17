@@ -128,7 +128,8 @@ export async function refreshPresentationPreview(
 
   // 2. SCOPE, validated and then READ BACK rather than accepted.
   if (!uuid.safeParse(studyId).success) throw new Error("Estudio inválido.");
-  const admin = createAdminClient();
+  // A preview only READS: its privileged client is bounded (Unit 6B.4B2P).
+  const admin = createAdminClient({ bounded: true });
   const { data: study, error } = await admin
     .from("study")
     .select("id, tenant_id, name")
@@ -245,6 +246,13 @@ const EXPECTED_REVISION = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).n
 /** Authorize, then — and only then — build the privileged client and the scope. */
 async function authorizedStudioScope(
   studyId: string,
+  /**
+   * `read` — the action only READS, to answer a person waiting on it, and its
+   * privileged client is BOUNDED so a hung read ends (Unit 6B.4B2P). `write` —
+   * the action commits something, and its client stays unbounded: a limit on a
+   * write abandons an operation whose outcome is then unknown.
+   */
+  access: "read" | "write",
 ): Promise<
   | { ok: true; admin: ReturnType<typeof createAdminClient>; userId: string; scope: { tenantId: string; studyId: string; studyName: string } }
   | { ok: false; reason: "not_authorized" | "invalid_scope"; detail: string }
@@ -270,7 +278,7 @@ async function authorizedStudioScope(
 
   // ONLY NOW. Everything above used the REQUEST-scoped client, which is subject
   // to RLS; the line below is the first privileged thing that exists.
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: access === "read" });
   const { data: study, error } = await admin
     .from("study")
     .select("id, tenant_id, name")
@@ -303,7 +311,7 @@ export async function saveCanonicalPresentationDraft(
   expectedRevision: number | null,
   idempotencyKey: string,
 ): Promise<SaveResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }
@@ -362,7 +370,7 @@ export async function saveCanonicalPresentationDraft(
  * adopting it costs.
  */
 export async function loadCanonicalPresentationDraft(studyId: string): Promise<LoadResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "read");
   if (!authorized.ok) {
     return {
       ok: false,
@@ -413,7 +421,7 @@ export async function rebindCanonicalPresentationDraft(
   expectedRevision: number,
   idempotencyKey: string,
 ): Promise<SaveResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }
@@ -478,7 +486,7 @@ export async function upgradeCanonicalPresentationCapabilities(
   expectedRevision: number,
   idempotencyKey: string,
 ): Promise<SaveResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }

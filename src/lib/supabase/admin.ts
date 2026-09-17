@@ -1,6 +1,8 @@
 import "server-only";
 import { createClient } from "@supabase/supabase-js";
 
+import { boundedFetch } from "@/lib/upstream/bounded-fetch";
+
 /**
  * Admin Supabase client using the SERVICE_ROLE key. BYPASSES ALL RLS (§6.3).
  *
@@ -17,8 +19,16 @@ import { createClient } from "@supabase/supabase-js";
  * reads and a build-time value could never override it. The build must not
  * carry this variable at all: `npm run test:secrets` fails if the name appears
  * in the compiled env snapshot. See wrangler.toml and docs/DEPLOYMENT.md.
+ *
+ * `bounded: true` — READS THAT SERVE A PAGE. `requireInternal()` hands out a
+ * bounded client, because every Studio page renders from it and a hung read
+ * must end (`src/lib/upstream/bounded-fetch.ts`). The default stays UNBOUNDED on
+ * purpose: this client also commits imports and uploads, and a per-attempt
+ * limit on a long write would abandon an operation whose outcome is then
+ * unknown. The bound is a request-lifetime control; it grants and removes no
+ * privilege.
  */
-export function createAdminClient() {
+export function createAdminClient(options: { bounded?: boolean } = {}) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceRoleKey) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
@@ -33,6 +43,9 @@ export function createAdminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     serviceRoleKey,
-    { auth: { autoRefreshToken: false, persistSession: false } },
+    {
+      auth: { autoRefreshToken: false, persistSession: false },
+      ...(options.bounded ? { global: { fetch: boundedFetch() } } : {}),
+    },
   );
 }

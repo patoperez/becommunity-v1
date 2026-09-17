@@ -2,6 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { recordRuntimeFailure, unavailableResponse } from "@/lib/runtime/unavailable";
+import { boundedFetch, withinDeadline } from "@/lib/upstream/bounded-fetch";
+import { classifySession } from "@/lib/upstream/outcome";
 
 /**
  * HOW LONG THE SESSION CHECK MAY TAKE BEFORE IT IS A FAILURE.
@@ -13,10 +15,13 @@ import { recordRuntimeFailure, unavailableResponse } from "@/lib/runtime/unavail
  * answers leaves the request open until something above gives up — measured at
  * over forty-five seconds, with no response and no log.
  *
- * Eight seconds is generous against a p99 of well under one, and short enough
- * that a reader gets an answer rather than a spinner.
+ * TWO BOUNDS, BECAUSE ONE WAS NOT ENOUGH (Unit 6B.4B2P). Each ATTEMPT is bounded
+ * at eight seconds by the client's own fetch (`UPSTREAM_ATTEMPT_TIMEOUT_MS.auth`).
+ * But auth-js retries a token refresh on its own for up to thirty seconds,
+ * re-arming a fresh per-attempt bound each time, so a session near expiry could
+ * still hold a request for about forty seconds. This bounds the whole OPERATION.
  */
-const SESSION_CHECK_TIMEOUT_MS = 8_000;
+const SESSION_CHECK_DEADLINE_MS = 9_000;
 
 /**
  * Build the Content-Security-Policy (§5.2). Nonce-based `script-src` with
@@ -92,15 +97,17 @@ async function runUpdateSession(request: NextRequest) {
       /*
         EVERY CALL THIS CLIENT MAKES IS BOUNDED. The bound goes on the client's
         own `fetch` rather than on one call site, so a library that adds a
-        request later inherits it instead of escaping it. `AbortSignal.timeout`
-        is the platform's own; the abort carries NO reason, because a custom
-        reason stops `@supabase/postgrest-js` recognising a cancellation and
-        turns it into a retried network failure.
+        request later inherits it instead of escaping it.
+
+        ⚠️ CORRECTED IN UNIT 6B.4B2P. This used `AbortSignal.timeout()` and said
+        «the abort carries NO reason». It does carry one: a `TimeoutError`, which
+        `@supabase/postgrest-js` does NOT recognise as an abort, so a PostgREST
+        GET behind that bound would have been retried three times. It was
+        harmless here only because this client makes auth calls alone. The
+        shared policy aborts with an `AbortError` carrying a sentinel message,
+        and honours a caller's own signal.
       */
-      global: {
-        fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-          fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS) }),
-      },
+      global: { fetch: boundedFetch() },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -131,11 +138,17 @@ async function runUpdateSession(request: NextRequest) {
   // because refusing a reader we cannot vouch for is correct either way. What is
   // new is that the second case is now NAMED, so it is visible in the logs
   // instead of looking like a quiet afternoon of people signing out.
-  const attempt = await supabase.auth.getUser();
-  const user = attempt.data.user;
-  if (!user && isTransportFailure(attempt.error)) {
+  //
+  // ⚠️ CORRECTED IN UNIT 6B.4B2P: the timeout used to be detected by
+  // `error.name === "AbortError"`, which can never be true — auth-js renames
+  // every fetch rejection `AuthRetryableFetchError` — so `session_timeout` was
+  // unreachable. The shared classifier reads the bound's sentinel instead.
+  const attempt = await withinDeadline(supabase.auth.getUser(), SESSION_CHECK_DEADLINE_MS);
+  const session = classifySession(attempt.settled ? attempt.value : null);
+  const user = session === "authenticated" && attempt.settled ? attempt.value.data.user : null;
+  if (session === "timeout" || session === "cancelled" || session === "upstream_failure") {
     recordRuntimeFailure({
-      code: attempt.error?.name === "AbortError" ? "session_timeout" : "session_unverifiable",
+      code: session === "upstream_failure" ? "session_unverifiable" : "session_timeout",
       pathname: request.nextUrl.pathname,
       method: request.method,
     });
@@ -163,25 +176,4 @@ async function runUpdateSession(request: NextRequest) {
   // Next stamped onto its scripts via the request header above).
   supabaseResponse.headers.set("content-security-policy", csp);
   return supabaseResponse;
-}
-
-/**
- * Did the session check fail to REACH an answer, as opposed to receiving one?
- *
- * `AuthApiError` means the service answered and the token is not good — an
- * ordinary «not signed in». `AuthRetryableFetchError`, an `AbortError` and a
- * bare `TypeError: fetch failed` mean nothing was learned about the token at
- * all. The two must not be confused: the first is a fact about the reader, the
- * second is a fact about the infrastructure.
- */
-function isTransportFailure(error: unknown): boolean {
-  if (!error) return false;
-  const name = (error as { name?: string }).name ?? "";
-  const status = (error as { status?: number }).status;
-  if (name === "AbortError" || name === "TimeoutError") return true;
-  if (name === "AuthRetryableFetchError") return true;
-  // An auth error the service itself produced carries a 4xx status; a transport
-  // failure carries none, or a 5xx the gateway produced.
-  if (typeof status === "number") return status >= 500;
-  return name === "TypeError" || name === "FetchError";
 }

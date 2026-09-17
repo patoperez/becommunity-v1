@@ -160,7 +160,8 @@ console.log("\n[3] The reader cannot reach the editable draft, and says so in it
     "both entry points authorize through the request-scoped client first",
   );
   check(
-    source.indexOf("authorizeStudy(requestClient") < source.indexOf("createAdminClient()"),
+    // `createAdminClient(` — since Unit 6B.4B2P it takes `{ bounded: true }`.
+    source.indexOf("authorizeStudy(requestClient") < source.indexOf("createAdminClient("),
     "and the privileged client is constructed only after that has succeeded",
   );
   check(

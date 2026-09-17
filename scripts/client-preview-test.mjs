@@ -52,7 +52,10 @@ assert.match(studioGuard, /auth\.getUser\(\)/, "the Studio gate must verify the 
 assert.doesNotMatch(studioGuard, /getSession\(/, "the Studio gate must never decide authorization from getSession");
 assert.match(studioGuard, /profile\?\.role !== "internal"/, "the Studio gate must read the role from the database");
 assert.ok(
-  studioGuard.indexOf('profile?.role !== "internal"') < studioGuard.indexOf("createAdminClient()"),
+  // `createAdminClient(` without its closing parenthesis: since Unit 6B.4B2P the
+  // gate asks for a BOUNDED client (`createAdminClient({ bounded: true })`), and
+  // the rule is about the call's position, not its arguments.
+  studioGuard.indexOf('profile?.role !== "internal"') < studioGuard.indexOf("createAdminClient("),
   "the privileged client must be created only after the role check",
 );
 

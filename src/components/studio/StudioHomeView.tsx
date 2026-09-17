@@ -48,7 +48,7 @@ type RecentStudy = {
 };
 
 export async function StudioHomeView() {
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   const [board, { data: recent }] = await Promise.all([
     loadAttentionBoard(admin, hrefFor),
     admin

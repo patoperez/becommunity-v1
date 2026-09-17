@@ -706,7 +706,7 @@ check(/tenant_id/.test(actionCode), "y recupera el inquilino de la fila, nunca d
 // AUTHORIZATION HAPPENS BEFORE THE PRIVILEGED CLIENT EXISTS, in every region
 // that builds one — checked per site, not with a single `indexOf`.
 {
-  const sites = [...actionCode.matchAll(/createAdminClient\(\)/g)].map((match) => match.index ?? -1);
+  const sites = [...actionCode.matchAll(/createAdminClient\(/g) /* with or without { bounded } since 6B.4B2P */].map((match) => match.index ?? -1);
   check(sites.length > 0, `la acción construye un cliente privilegiado (${sites.length} sitio(s))`);
   for (const [index, at] of sites.entries()) {
     const region = actionCode.slice(index === 0 ? 0 : sites[index - 1], at);

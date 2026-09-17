@@ -138,6 +138,16 @@ export function classifyTransportFailure(raw: unknown, aborted = false): Transpo
     return "SUBREQUEST_BUDGET_EXHAUSTED";
   }
 
+  // 2a. THE APPLICATION'S OWN BOUND (`src/lib/upstream/bounded-fetch.ts`). It
+  //     aborts with an `AbortError` — the only name postgrest-js will not retry —
+  //     and says which it was in a sentinel message, so the NAME cannot decide
+  //     here: a timeout would read as a cancellation. Tested before step 2, and
+  //     so is a platform `TimeoutError`, whose message «The operation was aborted
+  //     due to timeout» would otherwise match «aborted» (Unit 6B.4B2P).
+  if (/becommunity:upstream_timeout/.test(probe)) return "TIMED_OUT";
+  if (/becommunity:upstream_cancelled/.test(probe)) return "CANCELLED";
+  if (name === "TimeoutError" || /aborted due to timeout/i.test(probe)) return "TIMED_OUT";
+
   // 2. CANCELLATION, which reaches us as an AbortError long before any status.
   if (name === "AbortError" || /\baborted\b|operation was aborted/i.test(probe)) return "CANCELLED";
 

@@ -13,11 +13,15 @@ name = "becommunity-v1"
 # of the server handler, and awaits that — with no `try`/`catch` anywhere. A
 # rejection from any of the three reaches Cloudflare, which answers **Error 1101,
 # "Worker threw a JavaScript exception"**, on whatever route the reader asked
-# for. Unit 6B.4B2N recorded thirteen of those, on routes including `/login`.
+# for. Unit 6B.4B2N recorded thirteen 1101s, on routes including `/login`.
+# ⓘ Corrected in Unit 6B.4B2P: those were not rejections. Cloudflare's analytics
+# record them as `exceededResources` TERMINATIONS, which no `catch` ever sees.
+# The boundary covers rejections only.
 #
 # `src/worker-entry.ts` imports the generated entry, re-exports its Durable
-# Object classes unchanged, and calls it inside one `try`/`catch`. It adds no
-# behaviour to a request that succeeds.
+# Object classes unchanged, and calls it through the boundary in
+# `src/lib/runtime/boundary.ts` — one `try`/`catch`. It adds no behaviour to a
+# request that succeeds.
 main = "src/worker-entry.ts"
 
 # OpenNext requires a recent compatibility date + nodejs_compat.
@@ -51,26 +55,52 @@ compatibility_flags = ["nodejs_compat"]
 keep_vars = true
 
 # -----------------------------------------------------------------------------
-# WORKERS LOGS. THE REASON THE 1101 HAS NO EXPLANATION IS THAT THIS WAS OFF.
+# WORKERS LOGS: THE APPLICATION'S OWN LINES, AND NOT CLOUDFLARE'S URL LOG.
 # -----------------------------------------------------------------------------
-# Cloudflare's own answer to "what threw?" is Workers Logs, filtered on
-# `$workers.outcome = "exception"`. The API reported `observability: null` for
-# this Worker — it was never enabled — so nothing was retained for any of the
-# Ray IDs Unit 6B.4B2N recorded, and `wrangler tail` saw nothing because it was
-# not running at the time. Retention is 7 days on a paid plan and 3 on free, and
-# it is NOT retroactive: a log not taken is gone.
+# The API reported `observability: null` for this Worker — it was never enabled
+# — so no per-invocation record was retained for any of the Ray IDs Unit 6B.4B2N
+# recorded, and `wrangler tail` captured nothing for them. Retention is 7 days
+# on a paid plan and 3 on free, and it is NOT retroactive.
+# ⓘ Corrected in Unit 6B.4B2P: this heading called the missing log «the reason
+# the 1101 has no explanation» and said it answers «what threw?». Nothing was
+# thrown. Cloudflare's analytics record `exceededResources` terminations, and
+# those analytics exist whether or not this block does.
 #
-# `head_sampling_rate = 1` is deliberate. The event being hunted is rare and
-# bursty, and a sampled log of a rare event is a log that misses it. Turn the
-# rate down, or remove this block, once the failure is understood.
+# `head_sampling_rate = 1` is deliberate: the lines this application writes are
+# rare failure records (`src/lib/runtime/unavailable.ts`), and a sampled log of
+# a rare event is a log that misses it.
+#
+# INVOCATION LOGS ARE OFF, AND THAT IS A PRIVACY DECISION (Unit 6B.4B2P). With
+# `enabled = true` Cloudflare ALSO writes an automatic invocation log for every
+# request, carrying its method and FULL URL — `/studio/e/<study-uuid>/revision`,
+# any query string — and keeps it for the retention period. 6B.4B2O committed a
+# block that would have turned that on at a rate of 1, and described its logging
+# as path-free, which was true only of its own line. Turning invocation logs off
+# keeps the application's console lines and drops the URL log. It removes no
+# evidence this project can use: the resource diagnosis rests on the GraphQL
+# analytics dataset, which is unaffected, and the observability query API is not
+# readable with the credential this project holds.
+#
+# ⚠️ NONE OF THIS BLOCK IS IN EFFECT UNTIL A DEPLOY. Observability is a
+# SCRIPT-LEVEL, NON-VERSIONED setting: `wrangler versions upload` — and so every
+# preview build — ignores it, and 6B.4B2O's upload left the Worker reporting
+# `observability: null`, so no Workers Log of any kind was ever recorded for it.
+# `wrangler deploy`, `wrangler versions deploy` (even redeploying the current
+# version) or a dashboard change applies it to EVERY version, production
+# included. A future diagnosis that needs per-invocation outcomes must therefore
+# turn invocation logs on for the whole Worker — a deliberate, time-boxed,
+# recorded change that states URLs are being retained — and revert it.
 #
 # THIS BLOCK MUST STAY BELOW THE TOP-LEVEL KEYS. A TOML table swallows every key
 # that follows it, so placing it above `compatibility_date` silently made that
 # key — and `keep_vars` — fields of `observability`; wrangler warned, and the
-# build failed.
+# build failed. `[observability.logs]` is a sub-table of it and follows it.
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+[observability.logs]
+invocation_logs = false
 
 # Static assets emitted by the OpenNext build.
 [assets]

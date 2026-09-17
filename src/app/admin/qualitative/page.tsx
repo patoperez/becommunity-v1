@@ -45,7 +45,7 @@ export default async function QualitativePage({ searchParams }: { searchParams: 
   if (profile?.role !== "internal") redirect("/dashboard");
 
   const query = await searchParams;
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   const { data: studies } = await admin.from("study").select("id, name, period, journey_definition")
     .order("created_at", { ascending: false }).returns<Study[]>();
   const selected = (studies ?? []).find((study) => study.id === query.study) ?? studies?.[0] ?? null;

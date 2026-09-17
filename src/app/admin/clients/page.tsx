@@ -57,7 +57,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
     .eq("user_id", user.id).single<{ role: string }>();
   if (ownProfile?.role !== "internal") redirect("/dashboard");
 
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   const [{ data: tenants }, { data: profiles }, accounts, query] = await Promise.all([
     admin.from("tenant").select("id, name, brand_config").order("name").returns<Tenant[]>(),
     admin.from("profiles").select("user_id, tenant_id, full_name, data_scope")

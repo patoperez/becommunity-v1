@@ -28,3 +28,31 @@ export function authErrorMessage(code: string | undefined): string | null {
   }
   return null;
 }
+
+/**
+ * Which allowlisted code a failed sign-in is answered with.
+ *
+ * Only «the auth service said these credentials are not good» becomes
+ * `invalid_credentials`. Every other outcome — no answer, a timeout, a 5xx, a
+ * throttle, a shape nobody can read — becomes `service_unavailable`, whose
+ * sentence tells the person it is not their password. Pure and closed: the
+ * offline gate runs every outcome through it.
+ */
+export function signInErrorCode(
+  outcome: "signed_in" | "invalid_credentials" | "timeout" | "cancelled" | "upstream_failure",
+): Extract<AuthErrorCode, "invalid_credentials" | "service_unavailable"> {
+  return outcome === "invalid_credentials" ? "invalid_credentials" : "service_unavailable";
+}
+
+/**
+ * Which closed runtime code a failed sign-in is LOGGED under, or `null` when it
+ * is not an incident. A wrong password is the ordinary case and is not logged;
+ * everything that is a statement about the infrastructure is. Pure, so the
+ * offline gate runs every outcome through it rather than reading the action.
+ */
+export function signInFailureLogCode(
+  outcome: "signed_in" | "invalid_credentials" | "timeout" | "cancelled" | "upstream_failure",
+): "sign_in_timeout" | "sign_in_unverifiable" | null {
+  if (outcome === "signed_in" || outcome === "invalid_credentials") return null;
+  return outcome === "timeout" ? "sign_in_timeout" : "sign_in_unverifiable";
+}

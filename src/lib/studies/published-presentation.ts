@@ -364,7 +364,7 @@ export async function loadPublishedClientExperience(
     studyName: study.name,
   };
 
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   const pointer = await pointerState(admin, scope);
   if (pointer === "refused") return { state: "unreadable", reason: "publication_read_refused" };
   if (pointer === "absent") return { state: "not_published" };
@@ -426,7 +426,7 @@ export async function previewPublishedPresentationUnderSelection(
     studyName: study.name,
   };
 
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   // THE PROJECTION FIRST, so `publishedAt` is the same string the page was
   // given: the database formats that value, and reading the column directly
   // here would put two spellings of one moment on one screen.

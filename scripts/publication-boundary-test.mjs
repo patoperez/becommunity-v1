@@ -21,7 +21,7 @@ for (const table of ["respondent", "quant_response", "segment_dimension", "journ
 assert.match(migration, /revoke all privileges on table public\.confirmed_qual_observation from anon, authenticated/i);
 
 const authorizationIndex = loader.indexOf('requestClient.from("study")');
-const adminIndex = loader.indexOf("createAdminClient()");
+const adminIndex = loader.indexOf("createAdminClient("); // takes `{ bounded: true }` since 6B.4B2P
 assert.ok(authorizationIndex >= 0 && adminIndex > authorizationIndex, "RLS study authorization must happen before admin loading");
 assert.match(loader, /\.eq\("id", studyId\)/, "authorization and private loading must be scoped to one exact study ID");
 assert.match(loader, /quote_approved && row\.quote/, "only independently approved quotes may be loaded");

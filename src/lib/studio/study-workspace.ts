@@ -101,7 +101,7 @@ export async function loadStudioStudy(
   if (!study) return null;
 
   const [
-    { data: tenant },
+    { data: tenant, error: tenantError },
     respondents,
     quantResponses,
     confirmedObservations,
@@ -126,6 +126,11 @@ export async function loadStudioStudy(
     loadStudyMetricOptions(admin, [study.id]),
   ]);
 
+  // «UNAVAILABLE» IS NOT «DELETED». A failed tenant read used to render the
+  // header as «Cliente eliminado» with the default brand — an outage reported as
+  // a fact about the client. It now fails the page the way every other read in
+  // this loader already does (Unit 6B.4B2P).
+  if (tenantError) throw new Error("tenant: read failed");
   const stages = parseJourneyDefinition(study.journey_definition);
   const metricOptions = metricOptionsByStudy[study.id] ?? [];
   const offered = new Set(metricOptions.map((option) => option.key));

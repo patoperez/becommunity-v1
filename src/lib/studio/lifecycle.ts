@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { upstreamDeadlineSignal } from "@/lib/upstream/bounded-fetch";
 import {
   boundedDetails,
   EMPTY_TENANT_IMPACT,
@@ -379,9 +380,13 @@ export async function listTenantStorageObjects(
   const paths: string[] = [];
   const maxPages = Math.ceil(STORAGE_INVENTORY_CEILING / STORAGE_PAGE);
   for (let page = 0; page < maxPages; page += 1) {
+    // Storage passes through the client's bound untouched (it also carries
+    // uploads), so this page-serving LIST carries its own: a hung listing ends
+    // as an error, which this function already reports as incomplete — never
+    // as an empty inventory (Unit 6B.4B2P).
     const { data, error } = await admin.storage
       .from("tenant-branding")
-      .list(tenantId, { limit: STORAGE_PAGE, offset: page * STORAGE_PAGE });
+      .list(tenantId, { limit: STORAGE_PAGE, offset: page * STORAGE_PAGE }, { signal: upstreamDeadlineSignal(10_000) });
     if (error) {
       return {
         paths,

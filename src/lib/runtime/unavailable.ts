@@ -39,6 +39,14 @@ export const RUNTIME_FAILURE_CODES = [
   "session_timeout",
   /** A request-time module load failed. */
   "module_load_failed",
+  /** Studio's role read failed or was refused, so nobody could say who is asking. */
+  "authorization_unverifiable",
+  /** Studio's role read was still running when its bound expired. */
+  "authorization_timeout",
+  /** A sign-in attempt did not reach an answer from the auth service. */
+  "sign_in_unverifiable",
+  /** A sign-in attempt was still running when its bound expired. */
+  "sign_in_timeout",
 ] as const;
 
 export type RuntimeFailureCode = (typeof RUNTIME_FAILURE_CODES)[number];
@@ -46,6 +54,11 @@ export type RuntimeFailureCode = (typeof RUNTIME_FAILURE_CODES)[number];
 /**
  * The route CLASS, never the route. `/studio/e/<uuid>/revision` is a study
  * identifier in a log line; `studio` is not.
+ *
+ * ⓘ That keeps the identifier out of THIS line. It is not what keeps it out of
+ * Workers Logs as a whole: Cloudflare's automatic INVOCATION log records every
+ * request's method and full URL when it is on, which is why `wrangler.toml`
+ * asks for invocation logs off (Unit 6B.4B2P).
  */
 export type RouteClass = "health" | "auth" | "studio" | "insights" | "admin" | "api" | "other";
 
@@ -125,14 +138,40 @@ export function unavailableResponse(code: RuntimeFailureCode, pathname: string):
 }
 
 /**
+ * The HTTP method, from a closed list. A method is chosen by the CLIENT, so an
+ * arbitrary token — or a long string built to smuggle something into a log —
+ * is recorded as `OTHER`, never as itself.
+ */
+export const LOGGED_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
+export type LoggedMethod = (typeof LOGGED_METHODS)[number] | "OTHER";
+
+export function normalizeMethod(method: string): LoggedMethod {
+  const upper = typeof method === "string" ? method.toUpperCase() : "";
+  return (LOGGED_METHODS as readonly string[]).includes(upper) ? (upper as LoggedMethod) : "OTHER";
+}
+
+/**
  * ONE STRUCTURED LINE, AND ONLY WHAT A CLOSED VOCABULARY ALLOWS.
  *
- * Workers Logs records `console` output, so this is the whole of the runtime
- * instrumentation: no new route, no new binding, no new variable. What it may
- * carry is fixed here rather than at each call site — a code, a route class, an
- * HTTP method, and a correlation id the SERVER generates. A path, a query, a
- * cookie, a token, an email, a study id, a database message and a stack trace
- * are all absent by construction, because none of them is a parameter.
+ * Workers Logs records `console` output, and this is the whole of the runtime
+ * instrumentation THIS CODE adds: no new route, no new binding, no new
+ * variable. What THIS LINE may carry is fixed here rather than at each call
+ * site — a code, a route class, an HTTP method from a closed list, and a
+ * correlation id the SERVER generates. A path, a query, a cookie, a token, an
+ * email, a study id, a database message and a stack trace are absent from it by
+ * construction: `pathname` is accepted only to derive the route class and is
+ * never written, and none of the others is a parameter.
+ *
+ * ⚠️ CORRECTED IN UNIT 6B.4B2P. This comment used to call the line «the whole of
+ * the runtime instrumentation» and say «none of them is a parameter». Both
+ * overclaimed. `pathname` IS a parameter. And this line is only what THIS CODE
+ * writes: were `[observability] enabled = true` applied to the Worker,
+ * Cloudflare's INVOCATION log would record every request's method and full URL
+ * beside it — `wrangler.toml` now sets `invocation_logs = false` for that — and
+ * libraries and the framework write their own console output regardless
+ * (`@supabase/auth-js` logs every failed auth fetch's raw rejection; Next logs an
+ * error thrown while rendering, with its stack). Observability is a
+ * script-level, non-versioned setting: none of it takes effect until a deploy.
  */
 export function recordRuntimeFailure(input: {
   code: RuntimeFailureCode;
@@ -146,7 +185,7 @@ export function recordRuntimeFailure(input: {
     event: "runtime_failure",
     code: input.code,
     routeClass: routeClass(input.pathname),
-    method: input.method,
+    method: normalizeMethod(input.method),
     correlationId,
     ...(typeof input.elapsedMs === "number" ? { elapsedMs: Math.round(input.elapsedMs) } : {}),
   };

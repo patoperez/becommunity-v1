@@ -57,7 +57,7 @@ export default async function UploadPage({
 
   // Internal users have no tenant, so the tenant list is fetched with the admin
   // client (server-only, §6.3) after the role check above.
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   const query = await searchParams;
 
   // THE HISTORY IS COUNTED, SCOPED AND PAGED.

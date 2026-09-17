@@ -262,7 +262,8 @@ assert.match(guard, /auth\.getUser\(\)/, "the gate verifies the JWT with the Aut
 assert.doesNotMatch(guard, /getSession\(/, "the gate never decides authorization from a decoded cookie");
 assert.match(guard, /redirect\("\/dashboard"\)/, "a wrong-role caller is redirected, so the denial has a status");
 assert.ok(
-  guard.indexOf('profile?.role !== "internal"') < guard.indexOf("createAdminClient()"),
+  // `createAdminClient(` — the bounded client takes an argument since 6B.4B2P.
+  guard.indexOf('profile?.role !== "internal"') < guard.indexOf("createAdminClient("),
   "the privileged client is created only after the role check",
 );
 ok("the shared gate uses getUser, reads the role from the database, and redirects rather than rendering a denial");

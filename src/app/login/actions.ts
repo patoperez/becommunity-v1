@@ -2,8 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { recordRuntimeFailure } from "@/lib/runtime/unavailable";
 import { createClient } from "@/lib/supabase/server";
+import { classifySignIn } from "@/lib/upstream/outcome";
 import { loginSchema } from "@/lib/validation/schemas";
+import { signInErrorCode, signInFailureLogCode } from "./errors";
 
 /**
  * Sign in with email + password (§7.2). All validation happens on the server;
@@ -24,6 +27,12 @@ export async function login(formData: FormData) {
     redirect(`/login?error=${bothPresent ? "invalid_credentials" : "missing_fields"}`);
   }
 
+  // The client is BOUNDED (`src/lib/supabase/server.ts`): a sign-in the auth
+  // service never answers ends at the per-attempt limit, as a timeout, instead
+  // of holding the form open. auth-js does not retry a sign-in, so the attempt
+  // bound is the operation's bound — no second deadline is needed, and none is
+  // added, because abandoning a sign-in that might still succeed would sign a
+  // person in behind an error message.
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
 
@@ -32,33 +41,20 @@ export async function login(formData: FormData) {
       TWO FAILURES, TWO SENTENCES. A 4xx from the auth service is a statement
       about the credentials and is answered generically, so nothing reveals
       whether the email exists. A transport failure — a refused connection, a
-      reset, a timeout, a 5xx from the gateway — is a statement about the
-      INFRASTRUCTURE, and telling that person their credentials are invalid is
-      simply false. Neither branch carries the error's own text.
+      reset, a timeout, a 5xx from the gateway, a throttle — is a statement about
+      the INFRASTRUCTURE, and telling that person their credentials are invalid
+      is simply false. Neither branch carries the error's own text.
+
+      Since Unit 6B.4B2P the classification is the shared one in
+      `src/lib/upstream/outcome.ts`, which the middleware uses too, so the two
+      cannot drift apart; and the infrastructure case is now logged.
     */
-    redirect(`/login?error=${isAuthTransportFailure(error) ? "service_unavailable" : "invalid_credentials"}`);
+    const outcome = classifySignIn(error);
+    const logCode = signInFailureLogCode(outcome);
+    if (logCode) recordRuntimeFailure({ code: logCode, pathname: "/login", method: "POST" });
+    redirect(`/login?error=${signInErrorCode(outcome)}`);
   }
 
   revalidatePath("/", "layout");
   redirect("/dashboard");
-}
-
-/**
- * Did the sign-in attempt fail to REACH the auth service, as opposed to being
- * refused by it?
- *
- * `AuthApiError` with a 4xx is the service answering «no». An
- * `AuthRetryableFetchError`, an abort, a bare `TypeError: fetch failed` or a 5xx
- * from the gateway mean nothing was learned about the credentials at all. The
- * same distinction is drawn in `src/lib/supabase/middleware.ts`, for the same
- * reason and with the same closed rules.
- */
-function isAuthTransportFailure(error: unknown): boolean {
-  if (!error) return false;
-  const name = (error as { name?: string }).name ?? "";
-  const status = (error as { status?: number }).status;
-  if (name === "AbortError" || name === "TimeoutError") return true;
-  if (name === "AuthRetryableFetchError") return true;
-  if (typeof status === "number") return status >= 500;
-  return name === "TypeError" || name === "FetchError";
 }

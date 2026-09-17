@@ -60,7 +60,7 @@ export default async function StudiesPage({ searchParams }: { searchParams: Sear
   const { data: profile } = await supabase.from("profiles").select("role").eq("user_id", user.id).single<{ role: string }>();
   if (profile?.role !== "internal") redirect("/dashboard");
 
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   const [{ data: tenants }, { data: studies }, { data: templates }, query] = await Promise.all([
     admin.from("tenant").select("id, name").order("name").returns<Tenant[]>(),
     admin.from("study").select("id, tenant_id, name, period, status, dashboard_config, journey_definition").order("created_at", { ascending: false }).returns<Study[]>(),

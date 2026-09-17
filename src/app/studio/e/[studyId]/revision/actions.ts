@@ -188,6 +188,13 @@ const PAIN_DECISION = z
 /** Authorize, then — and only then — build the privileged client and the scope. */
 async function authorizedStudioScope(
   studyId: string,
+  /**
+   * `read` — the action only READS, to answer a person waiting on it, and its
+   * privileged client is BOUNDED so a hung read ends (Unit 6B.4B2P). `write` —
+   * the action commits something, and its client stays unbounded: a limit on a
+   * write abandons an operation whose outcome is then unknown.
+   */
+  access: "read" | "write",
 ): Promise<
   | {
       ok: true;
@@ -218,7 +225,7 @@ async function authorizedStudioScope(
 
   // ONLY NOW. Everything above used the REQUEST-scoped client, which is subject
   // to RLS; the line below is the first privileged thing that exists.
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: access === "read" });
   const { data: study, error } = await admin
     .from("study")
     .select("id, tenant_id, name")
@@ -252,7 +259,7 @@ export async function publishCanonicalPresentation(
   acknowledged: readonly string[],
   idempotencyKey: string,
 ): Promise<PublishResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }
@@ -300,7 +307,7 @@ export async function restoreCanonicalPublication(
   reason: string,
   idempotencyKey: string,
 ): Promise<RestoreResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }
@@ -367,7 +374,7 @@ export async function previewPublicationUnderSelection(
   studyId: string,
   viewerJson: string,
 ): Promise<PublicationPreviewResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "read");
   if (!authorized.ok) {
     return {
       ok: false,
@@ -434,7 +441,7 @@ export async function recordCanonicalQualitativeSignOff(
   reviewedDraftRevision: number,
   groupTokens: readonly string[],
 ): Promise<SignOffResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }
@@ -507,7 +514,7 @@ export async function recordCanonicalCategoryDecision(
   studyId: string,
   input: unknown,
 ): Promise<{ ok: true; created: boolean; version: number } | { ok: false; code: string; detail: string }> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, code: "not_authorized", detail: authorized.detail };
   }
@@ -538,7 +545,7 @@ export async function recordCanonicalJourneyPainDecision(
   studyId: string,
   input: PainDecisionInput,
 ): Promise<PainDecisionResult> {
-  const authorized = await authorizedStudioScope(studyId);
+  const authorized = await authorizedStudioScope(studyId, "write");
   if (!authorized.ok) {
     return { ok: false, reason: authorized.reason, detail: authorized.detail };
   }

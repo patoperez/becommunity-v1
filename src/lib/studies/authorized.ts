@@ -116,7 +116,7 @@ export async function loadAuthorizedStudyData(
   if (!study || !profile) return null;
   const scope = profile.role === "internal" ? {} : parseDataScope(profile.data_scope);
 
-  const admin = createAdminClient();
+  const admin = createAdminClient({ bounded: true }); // reads that serve a page end (6B.4B2P)
   const [{ data: tenant, error: tenantError }, rows, qualitative, interpretation, periodSeries] = await Promise.all([
     admin.from("tenant").select("name, brand_config").eq("id", study.tenant_id)
       .maybeSingle<{ name: string; brand_config: unknown }>(),
